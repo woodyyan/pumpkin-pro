@@ -102,7 +102,7 @@ def run_backtest_api(req: BacktestRequest):
             "status": "success",
             "source_used": source_name,
             "data_source": req.data_source,
-            "data_summary": build_data_summary(raw_data, req, source_name, stock_name),
+            "data_summary": build_data_summary(raw_data, req, source_name, stock_name, stock_name_debug),
             "strategy": {
                 "name": req.strategy_name,
                 "params": params,

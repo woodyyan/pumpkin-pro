@@ -307,9 +307,8 @@ export default function BacktestPage() {
 
     setLoading(true);
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
       const payload = buildPayload(form);
-      const response = await fetch(`${apiUrl}/api/backtest`, {
+      const response = await fetch('/api/backtest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

@@ -111,7 +111,11 @@ npm install
 npm run dev
 ```
 
-前端默认会请求 `http://localhost:8080`；如果你需要修改地址，可设置环境变量 `NEXT_PUBLIC_API_URL`。
+前端统一请求同源路径 `/api/*`，由 Next.js 转发到后端。
+
+- 本地开发默认转发到 `http://localhost:8080`
+- 如果前端服务端与后端不在同一地址，可为前端进程设置 `BACKEND_API_URL`
+- Docker Compose 已默认配置为 `http://backend:8080`
 
 ## 使用说明
 

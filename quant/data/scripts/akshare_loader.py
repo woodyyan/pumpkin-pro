@@ -1,0 +1,113 @@
+import queue
+import threading
+from datetime import datetime
+from typing import Tuple
+
+import akshare as ak
+import pandas as pd
+
+from data.data_loader import DataLoader
+
+
+def _put_success(result_queue, dataframe: pd.DataFrame, source_name: str):
+    result_queue.put(("success", dataframe, source_name))
+
+
+def fetch_data_worker(ticker, start_str, end_str, market, result_queue, start_date, end_date):
+    """在独立线程中执行下载，包含多数据源轮询容灾机制"""
+    errors = []
+
+    if market == "a_share":
+        try:
+            df = ak.stock_zh_a_hist(symbol=ticker, period="daily", start_date=start_str, end_date=end_str, adjust="qfq")
+            if df is not None and not df.empty:
+                _put_success(result_queue, df, "东方财富 (EastMoney)")
+                return
+        except Exception as exc:
+            errors.append(f"东财接口失败: {exc}")
+
+        try:
+            prefix = "sh" if ticker.startswith(("6", "5")) else "sz"
+            symbol_sina = f"{prefix}{ticker}"
+            df = ak.stock_zh_a_daily(symbol=symbol_sina, start_date=start_str, end_date=end_str, adjust="qfq")
+            if df is not None and not df.empty:
+                _put_success(result_queue, df, "新浪财经 (Sina Finance)")
+                return
+        except Exception as exc:
+            errors.append(f"新浪接口失败: {exc}")
+
+        try:
+            df = ak.stock_zh_a_hist(symbol=ticker, period="daily", start_date=start_str, end_date=end_str, adjust="")
+            if df is not None and not df.empty:
+                _put_success(result_queue, df, "备用通道")
+                return
+        except Exception as exc:
+            errors.append(f"备用接口失败: {exc}")
+
+    elif market == "hk":
+        try:
+            df = ak.stock_hk_hist(symbol=ticker, period="daily", start_date=start_str, end_date=end_str, adjust="qfq")
+            if df is not None and not df.empty:
+                _put_success(result_queue, df, "东方财富-港股 (EastMoney HK)")
+                return
+        except Exception as exc:
+            errors.append(f"港股主接口失败: {exc}")
+
+        try:
+            df = ak.stock_hk_daily(symbol=ticker)
+            if df is not None and not df.empty:
+                df = df.reset_index()
+                date_column = df.columns[0]
+                df[date_column] = pd.to_datetime(df[date_column], errors="coerce")
+                df = df[(df[date_column] >= pd.to_datetime(start_date)) & (df[date_column] <= pd.to_datetime(end_date))]
+                if not df.empty:
+                    _put_success(result_queue, df, "新浪财经-港股 (Sina HK)")
+                    return
+        except Exception as exc:
+            errors.append(f"港股备用接口失败: {exc}")
+
+    result_queue.put(("error", " | ".join(errors), None))
+
+
+def _detect_market(ticker: str) -> str:
+    if len(ticker) == 5 and ticker.isdigit():
+        return "hk"
+    if len(ticker) == 6 and ticker.isdigit():
+        return "a_share"
+    raise ValueError(f"无法识别的股票代码格式: {ticker}。A股请用6位数字，港股请用5位数字。")
+
+
+def fetch_stock_data(ticker: str, start_date: datetime, end_date: datetime) -> Tuple[pd.DataFrame, str]:
+    """
+    Fetch stock data from Akshare using multiple data sources as fallbacks.
+    Returns (DataFrame, source_name)
+    """
+    start_str = start_date.strftime("%Y%m%d")
+    end_str = end_date.strftime("%Y%m%d")
+    market = _detect_market(ticker)
+
+    result_queue = queue.Queue()
+    thread = threading.Thread(
+        target=fetch_data_worker,
+        args=(ticker, start_str, end_str, market, result_queue, start_date, end_date),
+        daemon=True,
+    )
+    thread.start()
+    thread.join(timeout=30.0)
+
+    if thread.is_alive():
+        raise TimeoutError("请求超时(>30秒)。所有数据源连接均已放弃，请检查网络后重试。")
+
+    if result_queue.empty():
+        raise RuntimeError("获取数据时发生未知异常，未返回结果。")
+
+    status, result, source_used = result_queue.get()
+    if status == "error":
+        raise RuntimeError(f"所有数据源均连接失败。详细排查: {result}")
+
+    if result is None or result.empty:
+        raise ValueError(f"未能在任何数据源中找到 {ticker} 的交易记录。")
+
+    loader = DataLoader()
+    prepared = loader.prepare_dataframe(result)
+    return prepared, source_used

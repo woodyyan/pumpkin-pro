@@ -15,11 +15,10 @@ services:
     environment:
       - NODE_ENV=development
       - NEXT_PUBLIC_API_URL=http://localhost:8080
+      - CHOKIDAR_USEPOLLING=true
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+    # 移除主机挂载，防止宿主机的环境(Mac)和容器的环境(Alpine Linux)互相污染 node_modules
 
   # 2. 核心交易网关与 API 服务 (Go)
   backend:
@@ -33,8 +32,6 @@ services:
       - QUANT_SERVICE_URL=http://quant:8000
     depends_on:
       - quant
-    volumes:
-      - ./backend:/app
 
   # 3. 策略计算微服务 (Python + FastAPI)
   quant:
@@ -43,5 +40,3 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    volumes:
-      - ./quant:/app

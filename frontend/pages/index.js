@@ -305,6 +305,12 @@ export default function BacktestPage() {
       return;
     }
 
+    const strategyValidationError = validateStrategyParams(form);
+    if (strategyValidationError) {
+      setError(strategyValidationError);
+      return;
+    }
+
     setLoading(true);
     try {
       const payload = buildPayload(form);
@@ -314,9 +320,10 @@ export default function BacktestPage() {
         body: JSON.stringify(payload),
       });
 
-      const responseData = await response.json();
+      const responseText = await response.text();
+      const responseData = parseApiResponse(responseText);
       if (!response.ok) {
-        throw new Error(responseData?.detail || '回测请求失败');
+        throw new Error(extractErrorMessage(responseData, responseText));
       }
 
       setResult(responseData);
@@ -686,6 +693,118 @@ export default function BacktestPage() {
       )}
     </div>
   );
+}
+
+const ERROR_FIELD_LABELS = {
+  ticker: '股票代码',
+  capital: '初始资金',
+  fee_pct: '手续费率',
+  strategy_params: '策略参数',
+  ma_short: '短均线周期',
+  ma_long: '长均线周期',
+  grid_count: '网格数量',
+  grid_step: '网格步长',
+  bb_period: '布林带周期',
+  bb_std: '标准差倍数',
+  rsi_period: 'RSI 周期',
+  rsi_low: '低位阈值',
+  rsi_high: '高位阈值',
+};
+
+function validateStrategyParams(form) {
+  if (form.strategyName !== '趋势跟踪(双均线)') {
+    return '';
+  }
+
+  const shortPeriod = Number(form.strategyParams.ma_short);
+  const longPeriod = Number(form.strategyParams.ma_long);
+
+  if (!Number.isInteger(shortPeriod) || shortPeriod < 2) {
+    return '短均线周期最小为 2。';
+  }
+
+  if (!Number.isInteger(longPeriod) || longPeriod < 3) {
+    return '长均线周期最小为 3。';
+  }
+
+  if (shortPeriod >= longPeriod) {
+    return '双均线策略要求短均线周期小于长均线周期。';
+  }
+
+  return '';
+}
+
+function parseApiResponse(responseText) {
+  if (!responseText) return null;
+
+  try {
+    return JSON.parse(responseText);
+  } catch {
+    return responseText;
+  }
+}
+
+function extractErrorMessage(responseData, fallbackText) {
+  if (responseData && typeof responseData === 'object' && !Array.isArray(responseData) && 'detail' in responseData) {
+    return formatApiDetail(responseData.detail) || fallbackText || '回测请求失败';
+  }
+
+  return formatApiDetail(responseData) || fallbackText || '回测请求失败';
+}
+
+function formatApiDetail(detail) {
+  if (!detail) return '';
+  if (typeof detail === 'string') return detail;
+
+  if (Array.isArray(detail)) {
+    return detail.map((item) => formatApiValidationItem(item)).filter(Boolean).join('；');
+  }
+
+  if (typeof detail === 'object') {
+    if (typeof detail.message === 'string') return detail.message;
+    if (typeof detail.detail === 'string') return detail.detail;
+  }
+
+  return String(detail);
+}
+
+function formatApiValidationItem(item) {
+  if (!item || typeof item !== 'object') {
+    return typeof item === 'string' ? item : String(item || '');
+  }
+
+  const fieldPath = formatErrorFieldPath(item.loc);
+
+  if (item.type === 'greater_than_equal' && item.ctx?.ge !== undefined) {
+    return `${fieldPath || '该字段'}不能小于 ${item.ctx.ge}。`;
+  }
+
+  if (item.type === 'less_than_equal' && item.ctx?.le !== undefined) {
+    return `${fieldPath || '该字段'}不能大于 ${item.ctx.le}。`;
+  }
+
+  if (item.type === 'greater_than' && item.ctx?.gt !== undefined) {
+    return `${fieldPath || '该字段'}必须大于 ${item.ctx.gt}。`;
+  }
+
+  if (item.type === 'less_than' && item.ctx?.lt !== undefined) {
+    return `${fieldPath || '该字段'}必须小于 ${item.ctx.lt}。`;
+  }
+
+  if (item.msg) {
+    return fieldPath ? `${fieldPath}：${item.msg}` : item.msg;
+  }
+
+  return fieldPath || '请求参数校验失败';
+}
+
+function formatErrorFieldPath(loc) {
+  if (!Array.isArray(loc)) return '';
+
+  return loc
+    .filter((segment) => segment !== 'body')
+    .map((segment) => ERROR_FIELD_LABELS[segment] || String(segment))
+    .join(' / ');
 }
 
 function buildPayload(form) {

@@ -344,9 +344,9 @@ export default function BacktestPage() {
               Pumpkin Pro · 历史回测
             </span>
             <div>
-              <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">大型股票交易系统中的历史回测工作台</h1>
+              <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">历史回测工作台</h1>
               <p className="mt-3 text-sm md:text-base text-white/65 leading-7">
-                保留当前导航栏布局，接入 Go 后端代理与 Python 量化引擎，支持四类策略、本地 CSV、示例行情、A 股/港股在线历史数据，以及完整回测分析。
+                支持趋势追踪（双均线）、网格交易、均值回归（布林带）、区间交易（RSI）四类策略。支持A股/港股在线历史数据，以及完整回测分析。
               </p>
             </div>
           </div>

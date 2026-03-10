@@ -12,13 +12,13 @@ function MyApp({ Component, pageProps }) {
         <nav className="fixed top-0 left-0 right-0 h-16 bg-black/60 backdrop-blur-md border-b border-white/10 z-50 flex items-center justify-between px-6">
           <div className="flex items-center space-x-2">
             <span className="text-2xl">🎃</span>
-            <span className="text-lg font-bold tracking-tight">Pumpkin Pro</span>
+            <span className="text-lg font-bold tracking-tight">Pumpkin Pro 南瓜交易系统</span>
           </div>
           <div className="flex space-x-6 text-sm font-medium text-white/70">
-            <a href="/" className="text-white hover:text-white transition">Backtest</a>
-            <a href="#" className="hover:text-white transition">Live Trading</a>
-            <a href="#" className="hover:text-white transition">Strategies</a>
-            <a href="#" className="hover:text-white transition">Settings</a>
+            <a href="/" className="text-white hover:text-white transition">历史回测</a>
+            <a href="#" className="hover:text-white transition">实盘交易</a>
+            <a href="#" className="hover:text-white transition">策略中心</a>
+            <a href="#" className="hover:text-white transition">系统设置</a>
           </div>
           <div className="w-8"></div>
         </nav>

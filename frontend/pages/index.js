@@ -550,7 +550,8 @@ export default function BacktestPage() {
 
       {result && (
         <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <SummaryPill label="回测标的" value={result.data_summary?.ticker_display || result.data_summary?.ticker || '示例/CSV'} />
             <SummaryPill label="数据来源" value={result.source_used} />
             <SummaryPill label="回测区间" value={`${result.data_summary?.start_date} ~ ${result.data_summary?.end_date}`} />
             <SummaryPill label="样本数量" value={`${result.data_summary?.total_records || 0} 条`} />
@@ -579,7 +580,8 @@ export default function BacktestPage() {
           <section className="grid gap-6 xl:grid-cols-2">
             <SectionCard title="回测摘要" description="汇总当前回测的核心信息。">
               <div className="grid gap-3">
-                <StatRow label="股票代码" value={result.data_summary?.ticker || '示例/CSV'} />
+                <StatRow label="回测标的" value={result.data_summary?.ticker_display || result.data_summary?.ticker || '示例/CSV'} />
+                <StatRow label="股票名称" value={result.data_summary?.ticker_name || (form.dataSource === 'online' ? '未识别' : '不适用')} />
                 <StatRow label="交易日数量" value={`${result.data_summary?.total_records || 0} 天`} />
                 <StatRow label="日收益胜率" value={formatPercent(result.metrics?.daily_win_rate_pct)} />
                 <StatRow label="波动率" value={formatPercent(result.metrics?.volatility_pct)} />

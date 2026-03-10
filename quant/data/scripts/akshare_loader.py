@@ -1,7 +1,8 @@
 import queue
 import threading
 from datetime import datetime
-from typing import Tuple
+from functools import lru_cache
+from typing import Optional, Tuple
 
 import akshare as ak
 import pandas as pd
@@ -75,6 +76,54 @@ def _detect_market(ticker: str) -> str:
     if len(ticker) == 6 and ticker.isdigit():
         return "a_share"
     raise ValueError(f"无法识别的股票代码格式: {ticker}。A股请用6位数字，港股请用5位数字。")
+
+
+@lru_cache(maxsize=256)
+def resolve_stock_name(ticker: str) -> Optional[str]:
+    market = _detect_market(ticker)
+
+    try:
+        if market == "a_share":
+            info_df = ak.stock_individual_info_em(symbol=ticker)
+            if info_df is not None and not info_df.empty and {"item", "value"}.issubset(info_df.columns):
+                matched = info_df[info_df["item"].astype(str).isin(["股票简称", "股票名称", "名称"])]
+                if not matched.empty:
+                    name = str(matched.iloc[0]["value"]).strip()
+                    if name:
+                        return name
+        else:
+            hk_spot_df = _get_hk_spot_snapshot()
+            if hk_spot_df is not None and not hk_spot_df.empty and {"代码", "名称"}.issubset(hk_spot_df.columns):
+                matched = hk_spot_df[hk_spot_df["代码"].astype(str).str.zfill(5) == ticker]
+                if not matched.empty:
+                    name = str(matched.iloc[0]["名称"]).strip()
+                    if name:
+                        return name
+    except Exception:
+        pass
+
+    try:
+        a_share_spot_df = _get_a_share_spot_snapshot()
+        if a_share_spot_df is not None and not a_share_spot_df.empty and {"代码", "名称"}.issubset(a_share_spot_df.columns):
+            matched = a_share_spot_df[a_share_spot_df["代码"].astype(str).str.zfill(6) == ticker]
+            if not matched.empty:
+                name = str(matched.iloc[0]["名称"]).strip()
+                if name:
+                    return name
+    except Exception:
+        pass
+
+    return None
+
+
+@lru_cache(maxsize=1)
+def _get_a_share_spot_snapshot() -> pd.DataFrame:
+    return ak.stock_zh_a_spot_em()
+
+
+@lru_cache(maxsize=1)
+def _get_hk_spot_snapshot() -> pd.DataFrame:
+    return ak.stock_hk_spot_em()
 
 
 def fetch_stock_data(ticker: str, start_date: datetime, end_date: datetime) -> Tuple[pd.DataFrame, str]:

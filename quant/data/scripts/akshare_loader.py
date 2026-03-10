@@ -1,13 +1,16 @@
+import logging
 import queue
 import threading
 from datetime import datetime
 from functools import lru_cache
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import akshare as ak
 import pandas as pd
 
 from data.data_loader import DataLoader
+
+logger = logging.getLogger(__name__)
 
 
 def _put_success(result_queue, dataframe: pd.DataFrame, source_name: str):
@@ -78,42 +81,82 @@ def _detect_market(ticker: str) -> str:
     raise ValueError(f"无法识别的股票代码格式: {ticker}。A股请用6位数字，港股请用5位数字。")
 
 
-@lru_cache(maxsize=256)
 def resolve_stock_name(ticker: str) -> Optional[str]:
-    market = _detect_market(ticker)
+    stock_name, _ = resolve_stock_name_with_debug(ticker)
+    return stock_name
 
-    try:
-        if market == "a_share":
+
+def resolve_stock_name_with_debug(ticker: str) -> Tuple[Optional[str], Dict]:
+    market = _detect_market(ticker)
+    errors: List[str] = []
+
+    if market == "a_share":
+        try:
             info_df = ak.stock_individual_info_em(symbol=ticker)
             if info_df is not None and not info_df.empty and {"item", "value"}.issubset(info_df.columns):
                 matched = info_df[info_df["item"].astype(str).isin(["股票简称", "股票名称", "名称"])]
                 if not matched.empty:
                     name = str(matched.iloc[0]["value"]).strip()
                     if name:
-                        return name
-        else:
+                        return name, {
+                            "status": "success",
+                            "market": market,
+                            "source": "东方财富-个股信息",
+                            "message": f"已通过东方财富-个股信息识别股票名称：{name}",
+                            "errors": [],
+                        }
+            errors.append("东方财富-个股信息未返回可用名称")
+        except Exception as exc:
+            logger.warning("A股名称识别失败 ticker=%s source=%s error=%s", ticker, "东方财富-个股信息", exc)
+            errors.append(f"东方财富-个股信息异常: {exc}")
+
+        try:
+            a_share_spot_df = _get_a_share_spot_snapshot()
+            if a_share_spot_df is not None and not a_share_spot_df.empty and {"代码", "名称"}.issubset(a_share_spot_df.columns):
+                matched = a_share_spot_df[a_share_spot_df["代码"].astype(str).str.zfill(6) == ticker]
+                if not matched.empty:
+                    name = str(matched.iloc[0]["名称"]).strip()
+                    if name:
+                        return name, {
+                            "status": "success",
+                            "market": market,
+                            "source": "东方财富-A股实时行情",
+                            "message": f"已通过东方财富-A股实时行情识别股票名称：{name}",
+                            "errors": errors,
+                        }
+            errors.append("东方财富-A股实时行情未匹配到股票名称")
+        except Exception as exc:
+            logger.warning("A股名称识别失败 ticker=%s source=%s error=%s", ticker, "东方财富-A股实时行情", exc)
+            errors.append(f"东方财富-A股实时行情异常: {exc}")
+    else:
+        try:
             hk_spot_df = _get_hk_spot_snapshot()
             if hk_spot_df is not None and not hk_spot_df.empty and {"代码", "名称"}.issubset(hk_spot_df.columns):
                 matched = hk_spot_df[hk_spot_df["代码"].astype(str).str.zfill(5) == ticker]
                 if not matched.empty:
                     name = str(matched.iloc[0]["名称"]).strip()
                     if name:
-                        return name
-    except Exception:
-        pass
+                        return name, {
+                            "status": "success",
+                            "market": market,
+                            "source": "东方财富-港股实时行情",
+                            "message": f"已通过东方财富-港股实时行情识别股票名称：{name}",
+                            "errors": [],
+                        }
+            errors.append("东方财富-港股实时行情未匹配到股票名称")
+        except Exception as exc:
+            logger.warning("港股名称识别失败 ticker=%s source=%s error=%s", ticker, "东方财富-港股实时行情", exc)
+            errors.append(f"东方财富-港股实时行情异常: {exc}")
 
-    try:
-        a_share_spot_df = _get_a_share_spot_snapshot()
-        if a_share_spot_df is not None and not a_share_spot_df.empty and {"代码", "名称"}.issubset(a_share_spot_df.columns):
-            matched = a_share_spot_df[a_share_spot_df["代码"].astype(str).str.zfill(6) == ticker]
-            if not matched.empty:
-                name = str(matched.iloc[0]["名称"]).strip()
-                if name:
-                    return name
-    except Exception:
-        pass
-
-    return None
+    message = "；".join(errors) if errors else "未匹配到股票名称"
+    logger.warning("股票名称未识别 ticker=%s market=%s detail=%s", ticker, market, message)
+    return None, {
+        "status": "failed",
+        "market": market,
+        "source": None,
+        "message": message,
+        "errors": errors,
+    }
 
 
 @lru_cache(maxsize=1)

@@ -14,7 +14,7 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=development
-      - NEXT_PUBLIC_API_URL=http://localhost:8080
+      - NEXT_PUBLIC_API_URL=http://123.207.65.40:8080
       - CHOKIDAR_USEPOLLING=true
     depends_on:
       - backend

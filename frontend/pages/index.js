@@ -581,7 +581,20 @@ export default function BacktestPage() {
             <SectionCard title="回测摘要" description="汇总当前回测的核心信息。">
               <div className="grid gap-3">
                 <StatRow label="回测标的" value={result.data_summary?.ticker_display || result.data_summary?.ticker || '示例/CSV'} />
-                <StatRow label="股票名称" value={result.data_summary?.ticker_name || (form.dataSource === 'online' ? '未识别' : '不适用')} />
+                <StatRow label="股票名称" value={result.data_summary?.ticker_name || (result.data_source === 'online' ? '未识别' : '不适用')} />
+                {result.data_source === 'online' && result.data_summary?.ticker_name_debug?.message && (
+                  <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/70">
+                    <div className="text-xs uppercase tracking-[0.2em] text-white/35">名称识别日志</div>
+                    <div className="mt-2 leading-6">{result.data_summary.ticker_name_debug.message}</div>
+                    {!!result.data_summary?.ticker_name_debug?.errors?.length && (
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-amber-200/80">
+                        {result.data_summary.ticker_name_debug.errors.map((item, index) => (
+                          <li key={`${item}-${index}`}>{item}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
                 <StatRow label="交易日数量" value={`${result.data_summary?.total_records || 0} 天`} />
                 <StatRow label="日收益胜率" value={formatPercent(result.metrics?.daily_win_rate_pct)} />
                 <StatRow label="波动率" value={formatPercent(result.metrics?.volatility_pct)} />

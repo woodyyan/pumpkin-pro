@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -9,7 +10,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from data.data_loader import DataLoader, generate_sample_data
-from data.scripts.akshare_loader import fetch_stock_data, resolve_stock_name
+from data.scripts.akshare_loader import fetch_stock_data, resolve_stock_name_with_debug
 from engine.backtest_engine import BacktestEngine
 from indicators.technical_indicators import TechnicalIndicators
 from result.metrics import PerformanceMetrics
@@ -17,6 +18,8 @@ from strategy.grid_strategy import GridStrategy
 from strategy.mean_reversion_strategy import MeanReversionStrategy
 from strategy.range_trading_strategy import RangeTradingStrategy
 from strategy.trend_strategy import TrendStrategy
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Pumpkin Quant Service", description="Quantitative Backtesting Engine API")
 
@@ -87,7 +90,7 @@ def run_backtest_api(req: BacktestRequest):
         start_dt, end_dt = parse_date_range(req.start_date, req.end_date)
         params = model_to_dict(req.strategy_params)
 
-        raw_data, source_name, stock_name = load_market_data(req, start_dt, end_dt)
+        raw_data, source_name, stock_name, stock_name_debug = load_market_data(req, start_dt, end_dt)
         if raw_data.empty:
             raise HTTPException(status_code=400, detail="可用行情数据为空，无法回测")
 
@@ -144,7 +147,9 @@ def model_to_dict(model) -> Dict:
     return model.dict()
 
 
-def load_market_data(req: BacktestRequest, start_dt: datetime, end_dt: datetime) -> Tuple[pd.DataFrame, str, Optional[str]]:
+def load_market_data(
+    req: BacktestRequest, start_dt: datetime, end_dt: datetime
+) -> Tuple[pd.DataFrame, str, Optional[str], Optional[Dict]]:
     loader = DataLoader()
 
     if req.data_source not in SUPPORTED_DATA_SOURCES:
@@ -154,8 +159,15 @@ def load_market_data(req: BacktestRequest, start_dt: datetime, end_dt: datetime)
         if not req.ticker:
             raise ValueError("在线下载模式必须填写股票代码")
         data, source_name = fetch_stock_data(req.ticker, start_dt, end_dt)
-        stock_name = resolve_stock_name(req.ticker)
-        return loader.prepare_dataframe(data), source_name, stock_name
+        stock_name, stock_name_debug = resolve_stock_name_with_debug(req.ticker)
+        logger.info(
+            "股票名称识别结果 ticker=%s status=%s source=%s message=%s",
+            req.ticker,
+            stock_name_debug.get("status") if stock_name_debug else "unknown",
+            stock_name_debug.get("source") if stock_name_debug else None,
+            stock_name_debug.get("message") if stock_name_debug else None,
+        )
+        return loader.prepare_dataframe(data), source_name, stock_name, stock_name_debug
 
     if req.data_source == "csv":
         if not req.csv_content:
@@ -163,7 +175,11 @@ def load_market_data(req: BacktestRequest, start_dt: datetime, end_dt: datetime)
         data = loader.prepare_csv_content(req.csv_content)
         filtered = filter_date_range(data, start_dt, end_dt)
         filename = req.csv_filename or "uploaded.csv"
-        return filtered, f"本地CSV ({filename})", None
+        return filtered, f"本地CSV ({filename})", None, {
+            "status": "skipped",
+            "message": "当前为本地 CSV 模式，未执行股票名称识别",
+            "errors": [],
+        }
 
     sample_params = model_to_dict(req.sample_config)
     generated = generate_sample_data(
@@ -175,7 +191,11 @@ def load_market_data(req: BacktestRequest, start_dt: datetime, end_dt: datetime)
         seed=sample_params["seed"],
     )
     prepared = loader.prepare_dataframe(generated)
-    return prepared, "系统示例行情", None
+    return prepared, "系统示例行情", None, {
+        "status": "skipped",
+        "message": "当前为系统示例行情，未执行股票名称识别",
+        "errors": [],
+    }
 
 
 def filter_date_range(data: pd.DataFrame, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
@@ -262,7 +282,13 @@ def calculate_metrics(results_df: pd.DataFrame, trades_df: pd.DataFrame, capital
     return dict_to_json_safe(metrics_calc.calculate_all_metrics())
 
 
-def build_data_summary(data: pd.DataFrame, req: BacktestRequest, source_name: str, stock_name: Optional[str]) -> Dict:
+def build_data_summary(
+    data: pd.DataFrame,
+    req: BacktestRequest,
+    source_name: str,
+    stock_name: Optional[str],
+    stock_name_debug: Optional[Dict],
+) -> Dict:
     loader = DataLoader()
     summary = loader.get_data_summary(data)
     ticker_display = build_ticker_display(req.data_source, req.ticker, stock_name, req.csv_filename)
@@ -270,6 +296,7 @@ def build_data_summary(data: pd.DataFrame, req: BacktestRequest, source_name: st
         "source_used": source_name,
         "ticker": req.ticker,
         "ticker_name": stock_name,
+        "ticker_name_debug": stock_name_debug,
         "ticker_display": ticker_display,
         "total_records": summary["total_records"],
         "start_date": summary["start_date"],

@@ -1,27 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-const STRATEGY_OPTIONS = [
-  {
-    value: '趋势跟踪(双均线)',
-    label: '趋势跟踪（双均线）',
-    description: '短均线上穿长均线买入，下穿卖出，适合趋势型行情。',
-  },
-  {
-    value: '网格交易',
-    label: '网格交易',
-    description: '围绕基准价分层挂单，适合震荡市场分批低买高卖。',
-  },
-  {
-    value: '均值回归(布林带)',
-    label: '均值回归（布林带）',
-    description: '价格跌破下轨买入、突破上轨卖出，捕捉回归均值机会。',
-  },
-  {
-    value: '区间交易(RSI)',
-    label: '区间交易（RSI）',
-    description: 'RSI 从低位回升买入，从高位回落卖出，适合箱体行情。',
-  },
-];
+import {
+  buildInitialStrategyParams,
+  getInputAttributes,
+  sanitizeStrategyParams,
+  sortParamSchema,
+  validateStrategyParams,
+} from '../lib/strategy-form';
+import { requestJson } from '../lib/api';
 
 const DATA_SOURCE_OPTIONS = [
   { value: 'online', label: '在线下载', description: '下载 A 股 / 港股历史数据' },
@@ -36,20 +22,10 @@ const DEFAULT_FORM = {
   endDate: '2023-12-31',
   capital: 100000,
   feePct: 0.001,
-  strategyName: '趋势跟踪(双均线)',
+  strategyId: '',
+  strategyParams: {},
   csvContent: '',
   csvFilename: '',
-  strategyParams: {
-    ma_short: 20,
-    ma_long: 60,
-    grid_count: 5,
-    grid_step: 0.05,
-    bb_period: 20,
-    bb_std: 2,
-    rsi_period: 14,
-    rsi_low: 30,
-    rsi_high: 70,
-  },
   sampleConfig: {
     start_price: 100,
     drift: 0.0005,
@@ -58,8 +34,17 @@ const DEFAULT_FORM = {
   },
 };
 
+const ERROR_FIELD_LABELS = {
+  ticker: '股票代码',
+  capital: '初始资金',
+  fee_pct: '手续费率',
+  strategy_params: '策略参数',
+};
+
 export default function BacktestPage() {
   const [form, setForm] = useState(DEFAULT_FORM);
+  const [strategies, setStrategies] = useState([]);
+  const [strategiesLoading, setStrategiesLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
@@ -72,9 +57,12 @@ export default function BacktestPage() {
   const auxChartRef = useRef(null);
 
   const selectedStrategy = useMemo(
-    () => STRATEGY_OPTIONS.find((item) => item.value === form.strategyName) || STRATEGY_OPTIONS[0],
-    [form.strategyName],
+    () => strategies.find((item) => item.id === form.strategyId) || null,
+    [form.strategyId, strategies],
   );
+
+  const orderedParams = useMemo(() => sortParamSchema(selectedStrategy), [selectedStrategy]);
+  const resultStrategyParams = result?.strategy?.params || form.strategyParams;
 
   const metricCards = useMemo(() => {
     if (!result?.metrics) return [];
@@ -90,6 +78,44 @@ export default function BacktestPage() {
       { title: '总手续费', value: result.metrics.total_fee, type: 'currency' },
     ];
   }, [result]);
+
+  useEffect(() => {
+    const loadStrategies = async () => {
+      setStrategiesLoading(true);
+      try {
+        const response = await fetch('/api/strategies/active');
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data?.detail || '加载可用策略失败');
+        }
+
+        const items = data?.items || [];
+        setStrategies(items);
+        setForm((prev) => {
+          const currentStrategy = items.find((item) => item.id === prev.strategyId) || items[0] || null;
+          if (!currentStrategy) {
+            return { ...prev, strategyId: '', strategyParams: {} };
+          }
+
+          const strategyParams = currentStrategy.id === prev.strategyId
+            ? { ...buildInitialStrategyParams(currentStrategy), ...filterParamsByDefinition(currentStrategy, prev.strategyParams) }
+            : buildInitialStrategyParams(currentStrategy);
+
+          return {
+            ...prev,
+            strategyId: currentStrategy.id,
+            strategyParams,
+          };
+        });
+      } catch (err) {
+        setError(err.message || '加载策略失败');
+      } finally {
+        setStrategiesLoading(false);
+      }
+    };
+
+    loadStrategies();
+  }, []);
 
   useEffect(() => {
     let cleanup = () => {};
@@ -213,8 +239,8 @@ export default function BacktestPage() {
               .filter((item) => item[rsiKey] !== null && item[rsiKey] !== undefined)
               .map((item) => ({ time: item.date, value: item[rsiKey] })),
           );
-          rsiSeries.createPriceLine({ price: Number(form.strategyParams.rsi_low), color: '#22c55e', lineStyle: 2, axisLabelVisible: true, title: '低位线' });
-          rsiSeries.createPriceLine({ price: Number(form.strategyParams.rsi_high), color: '#ef4444', lineStyle: 2, axisLabelVisible: true, title: '高位线' });
+          rsiSeries.createPriceLine({ price: Number(resultStrategyParams.rsi_low), color: '#22c55e', lineStyle: 2, axisLabelVisible: true, title: '低位线' });
+          rsiSeries.createPriceLine({ price: Number(resultStrategyParams.rsi_high), color: '#ef4444', lineStyle: 2, axisLabelVisible: true, title: '高位线' });
         } else if (result.analysis?.drawdown_curve?.length) {
           const drawdownSeries = auxChart.addAreaSeries({
             lineColor: '#ef4444',
@@ -244,7 +270,7 @@ export default function BacktestPage() {
     renderCharts();
 
     return () => cleanup();
-  }, [result, form.strategyParams.rsi_high, form.strategyParams.rsi_low]);
+  }, [result, resultStrategyParams.rsi_high, resultStrategyParams.rsi_low]);
 
   const destroyCharts = () => {
     [priceChartRef, equityChartRef, auxChartRef].forEach((chartRef) => {
@@ -257,6 +283,17 @@ export default function BacktestPage() {
 
   const updateField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const selectStrategy = (strategyId) => {
+    const strategy = strategies.find((item) => item.id === strategyId);
+    if (!strategy) return;
+
+    setForm((prev) => ({
+      ...prev,
+      strategyId: strategy.id,
+      strategyParams: buildInitialStrategyParams(strategy),
+    }));
   };
 
   const updateStrategyParam = (key, value) => {
@@ -295,6 +332,16 @@ export default function BacktestPage() {
   const runBacktest = async () => {
     setError('');
 
+    if (strategiesLoading) {
+      setError('策略列表仍在加载，请稍后再试。');
+      return;
+    }
+
+    if (!selectedStrategy) {
+      setError('当前没有可用策略，请先到策略库创建并启用策略。');
+      return;
+    }
+
     if (form.dataSource === 'online' && !form.ticker.trim()) {
       setError('在线下载模式需要填写股票代码，A 股为 6 位数字，港股为 5 位数字。');
       return;
@@ -305,7 +352,7 @@ export default function BacktestPage() {
       return;
     }
 
-    const strategyValidationError = validateStrategyParams(form);
+    const strategyValidationError = validateStrategyParams(selectedStrategy, form.strategyParams);
     if (strategyValidationError) {
       setError(strategyValidationError);
       return;
@@ -313,18 +360,16 @@ export default function BacktestPage() {
 
     setLoading(true);
     try {
-      const payload = buildPayload(form);
-      const response = await fetch('/api/backtest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      const responseText = await response.text();
-      const responseData = parseApiResponse(responseText);
-      if (!response.ok) {
-        throw new Error(extractErrorMessage(responseData, responseText));
-      }
+      const payload = buildPayload(form, selectedStrategy);
+      const responseData = await requestJson(
+        '/api/backtest',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+        '回测失败，请稍后重试。',
+      );
 
       setResult(responseData);
     } catch (err) {
@@ -352,13 +397,13 @@ export default function BacktestPage() {
             <div>
               <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">历史回测工作台</h1>
               <p className="mt-3 text-sm md:text-base text-white/65 leading-7">
-                支持趋势追踪（双均线）、网格交易、均值回归（布林带）、区间交易（RSI）四类策略。支持A股/港股在线历史数据，以及完整回测分析。
+                历史回测已接入策略库。你可以直接选择已启用的策略模板，系统会自动加载默认参数、参数结构与对应的执行实现。
               </p>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm text-white/70 md:min-w-[320px]">
             <MiniStat label="数据源" value="CSV / 示例 / 在线下载" />
-            <MiniStat label="策略" value="4 类内置策略" />
+            <MiniStat label="策略来源" value={strategiesLoading ? '加载中...' : `${strategies.length} 条启用策略`} />
             <MiniStat label="指标分析" value="收益 / 回撤 / 夏普" />
             <MiniStat label="图表输出" value="K 线 / 资产 / 回撤" />
           </div>
@@ -466,78 +511,75 @@ export default function BacktestPage() {
           </div>
         </SectionCard>
 
-        <SectionCard title="策略设置" description={selectedStrategy.description}>
+        <SectionCard title="策略设置" description={selectedStrategy?.description || '从策略库动态加载默认参数与参数定义。'}>
           <div className="space-y-6">
             <Field label="回测策略">
               <select
-                value={form.strategyName}
-                onChange={(event) => updateField('strategyName', event.target.value)}
+                value={form.strategyId}
+                onChange={(event) => selectStrategy(event.target.value)}
                 className="w-full rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition focus:border-primary"
+                disabled={strategiesLoading || strategies.length === 0}
               >
-                {STRATEGY_OPTIONS.map((strategy) => (
-                  <option key={strategy.value} value={strategy.value}>
-                    {strategy.label}
-                  </option>
-                ))}
+                {strategiesLoading ? (
+                  <option value="">策略加载中...</option>
+                ) : strategies.length === 0 ? (
+                  <option value="">暂无启用策略</option>
+                ) : (
+                  strategies.map((strategy) => (
+                    <option key={strategy.id} value={strategy.id}>
+                      {strategy.name}
+                    </option>
+                  ))
+                )}
               </select>
             </Field>
 
-            {form.strategyName === '趋势跟踪(双均线)' && (
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="短均线周期">
-                  <Input type="number" min="2" step="1" value={form.strategyParams.ma_short} onChange={(event) => updateStrategyParam('ma_short', Number(event.target.value))} />
-                </Field>
-                <Field label="长均线周期">
-                  <Input type="number" min="3" step="1" value={form.strategyParams.ma_long} onChange={(event) => updateStrategyParam('ma_long', Number(event.target.value))} />
-                </Field>
-              </div>
-            )}
+            {selectedStrategy && orderedParams.length > 0 ? (
+              <div className={`grid gap-4 ${orderedParams.length >= 3 ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
+                {orderedParams.map((item) => {
+                  if (item.type === 'boolean') {
+                    return (
+                      <Field key={item.key} label={item.label}>
+                        <select
+                          value={String(Boolean(form.strategyParams[item.key]))}
+                          onChange={(event) => updateStrategyParam(item.key, event.target.value === 'true')}
+                          className="w-full rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition focus:border-primary"
+                        >
+                          <option value="true">是</option>
+                          <option value="false">否</option>
+                        </select>
+                        {item.description && <div className="text-xs leading-6 text-white/45">{item.description}</div>}
+                      </Field>
+                    );
+                  }
 
-            {form.strategyName === '网格交易' && (
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="网格数量">
-                  <Input type="number" min="2" max="20" step="1" value={form.strategyParams.grid_count} onChange={(event) => updateStrategyParam('grid_count', Number(event.target.value))} />
-                </Field>
-                <Field label="网格步长">
-                  <Input type="number" min="0.001" max="0.5" step="0.001" value={form.strategyParams.grid_step} onChange={(event) => updateStrategyParam('grid_step', Number(event.target.value))} />
-                </Field>
+                  return (
+                    <Field key={item.key} label={item.label}>
+                      <Input
+                        {...getInputAttributes(item)}
+                        value={form.strategyParams[item.key] ?? ''}
+                        onChange={(event) => updateStrategyParam(item.key, event.target.value)}
+                      />
+                      {item.description && <div className="text-xs leading-6 text-white/45">{item.description}</div>}
+                    </Field>
+                  );
+                })}
               </div>
-            )}
-
-            {form.strategyName === '均值回归(布林带)' && (
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="布林带周期">
-                  <Input type="number" min="5" step="1" value={form.strategyParams.bb_period} onChange={(event) => updateStrategyParam('bb_period', Number(event.target.value))} />
-                </Field>
-                <Field label="标准差倍数">
-                  <Input type="number" min="0.5" max="5" step="0.1" value={form.strategyParams.bb_std} onChange={(event) => updateStrategyParam('bb_std', Number(event.target.value))} />
-                </Field>
-              </div>
-            )}
-
-            {form.strategyName === '区间交易(RSI)' && (
-              <div className="grid gap-4 md:grid-cols-3">
-                <Field label="RSI 周期">
-                  <Input type="number" min="2" step="1" value={form.strategyParams.rsi_period} onChange={(event) => updateStrategyParam('rsi_period', Number(event.target.value))} />
-                </Field>
-                <Field label="低位阈值">
-                  <Input type="number" min="1" max="50" step="1" value={form.strategyParams.rsi_low} onChange={(event) => updateStrategyParam('rsi_low', Number(event.target.value))} />
-                </Field>
-                <Field label="高位阈值">
-                  <Input type="number" min="50" max="99" step="1" value={form.strategyParams.rsi_high} onChange={(event) => updateStrategyParam('rsi_high', Number(event.target.value))} />
-                </Field>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-border bg-black/20 px-4 py-8 text-center text-sm text-white/45">
+                {strategiesLoading ? '正在加载策略配置...' : '当前策略没有参数定义，或尚未启用任何策略。'}
               </div>
             )}
 
             <div className="rounded-2xl border border-border bg-black/20 p-4 text-sm leading-7 text-white/65">
               <div className="font-medium text-white">已选策略说明</div>
-              <div className="mt-2">{selectedStrategy.description}</div>
+              <div className="mt-2">{selectedStrategy?.description || '请先到策略库创建并启用策略。'}</div>
             </div>
 
             <button
               type="button"
               onClick={runBacktest}
-              disabled={loading}
+              disabled={loading || strategiesLoading || !selectedStrategy}
               className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? '回测运行中...' : '运行历史回测'}
@@ -561,7 +603,7 @@ export default function BacktestPage() {
             <SummaryPill label="数据来源" value={result.source_used} />
             <SummaryPill label="回测区间" value={`${result.data_summary?.start_date} ~ ${result.data_summary?.end_date}`} />
             <SummaryPill label="样本数量" value={`${result.data_summary?.total_records || 0} 条`} />
-            <SummaryPill label="当前策略" value={selectedStrategy.label} />
+            <SummaryPill label="当前策略" value={result.strategy?.name || selectedStrategy?.name || '--'} />
           </section>
 
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -594,6 +636,20 @@ export default function BacktestPage() {
                 <StatRow label="最佳单日" value={formatPercent(result.metrics?.best_day_pct)} />
                 <StatRow label="最差单日" value={formatPercent(result.metrics?.worst_day_pct)} />
               </div>
+
+              {result.data_summary?.ticker_name_debug?.message && (
+                <div className="mt-4 rounded-xl border border-white/5 bg-black/20 px-4 py-4 text-sm leading-7 text-white/60">
+                  <div className="font-medium text-white">名称识别日志</div>
+                  <div className="mt-2">{result.data_summary.ticker_name_debug.message}</div>
+                  {(result.data_summary.ticker_name_debug.errors || []).length > 0 && (
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-red-200/80">
+                      {result.data_summary.ticker_name_debug.errors.map((item, index) => (
+                        <li key={`${item}-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </SectionCard>
 
             <SectionCard title="信号统计" description="查看策略发出的买卖信号数量。">
@@ -682,43 +738,9 @@ export default function BacktestPage() {
   );
 }
 
-const ERROR_FIELD_LABELS = {
-  ticker: '股票代码',
-  capital: '初始资金',
-  fee_pct: '手续费率',
-  strategy_params: '策略参数',
-  ma_short: '短均线周期',
-  ma_long: '长均线周期',
-  grid_count: '网格数量',
-  grid_step: '网格步长',
-  bb_period: '布林带周期',
-  bb_std: '标准差倍数',
-  rsi_period: 'RSI 周期',
-  rsi_low: '低位阈值',
-  rsi_high: '高位阈值',
-};
-
-function validateStrategyParams(form) {
-  if (form.strategyName !== '趋势跟踪(双均线)') {
-    return '';
-  }
-
-  const shortPeriod = Number(form.strategyParams.ma_short);
-  const longPeriod = Number(form.strategyParams.ma_long);
-
-  if (!Number.isInteger(shortPeriod) || shortPeriod < 2) {
-    return '短均线周期最小为 2。';
-  }
-
-  if (!Number.isInteger(longPeriod) || longPeriod < 3) {
-    return '长均线周期最小为 3。';
-  }
-
-  if (shortPeriod >= longPeriod) {
-    return '双均线策略要求短均线周期小于长均线周期。';
-  }
-
-  return '';
+function filterParamsByDefinition(definition, params) {
+  const allowedKeys = new Set((definition?.param_schema || []).map((item) => item.key));
+  return Object.fromEntries(Object.entries(params || {}).filter(([key]) => allowedKeys.has(key)));
 }
 
 function parseApiResponse(responseText) {
@@ -794,7 +816,7 @@ function formatErrorFieldPath(loc) {
     .join(' / ');
 }
 
-function buildPayload(form) {
+function buildPayload(form, selectedStrategy) {
   return {
     data_source: form.dataSource,
     ticker: form.dataSource === 'online' ? form.ticker.trim() : null,
@@ -802,20 +824,11 @@ function buildPayload(form) {
     end_date: form.endDate,
     capital: Number(form.capital),
     fee_pct: Number(form.feePct),
-    strategy_name: form.strategyName,
+    strategy_id: selectedStrategy.id,
+    strategy_name: selectedStrategy.name,
     csv_content: form.dataSource === 'csv' ? form.csvContent : null,
     csv_filename: form.dataSource === 'csv' ? form.csvFilename : null,
-    strategy_params: {
-      ma_short: Number(form.strategyParams.ma_short),
-      ma_long: Number(form.strategyParams.ma_long),
-      grid_count: Number(form.strategyParams.grid_count),
-      grid_step: Number(form.strategyParams.grid_step),
-      bb_period: Number(form.strategyParams.bb_period),
-      bb_std: Number(form.strategyParams.bb_std),
-      rsi_period: Number(form.strategyParams.rsi_period),
-      rsi_low: Number(form.strategyParams.rsi_low),
-      rsi_high: Number(form.strategyParams.rsi_high),
-    },
+    strategy_params: sanitizeStrategyParams(selectedStrategy, form.strategyParams),
     sample_config: {
       start_price: Number(form.sampleConfig.start_price),
       drift: Number(form.sampleConfig.drift),

@@ -17,7 +17,7 @@ function MyApp({ Component, pageProps }) {
           <div className="flex space-x-6 text-sm font-medium text-white/70">
             <a href="/" className="text-white hover:text-white transition">历史回测</a>
             <a href="#" className="hover:text-white transition">实盘交易</a>
-            <a href="#" className="hover:text-white transition">策略中心</a>
+            <a href="/strategies" className="hover:text-white transition">策略库</a>
             <a href="#" className="hover:text-white transition">系统设置</a>
           </div>
           <div className="w-8"></div>

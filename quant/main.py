@@ -1,6 +1,7 @@
 import logging
+import os
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -12,37 +13,21 @@ from pydantic import BaseModel, Field
 from data.data_loader import DataLoader, generate_sample_data
 from data.scripts.akshare_loader import fetch_stock_data, resolve_stock_name_with_debug
 from engine.backtest_engine import BacktestEngine
-from indicators.technical_indicators import TechnicalIndicators
 from result.metrics import PerformanceMetrics
-from strategy.grid_strategy import GridStrategy
-from strategy.mean_reversion_strategy import MeanReversionStrategy
-from strategy.range_trading_strategy import RangeTradingStrategy
-from strategy.trend_strategy import TrendStrategy
+from strategy_library.models import StrategyDefinition, StrategyParamDefinition
+from strategy_library.registry import StrategyRegistry
+from strategy_library.resolver import ResolvedStrategy, StrategyResolver
+from strategy_library.service import StrategyService
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Pumpkin Quant Service", description="Quantitative Backtesting Engine API")
 
-SUPPORTED_STRATEGIES = [
-    "趋势跟踪(双均线)",
-    "网格交易",
-    "均值回归(布林带)",
-    "区间交易(RSI)",
-]
-
 SUPPORTED_DATA_SOURCES = ["online", "csv", "sample"]
 
-
-class StrategyParams(BaseModel):
-    ma_short: int = Field(default=20, ge=2)
-    ma_long: int = Field(default=60, ge=3)
-    grid_count: int = Field(default=5, ge=2, le=20)
-    grid_step: float = Field(default=0.05, gt=0.001, le=0.5)
-    bb_period: int = Field(default=20, ge=5)
-    bb_std: float = Field(default=2.0, gt=0.1, le=5.0)
-    rsi_period: int = Field(default=14, ge=2)
-    rsi_low: float = Field(default=30.0, ge=1, le=50)
-    rsi_high: float = Field(default=70.0, ge=50, le=99)
+strategy_registry = StrategyRegistry()
+strategy_service = StrategyService(registry=strategy_registry)
+strategy_resolver = StrategyResolver(service=strategy_service, registry=strategy_registry)
 
 
 class SampleDataConfig(BaseModel):
@@ -52,6 +37,24 @@ class SampleDataConfig(BaseModel):
     seed: int = Field(default=42, ge=0)
 
 
+class StrategyUpsertRequest(BaseModel):
+    id: str
+    key: str
+    name: str
+    description: str = ""
+    category: str = "通用"
+    implementation_key: str
+    status: str = "draft"
+    version: int = 1
+    param_schema: List[StrategyParamDefinition] = Field(default_factory=list)
+    default_params: Dict[str, Any] = Field(default_factory=dict)
+    required_indicators: List[Dict[str, Any]] = Field(default_factory=list)
+    chart_overlays: List[Dict[str, Any]] = Field(default_factory=list)
+    ui_schema: Dict[str, Any] = Field(default_factory=dict)
+    execution_options: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class BacktestRequest(BaseModel):
     data_source: str = Field(default="online", description="online/csv/sample")
     ticker: Optional[str] = Field(default=None, description="A股六位数字或港股五位数字")
@@ -59,8 +62,9 @@ class BacktestRequest(BaseModel):
     end_date: str = Field(..., description="YYYY-MM-DD")
     capital: float = Field(default=100000.0, gt=0)
     fee_pct: float = Field(default=0.001, ge=0, le=0.05)
-    strategy_name: str = Field(default="趋势跟踪(双均线)")
-    strategy_params: StrategyParams = Field(default_factory=StrategyParams)
+    strategy_id: Optional[str] = Field(default=None, description="策略库中的策略 ID")
+    strategy_name: Optional[str] = Field(default=None, description="兼容旧版请求的策略名称")
+    strategy_params: Dict[str, Any] = Field(default_factory=dict)
     csv_content: Optional[str] = Field(default=None, description="上传的本地 CSV 文本")
     csv_filename: Optional[str] = Field(default=None)
     sample_config: SampleDataConfig = Field(default_factory=SampleDataConfig)
@@ -71,7 +75,7 @@ def health_check():
     return {
         "status": "online",
         "service": "Pumpkin Quant Engine",
-        "strategies": SUPPORTED_STRATEGIES,
+        "strategies": [strategy.name for strategy in strategy_service.list_strategies(active_only=True)],
         "data_sources": SUPPORTED_DATA_SOURCES,
     }
 
@@ -79,22 +83,82 @@ def health_check():
 @app.get("/api/backtest/options")
 def get_backtest_options():
     return {
-        "strategies": SUPPORTED_STRATEGIES,
+        "strategies": [build_strategy_summary(strategy) for strategy in strategy_service.list_strategies(active_only=True)],
         "data_sources": SUPPORTED_DATA_SOURCES,
     }
+
+
+@app.get("/api/strategies/active")
+def get_active_strategies():
+    return {
+        "items": [strategy_to_dict(strategy) for strategy in strategy_service.list_strategies(active_only=True)]
+    }
+
+
+@app.get("/api/strategies")
+def list_strategies():
+    return {
+        "items": [build_strategy_summary(strategy) for strategy in strategy_service.list_strategies()],
+        "implementation_keys": strategy_service.list_implementation_keys(),
+    }
+
+
+@app.get("/api/strategies/{strategy_id}/definition")
+def get_strategy_definition(strategy_id: str):
+    try:
+        strategy = strategy_service.get_strategy(strategy_id)
+        return {"item": strategy_to_dict(strategy)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/strategies/{strategy_id}")
+def get_strategy_detail(strategy_id: str):
+    try:
+        strategy = strategy_service.get_strategy(strategy_id)
+        return {
+            "item": strategy_to_dict(strategy),
+            "implementation_keys": strategy_service.list_implementation_keys(),
+        }
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/strategies")
+def create_strategy(req: StrategyUpsertRequest):
+    try:
+        created = strategy_service.create_strategy(build_strategy_definition(req))
+        return {"item": strategy_to_dict(created)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/strategies/{strategy_id}")
+def update_strategy(strategy_id: str, req: StrategyUpsertRequest):
+    try:
+        updated = strategy_service.update_strategy(strategy_id, build_strategy_definition(req, strategy_id=strategy_id))
+        return {"item": strategy_to_dict(updated)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/backtest")
 def run_backtest_api(req: BacktestRequest):
     try:
         start_dt, end_dt = parse_date_range(req.start_date, req.end_date)
-        params = model_to_dict(req.strategy_params)
+        resolved_strategy = strategy_resolver.resolve(
+            strategy_id=req.strategy_id,
+            strategy_name=req.strategy_name,
+            override_params=req.strategy_params,
+        )
 
         raw_data, source_name, stock_name, stock_name_debug = load_market_data(req, start_dt, end_dt)
         if raw_data.empty:
             raise HTTPException(status_code=400, detail="可用行情数据为空，无法回测")
 
-        results_df, trades_df, enriched_df = execute_backtest(raw_data, req.strategy_name, params, req.capital, req.fee_pct)
+        results_df, trades_df, enriched_df = execute_backtest(raw_data, resolved_strategy, req.capital, req.fee_pct)
         metrics = calculate_metrics(results_df, trades_df, req.capital)
         signal_summary = build_signal_summary(enriched_df)
 
@@ -103,14 +167,11 @@ def run_backtest_api(req: BacktestRequest):
             "source_used": source_name,
             "data_source": req.data_source,
             "data_summary": build_data_summary(raw_data, req, source_name, stock_name, stock_name_debug),
-            "strategy": {
-                "name": req.strategy_name,
-                "params": params,
-            },
+            "strategy": build_runtime_strategy_payload(resolved_strategy),
             "metrics": metrics,
             "signal_summary": signal_summary,
             "trades": df_to_json_safe(trades_df),
-            "kline_data": df_to_json_safe(build_visual_dataset(results_df, req.strategy_name, params)),
+            "kline_data": df_to_json_safe(build_visual_dataset(results_df, resolved_strategy)),
             "analysis": {
                 "equity_curve": df_to_json_safe(build_equity_curve(results_df)),
                 "drawdown_curve": df_to_json_safe(build_drawdown_curve(results_df)),
@@ -120,6 +181,8 @@ def run_backtest_api(req: BacktestRequest):
         return response
     except HTTPException:
         raise
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -127,6 +190,62 @@ def run_backtest_api(req: BacktestRequest):
 
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def build_strategy_definition(req: StrategyUpsertRequest, strategy_id: Optional[str] = None) -> StrategyDefinition:
+    return StrategyDefinition(
+        id=strategy_id or req.id,
+        key=req.key,
+        name=req.name,
+        description=req.description,
+        category=req.category,
+        implementation_key=req.implementation_key,
+        status=req.status,
+        version=req.version,
+        created_at="",
+        updated_at="",
+        param_schema=req.param_schema,
+        default_params=req.default_params,
+        required_indicators=req.required_indicators,
+        chart_overlays=req.chart_overlays,
+        ui_schema=req.ui_schema,
+        execution_options=req.execution_options,
+        metadata=req.metadata,
+    )
+
+
+def build_strategy_summary(strategy: StrategyDefinition) -> Dict[str, Any]:
+    description = strategy.description or ""
+    return {
+        "id": strategy.id,
+        "key": strategy.key,
+        "name": strategy.name,
+        "category": strategy.category,
+        "status": strategy.status,
+        "description": description,
+        "description_summary": description[:72],
+        "implementation_key": strategy.implementation_key,
+        "version": strategy.version,
+        "updated_at": strategy.updated_at,
+    }
+
+
+def build_runtime_strategy_payload(resolved_strategy: ResolvedStrategy) -> Dict[str, Any]:
+    strategy = resolved_strategy.definition
+    return {
+        "id": strategy.id,
+        "key": strategy.key,
+        "name": strategy.name,
+        "implementation_key": strategy.implementation_key,
+        "params": resolved_strategy.params,
+        "chart_overlays": resolved_strategy.adapter.get_overlay_columns(resolved_strategy.params),
+    }
+
+
+def strategy_to_dict(strategy: StrategyDefinition) -> Dict[str, Any]:
+    if hasattr(strategy, "model_dump"):
+        return strategy.model_dump()
+    return strategy.dict()
 
 
 def parse_date_range(start_date: str, end_date: str) -> Tuple[datetime, datetime]:
@@ -149,7 +268,7 @@ def model_to_dict(model) -> Dict:
 
 def load_market_data(
     req: BacktestRequest, start_dt: datetime, end_dt: datetime
-) -> Tuple[pd.DataFrame, str, Optional[str], Optional[Dict]]:
+) -> Tuple[pd.DataFrame, str, Optional[str], Optional[Dict[str, Any]]]:
     loader = DataLoader()
 
     if req.data_source not in SUPPORTED_DATA_SOURCES:
@@ -207,69 +326,18 @@ def filter_date_range(data: pd.DataFrame, start_dt: datetime, end_dt: datetime) 
 
 def execute_backtest(
     market_data: pd.DataFrame,
-    strategy_name: str,
-    params: Dict,
+    resolved_strategy: ResolvedStrategy,
     capital: float,
     fee_pct: float,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    if strategy_name not in SUPPORTED_STRATEGIES:
-        raise ValueError(f"未知策略: {strategy_name}")
-
-    enriched_data = attach_indicators(market_data, strategy_name, params)
-    strategy = build_strategy(strategy_name, enriched_data, params)
+    enriched_data = resolved_strategy.adapter.attach_indicators(market_data, resolved_strategy.params)
+    strategy = resolved_strategy.adapter.build_strategy(enriched_data, resolved_strategy.params)
     data_with_signals = strategy.generate_signals()
 
     engine = BacktestEngine(data_with_signals, capital, fee_pct)
     results_df = engine.run_backtest()
     trades_df = engine.get_trade_log()
     return results_df, trades_df, data_with_signals
-
-
-def attach_indicators(data: pd.DataFrame, strategy_name: str, params: Dict) -> pd.DataFrame:
-    indicator_calc = TechnicalIndicators(data)
-    enriched = indicator_calc.data.copy()
-
-    if strategy_name == "趋势跟踪(双均线)":
-        short_period = params["ma_short"]
-        long_period = params["ma_long"]
-        if short_period >= long_period:
-            raise ValueError("双均线策略要求短均线周期小于长均线周期")
-        enriched[f"MA{short_period}"] = indicator_calc.calculate_ma(short_period)
-        enriched[f"MA{long_period}"] = indicator_calc.calculate_ma(long_period)
-
-    elif strategy_name == "均值回归(布林带)":
-        upper_band, mid_band, lower_band = indicator_calc.calculate_bollinger_bands(
-            period=params["bb_period"], std_dev=params["bb_std"]
-        )
-        enriched["BB_upper"] = upper_band
-        enriched["BB_mid"] = mid_band
-        enriched["BB_lower"] = lower_band
-
-    elif strategy_name == "区间交易(RSI)":
-        if params["rsi_low"] >= params["rsi_high"]:
-            raise ValueError("RSI 低阈值必须小于高阈值")
-        enriched[f"RSI_{params['rsi_period']}"] = indicator_calc.calculate_rsi(period=params["rsi_period"])
-
-    return enriched
-
-
-def build_strategy(strategy_name: str, enriched_data: pd.DataFrame, params: Dict):
-    if strategy_name == "趋势跟踪(双均线)":
-        return TrendStrategy(enriched_data, ma_short=params["ma_short"], ma_long=params["ma_long"])
-    if strategy_name == "网格交易":
-        return GridStrategy(
-            enriched_data,
-            grid_count=params["grid_count"],
-            grid_step_pct=params["grid_step"],
-        )
-    if strategy_name == "均值回归(布林带)":
-        return MeanReversionStrategy(enriched_data, bb_period=params["bb_period"])
-    return RangeTradingStrategy(
-        enriched_data,
-        rsi_period=params["rsi_period"],
-        rsi_low=params["rsi_low"],
-        rsi_high=params["rsi_high"],
-    )
 
 
 def calculate_metrics(results_df: pd.DataFrame, trades_df: pd.DataFrame, capital: float) -> Dict:
@@ -287,7 +355,7 @@ def build_data_summary(
     req: BacktestRequest,
     source_name: str,
     stock_name: Optional[str],
-    stock_name_debug: Optional[Dict],
+    stock_name_debug: Optional[Dict[str, Any]],
 ) -> Dict:
     loader = DataLoader()
     summary = loader.get_data_summary(data)
@@ -328,7 +396,7 @@ def build_signal_summary(data_with_signals: pd.DataFrame) -> Dict:
     }
 
 
-def build_visual_dataset(results_df: pd.DataFrame, strategy_name: str, params: Dict) -> pd.DataFrame:
+def build_visual_dataset(results_df: pd.DataFrame, resolved_strategy: ResolvedStrategy) -> pd.DataFrame:
     base_columns = [
         "date",
         "open",
@@ -342,15 +410,7 @@ def build_visual_dataset(results_df: pd.DataFrame, strategy_name: str, params: D
         "signal",
         "cumulative_return",
     ]
-
-    overlay_columns: List[str] = []
-    if strategy_name == "趋势跟踪(双均线)":
-        overlay_columns = [f"MA{params['ma_short']}", f"MA{params['ma_long']}"]
-    elif strategy_name == "均值回归(布林带)":
-        overlay_columns = ["BB_upper", "BB_mid", "BB_lower"]
-    elif strategy_name == "区间交易(RSI)":
-        overlay_columns = [f"RSI_{params['rsi_period']}"]
-
+    overlay_columns = resolved_strategy.adapter.get_overlay_columns(resolved_strategy.params)
     existing_columns = [column for column in base_columns + overlay_columns if column in results_df.columns]
     return results_df[existing_columns].copy()
 
@@ -414,4 +474,4 @@ def dict_to_json_safe(data: Dict) -> Dict:
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

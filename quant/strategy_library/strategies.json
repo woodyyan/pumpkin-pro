@@ -1,0 +1,369 @@
+{
+  "version": 1,
+  "updated_at": "2026-03-12T08:29:32Z",
+  "items": [
+    {
+      "id": "trend-ma-cross",
+      "key": "trend_ma_cross",
+      "name": "趋势跟踪(双均线)",
+      "description": "短均线上穿长均线买入，下穿卖出，适合趋势型行情。",
+      "category": "趋势",
+      "implementation_key": "trend_cross",
+      "status": "active",
+      "version": 3,
+      "created_at": "2026-03-11T00:00:00Z",
+      "updated_at": "2026-03-12T03:18:54Z",
+      "param_schema": [
+        {
+          "key": "ma_short",
+          "label": "短均线周期",
+          "type": "integer",
+          "required": true,
+          "default": 20,
+          "min": 2.0,
+          "max": 250.0,
+          "step": 1.0,
+          "description": "用于捕捉短期趋势变化。",
+          "options": []
+        },
+        {
+          "key": "ma_long",
+          "label": "长均线周期",
+          "type": "integer",
+          "required": true,
+          "default": 60,
+          "min": 3.0,
+          "max": 500.0,
+          "step": 1.0,
+          "description": "用于识别长期趋势方向。",
+          "options": []
+        }
+      ],
+      "default_params": {
+        "ma_short": 20,
+        "ma_long": 60
+      },
+      "required_indicators": [
+        {
+          "type": "ma",
+          "params": [
+            "ma_short",
+            "ma_long"
+          ]
+        }
+      ],
+      "chart_overlays": [
+        {
+          "type": "line",
+          "template": "MA{ma_short}"
+        },
+        {
+          "type": "line",
+          "template": "MA{ma_long}"
+        }
+      ],
+      "ui_schema": {
+        "param_order": [
+          "ma_short",
+          "ma_long"
+        ]
+      },
+      "execution_options": {},
+      "metadata": {
+        "aliases": [
+          "趋势跟踪（双均线）"
+        ]
+      }
+    },
+    {
+      "id": "grid-trading",
+      "key": "grid_trading",
+      "name": "网格交易",
+      "description": "围绕基准价分层挂单，适合震荡市场分批低买高卖。",
+      "category": "震荡",
+      "implementation_key": "grid",
+      "status": "active",
+      "version": 4,
+      "created_at": "2026-03-11T00:00:00Z",
+      "updated_at": "2026-03-12T08:29:26Z",
+      "param_schema": [
+        {
+          "key": "grid_count",
+          "label": "网格数量",
+          "type": "integer",
+          "required": true,
+          "default": 5,
+          "min": 2.0,
+          "max": 20.0,
+          "step": 1.0,
+          "description": "决定买卖网格层数。",
+          "options": []
+        },
+        {
+          "key": "grid_step",
+          "label": "网格步长",
+          "type": "number",
+          "required": true,
+          "default": 0.05,
+          "min": 0.001,
+          "max": 0.5,
+          "step": 0.001,
+          "description": "相邻网格的价格间距比例。",
+          "options": []
+        }
+      ],
+      "default_params": {
+        "grid_count": 5,
+        "grid_step": 0.03
+      },
+      "required_indicators": [],
+      "chart_overlays": [],
+      "ui_schema": {
+        "param_order": [
+          "grid_count",
+          "grid_step"
+        ]
+      },
+      "execution_options": {},
+      "metadata": {
+        "aliases": []
+      }
+    },
+    {
+      "id": "bollinger-mean-reversion",
+      "key": "bollinger_mean_reversion",
+      "name": "均值回归(布林带)",
+      "description": "价格跌破下轨买入、突破上轨卖出，捕捉回归均值机会。",
+      "category": "均值回归",
+      "implementation_key": "bollinger_reversion",
+      "status": "active",
+      "version": 3,
+      "created_at": "2026-03-11T00:00:00Z",
+      "updated_at": "2026-03-12T08:29:32Z",
+      "param_schema": [
+        {
+          "key": "bb_period",
+          "label": "布林带周期",
+          "type": "integer",
+          "required": true,
+          "default": 20,
+          "min": 5.0,
+          "max": 250.0,
+          "step": 1.0,
+          "description": "用于计算布林带中轨的均线周期。",
+          "options": []
+        },
+        {
+          "key": "bb_std",
+          "label": "标准差倍数",
+          "type": "number",
+          "required": true,
+          "default": 2,
+          "min": 0.1,
+          "max": 5.0,
+          "step": 0.1,
+          "description": "用于计算布林带上下轨宽度。",
+          "options": []
+        }
+      ],
+      "default_params": {
+        "bb_period": 20,
+        "bb_std": 2.0
+      },
+      "required_indicators": [
+        {
+          "type": "bollinger",
+          "params": [
+            "bb_period",
+            "bb_std"
+          ]
+        }
+      ],
+      "chart_overlays": [
+        {
+          "type": "line",
+          "template": "BB_upper"
+        },
+        {
+          "type": "line",
+          "template": "BB_mid"
+        },
+        {
+          "type": "line",
+          "template": "BB_lower"
+        }
+      ],
+      "ui_schema": {
+        "param_order": [
+          "bb_period",
+          "bb_std"
+        ]
+      },
+      "execution_options": {},
+      "metadata": {
+        "aliases": [
+          "均值回归（布林带）"
+        ]
+      }
+    },
+    {
+      "id": "rsi-range-trading",
+      "key": "rsi_range_trading",
+      "name": "区间交易(RSI)",
+      "description": "RSI 从低位回升买入，从高位回落卖出，适合箱体行情。",
+      "category": "区间",
+      "implementation_key": "rsi_range",
+      "status": "active",
+      "version": 1,
+      "created_at": "2026-03-11T00:00:00Z",
+      "updated_at": "2026-03-11T00:00:00Z",
+      "param_schema": [
+        {
+          "key": "rsi_period",
+          "label": "RSI 周期",
+          "type": "integer",
+          "required": true,
+          "default": 14,
+          "min": 2.0,
+          "max": 120.0,
+          "step": 1.0,
+          "description": "用于计算 RSI 指标的回看窗口。",
+          "options": []
+        },
+        {
+          "key": "rsi_low",
+          "label": "低位阈值",
+          "type": "number",
+          "required": true,
+          "default": 30,
+          "min": 1.0,
+          "max": 50.0,
+          "step": 1.0,
+          "description": "RSI 从低位线向上突破时触发买入。",
+          "options": []
+        },
+        {
+          "key": "rsi_high",
+          "label": "高位阈值",
+          "type": "number",
+          "required": true,
+          "default": 70,
+          "min": 50.0,
+          "max": 99.0,
+          "step": 1.0,
+          "description": "RSI 从高位线向下跌破时触发卖出。",
+          "options": []
+        }
+      ],
+      "default_params": {
+        "rsi_period": 14,
+        "rsi_low": 30,
+        "rsi_high": 70
+      },
+      "required_indicators": [
+        {
+          "type": "rsi",
+          "params": [
+            "rsi_period"
+          ]
+        }
+      ],
+      "chart_overlays": [
+        {
+          "type": "line",
+          "template": "RSI_{rsi_period}"
+        }
+      ],
+      "ui_schema": {
+        "param_order": [
+          "rsi_period",
+          "rsi_low",
+          "rsi_high"
+        ]
+      },
+      "execution_options": {},
+      "metadata": {
+        "aliases": [
+          "区间交易（RSI）"
+        ]
+      }
+    },
+    {
+      "id": "bollinger-strategy-1",
+      "key": "bollinger_strategy_1",
+      "name": "均值回归策略 测试一下",
+      "description": "价格跌破下轨买入、突破上轨卖出，捕捉回归均值机会。哈哈哈哈。",
+      "category": "均值回归",
+      "implementation_key": "bollinger_reversion",
+      "status": "active",
+      "version": 2,
+      "created_at": "2026-03-12T05:31:19Z",
+      "updated_at": "2026-03-12T08:29:21Z",
+      "param_schema": [
+        {
+          "key": "bb_period",
+          "label": "布林带周期",
+          "type": "integer",
+          "required": true,
+          "default": 20,
+          "min": 5.0,
+          "max": 250.0,
+          "step": 1.0,
+          "description": "用于计算布林带中轨的均线周期。",
+          "options": []
+        },
+        {
+          "key": "bb_std",
+          "label": "标准差倍数",
+          "type": "number",
+          "required": true,
+          "default": 2,
+          "min": 0.1,
+          "max": 5.0,
+          "step": 0.1,
+          "description": "用于计算布林带上下轨宽度。",
+          "options": []
+        }
+      ],
+      "default_params": {
+        "bb_period": 8,
+        "bb_std": 1.0
+      },
+      "required_indicators": [
+        {
+          "type": "bollinger",
+          "params": [
+            "bb_period",
+            "bb_std"
+          ]
+        }
+      ],
+      "chart_overlays": [
+        {
+          "type": "line",
+          "template": "BB_upper"
+        },
+        {
+          "type": "line",
+          "template": "BB_mid"
+        },
+        {
+          "type": "line",
+          "template": "BB_lower"
+        }
+      ],
+      "ui_schema": {
+        "param_order": [
+          "bb_period",
+          "bb_std"
+        ]
+      },
+      "execution_options": {},
+      "metadata": {
+        "aliases": [
+          "均值回归（布林带）"
+        ]
+      }
+    }
+  ]
+}

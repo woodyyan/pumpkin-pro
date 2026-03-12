@@ -357,22 +357,14 @@ export default function StrategyLibraryPage() {
 
               <div className="flex flex-wrap items-center gap-2">
                 {mode === 'view' ? (
-                  <>
-                    <CreateStrategyDropdown
-                      open={createMenuOpen}
-                      onToggle={() => setCreateMenuOpen((prev) => !prev)}
-                      onSelect={(strategyType) => requestWorkspaceAction({ type: 'create', strategyType })}
-                      variant="secondary"
-                    />
-                    <button
-                      type="button"
-                      onClick={startEdit}
-                      disabled={!selectedDetail || loadingDetail}
-                      className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      编辑当前策略
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    onClick={startEdit}
+                    disabled={!selectedDetail || loadingDetail}
+                    className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    编辑当前策略
+                  </button>
                 ) : (
                   <>
                     <button

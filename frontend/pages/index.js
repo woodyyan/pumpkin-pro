@@ -1,12 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  buildInitialStrategyParams,
-  getInputAttributes,
-  sanitizeStrategyParams,
-  sortParamSchema,
-  validateStrategyParams,
-} from '../lib/strategy-form';
 import { requestJson } from '../lib/api';
 
 const DATA_SOURCE_OPTIONS = [
@@ -23,7 +16,6 @@ const DEFAULT_FORM = {
   capital: 100000,
   feePct: 0.001,
   strategyId: '',
-  strategyParams: {},
   csvContent: '',
   csvFilename: '',
   sampleConfig: {
@@ -61,8 +53,7 @@ export default function BacktestPage() {
     [form.strategyId, strategies],
   );
 
-  const orderedParams = useMemo(() => sortParamSchema(selectedStrategy), [selectedStrategy]);
-  const resultStrategyParams = result?.strategy?.params || form.strategyParams;
+  const resultStrategyParams = result?.strategy?.params || {};
 
   const metricCards = useMemo(() => {
     if (!result?.metrics) return [];
@@ -94,17 +85,12 @@ export default function BacktestPage() {
         setForm((prev) => {
           const currentStrategy = items.find((item) => item.id === prev.strategyId) || items[0] || null;
           if (!currentStrategy) {
-            return { ...prev, strategyId: '', strategyParams: {} };
+            return { ...prev, strategyId: '' };
           }
-
-          const strategyParams = currentStrategy.id === prev.strategyId
-            ? { ...buildInitialStrategyParams(currentStrategy), ...filterParamsByDefinition(currentStrategy, prev.strategyParams) }
-            : buildInitialStrategyParams(currentStrategy);
 
           return {
             ...prev,
             strategyId: currentStrategy.id,
-            strategyParams,
           };
         });
       } catch (err) {
@@ -292,17 +278,6 @@ export default function BacktestPage() {
     setForm((prev) => ({
       ...prev,
       strategyId: strategy.id,
-      strategyParams: buildInitialStrategyParams(strategy),
-    }));
-  };
-
-  const updateStrategyParam = (key, value) => {
-    setForm((prev) => ({
-      ...prev,
-      strategyParams: {
-        ...prev.strategyParams,
-        [key]: value,
-      },
     }));
   };
 
@@ -352,12 +327,6 @@ export default function BacktestPage() {
       return;
     }
 
-    const strategyValidationError = validateStrategyParams(selectedStrategy, form.strategyParams);
-    if (strategyValidationError) {
-      setError(strategyValidationError);
-      return;
-    }
-
     setLoading(true);
     try {
       const payload = buildPayload(form, selectedStrategy);
@@ -397,7 +366,7 @@ export default function BacktestPage() {
             <div>
               <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">历史回测工作台</h1>
               <p className="mt-3 text-sm md:text-base text-white/65 leading-7">
-                历史回测已接入策略库。你可以直接选择已启用的策略模板，系统会自动加载默认参数、参数结构与对应的执行实现。
+                历史回测已接入策略库。你可以直接选择已启用的策略模板，参数由策略库统一维护，回测页面不再提供参数改写入口。
               </p>
             </div>
           </div>
@@ -411,7 +380,7 @@ export default function BacktestPage() {
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <SectionCard title="回测配置" description="先选择数据来源，再配置策略与资金参数。">
+        <SectionCard title="回测配置" description="先选择数据来源，再配置回测区间与资金参数。">
           <div className="space-y-6">
             <div className="grid gap-3 md:grid-cols-3">
               {DATA_SOURCE_OPTIONS.map((option) => (
@@ -511,7 +480,7 @@ export default function BacktestPage() {
           </div>
         </SectionCard>
 
-        <SectionCard title="策略设置" description={selectedStrategy?.description || '从策略库动态加载默认参数与参数定义。'}>
+        <SectionCard title="策略设置" description={selectedStrategy?.description || '选择策略库中的启用策略用于回测。'}>
           <div className="space-y-6">
             <Field label="回测策略">
               <select
@@ -534,42 +503,9 @@ export default function BacktestPage() {
               </select>
             </Field>
 
-            {selectedStrategy && orderedParams.length > 0 ? (
-              <div className={`grid gap-4 ${orderedParams.length >= 3 ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
-                {orderedParams.map((item) => {
-                  if (item.type === 'boolean') {
-                    return (
-                      <Field key={item.key} label={item.label}>
-                        <select
-                          value={String(Boolean(form.strategyParams[item.key]))}
-                          onChange={(event) => updateStrategyParam(item.key, event.target.value === 'true')}
-                          className="w-full rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition focus:border-primary"
-                        >
-                          <option value="true">是</option>
-                          <option value="false">否</option>
-                        </select>
-                        {item.description && <div className="text-xs leading-6 text-white/45">{item.description}</div>}
-                      </Field>
-                    );
-                  }
-
-                  return (
-                    <Field key={item.key} label={item.label}>
-                      <Input
-                        {...getInputAttributes(item)}
-                        value={form.strategyParams[item.key] ?? ''}
-                        onChange={(event) => updateStrategyParam(item.key, event.target.value)}
-                      />
-                      {item.description && <div className="text-xs leading-6 text-white/45">{item.description}</div>}
-                    </Field>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-dashed border-border bg-black/20 px-4 py-8 text-center text-sm text-white/45">
-                {strategiesLoading ? '正在加载策略配置...' : '当前策略没有参数定义，或尚未启用任何策略。'}
-              </div>
-            )}
+            <div className="rounded-2xl border border-dashed border-border bg-black/20 px-4 py-5 text-sm leading-7 text-white/60">
+              策略参数已统一收敛到“策略库”维护。回测引擎仅负责选择策略并执行回测，运行时将自动使用策略库中当前版本的默认参数。
+            </div>
 
             <div className="rounded-2xl border border-border bg-black/20 p-4 text-sm leading-7 text-white/65">
               <div className="font-medium text-white">已选策略说明</div>
@@ -592,7 +528,7 @@ export default function BacktestPage() {
 
       {!result && !loading && (
         <div className="rounded-2xl border border-dashed border-border bg-card/60 px-6 py-16 text-center text-white/45">
-          选择数据源与策略参数后，点击“运行历史回测”，这里会展示 K 线、资产曲线、回撤分析和交易结果。
+          选择数据源与策略后，点击“运行历史回测”，这里会展示 K 线、资产曲线、回撤分析和交易结果。
         </div>
       )}
 
@@ -738,11 +674,6 @@ export default function BacktestPage() {
   );
 }
 
-function filterParamsByDefinition(definition, params) {
-  const allowedKeys = new Set((definition?.param_schema || []).map((item) => item.key));
-  return Object.fromEntries(Object.entries(params || {}).filter(([key]) => allowedKeys.has(key)));
-}
-
 function parseApiResponse(responseText) {
   if (!responseText) return null;
 
@@ -828,7 +759,6 @@ function buildPayload(form, selectedStrategy) {
     strategy_name: selectedStrategy.name,
     csv_content: form.dataSource === 'csv' ? form.csvContent : null,
     csv_filename: form.dataSource === 'csv' ? form.csvFilename : null,
-    strategy_params: sanitizeStrategyParams(selectedStrategy, form.strategyParams),
     sample_config: {
       start_price: Number(form.sampleConfig.start_price),
       drift: Number(form.sampleConfig.drift),

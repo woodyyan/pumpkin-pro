@@ -57,27 +57,50 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy over SSH
+      - name: Deploy over SSH (key auth)
+        if: ${{ vars.DEPLOY_AUTH_METHOD != 'password' }}
         uses: appleboy/ssh-action@v1.2.0
         env:
           DEPLOY_APP_DIR: ${{ secrets.DEPLOY_APP_DIR }}
           DEPLOY_REPO_URL: ${{ secrets.DEPLOY_REPO_URL }}
           DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH }}
+          DEPLOY_GITHUB_TOKEN: ${{ secrets.DEPLOY_GITHUB_TOKEN }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           port: ${{ vars.DEPLOY_PORT || 22 }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          password: ${{ secrets.DEPLOY_PASSWORD }}
+          passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
           script_stop: true
-          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH
+          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN
           script: |
-            set -e
+            set -euo pipefail
 
             APP_DIR="${DEPLOY_APP_DIR:-/opt/pumpkin-pro}"
-            REPO_URL="${DEPLOY_REPO_URL:-https://github.com/${{ github.repository }}.git}"
+            RAW_REPO_URL="${DEPLOY_REPO_URL:-https://github.com/${{ github.repository }}.git}"
             BRANCH="${DEPLOY_BRANCH:-main}"
+            REPO_URL="$RAW_REPO_URL"
 
+            if [ -n "${DEPLOY_GITHUB_TOKEN:-}" ] && printf '%s' "$RAW_REPO_URL" | grep -q '^https://github.com/'; then
+              REPO_URL="$(printf '%s' "$RAW_REPO_URL" | sed "s#https://github.com/#https://x-access-token:${DEPLOY_GITHUB_TOKEN}@github.com/#")"
+            fi
+
+            retry() {
+              local retries=3
+              local count=1
+              until "$@"; do
+                if [ "$count" -ge "$retries" ]; then
+                  return 1
+                fi
+                count=$((count + 1))
+                sleep 3
+              done
+            }
+
+            if ! command -v git >/dev/null 2>&1; then
+              echo "git is required on target server"
+              exit 1
+            fi
             if ! command -v docker >/dev/null 2>&1; then
               echo "docker is required on target server"
               exit 1
@@ -90,11 +113,79 @@ jobs:
             mkdir -p "$APP_DIR"
 
             if [ ! -d "$APP_DIR/.git" ]; then
-              git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+              retry git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
             fi
 
             cd "$APP_DIR"
-            git fetch origin "$BRANCH"
+            git remote set-url origin "$REPO_URL" || true
+            retry git fetch origin "$BRANCH"
+            git checkout "$BRANCH"
+            git reset --hard "origin/$BRANCH"
+
+            DOCKER_BUILDKIT=0 docker compose up -d --build --remove-orphans
+            docker image prune -f || true
+
+      - name: Deploy over SSH (password auth)
+        if: ${{ vars.DEPLOY_AUTH_METHOD == 'password' }}
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_APP_DIR: ${{ secrets.DEPLOY_APP_DIR }}
+          DEPLOY_REPO_URL: ${{ secrets.DEPLOY_REPO_URL }}
+          DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH }}
+          DEPLOY_GITHUB_TOKEN: ${{ secrets.DEPLOY_GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          port: ${{ vars.DEPLOY_PORT || 22 }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          script_stop: true
+          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN
+          script: |
+            set -euo pipefail
+
+            APP_DIR="${DEPLOY_APP_DIR:-/opt/pumpkin-pro}"
+            RAW_REPO_URL="${DEPLOY_REPO_URL:-https://github.com/${{ github.repository }}.git}"
+            BRANCH="${DEPLOY_BRANCH:-main}"
+            REPO_URL="$RAW_REPO_URL"
+
+            if [ -n "${DEPLOY_GITHUB_TOKEN:-}" ] && printf '%s' "$RAW_REPO_URL" | grep -q '^https://github.com/'; then
+              REPO_URL="$(printf '%s' "$RAW_REPO_URL" | sed "s#https://github.com/#https://x-access-token:${DEPLOY_GITHUB_TOKEN}@github.com/#")"
+            fi
+
+            retry() {
+              local retries=3
+              local count=1
+              until "$@"; do
+                if [ "$count" -ge "$retries" ]; then
+                  return 1
+                fi
+                count=$((count + 1))
+                sleep 3
+              done
+            }
+
+            if ! command -v git >/dev/null 2>&1; then
+              echo "git is required on target server"
+              exit 1
+            fi
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "docker is required on target server"
+              exit 1
+            fi
+            if ! docker compose version >/dev/null 2>&1; then
+              echo "docker compose is required on target server"
+              exit 1
+            fi
+
+            mkdir -p "$APP_DIR"
+
+            if [ ! -d "$APP_DIR/.git" ]; then
+              retry git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+            fi
+
+            cd "$APP_DIR"
+            git remote set-url origin "$REPO_URL" || true
+            retry git fetch origin "$BRANCH"
             git checkout "$BRANCH"
             git reset --hard "origin/$BRANCH"
 

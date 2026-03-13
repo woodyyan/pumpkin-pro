@@ -141,9 +141,9 @@ export default function LiveTradingPage() {
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-border bg-card p-6">
-        <h1 className="text-2xl font-semibold tracking-tight">实盘监控（阶段 A）</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">实盘监控</h1>
         <p className="mt-3 text-sm leading-7 text-white/65">
-          当前仅提供实时监控与异动捕获，不触发任何下单行为。系统采用“关注池 + 激活标的”模型：可维护多只关注股票，但同一时刻只监控 1 只激活标的。
+          当前仅提供实时监控与异动捕获，不触发任何下单行为，后续会加上信号推送功能。系统采用“关注池 + 激活标的”模型：可维护多只关注股票，但同一时刻只监控 1 只激活标的。
         </p>
       </section>
 

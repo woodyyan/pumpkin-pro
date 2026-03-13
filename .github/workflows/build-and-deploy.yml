@@ -1,0 +1,102 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+
+      - name: Build backend
+        run: |
+          cd backend
+          go mod download
+          go build ./...
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python syntax check
+        run: python -m compileall quant
+
+  deploy:
+    name: Deploy to Server
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_APP_DIR: ${{ secrets.DEPLOY_APP_DIR }}
+          DEPLOY_REPO_URL: ${{ secrets.DEPLOY_REPO_URL }}
+          DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          port: ${{ vars.DEPLOY_PORT || 22 }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          script_stop: true
+          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH
+          script: |
+            set -e
+
+            APP_DIR="${DEPLOY_APP_DIR:-/opt/pumpkin-pro}"
+            REPO_URL="${DEPLOY_REPO_URL:-https://github.com/${{ github.repository }}.git}"
+            BRANCH="${DEPLOY_BRANCH:-main}"
+
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "docker is required on target server"
+              exit 1
+            fi
+            if ! docker compose version >/dev/null 2>&1; then
+              echo "docker compose is required on target server"
+              exit 1
+            fi
+
+            mkdir -p "$APP_DIR"
+
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+            fi
+
+            cd "$APP_DIR"
+            git fetch origin "$BRANCH"
+            git checkout "$BRANCH"
+            git reset --hard "origin/$BRANCH"
+
+            docker compose up -d --build --remove-orphans
+            docker image prune -f || true

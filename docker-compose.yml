@@ -30,6 +30,17 @@ services:
     environment:
       - GO_ENV=development
       - QUANT_SERVICE_URL=http://quant:8000
+      - DB_TYPE=${DB_TYPE:-sqlite}
+      - DB_PATH=${DB_PATH:-/app/data/pumpkin.db}
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_NAME=${DB_NAME:-pumpkin_pro}
+      - DB_SSLMODE=${DB_SSLMODE:-disable}
+      - STRATEGY_SEED_PATH=${STRATEGY_SEED_PATH:-seed/strategies.json}
+    volumes:
+      - ./data:/app/data
     depends_on:
       - quant
 

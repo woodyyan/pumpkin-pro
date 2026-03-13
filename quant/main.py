@@ -55,6 +55,14 @@ class StrategyUpsertRequest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class RuntimeStrategyPayload(BaseModel):
+    id: str
+    key: str
+    name: str
+    implementation_key: str
+    params: Dict[str, Any] = Field(default_factory=dict)
+
+
 class BacktestRequest(BaseModel):
     data_source: str = Field(default="online", description="online/csv/sample")
     ticker: Optional[str] = Field(default=None, description="A股六位数字或港股五位数字")
@@ -65,6 +73,7 @@ class BacktestRequest(BaseModel):
     strategy_id: Optional[str] = Field(default=None, description="策略库中的策略 ID")
     strategy_name: Optional[str] = Field(default=None, description="兼容旧版请求的策略名称")
     strategy_params: Dict[str, Any] = Field(default_factory=dict)
+    runtime_strategy: Optional[RuntimeStrategyPayload] = Field(default=None, description="由网关注入的运行态策略定义")
     csv_content: Optional[str] = Field(default=None, description="上传的本地 CSV 文本")
     csv_filename: Optional[str] = Field(default=None)
     sample_config: SampleDataConfig = Field(default_factory=SampleDataConfig)
@@ -144,15 +153,45 @@ def update_strategy(strategy_id: str, req: StrategyUpsertRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def resolve_backtest_strategy(req: BacktestRequest) -> ResolvedStrategy:
+    if req.runtime_strategy:
+        runtime = req.runtime_strategy
+        adapter = strategy_registry.get_adapter(runtime.implementation_key)
+        params = runtime.params or {}
+        adapter.validate_params(params)
+        definition = StrategyDefinition(
+            id=runtime.id,
+            key=runtime.key,
+            name=runtime.name,
+            description="",
+            category="",
+            implementation_key=runtime.implementation_key,
+            status="active",
+            version=1,
+            created_at="",
+            updated_at="",
+            param_schema=[],
+            default_params=params,
+            required_indicators=[],
+            chart_overlays=[],
+            ui_schema={},
+            execution_options={},
+            metadata={},
+        )
+        return ResolvedStrategy(definition=definition, params=params, adapter=adapter)
+
+    return strategy_resolver.resolve(
+        strategy_id=req.strategy_id,
+        strategy_name=req.strategy_name,
+        override_params=req.strategy_params,
+    )
+
+
 @app.post("/api/backtest")
 def run_backtest_api(req: BacktestRequest):
     try:
         start_dt, end_dt = parse_date_range(req.start_date, req.end_date)
-        resolved_strategy = strategy_resolver.resolve(
-            strategy_id=req.strategy_id,
-            strategy_name=req.strategy_name,
-            override_params=req.strategy_params,
-        )
+        resolved_strategy = resolve_backtest_strategy(req)
 
         raw_data, source_name, stock_name, stock_name_debug = load_market_data(req, start_dt, end_dt)
         if raw_data.empty:

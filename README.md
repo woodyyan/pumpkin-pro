@@ -43,7 +43,8 @@
 ## 技术栈
 
 - **前端**：Next.js 14、React 18、Lightweight Charts、Tailwind CSS
-- **后端**：Go
+- **后端**：Go、GORM
+- **数据库**：SQLite（默认）/ PostgreSQL（可选，`DB_TYPE=postgres`）
 - **量化服务**：Python、FastAPI、Pandas、NumPy、AkShare
 - **部署方式**：Docker Compose / 本地开发模式
 
@@ -75,8 +76,11 @@ pumpkin-pro/
 在项目根目录执行：
 
 ```bash
+cp .env.example .env
 docker compose up --build
 ```
+
+默认数据库为 SQLite，数据库文件持久化在宿主机 `./data/pumpkin.db`。如果需要切换 PostgreSQL，只需在 `.env` 中设置 `DB_TYPE=postgres` 并补全连接参数。
 
 启动后默认端口：
 
@@ -100,7 +104,11 @@ python3 main.py
 
 ```bash
 cd backend
+# 默认 SQLite（data/pumpkin.db）
 go run main.go
+
+# 如需切换 PostgreSQL
+# DB_TYPE=postgres DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=postgres DB_PASSWORD=postgres DB_NAME=pumpkin_pro DB_SSLMODE=disable go run main.go
 ```
 
 #### 3. 启动前端

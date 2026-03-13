@@ -343,6 +343,19 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 			"session_state":    sessionState,
 			"snapshot":         snapshot,
 		})
+	case "overlay":
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+			return
+		}
+		windowMinutes := parseWindowMinutes(r.URL.Query().Get("window_minutes"), 60)
+		benchmark := strings.TrimSpace(r.URL.Query().Get("benchmark"))
+		overlay, err := a.liveService.GetOverlay(r.Context(), symbol, windowMinutes, benchmark)
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, overlay)
 	case "anomalies/price-volume":
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
@@ -401,6 +414,17 @@ func parseLimit(raw string, fallback int) int {
 	}
 	if value > 200 {
 		return 200
+	}
+	return value
+}
+
+func parseWindowMinutes(raw string, fallback int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	if value > 240 {
+		return 240
 	}
 	return value
 }

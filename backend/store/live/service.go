@@ -11,8 +11,14 @@ import (
 )
 
 const (
-	maxSampleSize      = 80
-	maxEventBufferSize = 160
+	maxSampleSize            = 80
+	maxEventBufferSize       = 160
+	maxOverlaySampleSize     = 360
+	defaultOverlayBenchmark  = "HSI"
+	defaultOverlayWindowMins = 60
+	maxOverlayWindowMins     = 240
+	betaWarmupSamples        = 30
+	rsWarmupSamples          = 10
 )
 
 type Service struct {
@@ -35,9 +41,16 @@ type symbolRuntime struct {
 	PriceSamples    []float64
 	VolumeDeltas    []float64
 	NetInflowSeries []float64
+	OverlaySamples  []overlaySample
 
 	PriceVolumeEvents []PriceVolumeAnomaly
 	BlockFlowEvents   []BlockFlowAnomaly
+}
+
+type overlaySample struct {
+	TS             time.Time
+	StockPrice     float64
+	BenchmarkPrice float64
 }
 
 func NewService(repo *Repository) *Service {
@@ -202,7 +215,7 @@ func (s *Service) GetSymbolSnapshot(ctx context.Context, symbol string) (*Symbol
 	defer s.mu.Unlock()
 
 	rt := s.ensureRuntime(normalized)
-	s.processRuntimeUpdate(rt, snapshot)
+	s.processRuntimeUpdate(rt, snapshot, nil)
 	isActive := normalized == s.activeSymbol
 	if isActive {
 		if len(rt.PriceSamples) >= s.warmupMinSample {
@@ -212,6 +225,57 @@ func (s *Service) GetSymbolSnapshot(ctx context.Context, symbol string) (*Symbol
 		}
 	}
 	return snapshot, isActive, s.sessionState, nil
+}
+
+func (s *Service) GetOverlay(ctx context.Context, symbol string, windowMinutes int, benchmark string) (*OverlayPayload, error) {
+	normalizedSymbol, err := normalizeHKSymbol(symbol)
+	if err != nil {
+		return nil, err
+	}
+	if windowMinutes <= 0 {
+		windowMinutes = defaultOverlayWindowMins
+	}
+	if windowMinutes > maxOverlayWindowMins {
+		windowMinutes = maxOverlayWindowMins
+	}
+	normalizedBenchmark := normalizeBenchmark(benchmark)
+
+	symbolSnapshot, benchmarkSnapshot, err := s.marketClient.FetchOverlaySnapshot(ctx, normalizedSymbol, normalizedBenchmark)
+	if err != nil {
+		s.setDegradedIfRunning()
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rt := s.ensureRuntime(normalizedSymbol)
+	s.processRuntimeUpdate(rt, symbolSnapshot, benchmarkSnapshot)
+	if normalizedSymbol == s.activeSymbol {
+		if len(rt.PriceSamples) >= s.warmupMinSample {
+			s.sessionState = SessionRunning
+		} else {
+			s.sessionState = SessionWarming
+		}
+	}
+
+	windowSamples := windowOverlaySamples(rt.OverlaySamples, windowMinutes)
+	series := buildOverlaySeries(windowSamples)
+	metrics := buildOverlayMetrics(windowSamples)
+	updatedAt := time.Now().UTC().Format(time.RFC3339)
+	if len(windowSamples) > 0 {
+		updatedAt = windowSamples[len(windowSamples)-1].TS.UTC().Format(time.RFC3339)
+	}
+
+	return &OverlayPayload{
+		Symbol:        normalizedSymbol,
+		Benchmark:     normalizedBenchmark,
+		WindowMinutes: windowMinutes,
+		SessionState:  s.sessionState,
+		Series:        series,
+		Metrics:       metrics,
+		UpdatedAt:     updatedAt,
+	}, nil
 }
 
 func (s *Service) ListPriceVolumeAnomalies(ctx context.Context, symbol string, since time.Time, limit int, types []string) ([]PriceVolumeAnomaly, SessionState, error) {
@@ -300,7 +364,7 @@ func (s *Service) ensureRuntime(symbol string) *symbolRuntime {
 	return rt
 }
 
-func (s *Service) processRuntimeUpdate(rt *symbolRuntime, snapshot *SymbolSnapshot) {
+func (s *Service) processRuntimeUpdate(rt *symbolRuntime, snapshot *SymbolSnapshot, benchmark *BenchmarkSnapshot) {
 	price := snapshot.LastPrice
 	volume := snapshot.Volume
 	turnover := snapshot.Turnover
@@ -335,6 +399,21 @@ func (s *Service) processRuntimeUpdate(rt *symbolRuntime, snapshot *SymbolSnapsh
 	now, _ := time.Parse(time.RFC3339, snapshot.TS)
 	if now.IsZero() {
 		now = time.Now().UTC()
+	}
+	if benchmark != nil && price > 0 && benchmark.Last > 0 {
+		benchmarkTS, _ := time.Parse(time.RFC3339, benchmark.TS)
+		if benchmarkTS.IsZero() {
+			benchmarkTS = now
+		}
+		sampleTS := now
+		if benchmarkTS.After(sampleTS) {
+			sampleTS = benchmarkTS
+		}
+		rt.OverlaySamples = appendOverlaySample(rt.OverlaySamples, overlaySample{
+			TS:             sampleTS.UTC(),
+			StockPrice:     price,
+			BenchmarkPrice: benchmark.Last,
+		}, maxOverlaySampleSize)
 	}
 
 	newPriceEvents := detectPriceVolumeAnomalies(snapshot.Symbol, rt.PriceSamples, rt.VolumeDeltas, priceDelta, volumeDelta, now)
@@ -530,4 +609,133 @@ func minFloat(values []float64) float64 {
 		}
 	}
 	return minValue
+}
+
+func appendOverlaySample(items []overlaySample, sample overlaySample, capSize int) []overlaySample {
+	minuteTS := sample.TS.UTC().Truncate(time.Minute)
+	sample.TS = minuteTS
+	if len(items) > 0 {
+		lastIdx := len(items) - 1
+		if items[lastIdx].TS.Equal(minuteTS) {
+			items[lastIdx] = sample
+			return items
+		}
+	}
+
+	items = append(items, sample)
+	if len(items) > capSize {
+		items = items[len(items)-capSize:]
+	}
+	return items
+}
+
+func windowOverlaySamples(items []overlaySample, windowMinutes int) []overlaySample {
+	if len(items) == 0 {
+		return nil
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(windowMinutes) * time.Minute)
+	start := 0
+	for idx, item := range items {
+		if item.TS.After(cutoff) || item.TS.Equal(cutoff) {
+			start = idx
+			break
+		}
+		if idx == len(items)-1 {
+			start = len(items)
+		}
+	}
+	if start >= len(items) {
+		return nil
+	}
+	window := make([]overlaySample, 0, len(items)-start)
+	window = append(window, items[start:]...)
+	return window
+}
+
+func buildOverlaySeries(samples []overlaySample) []OverlayPoint {
+	if len(samples) == 0 {
+		return []OverlayPoint{}
+	}
+	baseStock := samples[0].StockPrice
+	baseBenchmark := samples[0].BenchmarkPrice
+	if baseStock <= 0 {
+		baseStock = 1
+	}
+	if baseBenchmark <= 0 {
+		baseBenchmark = 1
+	}
+
+	points := make([]OverlayPoint, 0, len(samples))
+	for _, sample := range samples {
+		points = append(points, OverlayPoint{
+			TS:             sample.TS.UTC().Format(time.RFC3339),
+			StockPrice:     sample.StockPrice,
+			BenchmarkPrice: sample.BenchmarkPrice,
+			StockNorm:      sample.StockPrice / baseStock,
+			BenchmarkNorm:  sample.BenchmarkPrice / baseBenchmark,
+		})
+	}
+	return points
+}
+
+func buildOverlayMetrics(samples []overlaySample) OverlayMetrics {
+	metrics := OverlayMetrics{
+		Beta:             nil,
+		RelativeStrength: nil,
+		SampleCount:      len(samples),
+		WarmupMinSamples: betaWarmupSamples,
+		IsWarmup:         len(samples) < betaWarmupSamples,
+	}
+	if len(samples) < 2 {
+		return metrics
+	}
+
+	stockReturns := make([]float64, 0, len(samples)-1)
+	benchmarkReturns := make([]float64, 0, len(samples)-1)
+	for i := 1; i < len(samples); i++ {
+		prev := samples[i-1]
+		curr := samples[i]
+		if prev.StockPrice <= 0 || prev.BenchmarkPrice <= 0 {
+			continue
+		}
+		stockReturns = append(stockReturns, curr.StockPrice/prev.StockPrice-1)
+		benchmarkReturns = append(benchmarkReturns, curr.BenchmarkPrice/prev.BenchmarkPrice-1)
+	}
+
+	if len(samples) >= rsWarmupSamples {
+		first := samples[0]
+		last := samples[len(samples)-1]
+		if first.StockPrice > 0 && first.BenchmarkPrice > 0 {
+			rsValue := (last.StockPrice/first.StockPrice - 1) - (last.BenchmarkPrice/first.BenchmarkPrice - 1)
+			metrics.RelativeStrength = &rsValue
+		}
+	}
+
+	if len(stockReturns) < betaWarmupSamples-1 || len(benchmarkReturns) != len(stockReturns) {
+		return metrics
+	}
+
+	meanStock := 0.0
+	meanBenchmark := 0.0
+	for i := range stockReturns {
+		meanStock += stockReturns[i]
+		meanBenchmark += benchmarkReturns[i]
+	}
+	meanStock /= float64(len(stockReturns))
+	meanBenchmark /= float64(len(benchmarkReturns))
+
+	cov := 0.0
+	varBenchmark := 0.0
+	for i := range stockReturns {
+		ds := stockReturns[i] - meanStock
+		db := benchmarkReturns[i] - meanBenchmark
+		cov += ds * db
+		varBenchmark += db * db
+	}
+	if varBenchmark > 0 {
+		betaValue := cov / varBenchmark
+		metrics.Beta = &betaValue
+	}
+
+	return metrics
 }

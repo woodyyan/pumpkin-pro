@@ -12,7 +12,14 @@ import (
 	"time"
 )
 
-var symbolPattern = regexp.MustCompile(`^\d{5}\.HK$`)
+var (
+	symbolPattern          = regexp.MustCompile(`^\d{5}\.HK$`)
+	supportedBenchmarksMap = map[string]string{
+		"HSI":    "hkHSI",
+		"HSCEI":  "hkHSCEI",
+		"HSTECH": "hkHSTECH",
+	}
+)
 
 type quoteData struct {
 	Code       string
@@ -60,24 +67,23 @@ func quoteCodeFromSymbol(symbol string) string {
 	return "hk" + digits
 }
 
-func (c *MarketClient) FetchSymbolSnapshot(ctx context.Context, symbol string) (*SymbolSnapshot, error) {
-	normalized, err := normalizeHKSymbol(symbol)
-	if err != nil {
-		return nil, err
+func normalizeBenchmark(input string) string {
+	candidate := strings.ToUpper(strings.TrimSpace(input))
+	if candidate == "" {
+		candidate = "HSI"
 	}
-	code := quoteCodeFromSymbol(normalized)
-	fields, err := c.fetchFields(ctx, []string{code})
-	if err != nil {
-		return nil, err
+	if _, ok := supportedBenchmarksMap[candidate]; !ok {
+		return "HSI"
 	}
-	raw, ok := fields[code]
-	if !ok {
-		return nil, ErrDataSourceDown
-	}
-	quote, err := parseQuote(code, raw)
-	if err != nil {
-		return nil, err
-	}
+	return candidate
+}
+
+func quoteCodeFromBenchmark(benchmark string) string {
+	key := normalizeBenchmark(benchmark)
+	return supportedBenchmarksMap[key]
+}
+
+func buildSymbolSnapshot(normalized string, quote *quoteData) *SymbolSnapshot {
 	amplitude := 0.0
 	if quote.PrevClose > 0 {
 		amplitude = (quote.High - quote.Low) / quote.PrevClose
@@ -97,7 +103,75 @@ func (c *MarketClient) FetchSymbolSnapshot(ctx context.Context, symbol string) (
 		VolumeRatio: quote.VolumeRate,
 		TS:          quote.TS.UTC().Format(time.RFC3339),
 		Source:      "tencent-qt",
-	}, nil
+	}
+}
+
+func (c *MarketClient) FetchSymbolSnapshot(ctx context.Context, symbol string) (*SymbolSnapshot, error) {
+	normalized, err := normalizeHKSymbol(symbol)
+	if err != nil {
+		return nil, err
+	}
+	code := quoteCodeFromSymbol(normalized)
+	fields, err := c.fetchFields(ctx, []string{code})
+	if err != nil {
+		return nil, err
+	}
+	raw, ok := fields[code]
+	if !ok {
+		return nil, ErrDataSourceDown
+	}
+	quote, err := parseQuote(code, raw)
+	if err != nil {
+		return nil, err
+	}
+	return buildSymbolSnapshot(normalized, quote), nil
+}
+
+func (c *MarketClient) FetchOverlaySnapshot(ctx context.Context, symbol, benchmark string) (*SymbolSnapshot, *BenchmarkSnapshot, error) {
+	normalizedSymbol, err := normalizeHKSymbol(symbol)
+	if err != nil {
+		return nil, nil, err
+	}
+	normalizedBenchmark := normalizeBenchmark(benchmark)
+	symbolCode := quoteCodeFromSymbol(normalizedSymbol)
+	benchmarkCode := quoteCodeFromBenchmark(normalizedBenchmark)
+
+	fields, err := c.fetchFields(ctx, []string{symbolCode, benchmarkCode})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	symbolRaw, ok := fields[symbolCode]
+	if !ok {
+		return nil, nil, ErrDataSourceDown
+	}
+	symbolQuote, err := parseQuote(symbolCode, symbolRaw)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	benchmarkRaw, ok := fields[benchmarkCode]
+	if !ok {
+		return nil, nil, ErrDataSourceDown
+	}
+	benchmarkQuote, err := parseQuote(benchmarkCode, benchmarkRaw)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	symbolSnapshot := buildSymbolSnapshot(normalizedSymbol, symbolQuote)
+	benchmarkSnapshot := &BenchmarkSnapshot{
+		Code:       normalizedBenchmark,
+		Name:       strings.TrimSpace(benchmarkQuote.Name),
+		Last:       benchmarkQuote.Last,
+		ChangeRate: benchmarkQuote.ChangePct / 100,
+		TS:         benchmarkQuote.TS.UTC().Format(time.RFC3339),
+	}
+	if benchmarkSnapshot.Name == "" {
+		benchmarkSnapshot.Name = normalizedBenchmark
+	}
+
+	return symbolSnapshot, benchmarkSnapshot, nil
 }
 
 func (c *MarketClient) FetchMarketOverview(ctx context.Context) (*MarketOverview, error) {

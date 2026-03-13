@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { requestJson } from '../lib/api'
 
 const POLL_MS = 2000
+const OVERLAY_WINDOW_MINUTES = 60
 
 export default function LiveTradingPage() {
   const [watchlist, setWatchlist] = useState({ items: [], active_symbol: '', session_state: 'idle' })
   const [marketOverview, setMarketOverview] = useState(null)
   const [snapshotPayload, setSnapshotPayload] = useState(null)
+  const [overlayPayload, setOverlayPayload] = useState(null)
   const [priceVolumeEvents, setPriceVolumeEvents] = useState([])
   const [blockFlowEvents, setBlockFlowEvents] = useState([])
   const [symbolInput, setSymbolInput] = useState('00700.HK')
@@ -24,11 +26,13 @@ export default function LiveTradingPage() {
 
   const loadWatchlist = async () => {
     const data = await requestJson('/api/live/watchlist')
-    setWatchlist({
+    const nextState = {
       items: data.items || [],
       active_symbol: data.active_symbol || '',
       session_state: data.session_state || 'idle',
-    })
+    }
+    setWatchlist(nextState)
+    return nextState
   }
 
   const loadMarketOverview = async () => {
@@ -38,12 +42,16 @@ export default function LiveTradingPage() {
 
   const loadSymbolPanels = async (symbol) => {
     if (!symbol) return
-    const [snapshotData, pvData, blockData] = await Promise.all([
-      requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/snapshot`),
-      requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/anomalies/price-volume?limit=20`),
-      requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/anomalies/block-flow?limit=20`),
+    const encoded = encodeURIComponent(symbol)
+    const [snapshotData, overlayData, pvData, blockData] = await Promise.all([
+      requestJson(`/api/live/symbols/${encoded}/snapshot`),
+      requestJson(`/api/live/symbols/${encoded}/overlay?window_minutes=${OVERLAY_WINDOW_MINUTES}`),
+      requestJson(`/api/live/symbols/${encoded}/anomalies/price-volume?limit=20`),
+      requestJson(`/api/live/symbols/${encoded}/anomalies/block-flow?limit=20`),
     ])
+
     setSnapshotPayload(snapshotData)
+    setOverlayPayload(overlayData)
     setPriceVolumeEvents(pvData.items || [])
     setBlockFlowEvents(blockData.items || [])
     setLastUpdateAt(new Date().toISOString())
@@ -57,10 +65,10 @@ export default function LiveTradingPage() {
   const runPolling = async () => {
     try {
       setError('')
-      await loadWatchlist()
+      const watchState = await loadWatchlist()
       await loadMarketOverview()
-      if (activeSymbol) {
-        await loadSymbolPanels(activeSymbol)
+      if (watchState.active_symbol) {
+        await loadSymbolPanels(watchState.active_symbol)
       }
     } catch (err) {
       setError(err.message || '实时数据刷新失败')
@@ -100,7 +108,10 @@ export default function LiveTradingPage() {
         body: JSON.stringify({ symbol: symbolInput, name: nameInput }),
       })
       setNameInput('')
-      await loadWatchlist()
+      const nextWatchlist = await loadWatchlist()
+      if (nextWatchlist.active_symbol) {
+        await loadSymbolPanels(nextWatchlist.active_symbol)
+      }
     } catch (err) {
       setError(err.message || '添加关注失败')
     } finally {
@@ -127,11 +138,14 @@ export default function LiveTradingPage() {
     setError('')
     try {
       await requestJson(`/api/live/watchlist/${encodeURIComponent(symbol)}`, { method: 'DELETE' })
-      await loadWatchlist()
-      if (activeSymbol === symbol) {
+      const nextWatchlist = await loadWatchlist()
+      if (!nextWatchlist.active_symbol) {
         setSnapshotPayload(null)
+        setOverlayPayload(null)
         setPriceVolumeEvents([])
         setBlockFlowEvents([])
+      } else {
+        await loadSymbolPanels(nextWatchlist.active_symbol)
       }
     } catch (err) {
       setError(err.message || '删除关注失败')
@@ -141,9 +155,9 @@ export default function LiveTradingPage() {
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-border bg-card p-6">
-        <h1 className="text-2xl font-semibold tracking-tight">实盘监控</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">实盘监控（阶段 A）</h1>
         <p className="mt-3 text-sm leading-7 text-white/65">
-          当前仅提供实时监控与异动捕获，不触发任何下单行为，后续会加上信号推送功能。系统采用“关注池 + 激活标的”模型：可维护多只关注股票，但同一时刻只监控 1 只激活标的。
+          当前仅提供实时监控与异动捕获，不触发任何下单行为。系统采用“关注池 + 激活标的”模型：可维护多只关注股票，但同一时刻只监控 1 只激活标的。
         </p>
       </section>
 
@@ -251,6 +265,39 @@ export default function LiveTradingPage() {
             )}
           </section>
 
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-base font-semibold text-white">实时分时叠加（个股 vs 大盘）</h3>
+              <div className="text-xs text-white/60">默认窗口：{OVERLAY_WINDOW_MINUTES} 分钟</div>
+            </div>
+
+            {!overlayPayload?.series?.length ? (
+              <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">分时数据预热中，请稍后。</div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <OverlayIntradayChart series={overlayPayload.series} benchmark={overlayPayload.benchmark} symbol={overlayPayload.symbol} />
+                <div className="grid gap-3 md:grid-cols-4">
+                  <MetricMini label="基准指数" value={overlayPayload.benchmark || 'HSI'} />
+                  <MetricMini
+                    label="Beta"
+                    value={formatNumberMaybeNull(overlayPayload?.metrics?.beta, 3)}
+                    accent={overlayPayload?.metrics?.beta != null && overlayPayload.metrics.beta >= 1 ? 'up' : 'normal'}
+                  />
+                  <MetricMini
+                    label="Relative Strength"
+                    value={formatPercentMaybeNull(overlayPayload?.metrics?.relative_strength)}
+                    accent={overlayPayload?.metrics?.relative_strength != null && overlayPayload.metrics.relative_strength >= 0 ? 'up' : 'down'}
+                  />
+                  <MetricMini
+                    label="样本状态"
+                    value={`${overlayPayload?.metrics?.sample_count || 0}/${overlayPayload?.metrics?.warmup_min_samples || 30} · ${overlayPayload?.metrics?.is_warmup ? '预热中' : '可用'}`}
+                    accent={overlayPayload?.metrics?.is_warmup ? 'normal' : 'up'}
+                  />
+                </div>
+              </div>
+            )}
+          </section>
+
           <section className="grid gap-4 xl:grid-cols-2">
             <EventPanel title="量价异动（A3）" events={priceVolumeEvents} renderEvent={(item) => (
               <>
@@ -272,6 +319,105 @@ export default function LiveTradingPage() {
       </section>
     </div>
   )
+}
+
+function OverlayIntradayChart({ series, benchmark, symbol }) {
+  const containerRef = useRef(null)
+  const chartRef = useRef(null)
+
+  useEffect(() => {
+    let cleanup = () => {}
+    let cancelled = false
+
+    const renderChart = async () => {
+      if (!containerRef.current || !Array.isArray(series) || series.length === 0) {
+        if (chartRef.current) {
+          chartRef.current.remove()
+          chartRef.current = null
+        }
+        return
+      }
+
+      const { createChart, ColorType } = await import('lightweight-charts')
+      if (cancelled || !containerRef.current) return
+
+      if (chartRef.current) {
+        chartRef.current.remove()
+        chartRef.current = null
+      }
+
+      const chart = createChart(containerRef.current, {
+        width: containerRef.current.clientWidth || 700,
+        height: 280,
+        layout: {
+          background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' },
+          textColor: '#E5E7EB',
+        },
+        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        timeScale: {
+          borderColor: 'rgba(148,163,184,0.35)',
+          timeVisible: true,
+          secondsVisible: false,
+        },
+        grid: {
+          vertLines: { color: 'rgba(148,163,184,0.1)' },
+          horzLines: { color: 'rgba(148,163,184,0.1)' },
+        },
+      })
+
+      const stockLine = chart.addLineSeries({
+        color: '#f59e0b',
+        lineWidth: 2,
+        title: `${symbol}（归一化）`,
+      })
+      const benchmarkLine = chart.addLineSeries({
+        color: '#38bdf8',
+        lineWidth: 2,
+        title: `${benchmark || 'HSI'}（归一化）`,
+      })
+
+      const stockData = []
+      const benchmarkData = []
+      for (const item of series) {
+        const timestamp = Math.floor(new Date(item.ts).getTime() / 1000)
+        if (!timestamp || Number.isNaN(timestamp)) continue
+        if (item.stock_norm != null && !Number.isNaN(Number(item.stock_norm))) {
+          stockData.push({ time: timestamp, value: Number(item.stock_norm) })
+        }
+        if (item.benchmark_norm != null && !Number.isNaN(Number(item.benchmark_norm))) {
+          benchmarkData.push({ time: timestamp, value: Number(item.benchmark_norm) })
+        }
+      }
+
+      stockLine.setData(stockData)
+      benchmarkLine.setData(benchmarkData)
+      chart.timeScale().fitContent()
+      chartRef.current = chart
+
+      const onResize = () => {
+        if (!containerRef.current || !chartRef.current) return
+        chartRef.current.applyOptions({ width: containerRef.current.clientWidth || 700 })
+        chartRef.current.timeScale().fitContent()
+      }
+      window.addEventListener('resize', onResize)
+
+      cleanup = () => {
+        window.removeEventListener('resize', onResize)
+        if (chartRef.current) {
+          chartRef.current.remove()
+          chartRef.current = null
+        }
+      }
+    }
+
+    renderChart()
+    return () => {
+      cancelled = true
+      cleanup()
+    }
+  }, [benchmark, series, symbol])
+
+  return <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-black/20" />
 }
 
 function EventPanel({ title, events, renderEvent }) {
@@ -330,7 +476,17 @@ function formatPercent(value) {
   return `${sign}${num.toFixed(2)}%`
 }
 
+function formatPercentMaybeNull(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return formatPercent(value)
+}
+
 function formatNumber(value, digits = 2) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits })
+}
+
+function formatNumberMaybeNull(value, digits = 2) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
   return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits })
 }

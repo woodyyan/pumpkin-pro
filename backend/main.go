@@ -9,10 +9,13 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/woodyyan/pumpkin-pro/backend/config"
 	"github.com/woodyyan/pumpkin-pro/backend/store"
+	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
 )
 
@@ -21,6 +24,7 @@ var supportedDataSources = []string{"online", "csv", "sample"}
 type appServer struct {
 	cfg             config.Config
 	strategyService *strategy.Service
+	liveService     *live.Service
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -206,7 +210,7 @@ func (a *appServer) handleStrategyDetail(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"item":               item,
+			"item":                item,
 			"implementation_keys": a.strategyService.ImplementationKeys(),
 		})
 	case http.MethodPut:
@@ -224,6 +228,254 @@ func (a *appServer) handleStrategyDetail(w http.ResponseWriter, r *http.Request,
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "Only GET and PUT methods are allowed")
 	}
+}
+
+func (a *appServer) handleLiveWatchlist(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		state, err := a.liveService.ListWatchlist(r.Context())
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, map[string]any{
+			"session_state": state.SessionState,
+			"active_symbol": state.ActiveSymbol,
+			"items":         state.Items,
+		})
+	case http.MethodPost:
+		payload, err := decodeBodyAsMap(r)
+		if err != nil {
+			a.writeLiveError(w, live.ErrInvalidSymbol)
+			return
+		}
+		item, err := a.liveService.AddWatchlist(r.Context(), asString(payload["symbol"]), asString(payload["name"]))
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, map[string]any{"item": item})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Only GET and POST methods are allowed")
+	}
+}
+
+func (a *appServer) handleLiveWatchlistSubroutes(w http.ResponseWriter, r *http.Request) {
+	suffix := strings.TrimPrefix(r.URL.Path, "/api/live/watchlist/")
+	suffix = strings.TrimSpace(strings.Trim(suffix, "/"))
+	if suffix == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	if strings.HasSuffix(suffix, "/activate") {
+		symbol := strings.TrimSuffix(suffix, "/activate")
+		if r.Method != http.MethodPatch {
+			writeError(w, http.StatusMethodNotAllowed, "Only PATCH method is allowed")
+			return
+		}
+		resetWindow := true
+		payload, err := decodeBodyAsMap(r)
+		if err == nil {
+			if raw, ok := payload["reset_window"]; ok {
+				if value, ok := raw.(bool); ok {
+					resetWindow = value
+				}
+			}
+		}
+		result, err := a.liveService.ActivateSymbol(r.Context(), symbol, resetWindow)
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, result)
+		return
+	}
+
+	if r.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "Only DELETE method is allowed")
+		return
+	}
+	if err := a.liveService.DeleteWatchlist(r.Context(), suffix); err != nil {
+		a.writeLiveError(w, err)
+		return
+	}
+	writeLiveJSON(w, http.StatusOK, map[string]any{"deleted": true, "symbol": strings.ToUpper(suffix)})
+}
+
+func (a *appServer) handleLiveMarketOverview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	overview, err := a.liveService.GetMarketOverview(r.Context())
+	if err != nil {
+		a.writeLiveError(w, err)
+		return
+	}
+	writeLiveJSON(w, http.StatusOK, overview)
+}
+
+func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Request) {
+	suffix := strings.TrimPrefix(r.URL.Path, "/api/live/symbols/")
+	suffix = strings.Trim(strings.TrimSpace(suffix), "/")
+	parts := strings.Split(suffix, "/")
+	if len(parts) < 2 {
+		http.NotFound(w, r)
+		return
+	}
+
+	symbol := parts[0]
+	route := strings.Join(parts[1:], "/")
+	switch route {
+	case "snapshot":
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+			return
+		}
+		snapshot, isActive, sessionState, err := a.liveService.GetSymbolSnapshot(r.Context(), symbol)
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, map[string]any{
+			"is_active_symbol": isActive,
+			"session_state":    sessionState,
+			"snapshot":         snapshot,
+		})
+	case "anomalies/price-volume":
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+			return
+		}
+		since := parseSince(r.URL.Query().Get("since"))
+		limit := parseLimit(r.URL.Query().Get("limit"), 50)
+		types := splitCSV(r.URL.Query().Get("types"))
+		items, sessionState, err := a.liveService.ListPriceVolumeAnomalies(r.Context(), symbol, since, limit, types)
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, map[string]any{
+			"symbol":        strings.ToUpper(symbol),
+			"session_state": sessionState,
+			"items":         items,
+		})
+	case "anomalies/block-flow":
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+			return
+		}
+		since := parseSince(r.URL.Query().Get("since"))
+		limit := parseLimit(r.URL.Query().Get("limit"), 50)
+		items, sessionState, err := a.liveService.ListBlockFlowAnomalies(r.Context(), symbol, since, limit)
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, map[string]any{
+			"symbol":        strings.ToUpper(symbol),
+			"session_state": sessionState,
+			"items":         items,
+		})
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func parseSince(raw string) time.Time {
+	if strings.TrimSpace(raw) == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}
+
+func parseLimit(raw string, fallback int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	if value > 200 {
+		return 200
+	}
+	return value
+}
+
+func splitCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		text := strings.TrimSpace(part)
+		if text != "" {
+			items = append(items, text)
+		}
+	}
+	return items
+}
+
+func writeLiveJSON(w http.ResponseWriter, statusCode int, payload any) {
+	requestID := fmt.Sprintf("live-%d", time.Now().UnixNano())
+	if payload == nil {
+		writeJSON(w, statusCode, map[string]any{"request_id": requestID})
+		return
+	}
+
+	if mapped, ok := payload.(map[string]any); ok {
+		mapped["request_id"] = requestID
+		writeJSON(w, statusCode, mapped)
+		return
+	}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		writeJSON(w, statusCode, map[string]any{"request_id": requestID})
+		return
+	}
+
+	wrapper := map[string]any{"request_id": requestID}
+	if err := json.Unmarshal(encoded, &wrapper); err != nil {
+		wrapper["data"] = payload
+	}
+	writeJSON(w, statusCode, wrapper)
+}
+
+func (a *appServer) writeLiveError(w http.ResponseWriter, err error) {
+	requestID := fmt.Sprintf("live-%d", time.Now().UnixNano())
+	statusCode := http.StatusInternalServerError
+	code := "INTERNAL_ERROR"
+	message := err.Error()
+	switch {
+	case errors.Is(err, live.ErrInvalidSymbol):
+		statusCode = http.StatusBadRequest
+		code = "INVALID_SYMBOL"
+		message = "股票代码格式无效，需为 5 位港股代码（如 00700.HK）"
+	case errors.Is(err, live.ErrConflict):
+		statusCode = http.StatusConflict
+		code = "SYMBOL_ALREADY_EXISTS"
+		message = "该股票已在关注池中"
+	case errors.Is(err, live.ErrNotFound):
+		statusCode = http.StatusNotFound
+		code = "ACTIVE_SYMBOL_NOT_FOUND"
+		message = "关注股票不存在"
+	case errors.Is(err, live.ErrDataSourceDown):
+		statusCode = http.StatusServiceUnavailable
+		code = "DATA_SOURCE_UNAVAILABLE"
+		message = "行情数据源暂时不可用"
+	case errors.Is(err, live.ErrWarmupNotReady):
+		statusCode = http.StatusTooEarly
+		code = "WARMUP_NOT_READY"
+		message = "数据预热中，请稍后重试"
+	}
+	writeJSON(w, statusCode, map[string]any{
+		"request_id": requestID,
+		"code":       code,
+		"message":    message,
+		"details":    map[string]any{"error": err.Error()},
+	})
 }
 
 func (a *appServer) proxyToQuant(w http.ResponseWriter, r *http.Request, targetPath string, body []byte) {
@@ -352,9 +604,13 @@ func main() {
 		log.Printf("Seed strategies skipped: %v", err)
 	}
 
+	liveRepo := live.NewRepository(storeInstance.DB)
+	liveService := live.NewService(liveRepo)
+
 	server := &appServer{
 		cfg:             cfg,
 		strategyService: strategyService,
+		liveService:     liveService,
 	}
 
 	mux := http.NewServeMux()
@@ -364,6 +620,10 @@ func main() {
 	mux.HandleFunc("/api/strategies", server.handleStrategies)
 	mux.HandleFunc("/api/strategies/active", server.handleActiveStrategies)
 	mux.HandleFunc("/api/strategies/", server.handleStrategySubroutes)
+	mux.HandleFunc("/api/live/watchlist", server.handleLiveWatchlist)
+	mux.HandleFunc("/api/live/watchlist/", server.handleLiveWatchlistSubroutes)
+	mux.HandleFunc("/api/live/market/overview", server.handleLiveMarketOverview)
+	mux.HandleFunc("/api/live/symbols/", server.handleLiveSymbolsSubroutes)
 
 	handler := corsMiddleware(mux)
 	log.Printf("🚀 Pumpkin Go Backend is running on port %s (db=%s)", cfg.Port, cfg.DB.Type)

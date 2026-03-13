@@ -1,0 +1,259 @@
+package live
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+var symbolPattern = regexp.MustCompile(`^\d{5}\.HK$`)
+
+type quoteData struct {
+	Code       string
+	Name       string
+	Last       float64
+	PrevClose  float64
+	High       float64
+	Low        float64
+	Volume     float64
+	Turnover   float64
+	ChangePct  float64
+	VolumeRate float64
+	TS         time.Time
+}
+
+type MarketClient struct {
+	httpClient *http.Client
+}
+
+func NewMarketClient() *MarketClient {
+	return &MarketClient{
+		httpClient: &http.Client{Timeout: 4 * time.Second},
+	}
+}
+
+func normalizeHKSymbol(input string) (string, error) {
+	raw := strings.ToUpper(strings.TrimSpace(input))
+	raw = strings.TrimPrefix(raw, "HK")
+	raw = strings.TrimSuffix(raw, ".HK")
+	if raw == "" {
+		return "", ErrInvalidSymbol
+	}
+	if len(raw) < 5 {
+		raw = fmt.Sprintf("%05s", raw)
+	}
+	candidate := raw + ".HK"
+	if !symbolPattern.MatchString(candidate) {
+		return "", ErrInvalidSymbol
+	}
+	return candidate, nil
+}
+
+func quoteCodeFromSymbol(symbol string) string {
+	digits := strings.TrimSuffix(strings.ToUpper(symbol), ".HK")
+	return "hk" + digits
+}
+
+func (c *MarketClient) FetchSymbolSnapshot(ctx context.Context, symbol string) (*SymbolSnapshot, error) {
+	normalized, err := normalizeHKSymbol(symbol)
+	if err != nil {
+		return nil, err
+	}
+	code := quoteCodeFromSymbol(normalized)
+	fields, err := c.fetchFields(ctx, []string{code})
+	if err != nil {
+		return nil, err
+	}
+	raw, ok := fields[code]
+	if !ok {
+		return nil, ErrDataSourceDown
+	}
+	quote, err := parseQuote(code, raw)
+	if err != nil {
+		return nil, err
+	}
+	amplitude := 0.0
+	if quote.PrevClose > 0 {
+		amplitude = (quote.High - quote.Low) / quote.PrevClose
+	}
+	name := strings.TrimSpace(quote.Name)
+	if name == "" {
+		name = normalized
+	}
+	return &SymbolSnapshot{
+		Symbol:      normalized,
+		Name:        name,
+		LastPrice:   quote.Last,
+		ChangeRate:  quote.ChangePct / 100,
+		Volume:      quote.Volume,
+		Turnover:    quote.Turnover,
+		Amplitude:   amplitude,
+		VolumeRatio: quote.VolumeRate,
+		TS:          quote.TS.UTC().Format(time.RFC3339),
+		Source:      "tencent-qt",
+	}, nil
+}
+
+func (c *MarketClient) FetchMarketOverview(ctx context.Context) (*MarketOverview, error) {
+	codes := []string{"hkHSI", "hkHSCEI", "hkHSTECH"}
+	fields, err := c.fetchFields(ctx, codes)
+	if err != nil {
+		return nil, err
+	}
+
+	indexes := make([]IndexSnapshot, 0, len(codes))
+	totalTurnover := 0.0
+	latestTS := time.Now().UTC()
+	for _, code := range codes {
+		raw, ok := fields[code]
+		if !ok {
+			continue
+		}
+		quote, parseErr := parseQuote(code, raw)
+		if parseErr != nil {
+			continue
+		}
+		if quote.TS.After(latestTS) {
+			latestTS = quote.TS
+		}
+		totalTurnover += quote.Turnover
+		indexes = append(indexes, IndexSnapshot{
+			Code:       strings.TrimPrefix(strings.ToUpper(code), "HK"),
+			Name:       strings.TrimSpace(quote.Name),
+			Last:       quote.Last,
+			ChangeRate: quote.ChangePct / 100,
+		})
+	}
+	if len(indexes) == 0 {
+		return nil, ErrDataSourceDown
+	}
+
+	return &MarketOverview{
+		TS:             latestTS.UTC().Format(time.RFC3339),
+		Indexes:        indexes,
+		MarketTurnover: totalTurnover,
+		Advancers:      0,
+		Decliners:      0,
+	}, nil
+}
+
+func (c *MarketClient) fetchFields(ctx context.Context, codes []string) (map[string][]string, error) {
+	if len(codes) == 0 {
+		return map[string][]string{}, nil
+	}
+	url := "https://qt.gtimg.cn/q=" + strings.Join(codes, ",")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create market request failed: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrDataSourceDown, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("%w: status=%d", ErrDataSourceDown, resp.StatusCode)
+	}
+
+	payload, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrDataSourceDown, err)
+	}
+	lines := strings.Split(string(payload), "\n")
+	result := make(map[string][]string, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "v_") {
+			continue
+		}
+		left := strings.Index(line, "=\"")
+		right := strings.LastIndex(line, "\"")
+		if left <= 2 || right <= left+2 {
+			continue
+		}
+		code := strings.TrimSpace(line[2:left])
+		rawBody := line[left+2 : right]
+		result[code] = strings.Split(rawBody, "~")
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("%w: empty payload", ErrDataSourceDown)
+	}
+	return result, nil
+}
+
+func parseQuote(code string, fields []string) (*quoteData, error) {
+	if len(fields) < 44 {
+		return nil, fmt.Errorf("%w: quote fields too short", ErrDataSourceDown)
+	}
+
+	last, err := parseFloat(fields[3])
+	if err != nil {
+		return nil, err
+	}
+	prevClose, err := parseFloat(fields[4])
+	if err != nil {
+		return nil, err
+	}
+	high, err := parseFloat(fields[33])
+	if err != nil {
+		return nil, err
+	}
+	low, err := parseFloat(fields[34])
+	if err != nil {
+		return nil, err
+	}
+	volume, err := parseFloat(fields[36])
+	if err != nil {
+		return nil, err
+	}
+	turnover, err := parseFloat(fields[37])
+	if err != nil {
+		return nil, err
+	}
+	changePct, err := parseFloat(fields[32])
+	if err != nil {
+		return nil, err
+	}
+	volumeRate, err := parseFloat(fields[43])
+	if err != nil {
+		volumeRate = 0
+	}
+	ts, err := time.ParseInLocation("2006/01/02 15:04:05", strings.TrimSpace(fields[30]), time.Local)
+	if err != nil {
+		ts = time.Now()
+	}
+
+	name := strings.TrimSpace(fields[46])
+	if name == "" {
+		name = strings.TrimSpace(fields[1])
+	}
+
+	return &quoteData{
+		Code:       code,
+		Name:       name,
+		Last:       math.Max(last, 0),
+		PrevClose:  math.Max(prevClose, 0),
+		High:       math.Max(high, 0),
+		Low:        math.Max(low, 0),
+		Volume:     math.Max(volume, 0),
+		Turnover:   math.Max(turnover, 0),
+		ChangePct:  changePct,
+		VolumeRate: math.Max(volumeRate, 0),
+		TS:         ts,
+	}, nil
+}
+
+func parseFloat(raw string) (float64, error) {
+	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil {
+		return 0, fmt.Errorf("%w: parse number failed", ErrDataSourceDown)
+	}
+	return value, nil
+}

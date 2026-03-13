@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/woodyyan/pumpkin-pro/backend/config"
+	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
 	"gorm.io/gorm"
 )
@@ -25,6 +26,7 @@ func New(cfg config.DBConfig) (*Store, error) {
 
 	migrators := []Migrator{
 		strategy.NewMigrator(),
+		live.NewMigrator(),
 	}
 	for _, migrator := range migrators {
 		if err := migrator.AutoMigrate(db); err != nil {

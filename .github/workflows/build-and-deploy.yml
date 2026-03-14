@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: write
+
 concurrency:
   group: deploy-main
   cancel-in-progress: true
@@ -51,9 +55,61 @@ jobs:
       - name: Python syntax check
         run: python -m compileall quant
 
+  publish_images:
+    name: Build and Push Images
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/pumpkin-pro-backend:latest
+            ghcr.io/${{ github.repository_owner }}/pumpkin-pro-backend:${{ github.sha }}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/pumpkin-pro-frontend:latest
+            ghcr.io/${{ github.repository_owner }}/pumpkin-pro-frontend:${{ github.sha }}
+
+      - name: Build and push quant image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./quant
+          file: ./quant/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/pumpkin-pro-quant:latest
+            ghcr.io/${{ github.repository_owner }}/pumpkin-pro-quant:${{ github.sha }}
+
   deploy:
     name: Deploy to Server
-    needs: build
+    needs: publish_images
     runs-on: ubuntu-latest
 
     steps:
@@ -65,6 +121,11 @@ jobs:
           DEPLOY_REPO_URL: ${{ secrets.DEPLOY_REPO_URL }}
           DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH }}
           DEPLOY_GITHUB_TOKEN: ${{ secrets.DEPLOY_GITHUB_TOKEN }}
+          DEPLOY_GHCR_USER: ${{ secrets.DEPLOY_GHCR_USER }}
+          DEPLOY_GHCR_TOKEN: ${{ secrets.DEPLOY_GHCR_TOKEN }}
+          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_REPO_OWNER: ${{ github.repository_owner }}
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -72,7 +133,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
           script_stop: true
-          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN
+          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN,DEPLOY_GHCR_USER,DEPLOY_GHCR_TOKEN,IMAGE_TAG,IMAGE_REPO_OWNER,IMAGE_REGISTRY
           script: |
             set -euo pipefail
 
@@ -122,7 +183,17 @@ jobs:
             git checkout "$BRANCH"
             git reset --hard "origin/$BRANCH"
 
-            DOCKER_BUILDKIT=0 docker compose up -d --build --remove-orphans
+            REGISTRY="${IMAGE_REGISTRY:-ghcr.io}"
+            OWNER="${IMAGE_REPO_OWNER:-${{ github.repository_owner }}}"
+            TAG="${IMAGE_TAG:-latest}"
+
+            if [ -n "${DEPLOY_GHCR_TOKEN:-}" ]; then
+              GHCR_USER="${DEPLOY_GHCR_USER:-${{ github.repository_owner }}}"
+              echo "${DEPLOY_GHCR_TOKEN}" | docker login "$REGISTRY" -u "$GHCR_USER" --password-stdin
+            fi
+
+            retry env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose pull
+            env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose up -d --remove-orphans
             docker image prune -f || true
 
       - name: Deploy over SSH (password auth)
@@ -133,13 +204,18 @@ jobs:
           DEPLOY_REPO_URL: ${{ secrets.DEPLOY_REPO_URL }}
           DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH }}
           DEPLOY_GITHUB_TOKEN: ${{ secrets.DEPLOY_GITHUB_TOKEN }}
+          DEPLOY_GHCR_USER: ${{ secrets.DEPLOY_GHCR_USER }}
+          DEPLOY_GHCR_TOKEN: ${{ secrets.DEPLOY_GHCR_TOKEN }}
+          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_REPO_OWNER: ${{ github.repository_owner }}
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           port: ${{ vars.DEPLOY_PORT || 22 }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
           script_stop: true
-          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN
+          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN,DEPLOY_GHCR_USER,DEPLOY_GHCR_TOKEN,IMAGE_TAG,IMAGE_REPO_OWNER,IMAGE_REGISTRY
           script: |
             set -euo pipefail
 
@@ -189,5 +265,15 @@ jobs:
             git checkout "$BRANCH"
             git reset --hard "origin/$BRANCH"
 
-            DOCKER_BUILDKIT=0 docker compose up -d --build --remove-orphans
+            REGISTRY="${IMAGE_REGISTRY:-ghcr.io}"
+            OWNER="${IMAGE_REPO_OWNER:-${{ github.repository_owner }}}"
+            TAG="${IMAGE_TAG:-latest}"
+
+            if [ -n "${DEPLOY_GHCR_TOKEN:-}" ]; then
+              GHCR_USER="${DEPLOY_GHCR_USER:-${{ github.repository_owner }}}"
+              echo "${DEPLOY_GHCR_TOKEN}" | docker login "$REGISTRY" -u "$GHCR_USER" --password-stdin
+            fi
+
+            retry env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose pull
+            env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose up -d --remove-orphans
             docker image prune -f || true

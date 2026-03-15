@@ -155,7 +155,7 @@ export default function LiveTradingPage() {
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-border bg-card p-6">
-        <h1 className="text-2xl font-semibold tracking-tight">实盘监控（阶段 A）</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">实盘监控</h1>
         <p className="mt-3 text-sm leading-7 text-white/65">
           当前仅提供实时监控与异动捕获，不触发任何下单行为。系统采用“关注池 + 激活标的”模型：可维护多只关注股票，但同一时刻只监控 1 只激活标的。
         </p>
@@ -299,14 +299,14 @@ export default function LiveTradingPage() {
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2">
-            <EventPanel title="量价异动（A3）" events={priceVolumeEvents} renderEvent={(item) => (
+            <EventPanel title="量价异动" events={priceVolumeEvents} renderEvent={(item) => (
               <>
                 <div className="font-medium text-white">{item.anomaly_type}</div>
                 <div className="text-xs text-white/55">评分：{formatNumber(item.score, 1)} · {formatDateTime(item.detected_at)}</div>
               </>
             )} />
 
-            <EventPanel title="大单流向（A4）" events={blockFlowEvents} renderEvent={(item) => (
+            <EventPanel title="大单流向" events={blockFlowEvents} renderEvent={(item) => (
               <>
                 <div className="font-medium text-white">净流向：{formatCompact(item.net_inflow)}</div>
                 <div className="text-xs text-white/55">

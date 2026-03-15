@@ -59,6 +59,7 @@ jobs:
     name: Build and Push Images
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 180
 
     steps:
       - name: Checkout
@@ -111,6 +112,7 @@ jobs:
     name: Deploy to Server
     needs: publish_images
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
       - name: Deploy over SSH (key auth)
@@ -123,9 +125,13 @@ jobs:
           DEPLOY_GITHUB_TOKEN: ${{ secrets.DEPLOY_GITHUB_TOKEN }}
           DEPLOY_GHCR_USER: ${{ secrets.DEPLOY_GHCR_USER }}
           DEPLOY_GHCR_TOKEN: ${{ secrets.DEPLOY_GHCR_TOKEN }}
+          DEPLOY_MONITOR_SECONDS: ${{ vars.DEPLOY_MONITOR_SECONDS }}
+          DEPLOY_HEALTHCHECK_URL: ${{ vars.DEPLOY_HEALTHCHECK_URL }}
           IMAGE_TAG: ${{ github.sha }}
           IMAGE_REPO_OWNER: ${{ github.repository_owner }}
           IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -133,7 +139,8 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
           script_stop: true
-          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN,DEPLOY_GHCR_USER,DEPLOY_GHCR_TOKEN,IMAGE_TAG,IMAGE_REPO_OWNER,IMAGE_REGISTRY
+          command_timeout: 340m
+          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN,DEPLOY_GHCR_USER,DEPLOY_GHCR_TOKEN,DEPLOY_MONITOR_SECONDS,DEPLOY_HEALTHCHECK_URL,IMAGE_TAG,IMAGE_REPO_OWNER,IMAGE_REGISTRY,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT
           script: |
             set -euo pipefail
 
@@ -141,6 +148,12 @@ jobs:
             RAW_REPO_URL="${DEPLOY_REPO_URL:-https://github.com/${{ github.repository }}.git}"
             BRANCH="${DEPLOY_BRANCH:-main}"
             REPO_URL="$RAW_REPO_URL"
+            REGISTRY="${IMAGE_REGISTRY:-ghcr.io}"
+            OWNER="${IMAGE_REPO_OWNER:-${{ github.repository_owner }}}"
+            TAG="${IMAGE_TAG:-latest}"
+            MONITOR_SECONDS="${DEPLOY_MONITOR_SECONDS:-1200}"
+            HEALTHCHECK_URL="${DEPLOY_HEALTHCHECK_URL:-http://127.0.0.1:8080/api/health}"
+            RUN_ID="${GITHUB_RUN_ID:-manual}-${GITHUB_RUN_ATTEMPT:-0}"
 
             if [ -n "${DEPLOY_GITHUB_TOKEN:-}" ] && printf '%s' "$RAW_REPO_URL" | grep -q '^https://github.com/'; then
               REPO_URL="$(printf '%s' "$RAW_REPO_URL" | sed "s#https://github.com/#https://x-access-token:${DEPLOY_GITHUB_TOKEN}@github.com/#")"
@@ -154,7 +167,7 @@ jobs:
                   return 1
                 fi
                 count=$((count + 1))
-                sleep 3
+                sleep 10
               done
             }
 
@@ -171,7 +184,12 @@ jobs:
               exit 1
             fi
 
-            mkdir -p "$APP_DIR"
+            DEPLOY_STATE_DIR="$APP_DIR/.deploy"
+            STATUS_FILE="$DEPLOY_STATE_DIR/status-${RUN_ID}.txt"
+            LOG_FILE="$DEPLOY_STATE_DIR/deploy-${RUN_ID}.log"
+            RUN_SCRIPT="$DEPLOY_STATE_DIR/run-${RUN_ID}.sh"
+
+            mkdir -p "$APP_DIR" "$DEPLOY_STATE_DIR"
 
             if [ ! -d "$APP_DIR/.git" ]; then
               retry git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
@@ -183,18 +201,90 @@ jobs:
             git checkout "$BRANCH"
             git reset --hard "origin/$BRANCH"
 
-            REGISTRY="${IMAGE_REGISTRY:-ghcr.io}"
-            OWNER="${IMAGE_REPO_OWNER:-${{ github.repository_owner }}}"
-            TAG="${IMAGE_TAG:-latest}"
-
             if [ -n "${DEPLOY_GHCR_TOKEN:-}" ]; then
               GHCR_USER="${DEPLOY_GHCR_USER:-${{ github.repository_owner }}}"
               echo "${DEPLOY_GHCR_TOKEN}" | docker login "$REGISTRY" -u "$GHCR_USER" --password-stdin
             fi
 
-            retry env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose pull
-            env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose up -d --remove-orphans
-            docker image prune -f || true
+            cat > "$RUN_SCRIPT" <<'SCRIPT'
+            #!/usr/bin/env bash
+            set -euo pipefail
+
+            retry() {
+              local retries=3
+              local count=1
+              until "$@"; do
+                if [ "$count" -ge "$retries" ]; then
+                  return 1
+                fi
+                count=$((count + 1))
+                sleep 10
+              done
+            }
+
+            probe_health() {
+              if command -v curl >/dev/null 2>&1; then
+                curl -fsS --max-time 5 "$HEALTHCHECK_URL" >/dev/null
+                return $?
+              fi
+              if command -v wget >/dev/null 2>&1; then
+                wget -q -T 5 -O - "$HEALTHCHECK_URL" >/dev/null
+                return $?
+              fi
+              return 0
+            }
+            echo "running" > "$STATUS_FILE"
+            cd "$APP_DIR"
+
+            if retry env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose pull && \
+               env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose up -d --remove-orphans; then
+              ATTEMPT=0
+              until probe_health; do
+                ATTEMPT=$((ATTEMPT + 1))
+                if [ "$ATTEMPT" -ge 30 ]; then
+                  echo "health check failed for ${TAG}" >&2
+                  echo "failed" > "$STATUS_FILE"
+                  exit 1
+                fi
+                sleep 10
+              done
+
+              echo "success" > "$STATUS_FILE"
+              docker image prune -f || true
+              exit 0
+            fi
+
+            echo "failed" > "$STATUS_FILE"
+            exit 1
+            SCRIPT
+
+            chmod +x "$RUN_SCRIPT"
+
+            nohup env APP_DIR="$APP_DIR" REGISTRY="$REGISTRY" OWNER="$OWNER" TAG="$TAG" STATUS_FILE="$STATUS_FILE" LOG_FILE="$LOG_FILE" HEALTHCHECK_URL="$HEALTHCHECK_URL" "$RUN_SCRIPT" > "$LOG_FILE" 2>&1 &
+            DEPLOY_PID=$!
+            echo "Deployment started in background: pid=$DEPLOY_PID"
+            echo "Status file: $STATUS_FILE"
+            echo "Log file: $LOG_FILE"
+
+            ELAPSED=0
+            INTERVAL=15
+            while [ "$ELAPSED" -lt "$MONITOR_SECONDS" ]; do
+              STATUS="$(cat "$STATUS_FILE" 2>/dev/null || echo running)"
+              if [ "$STATUS" = "success" ]; then
+                echo "Deployment completed successfully."
+                exit 0
+              fi
+              if [ "$STATUS" = "failed" ]; then
+                echo "Deployment failed. Showing last 120 log lines:"
+                tail -n 120 "$LOG_FILE" || true
+                exit 1
+              fi
+              sleep "$INTERVAL"
+              ELAPSED=$((ELAPSED + INTERVAL))
+            done
+
+            echo "Deployment is still running after ${MONITOR_SECONDS}s. CI exits without waiting further."
+            echo "You can continue watching server log: tail -f $LOG_FILE"
 
       - name: Deploy over SSH (password auth)
         if: ${{ vars.DEPLOY_AUTH_METHOD != 'ssh' }}
@@ -206,16 +296,21 @@ jobs:
           DEPLOY_GITHUB_TOKEN: ${{ secrets.DEPLOY_GITHUB_TOKEN }}
           DEPLOY_GHCR_USER: ${{ secrets.DEPLOY_GHCR_USER }}
           DEPLOY_GHCR_TOKEN: ${{ secrets.DEPLOY_GHCR_TOKEN }}
+          DEPLOY_MONITOR_SECONDS: ${{ vars.DEPLOY_MONITOR_SECONDS }}
+          DEPLOY_HEALTHCHECK_URL: ${{ vars.DEPLOY_HEALTHCHECK_URL }}
           IMAGE_TAG: ${{ github.sha }}
           IMAGE_REPO_OWNER: ${{ github.repository_owner }}
           IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           port: ${{ vars.DEPLOY_PORT || 22 }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
           script_stop: true
-          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN,DEPLOY_GHCR_USER,DEPLOY_GHCR_TOKEN,IMAGE_TAG,IMAGE_REPO_OWNER,IMAGE_REGISTRY
+          command_timeout: 340m
+          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN,DEPLOY_GHCR_USER,DEPLOY_GHCR_TOKEN,DEPLOY_MONITOR_SECONDS,DEPLOY_HEALTHCHECK_URL,IMAGE_TAG,IMAGE_REPO_OWNER,IMAGE_REGISTRY,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT
           script: |
             set -euo pipefail
 
@@ -223,6 +318,12 @@ jobs:
             RAW_REPO_URL="${DEPLOY_REPO_URL:-https://github.com/${{ github.repository }}.git}"
             BRANCH="${DEPLOY_BRANCH:-main}"
             REPO_URL="$RAW_REPO_URL"
+            REGISTRY="${IMAGE_REGISTRY:-ghcr.io}"
+            OWNER="${IMAGE_REPO_OWNER:-${{ github.repository_owner }}}"
+            TAG="${IMAGE_TAG:-latest}"
+            MONITOR_SECONDS="${DEPLOY_MONITOR_SECONDS:-1200}"
+            HEALTHCHECK_URL="${DEPLOY_HEALTHCHECK_URL:-http://127.0.0.1:8080/api/health}"
+            RUN_ID="${GITHUB_RUN_ID:-manual}-${GITHUB_RUN_ATTEMPT:-0}"
 
             if [ -n "${DEPLOY_GITHUB_TOKEN:-}" ] && printf '%s' "$RAW_REPO_URL" | grep -q '^https://github.com/'; then
               REPO_URL="$(printf '%s' "$RAW_REPO_URL" | sed "s#https://github.com/#https://x-access-token:${DEPLOY_GITHUB_TOKEN}@github.com/#")"
@@ -236,7 +337,7 @@ jobs:
                   return 1
                 fi
                 count=$((count + 1))
-                sleep 3
+                sleep 10
               done
             }
 
@@ -253,7 +354,12 @@ jobs:
               exit 1
             fi
 
-            mkdir -p "$APP_DIR"
+            DEPLOY_STATE_DIR="$APP_DIR/.deploy"
+            STATUS_FILE="$DEPLOY_STATE_DIR/status-${RUN_ID}.txt"
+            LOG_FILE="$DEPLOY_STATE_DIR/deploy-${RUN_ID}.log"
+            RUN_SCRIPT="$DEPLOY_STATE_DIR/run-${RUN_ID}.sh"
+
+            mkdir -p "$APP_DIR" "$DEPLOY_STATE_DIR"
 
             if [ ! -d "$APP_DIR/.git" ]; then
               retry git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
@@ -265,16 +371,88 @@ jobs:
             git checkout "$BRANCH"
             git reset --hard "origin/$BRANCH"
 
-            REGISTRY="${IMAGE_REGISTRY:-ghcr.io}"
-            OWNER="${IMAGE_REPO_OWNER:-${{ github.repository_owner }}}"
-            TAG="${IMAGE_TAG:-latest}"
-
             if [ -n "${DEPLOY_GHCR_TOKEN:-}" ]; then
               GHCR_USER="${DEPLOY_GHCR_USER:-${{ github.repository_owner }}}"
               echo "${DEPLOY_GHCR_TOKEN}" | docker login "$REGISTRY" -u "$GHCR_USER" --password-stdin
             fi
 
-            retry env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose pull
-            env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose up -d --remove-orphans
-            docker image prune -f || true
+            cat > "$RUN_SCRIPT" <<'SCRIPT'
+            #!/usr/bin/env bash
+            set -euo pipefail
+
+            retry() {
+              local retries=3
+              local count=1
+              until "$@"; do
+                if [ "$count" -ge "$retries" ]; then
+                  return 1
+                fi
+                count=$((count + 1))
+                sleep 10
+              done
+            }
+
+            probe_health() {
+              if command -v curl >/dev/null 2>&1; then
+                curl -fsS --max-time 5 "$HEALTHCHECK_URL" >/dev/null
+                return $?
+              fi
+              if command -v wget >/dev/null 2>&1; then
+                wget -q -T 5 -O - "$HEALTHCHECK_URL" >/dev/null
+                return $?
+              fi
+              return 0
+            }
+            echo "running" > "$STATUS_FILE"
+            cd "$APP_DIR"
+
+            if retry env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose pull && \
+               env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose up -d --remove-orphans; then
+              ATTEMPT=0
+              until probe_health; do
+                ATTEMPT=$((ATTEMPT + 1))
+                if [ "$ATTEMPT" -ge 30 ]; then
+                  echo "health check failed for ${TAG}" >&2
+                  echo "failed" > "$STATUS_FILE"
+                  exit 1
+                fi
+                sleep 10
+              done
+
+              echo "success" > "$STATUS_FILE"
+              docker image prune -f || true
+              exit 0
+            fi
+
+            echo "failed" > "$STATUS_FILE"
+            exit 1
+            SCRIPT
+
+            chmod +x "$RUN_SCRIPT"
+
+            nohup env APP_DIR="$APP_DIR" REGISTRY="$REGISTRY" OWNER="$OWNER" TAG="$TAG" STATUS_FILE="$STATUS_FILE" LOG_FILE="$LOG_FILE" HEALTHCHECK_URL="$HEALTHCHECK_URL" "$RUN_SCRIPT" > "$LOG_FILE" 2>&1 &
+            DEPLOY_PID=$!
+            echo "Deployment started in background: pid=$DEPLOY_PID"
+            echo "Status file: $STATUS_FILE"
+            echo "Log file: $LOG_FILE"
+
+            ELAPSED=0
+            INTERVAL=15
+            while [ "$ELAPSED" -lt "$MONITOR_SECONDS" ]; do
+              STATUS="$(cat "$STATUS_FILE" 2>/dev/null || echo running)"
+              if [ "$STATUS" = "success" ]; then
+                echo "Deployment completed successfully."
+                exit 0
+              fi
+              if [ "$STATUS" = "failed" ]; then
+                echo "Deployment failed. Showing last 120 log lines:"
+                tail -n 120 "$LOG_FILE" || true
+                exit 1
+              fi
+              sleep "$INTERVAL"
+              ELAPSED=$((ELAPSED + INTERVAL))
+            done
+
+            echo "Deployment is still running after ${MONITOR_SECONDS}s. CI exits without waiting further."
+            echo "You can continue watching server log: tail -f $LOG_FILE"
 

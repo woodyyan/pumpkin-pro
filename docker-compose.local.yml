@@ -1,0 +1,51 @@
+# ==================================
+# Pumpkin Trader Pro - Local Build
+# ==================================
+# 说明：该文件用于本地构建镜像并启动服务，不依赖预先推送到 GHCR 的镜像。
+
+services:
+  # 1. 前端服务 (React + Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - BACKEND_API_URL=http://backend:8080
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - backend
+
+  # 2. 核心交易网关与 API 服务 (Go)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - GO_ENV=development
+      - QUANT_SERVICE_URL=http://quant:8000
+      - DB_TYPE=${DB_TYPE:-sqlite}
+      - DB_PATH=${DB_PATH:-/app/data/pumpkin.db}
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_NAME=${DB_NAME:-pumpkin_pro}
+      - DB_SSLMODE=${DB_SSLMODE:-disable}
+      - STRATEGY_SEED_PATH=${STRATEGY_SEED_PATH:-seed/strategies.json}
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - quant
+
+  # 3. 策略计算微服务 (Python + FastAPI)
+  quant:
+    build:
+      context: ./quant
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"

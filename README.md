@@ -71,22 +71,42 @@ pumpkin-pro/
 - Python 3.10+
 - Docker / Docker Compose（可选）
 
-### 方式一：使用 Docker Compose 启动
+### 方式一：使用 Docker Compose 启动（双配置）
 
-在项目根目录执行：
+当前仓库同时提供两套 Compose 文件，分别用于“本地构建运行”和“拉取已发布镜像运行”。这两套文件可以并存使用，不冲突。
+
+| 文件 | 适用场景 | 镜像来源 | 推荐命令 |
+| --- | --- | --- | --- |
+| `docker-compose.local.yml` | 本机开发、需要本地改代码后立即构建验证 | 本地 `Dockerfile`（`build`） | `docker compose -f docker-compose.local.yml up --build` |
+| `docker-compose.yml` | 预发/生产或希望与 CI 发布镜像保持一致 | GHCR（`image`） | `docker compose -f docker-compose.yml up -d` |
+
+在首次启动前，建议先复制环境变量模板：
 
 ```bash
 cp .env.example .env
-docker compose up --build
 ```
 
-默认数据库为 SQLite，数据库文件持久化在宿主机 `./data/pumpkin.db`。如果需要切换 PostgreSQL，只需在 `.env` 中设置 `DB_TYPE=postgres` 并补全连接参数。
+如果你使用本地构建模式，请在项目根目录执行：
 
-启动后默认端口：
+```bash
+docker compose -f docker-compose.local.yml up --build
+```
 
-- **前端**：`http://localhost:3000`
-- **后端**：`http://localhost:8080`
-- **量化服务**：`http://localhost:8000`
+如果你使用镜像拉取模式，请在项目根目录执行：
+
+```bash
+docker compose -f docker-compose.yml up -d
+```
+
+当 `docker-compose.yml` 指向私有 GHCR 镜像时，需要先完成登录：
+
+```bash
+echo "$GHCR_PAT" | docker login ghcr.io -u <github-username> --password-stdin
+```
+
+`docker-compose.yml` 默认会读取以下镜像变量（可在 `.env` 覆盖）：`IMAGE_REGISTRY`、`IMAGE_REPO_OWNER`、`IMAGE_TAG`。默认数据库为 SQLite，数据库文件持久化在宿主机 `./data/pumpkin.db`。如果需要切换 PostgreSQL，只需在 `.env` 中设置 `DB_TYPE=postgres` 并补全连接参数。
+
+无论采用哪套 Compose 文件，服务默认端口保持一致：前端 `http://localhost:3000`，后端 `http://localhost:8080`，量化服务 `http://localhost:8000`。
 
 ### 方式二：本地开发模式启动
 

@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: deploy-main
@@ -55,62 +54,9 @@ jobs:
       - name: Python syntax check
         run: python -m compileall quant
 
-  publish_images:
-    name: Build and Push Images
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push backend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/pumpkin-pro-backend:latest
-            ghcr.io/${{ github.repository_owner }}/pumpkin-pro-backend:${{ github.sha }}
-
-      - name: Build and push frontend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          file: ./frontend/Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/pumpkin-pro-frontend:latest
-            ghcr.io/${{ github.repository_owner }}/pumpkin-pro-frontend:${{ github.sha }}
-
-      - name: Build and push quant image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./quant
-          file: ./quant/Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/pumpkin-pro-quant:latest
-            ghcr.io/${{ github.repository_owner }}/pumpkin-pro-quant:${{ github.sha }}
-
   deploy:
     name: Deploy to Server
-    needs: publish_images
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -123,13 +69,8 @@ jobs:
           DEPLOY_REPO_URL: ${{ secrets.DEPLOY_REPO_URL }}
           DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH }}
           DEPLOY_GITHUB_TOKEN: ${{ secrets.DEPLOY_GITHUB_TOKEN }}
-          DEPLOY_GHCR_USER: ${{ secrets.DEPLOY_GHCR_USER }}
-          DEPLOY_GHCR_TOKEN: ${{ secrets.DEPLOY_GHCR_TOKEN }}
           DEPLOY_MONITOR_SECONDS: ${{ vars.DEPLOY_MONITOR_SECONDS }}
           DEPLOY_HEALTHCHECK_URL: ${{ vars.DEPLOY_HEALTHCHECK_URL }}
-          IMAGE_TAG: ${{ github.sha }}
-          IMAGE_REPO_OWNER: ${{ github.repository_owner }}
-          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         with:
@@ -140,7 +81,7 @@ jobs:
           passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
           script_stop: true
           command_timeout: 340m
-          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN,DEPLOY_GHCR_USER,DEPLOY_GHCR_TOKEN,DEPLOY_MONITOR_SECONDS,DEPLOY_HEALTHCHECK_URL,IMAGE_TAG,IMAGE_REPO_OWNER,IMAGE_REGISTRY,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT
+          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN,DEPLOY_MONITOR_SECONDS,DEPLOY_HEALTHCHECK_URL,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT
           script: |
             set -euo pipefail
 
@@ -148,9 +89,6 @@ jobs:
             RAW_REPO_URL="${DEPLOY_REPO_URL:-https://github.com/${{ github.repository }}.git}"
             BRANCH="${DEPLOY_BRANCH:-main}"
             REPO_URL="$RAW_REPO_URL"
-            REGISTRY="${IMAGE_REGISTRY:-ghcr.io}"
-            OWNER="${IMAGE_REPO_OWNER:-${{ github.repository_owner }}}"
-            TAG="${IMAGE_TAG:-latest}"
             MONITOR_SECONDS="${DEPLOY_MONITOR_SECONDS:-1200}"
             HEALTHCHECK_URL="${DEPLOY_HEALTHCHECK_URL:-http://127.0.0.1:8080/api/health}"
             RUN_ID="${GITHUB_RUN_ID:-manual}-${GITHUB_RUN_ATTEMPT:-0}"
@@ -201,26 +139,14 @@ jobs:
             git checkout "$BRANCH"
             git reset --hard "origin/$BRANCH"
 
-            if [ -n "${DEPLOY_GHCR_TOKEN:-}" ]; then
-              GHCR_USER="${DEPLOY_GHCR_USER:-${{ github.repository_owner }}}"
-              echo "${DEPLOY_GHCR_TOKEN}" | docker login "$REGISTRY" -u "$GHCR_USER" --password-stdin
+            if [ ! -f "$APP_DIR/docker-compose.local.yml" ]; then
+              echo "docker-compose.local.yml not found in $APP_DIR"
+              exit 1
             fi
 
             cat > "$RUN_SCRIPT" <<'SCRIPT'
             #!/usr/bin/env bash
             set -euo pipefail
-
-            retry() {
-              local retries=3
-              local count=1
-              until "$@"; do
-                if [ "$count" -ge "$retries" ]; then
-                  return 1
-                fi
-                count=$((count + 1))
-                sleep 10
-              done
-            }
 
             probe_health() {
               if command -v curl >/dev/null 2>&1; then
@@ -233,16 +159,16 @@ jobs:
               fi
               return 0
             }
+
             echo "running" > "$STATUS_FILE"
             cd "$APP_DIR"
 
-            if retry env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose pull && \
-               env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose up -d --remove-orphans; then
+            if docker compose -f docker-compose.local.yml up -d --build --remove-orphans; then
               ATTEMPT=0
               until probe_health; do
                 ATTEMPT=$((ATTEMPT + 1))
                 if [ "$ATTEMPT" -ge 30 ]; then
-                  echo "health check failed for ${TAG}" >&2
+                  echo "health check failed" >&2
                   echo "failed" > "$STATUS_FILE"
                   exit 1
                 fi
@@ -260,7 +186,7 @@ jobs:
 
             chmod +x "$RUN_SCRIPT"
 
-            nohup env APP_DIR="$APP_DIR" REGISTRY="$REGISTRY" OWNER="$OWNER" TAG="$TAG" STATUS_FILE="$STATUS_FILE" LOG_FILE="$LOG_FILE" HEALTHCHECK_URL="$HEALTHCHECK_URL" "$RUN_SCRIPT" > "$LOG_FILE" 2>&1 &
+            nohup env APP_DIR="$APP_DIR" STATUS_FILE="$STATUS_FILE" LOG_FILE="$LOG_FILE" HEALTHCHECK_URL="$HEALTHCHECK_URL" "$RUN_SCRIPT" > "$LOG_FILE" 2>&1 &
             DEPLOY_PID=$!
             echo "Deployment started in background: pid=$DEPLOY_PID"
             echo "Status file: $STATUS_FILE"
@@ -294,13 +220,8 @@ jobs:
           DEPLOY_REPO_URL: ${{ secrets.DEPLOY_REPO_URL }}
           DEPLOY_BRANCH: ${{ vars.DEPLOY_BRANCH }}
           DEPLOY_GITHUB_TOKEN: ${{ secrets.DEPLOY_GITHUB_TOKEN }}
-          DEPLOY_GHCR_USER: ${{ secrets.DEPLOY_GHCR_USER }}
-          DEPLOY_GHCR_TOKEN: ${{ secrets.DEPLOY_GHCR_TOKEN }}
           DEPLOY_MONITOR_SECONDS: ${{ vars.DEPLOY_MONITOR_SECONDS }}
           DEPLOY_HEALTHCHECK_URL: ${{ vars.DEPLOY_HEALTHCHECK_URL }}
-          IMAGE_TAG: ${{ github.sha }}
-          IMAGE_REPO_OWNER: ${{ github.repository_owner }}
-          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         with:
@@ -310,7 +231,7 @@ jobs:
           password: ${{ secrets.DEPLOY_PASSWORD }}
           script_stop: true
           command_timeout: 340m
-          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN,DEPLOY_GHCR_USER,DEPLOY_GHCR_TOKEN,DEPLOY_MONITOR_SECONDS,DEPLOY_HEALTHCHECK_URL,IMAGE_TAG,IMAGE_REPO_OWNER,IMAGE_REGISTRY,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT
+          envs: DEPLOY_APP_DIR,DEPLOY_REPO_URL,DEPLOY_BRANCH,DEPLOY_GITHUB_TOKEN,DEPLOY_MONITOR_SECONDS,DEPLOY_HEALTHCHECK_URL,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT
           script: |
             set -euo pipefail
 
@@ -318,9 +239,6 @@ jobs:
             RAW_REPO_URL="${DEPLOY_REPO_URL:-https://github.com/${{ github.repository }}.git}"
             BRANCH="${DEPLOY_BRANCH:-main}"
             REPO_URL="$RAW_REPO_URL"
-            REGISTRY="${IMAGE_REGISTRY:-ghcr.io}"
-            OWNER="${IMAGE_REPO_OWNER:-${{ github.repository_owner }}}"
-            TAG="${IMAGE_TAG:-latest}"
             MONITOR_SECONDS="${DEPLOY_MONITOR_SECONDS:-1200}"
             HEALTHCHECK_URL="${DEPLOY_HEALTHCHECK_URL:-http://127.0.0.1:8080/api/health}"
             RUN_ID="${GITHUB_RUN_ID:-manual}-${GITHUB_RUN_ATTEMPT:-0}"
@@ -371,26 +289,14 @@ jobs:
             git checkout "$BRANCH"
             git reset --hard "origin/$BRANCH"
 
-            if [ -n "${DEPLOY_GHCR_TOKEN:-}" ]; then
-              GHCR_USER="${DEPLOY_GHCR_USER:-${{ github.repository_owner }}}"
-              echo "${DEPLOY_GHCR_TOKEN}" | docker login "$REGISTRY" -u "$GHCR_USER" --password-stdin
+            if [ ! -f "$APP_DIR/docker-compose.local.yml" ]; then
+              echo "docker-compose.local.yml not found in $APP_DIR"
+              exit 1
             fi
 
             cat > "$RUN_SCRIPT" <<'SCRIPT'
             #!/usr/bin/env bash
             set -euo pipefail
-
-            retry() {
-              local retries=3
-              local count=1
-              until "$@"; do
-                if [ "$count" -ge "$retries" ]; then
-                  return 1
-                fi
-                count=$((count + 1))
-                sleep 10
-              done
-            }
 
             probe_health() {
               if command -v curl >/dev/null 2>&1; then
@@ -403,16 +309,16 @@ jobs:
               fi
               return 0
             }
+
             echo "running" > "$STATUS_FILE"
             cd "$APP_DIR"
 
-            if retry env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose pull && \
-               env IMAGE_REGISTRY="$REGISTRY" IMAGE_REPO_OWNER="$OWNER" IMAGE_TAG="$TAG" docker compose up -d --remove-orphans; then
+            if docker compose -f docker-compose.local.yml up -d --build --remove-orphans; then
               ATTEMPT=0
               until probe_health; do
                 ATTEMPT=$((ATTEMPT + 1))
                 if [ "$ATTEMPT" -ge 30 ]; then
-                  echo "health check failed for ${TAG}" >&2
+                  echo "health check failed" >&2
                   echo "failed" > "$STATUS_FILE"
                   exit 1
                 fi
@@ -430,7 +336,7 @@ jobs:
 
             chmod +x "$RUN_SCRIPT"
 
-            nohup env APP_DIR="$APP_DIR" REGISTRY="$REGISTRY" OWNER="$OWNER" TAG="$TAG" STATUS_FILE="$STATUS_FILE" LOG_FILE="$LOG_FILE" HEALTHCHECK_URL="$HEALTHCHECK_URL" "$RUN_SCRIPT" > "$LOG_FILE" 2>&1 &
+            nohup env APP_DIR="$APP_DIR" STATUS_FILE="$STATUS_FILE" LOG_FILE="$LOG_FILE" HEALTHCHECK_URL="$HEALTHCHECK_URL" "$RUN_SCRIPT" > "$LOG_FILE" 2>&1 &
             DEPLOY_PID=$!
             echo "Deployment started in background: pid=$DEPLOY_PID"
             echo "Status file: $STATUS_FILE"

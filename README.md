@@ -108,6 +108,12 @@ echo "$GHCR_PAT" | docker login ghcr.io -u <github-username> --password-stdin
 
 无论采用哪套 Compose 文件，服务默认端口保持一致：前端 `http://localhost:3000`，后端 `http://localhost:8080`，量化服务 `http://localhost:8000`。
 
+#### 服务端构建速度优化说明
+
+本仓库已在 `frontend/`、`backend/`、`quant/` 下补充 `.dockerignore`，并优化了 Dockerfile 的依赖缓存层。首次在服务器构建仍可能较慢（冷缓存 + 依赖下载），但后续增量构建通常会明显加快。
+
+如果你的目标是稳定且更快的服务器部署，建议优先使用 `docker-compose.yml` 的“拉取镜像模式”（CI 预构建后服务器仅 `pull`）；仅在需要现场编译验证时使用 `docker-compose.local.yml` 本地构建模式。
+
 ### 方式二：本地开发模式启动
 
 #### 1. 启动量化服务

@@ -136,11 +136,26 @@ jobs:
             cd "$APP_DIR"
             git remote set-url origin "$REPO_URL" || true
             retry git fetch origin "$BRANCH"
-            git checkout "$BRANCH"
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+            git sparse-checkout disable >/dev/null 2>&1 || true
             git reset --hard "origin/$BRANCH"
+            git clean -fd
 
-            if [ ! -f "$APP_DIR/docker-compose.local.yml" ]; then
+            COMPOSE_FILE="$APP_DIR/docker-compose.local.yml"
+            if [ ! -f "$COMPOSE_FILE" ]; then
+              FOUND_COMPOSE="$(find "$APP_DIR" -maxdepth 3 -name docker-compose.local.yml -print -quit || true)"
+              if [ -n "$FOUND_COMPOSE" ]; then
+                COMPOSE_FILE="$FOUND_COMPOSE"
+              fi
+            fi
+
+            if [ ! -f "$COMPOSE_FILE" ]; then
               echo "docker-compose.local.yml not found in $APP_DIR"
+              echo "Current HEAD: $(git rev-parse --short HEAD)"
+              echo "Tracked compose files:"
+              git ls-files '*compose*.yml' || true
+              echo "Directory listing:"
+              ls -la "$APP_DIR" || true
               exit 1
             fi
 
@@ -163,7 +178,7 @@ jobs:
             echo "running" > "$STATUS_FILE"
             cd "$APP_DIR"
 
-            if docker compose -f docker-compose.local.yml up -d --build --remove-orphans; then
+            if docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans; then
               ATTEMPT=0
               until probe_health; do
                 ATTEMPT=$((ATTEMPT + 1))
@@ -186,7 +201,7 @@ jobs:
 
             chmod +x "$RUN_SCRIPT"
 
-            nohup env APP_DIR="$APP_DIR" STATUS_FILE="$STATUS_FILE" LOG_FILE="$LOG_FILE" HEALTHCHECK_URL="$HEALTHCHECK_URL" "$RUN_SCRIPT" > "$LOG_FILE" 2>&1 &
+            nohup env APP_DIR="$APP_DIR" STATUS_FILE="$STATUS_FILE" LOG_FILE="$LOG_FILE" HEALTHCHECK_URL="$HEALTHCHECK_URL" COMPOSE_FILE="$COMPOSE_FILE" "$RUN_SCRIPT" > "$LOG_FILE" 2>&1 &
             DEPLOY_PID=$!
             echo "Deployment started in background: pid=$DEPLOY_PID"
             echo "Status file: $STATUS_FILE"
@@ -286,11 +301,26 @@ jobs:
             cd "$APP_DIR"
             git remote set-url origin "$REPO_URL" || true
             retry git fetch origin "$BRANCH"
-            git checkout "$BRANCH"
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+            git sparse-checkout disable >/dev/null 2>&1 || true
             git reset --hard "origin/$BRANCH"
+            git clean -fd
 
-            if [ ! -f "$APP_DIR/docker-compose.local.yml" ]; then
+            COMPOSE_FILE="$APP_DIR/docker-compose.local.yml"
+            if [ ! -f "$COMPOSE_FILE" ]; then
+              FOUND_COMPOSE="$(find "$APP_DIR" -maxdepth 3 -name docker-compose.local.yml -print -quit || true)"
+              if [ -n "$FOUND_COMPOSE" ]; then
+                COMPOSE_FILE="$FOUND_COMPOSE"
+              fi
+            fi
+
+            if [ ! -f "$COMPOSE_FILE" ]; then
               echo "docker-compose.local.yml not found in $APP_DIR"
+              echo "Current HEAD: $(git rev-parse --short HEAD)"
+              echo "Tracked compose files:"
+              git ls-files '*compose*.yml' || true
+              echo "Directory listing:"
+              ls -la "$APP_DIR" || true
               exit 1
             fi
 
@@ -313,7 +343,7 @@ jobs:
             echo "running" > "$STATUS_FILE"
             cd "$APP_DIR"
 
-            if docker compose -f docker-compose.local.yml up -d --build --remove-orphans; then
+            if docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans; then
               ATTEMPT=0
               until probe_health; do
                 ATTEMPT=$((ATTEMPT + 1))
@@ -336,7 +366,7 @@ jobs:
 
             chmod +x "$RUN_SCRIPT"
 
-            nohup env APP_DIR="$APP_DIR" STATUS_FILE="$STATUS_FILE" LOG_FILE="$LOG_FILE" HEALTHCHECK_URL="$HEALTHCHECK_URL" "$RUN_SCRIPT" > "$LOG_FILE" 2>&1 &
+            nohup env APP_DIR="$APP_DIR" STATUS_FILE="$STATUS_FILE" LOG_FILE="$LOG_FILE" HEALTHCHECK_URL="$HEALTHCHECK_URL" COMPOSE_FILE="$COMPOSE_FILE" "$RUN_SCRIPT" > "$LOG_FILE" 2>&1 &
             DEPLOY_PID=$!
             echo "Deployment started in background: pid=$DEPLOY_PID"
             echo "Status file: $STATUS_FILE"

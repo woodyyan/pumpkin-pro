@@ -122,12 +122,7 @@ jobs:
               exit 1
             fi
 
-            DEPLOY_STATE_DIR="$APP_DIR/.deploy"
-            STATUS_FILE="$DEPLOY_STATE_DIR/status-${RUN_ID}.txt"
-            LOG_FILE="$DEPLOY_STATE_DIR/deploy-${RUN_ID}.log"
-            RUN_SCRIPT="$DEPLOY_STATE_DIR/run-${RUN_ID}.sh"
-
-            mkdir -p "$APP_DIR" "$DEPLOY_STATE_DIR"
+            mkdir -p "$APP_DIR"
 
             if [ ! -d "$APP_DIR/.git" ]; then
               retry git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
@@ -141,9 +136,17 @@ jobs:
             git reset --hard "origin/$BRANCH"
             git clean -fd
 
+            REPO_ROOT="$(git rev-parse --show-toplevel)"
+            APP_DIR="$REPO_ROOT"
+            DEPLOY_STATE_DIR="$APP_DIR/.deploy"
+            STATUS_FILE="$DEPLOY_STATE_DIR/status-${RUN_ID}.txt"
+            LOG_FILE="$DEPLOY_STATE_DIR/deploy-${RUN_ID}.log"
+            RUN_SCRIPT="$DEPLOY_STATE_DIR/run-${RUN_ID}.sh"
+            mkdir -p "$DEPLOY_STATE_DIR"
+
             COMPOSE_FILE="$APP_DIR/docker-compose.local.yml"
             if [ ! -f "$COMPOSE_FILE" ]; then
-              FOUND_COMPOSE="$(find "$APP_DIR" -maxdepth 3 -name docker-compose.local.yml -print -quit || true)"
+              FOUND_COMPOSE="$(find "$APP_DIR" -maxdepth 4 -name docker-compose.local.yml -print -quit || true)"
               if [ -n "$FOUND_COMPOSE" ]; then
                 COMPOSE_FILE="$FOUND_COMPOSE"
               fi
@@ -151,6 +154,7 @@ jobs:
 
             if [ ! -f "$COMPOSE_FILE" ]; then
               echo "docker-compose.local.yml not found in $APP_DIR"
+              echo "Repo root: $REPO_ROOT"
               echo "Current HEAD: $(git rev-parse --short HEAD)"
               echo "Tracked compose files:"
               git ls-files '*compose*.yml' || true
@@ -287,12 +291,7 @@ jobs:
               exit 1
             fi
 
-            DEPLOY_STATE_DIR="$APP_DIR/.deploy"
-            STATUS_FILE="$DEPLOY_STATE_DIR/status-${RUN_ID}.txt"
-            LOG_FILE="$DEPLOY_STATE_DIR/deploy-${RUN_ID}.log"
-            RUN_SCRIPT="$DEPLOY_STATE_DIR/run-${RUN_ID}.sh"
-
-            mkdir -p "$APP_DIR" "$DEPLOY_STATE_DIR"
+            mkdir -p "$APP_DIR"
 
             if [ ! -d "$APP_DIR/.git" ]; then
               retry git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
@@ -306,9 +305,17 @@ jobs:
             git reset --hard "origin/$BRANCH"
             git clean -fd
 
+            REPO_ROOT="$(git rev-parse --show-toplevel)"
+            APP_DIR="$REPO_ROOT"
+            DEPLOY_STATE_DIR="$APP_DIR/.deploy"
+            STATUS_FILE="$DEPLOY_STATE_DIR/status-${RUN_ID}.txt"
+            LOG_FILE="$DEPLOY_STATE_DIR/deploy-${RUN_ID}.log"
+            RUN_SCRIPT="$DEPLOY_STATE_DIR/run-${RUN_ID}.sh"
+            mkdir -p "$DEPLOY_STATE_DIR"
+
             COMPOSE_FILE="$APP_DIR/docker-compose.local.yml"
             if [ ! -f "$COMPOSE_FILE" ]; then
-              FOUND_COMPOSE="$(find "$APP_DIR" -maxdepth 3 -name docker-compose.local.yml -print -quit || true)"
+              FOUND_COMPOSE="$(find "$APP_DIR" -maxdepth 4 -name docker-compose.local.yml -print -quit || true)"
               if [ -n "$FOUND_COMPOSE" ]; then
                 COMPOSE_FILE="$FOUND_COMPOSE"
               fi
@@ -316,6 +323,7 @@ jobs:
 
             if [ ! -f "$COMPOSE_FILE" ]; then
               echo "docker-compose.local.yml not found in $APP_DIR"
+              echo "Repo root: $REPO_ROOT"
               echo "Current HEAD: $(git rev-parse --short HEAD)"
               echo "Tracked compose files:"
               git ls-files '*compose*.yml' || true

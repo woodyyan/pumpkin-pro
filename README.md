@@ -78,7 +78,7 @@ pumpkin-pro/
 | 文件 | 适用场景 | 镜像来源 | 推荐命令 |
 | --- | --- | --- | --- |
 | `docker-compose.local.yml` | 本机开发、需要本地改代码后立即构建验证 | 本地 `Dockerfile`（`build`） | `docker compose -f docker-compose.local.yml up --build` |
-| `docker-compose.yml` | 预发/生产或希望与 CI 发布镜像保持一致 | GHCR（`image`） | `docker compose -f docker-compose.yml up -d` |
+| `docker-compose.yml` | 预发/生产或希望与 CI 发布镜像保持一致 | 腾讯云 TCR（`image`） | `docker compose -f docker-compose.yml up -d` |
 
 在首次启动前，建议先复制环境变量模板：
 
@@ -98,13 +98,13 @@ docker compose -f docker-compose.local.yml up --build
 docker compose -f docker-compose.yml up -d
 ```
 
-当 `docker-compose.yml` 指向私有 GHCR 镜像时，需要先完成登录：
+当 `docker-compose.yml` 指向私有 TCR 镜像时，需要先完成登录：
 
 ```bash
-echo "$GHCR_PAT" | docker login ghcr.io -u <github-username> --password-stdin
+echo "$TCR_PASSWORD" | docker login ccr.ccs.tencentyun.com -u <tcr-username> --password-stdin
 ```
 
-`docker-compose.yml` 默认会读取以下镜像变量（可在 `.env` 覆盖）：`IMAGE_REGISTRY`、`IMAGE_REPO_OWNER`、`IMAGE_TAG`。默认数据库为 SQLite，数据库文件持久化在宿主机 `./data/pumpkin.db`。如果需要切换 PostgreSQL，只需在 `.env` 中设置 `DB_TYPE=postgres` 并补全连接参数。
+`docker-compose.yml` 默认会读取以下镜像变量（可在 `.env` 覆盖）：`IMAGE_REGISTRY`、`IMAGE_NAMESPACE`、`IMAGE_TAG`。默认数据库为 SQLite，数据库文件持久化在宿主机 `./data/pumpkin.db`。如果需要切换 PostgreSQL，只需在 `.env` 中设置 `DB_TYPE=postgres` 并补全连接参数。
 
 无论采用哪套 Compose 文件，服务默认端口保持一致：前端 `http://localhost:3000`，后端 `http://localhost:8080`，量化服务 `http://localhost:8000`。
 

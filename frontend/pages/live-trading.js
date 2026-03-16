@@ -240,7 +240,7 @@ export default function LiveTradingPage() {
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               {(marketOverview?.indexes || []).map((index) => (
                 <div key={index.code} className="rounded-xl border border-border bg-black/20 p-3">
-                  <div className="text-xs text-white/50">{index.name || index.code}</div>
+                  <div className="text-xs text-white/50">{formatMarketIndexTitle(index.name, index.code)}</div>
                   <div className="mt-1 text-lg font-semibold text-white">{formatNumber(index.last, 2)}</div>
                   <div className={`text-xs ${index.change_rate >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
                     {formatPercent(index.change_rate)}
@@ -482,6 +482,29 @@ function formatSource(source) {
     return '腾讯行情（qt.gtimg.cn）'
   }
   return source || '腾讯行情（qt.gtimg.cn）'
+}
+
+function formatMarketIndexTitle(name, code) {
+  const rawName = String(name || '').trim()
+  const upperCode = String(code || '').trim().toUpperCase()
+
+  const nameMap = {
+    'Hang Seng Index': '恒生指数',
+    'Hang Seng China Enterprises Index': '恒生中国企业指数',
+    'Hang Seng TECH Index': '恒生科技指数',
+  }
+
+  if (nameMap[rawName]) {
+    return nameMap[rawName]
+  }
+
+  const codeMap = {
+    HSI: '恒生指数',
+    HSCEI: '恒生中国企业指数',
+    HSTECH: '恒生科技指数',
+  }
+
+  return codeMap[upperCode] || rawName || upperCode || '--'
 }
 
 function formatPercent(value) {

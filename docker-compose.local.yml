@@ -23,6 +23,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        GOPROXY: "${BACKEND_GOPROXY:-https://proxy.golang.org|https://goproxy.cn|direct}"
+        GOSUMDB: "${BACKEND_GOSUMDB:-sum.golang.org}"
     ports:
       - "8080:8080"
     environment:

@@ -226,10 +226,11 @@ export default function LiveTradingPage() {
         </div>
 
         <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-4">
             <MetricCard label="会话状态" value={sessionStateLabel(sessionState)} />
             <MetricCard label="激活标的" value={activeSymbol || '未设置'} />
             <MetricCard label="最后刷新" value={lastUpdateAt ? formatDateTime(lastUpdateAt) : '--'} />
+            <MetricCard label="行情来源" value={formatSource(snapshotPayload?.snapshot?.source)} />
           </div>
 
           {error && <div className="rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
@@ -473,6 +474,14 @@ function sessionStateLabel(state) {
     stopped: '已停止',
   }
   return labels[state] || state
+}
+
+function formatSource(source) {
+  const normalized = String(source || '').toLowerCase()
+  if (normalized === 'tencent-qt') {
+    return '腾讯行情（qt.gtimg.cn）'
+  }
+  return source || '腾讯行情（qt.gtimg.cn）'
 }
 
 function formatPercent(value) {

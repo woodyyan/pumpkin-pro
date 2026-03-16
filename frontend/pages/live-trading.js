@@ -376,18 +376,8 @@ function OverlayIntradayChart({ series, benchmark, symbol }) {
         title: `${benchmark || 'HSI'}（归一化）`,
       })
 
-      const stockData = []
-      const benchmarkData = []
-      for (const item of series) {
-        const timestamp = Math.floor(new Date(item.ts).getTime() / 1000)
-        if (!timestamp || Number.isNaN(timestamp)) continue
-        if (item.stock_norm != null && !Number.isNaN(Number(item.stock_norm))) {
-          stockData.push({ time: timestamp, value: Number(item.stock_norm) })
-        }
-        if (item.benchmark_norm != null && !Number.isNaN(Number(item.benchmark_norm))) {
-          benchmarkData.push({ time: timestamp, value: Number(item.benchmark_norm) })
-        }
-      }
+      const stockData = toAscendingSeriesData(series, 'stock_norm')
+      const benchmarkData = toAscendingSeriesData(series, 'benchmark_norm')
 
       stockLine.setData(stockData)
       benchmarkLine.setData(benchmarkData)
@@ -418,6 +408,22 @@ function OverlayIntradayChart({ series, benchmark, symbol }) {
   }, [benchmark, series, symbol])
 
   return <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-black/20" />
+}
+
+function toAscendingSeriesData(series, valueField) {
+  if (!Array.isArray(series) || series.length === 0) return []
+
+  const valueByTime = new Map()
+  for (const item of series) {
+    const timestamp = Math.floor(new Date(item.ts).getTime() / 1000)
+    const value = Number(item?.[valueField])
+    if (!timestamp || Number.isNaN(timestamp) || Number.isNaN(value)) continue
+    valueByTime.set(timestamp, value)
+  }
+
+  return Array.from(valueByTime.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([time, value]) => ({ time, value }))
 }
 
 function EventPanel({ title, events, renderEvent }) {

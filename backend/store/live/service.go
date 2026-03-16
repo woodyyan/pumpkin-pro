@@ -614,15 +614,29 @@ func minFloat(values []float64) float64 {
 func appendOverlaySample(items []overlaySample, sample overlaySample, capSize int) []overlaySample {
 	minuteTS := sample.TS.UTC().Truncate(time.Minute)
 	sample.TS = minuteTS
-	if len(items) > 0 {
-		lastIdx := len(items) - 1
-		if items[lastIdx].TS.Equal(minuteTS) {
-			items[lastIdx] = sample
-			return items
+	if len(items) == 0 {
+		return []overlaySample{sample}
+	}
+
+	lastIdx := len(items) - 1
+	lastTS := items[lastIdx].TS
+	if minuteTS.After(lastTS) {
+		items = append(items, sample)
+	} else if minuteTS.Equal(lastTS) {
+		items[lastIdx] = sample
+	} else {
+		insertAt := sort.Search(len(items), func(i int) bool {
+			return !items[i].TS.Before(minuteTS)
+		})
+		if insertAt < len(items) && items[insertAt].TS.Equal(minuteTS) {
+			items[insertAt] = sample
+		} else {
+			items = append(items, overlaySample{})
+			copy(items[insertAt+1:], items[insertAt:])
+			items[insertAt] = sample
 		}
 	}
 
-	items = append(items, sample)
 	if len(items) > capSize {
 		items = items[len(items)-capSize:]
 	}

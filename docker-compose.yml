@@ -7,7 +7,7 @@ version: '3.8'
 services:
   # 1. 前端服务 (React + Next.js)
   frontend:
-    image: ${IMAGE_REGISTRY:-ccr.ccs.tencentyun.com}/${IMAGE_NAMESPACE:-your-tcr-namespace}/pumpkin-pro-frontend:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ccr.ccs.tencentyun.com}/${IMAGE_NAMESPACE:pumpkin-pro}/pumpkin-pro-frontend:${IMAGE_TAG:-latest}
     ports:
       - "3000:3000"
     environment:
@@ -20,7 +20,7 @@ services:
 
   # 2. 核心交易网关与 API 服务 (Go)
   backend:
-    image: ${IMAGE_REGISTRY:-ccr.ccs.tencentyun.com}/${IMAGE_NAMESPACE:-your-tcr-namespace}/pumpkin-pro-backend:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ccr.ccs.tencentyun.com}/${IMAGE_NAMESPACE:pumpkin-pro}/pumpkin-pro-backend:${IMAGE_TAG:-latest}
     ports:
       - "8080:8080"
     environment:
@@ -42,6 +42,6 @@ services:
 
   # 3. 策略计算微服务 (Python + FastAPI)
   quant:
-    image: ${IMAGE_REGISTRY:-ccr.ccs.tencentyun.com}/${IMAGE_NAMESPACE:-your-tcr-namespace}/pumpkin-pro-quant:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ccr.ccs.tencentyun.com}/${IMAGE_NAMESPACE:pumpkin-pro}/pumpkin-pro-quant:${IMAGE_TAG:-latest}
     ports:
       - "8000:8000"

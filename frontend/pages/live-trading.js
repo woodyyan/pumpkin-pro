@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+
 import { requestJson } from '../lib/api'
+import { useAuth } from '../lib/auth-context'
+import { isAuthRequiredError } from '../lib/auth-storage'
 
 const POLL_MS = 2000
 const OVERLAY_WINDOW_MINUTES = 60
 
 export default function LiveTradingPage() {
+  const { openAuthModal } = useAuth()
   const [watchlist, setWatchlist] = useState({ items: [], active_symbol: '', session_state: 'idle' })
   const [marketOverview, setMarketOverview] = useState(null)
   const [snapshotPayload, setSnapshotPayload] = useState(null)
@@ -15,10 +19,20 @@ export default function LiveTradingPage() {
   const [nameInput, setNameInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState('')
 
   const activeSymbol = watchlist.active_symbol
   const sessionState = watchlist.session_state || 'idle'
+
+  const updateError = (nextError, nextNeedsLogin = false) => {
+    setError(nextError)
+    setErrorNeedsLogin(nextNeedsLogin)
+  }
+
+  const applyRequestError = (err, fallbackText) => {
+    updateError(err.message || fallbackText, isAuthRequiredError(err))
+  }
 
   const sortedWatchlist = useMemo(() => {
     return [...(watchlist.items || [])].sort((a, b) => Number(b.is_active) - Number(a.is_active))
@@ -64,14 +78,14 @@ export default function LiveTradingPage() {
 
   const runPolling = async () => {
     try {
-      setError('')
+      updateError('')
       const watchState = await loadWatchlist()
       await loadMarketOverview()
       if (watchState.active_symbol) {
         await loadSymbolPanels(watchState.active_symbol)
       }
     } catch (err) {
-      setError(err.message || '实时数据刷新失败')
+      applyRequestError(err, '实时数据刷新失败')
     }
   }
 
@@ -83,13 +97,13 @@ export default function LiveTradingPage() {
   useEffect(() => {
     const timer = setInterval(async () => {
       try {
-        setError('')
+        updateError('')
         await loadMarketOverview()
         if (activeSymbol) {
           await loadSymbolPanels(activeSymbol)
         }
       } catch (err) {
-        setError(err.message || '实时数据刷新失败')
+        applyRequestError(err, '实时数据刷新失败')
       }
     }, POLL_MS)
 
@@ -100,7 +114,7 @@ export default function LiveTradingPage() {
   const handleAddWatch = async (event) => {
     event.preventDefault()
     setSubmitting(true)
-    setError('')
+    updateError('')
     try {
       await requestJson('/api/live/watchlist', {
         method: 'POST',
@@ -113,14 +127,14 @@ export default function LiveTradingPage() {
         await loadSymbolPanels(nextWatchlist.active_symbol)
       }
     } catch (err) {
-      setError(err.message || '添加关注失败')
+      applyRequestError(err, '添加关注失败')
     } finally {
       setSubmitting(false)
     }
   }
 
   const handleActivate = async (symbol) => {
-    setError('')
+    updateError('')
     try {
       await requestJson(`/api/live/watchlist/${encodeURIComponent(symbol)}/activate`, {
         method: 'PATCH',
@@ -130,12 +144,12 @@ export default function LiveTradingPage() {
       await loadWatchlist()
       await loadSymbolPanels(symbol)
     } catch (err) {
-      setError(err.message || '切换激活标的失败')
+      applyRequestError(err, '切换激活标的失败')
     }
   }
 
   const handleDelete = async (symbol) => {
-    setError('')
+    updateError('')
     try {
       await requestJson(`/api/live/watchlist/${encodeURIComponent(symbol)}`, { method: 'DELETE' })
       const nextWatchlist = await loadWatchlist()
@@ -148,7 +162,7 @@ export default function LiveTradingPage() {
         await loadSymbolPanels(nextWatchlist.active_symbol)
       }
     } catch (err) {
-      setError(err.message || '删除关注失败')
+      applyRequestError(err, '删除关注失败')
     }
   }
 
@@ -233,7 +247,20 @@ export default function LiveTradingPage() {
             <MetricCard label="行情来源" value={formatSource(snapshotPayload?.snapshot?.source)} />
           </div>
 
-          {error && <div className="rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
+          {error ? (
+            <div className="rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              <div>{error}</div>
+              {errorNeedsLogin ? (
+                <button
+                  type="button"
+                  onClick={() => openAuthModal('login', '实盘交易相关操作需要登录后才能继续。')}
+                  className="mt-2 inline-flex rounded-lg border border-rose-300/40 px-2.5 py-1 text-xs text-rose-100 transition hover:bg-rose-500/15"
+                >
+                  去登录
+                </button>
+              ) : null}
+            </div>
+          ) : null}
 
           <section className="rounded-2xl border border-border bg-card p-5">
             <h3 className="text-base font-semibold text-white">港股大盘概览</h3>

@@ -17,10 +17,11 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) List(ctx context.Context) ([]WatchlistItem, error) {
+func (r *Repository) List(ctx context.Context, userID string) ([]WatchlistItem, error) {
 	var records []WatchlistRecord
 	if err := r.db.WithContext(ctx).
 		Model(&WatchlistRecord{}).
+		Where("user_id = ?", userID).
 		Order("is_active DESC").
 		Order("updated_at DESC").
 		Find(&records).Error; err != nil {
@@ -34,9 +35,10 @@ func (r *Repository) List(ctx context.Context) ([]WatchlistItem, error) {
 	return items, nil
 }
 
-func (r *Repository) Create(ctx context.Context, symbol, name string) (*WatchlistItem, error) {
+func (r *Repository) Create(ctx context.Context, userID, symbol, name string) (*WatchlistItem, error) {
 	now := time.Now().UTC()
 	record := WatchlistRecord{
+		UserID:    userID,
 		Symbol:    symbol,
 		Name:      name,
 		Exchange:  "HKEX",
@@ -54,8 +56,8 @@ func (r *Repository) Create(ctx context.Context, symbol, name string) (*Watchlis
 	return &item, nil
 }
 
-func (r *Repository) Delete(ctx context.Context, symbol string) error {
-	result := r.db.WithContext(ctx).Where("symbol = ?", symbol).Delete(&WatchlistRecord{})
+func (r *Repository) Delete(ctx context.Context, userID, symbol string) error {
+	result := r.db.WithContext(ctx).Where("user_id = ? AND symbol = ?", userID, symbol).Delete(&WatchlistRecord{})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -65,9 +67,9 @@ func (r *Repository) Delete(ctx context.Context, symbol string) error {
 	return nil
 }
 
-func (r *Repository) GetBySymbol(ctx context.Context, symbol string) (*WatchlistItem, error) {
+func (r *Repository) GetBySymbol(ctx context.Context, userID, symbol string) (*WatchlistItem, error) {
 	var record WatchlistRecord
-	if err := r.db.WithContext(ctx).First(&record, "symbol = ?", symbol).Error; err != nil {
+	if err := r.db.WithContext(ctx).First(&record, "user_id = ? AND symbol = ?", userID, symbol).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}
@@ -77,9 +79,9 @@ func (r *Repository) GetBySymbol(ctx context.Context, symbol string) (*Watchlist
 	return &item, nil
 }
 
-func (r *Repository) GetActive(ctx context.Context) (*WatchlistItem, error) {
+func (r *Repository) GetActive(ctx context.Context, userID string) (*WatchlistItem, error) {
 	var record WatchlistRecord
-	if err := r.db.WithContext(ctx).Where("is_active = ?", true).First(&record).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("user_id = ? AND is_active = ?", userID, true).First(&record).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
@@ -89,10 +91,10 @@ func (r *Repository) GetActive(ctx context.Context) (*WatchlistItem, error) {
 	return &item, nil
 }
 
-func (r *Repository) SetActiveSymbol(ctx context.Context, symbol string) (*WatchlistItem, error) {
+func (r *Repository) SetActiveSymbol(ctx context.Context, userID, symbol string) (*WatchlistItem, error) {
 	returnItem := &WatchlistItem{}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&WatchlistRecord{}).Where("symbol = ?", symbol).Updates(map[string]any{
+		result := tx.Model(&WatchlistRecord{}).Where("user_id = ? AND symbol = ?", userID, symbol).Updates(map[string]any{
 			"is_active":  true,
 			"updated_at": time.Now().UTC(),
 		})
@@ -103,12 +105,12 @@ func (r *Repository) SetActiveSymbol(ctx context.Context, symbol string) (*Watch
 			return ErrNotFound
 		}
 
-		if err := tx.Model(&WatchlistRecord{}).Where("symbol <> ?", symbol).Update("is_active", false).Error; err != nil {
+		if err := tx.Model(&WatchlistRecord{}).Where("user_id = ? AND symbol <> ?", userID, symbol).Update("is_active", false).Error; err != nil {
 			return err
 		}
 
 		var updated WatchlistRecord
-		if err := tx.First(&updated, "symbol = ?", symbol).Error; err != nil {
+		if err := tx.First(&updated, "user_id = ? AND symbol = ?", userID, symbol).Error; err != nil {
 			return err
 		}
 		item := toWatchlistItem(updated)

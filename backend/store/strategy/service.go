@@ -65,12 +65,13 @@ func NewService(repo *Repository) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) List(ctx context.Context, activeOnly bool) ([]*Strategy, error) {
-	return s.repo.List(ctx, activeOnly)
+func (s *Service) List(ctx context.Context, userID string, activeOnly bool, includeSystem bool) ([]*Strategy, error) {
+	return s.repo.List(ctx, userID, activeOnly, includeSystem)
 }
 
-func (s *Service) ListSummaries(ctx context.Context) ([]StrategySummary, error) {
-	items, err := s.repo.List(ctx, false)
+func (s *Service) ListSummaries(ctx context.Context, userID string) ([]StrategySummary, error) {
+	includeSystem := strings.TrimSpace(userID) != ""
+	items, err := s.repo.List(ctx, userID, false, includeSystem)
 	if err != nil {
 		return nil, err
 	}
@@ -106,23 +107,27 @@ func (s *Service) ImplementationKeys() []string {
 	return keys
 }
 
-func (s *Service) GetByID(ctx context.Context, strategyID string) (*Strategy, error) {
+func (s *Service) GetByID(ctx context.Context, userID string, strategyID string) (*Strategy, error) {
 	if strings.TrimSpace(strategyID) == "" {
 		return nil, ErrInvalid
 	}
-	return s.repo.GetByID(ctx, strategyID)
+	includeSystem := strings.TrimSpace(userID) != ""
+	return s.repo.GetByID(ctx, strategyID, userID, includeSystem)
 }
 
-func (s *Service) Create(ctx context.Context, payload StrategyPayload) (*Strategy, error) {
+func (s *Service) Create(ctx context.Context, userID string, payload StrategyPayload) (*Strategy, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, ErrForbidden
+	}
 	normalized, err := s.normalizePayload(payload, nil)
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.Create(ctx, normalized)
+	return s.repo.Create(ctx, userID, normalized)
 }
 
-func (s *Service) Update(ctx context.Context, strategyID string, payload StrategyPayload) (*Strategy, error) {
-	existing, err := s.repo.GetByID(ctx, strategyID)
+func (s *Service) Update(ctx context.Context, userID string, strategyID string, payload StrategyPayload) (*Strategy, error) {
+	existing, err := s.repo.GetByID(ctx, strategyID, userID, false)
 	if err != nil {
 		return nil, err
 	}
@@ -131,16 +136,16 @@ func (s *Service) Update(ctx context.Context, strategyID string, payload Strateg
 		return nil, err
 	}
 	normalized.ID = existing.ID
-	return s.repo.Update(ctx, existing.ID, normalized)
+	return s.repo.Update(ctx, existing.ID, userID, normalized)
 }
 
-func (s *Service) BuildRuntimeStrategy(ctx context.Context, strategyID string, strategyName string, overrideParams map[string]any) (*RuntimeStrategy, error) {
+func (s *Service) BuildRuntimeStrategy(ctx context.Context, userID string, strategyID string, strategyName string, overrideParams map[string]any) (*RuntimeStrategy, error) {
 	var selected *Strategy
 	var err error
 	if strategyID != "" {
-		selected, err = s.repo.GetByID(ctx, strategyID)
+		selected, err = s.repo.GetByID(ctx, strategyID, userID, strings.TrimSpace(userID) != "")
 	} else if strategyName != "" {
-		selected, err = s.findByNameOrAlias(ctx, strategyName)
+		selected, err = s.findByNameOrAlias(ctx, userID, strategyName)
 	} else {
 		return nil, fmt.Errorf("strategy_id or strategy_name is required")
 	}
@@ -170,7 +175,7 @@ func (s *Service) BuildRuntimeStrategy(ctx context.Context, strategyID string, s
 }
 
 func (s *Service) SeedFromFileIfEmpty(ctx context.Context, seedPath string) error {
-	count, err := s.repo.Count(ctx)
+	count, err := s.repo.CountSystem(ctx)
 	if err != nil {
 		return err
 	}
@@ -191,7 +196,7 @@ func (s *Service) SeedFromFileIfEmpty(ctx context.Context, seedPath string) erro
 		return fmt.Errorf("decode seed file failed: %w", err)
 	}
 	for _, item := range doc.Items {
-		if _, err := s.Create(ctx, item); err != nil {
+		if _, err := s.repo.Create(ctx, "", item); err != nil {
 			return fmt.Errorf("seed strategy %s failed: %w", item.ID, err)
 		}
 	}
@@ -266,12 +271,13 @@ func (s *Service) normalizePayload(payload StrategyPayload, existing *Strategy) 
 	return payload, nil
 }
 
-func (s *Service) findByNameOrAlias(ctx context.Context, strategyName string) (*Strategy, error) {
+func (s *Service) findByNameOrAlias(ctx context.Context, userID string, strategyName string) (*Strategy, error) {
 	strategyName = strings.TrimSpace(strategyName)
 	if strategyName == "" {
 		return nil, ErrInvalid
 	}
-	item, err := s.repo.GetByName(ctx, strategyName)
+	includeSystem := strings.TrimSpace(userID) != ""
+	item, err := s.repo.GetByName(ctx, strategyName, userID, includeSystem)
 	if err == nil {
 		return item, nil
 	}
@@ -279,7 +285,7 @@ func (s *Service) findByNameOrAlias(ctx context.Context, strategyName string) (*
 		return nil, err
 	}
 
-	items, listErr := s.repo.List(ctx, false)
+	items, listErr := s.repo.List(ctx, userID, false, includeSystem)
 	if listErr != nil {
 		return nil, listErr
 	}

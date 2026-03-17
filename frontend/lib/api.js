@@ -1,3 +1,5 @@
+import { getAccessToken } from './auth-storage'
+
 export async function readApiResponse(response) {
   const responseText = await response.text();
   if (!responseText) return null;
@@ -18,15 +20,42 @@ export async function readApiResponse(response) {
   }
 }
 
-export async function requestJson(input, init, fallbackMessage = '请求失败') {
-  const response = await fetch(input, init);
-  const data = await readApiResponse(response);
-
-  if (!response.ok) {
-    throw new Error(extractApiErrorMessage(data, fallbackMessage));
+export async function requestJson(input, init = {}, fallbackMessage = '请求失败') {
+  const headers = new Headers(init?.headers || {})
+  if (!headers.has('accept')) {
+    headers.set('Accept', 'application/json')
   }
 
-  return data;
+  const accessToken = getAccessToken()
+  if (accessToken && !headers.has('authorization')) {
+    headers.set('Authorization', `Bearer ${accessToken}`)
+  }
+
+  const response = await fetch(input, {
+    ...init,
+    headers,
+  })
+  const data = await readApiResponse(response)
+
+  if (!response.ok) {
+    throw buildApiError(response, data, fallbackMessage)
+  }
+
+  return data
+}
+
+function buildApiError(response, responseData, fallbackText) {
+  const error = new Error(extractApiErrorMessage(responseData, fallbackText))
+  error.status = response?.status || 0
+  error.code =
+    responseData &&
+    typeof responseData === 'object' &&
+    !Array.isArray(responseData) &&
+    typeof responseData.code === 'string'
+      ? responseData.code
+      : ''
+  error.responseData = responseData
+  return error
 }
 
 export function extractApiErrorMessage(responseData, fallbackText = '请求失败') {

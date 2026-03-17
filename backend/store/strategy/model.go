@@ -7,23 +7,24 @@ import (
 )
 
 type StrategyRecord struct {
-	ID                string    `gorm:"primaryKey;size:128"`
-	Key               string    `gorm:"size:128;not null;uniqueIndex"`
-	Name              string    `gorm:"size:255;not null"`
-	Description       string    `gorm:"type:text;not null"`
-	Category          string    `gorm:"size:64;not null"`
-	ImplementationKey string    `gorm:"size:128;not null;index"`
-	Status            string    `gorm:"size:32;not null;index"`
-	Version           int       `gorm:"not null;default:1"`
-	ParamSchemaJSON   string    `gorm:"type:text;not null"`
-	DefaultParamsJSON string    `gorm:"type:text;not null"`
-	RequiredIndicatorsJSON string `gorm:"type:text;not null"`
-	ChartOverlaysJSON string    `gorm:"type:text;not null"`
-	UISchemaJSON      string    `gorm:"type:text;not null"`
-	ExecutionOptionsJSON string `gorm:"type:text;not null"`
-	MetadataJSON      string    `gorm:"type:text;not null"`
-	CreatedAt         time.Time `gorm:"not null"`
-	UpdatedAt         time.Time `gorm:"not null"`
+	ID                    string    `gorm:"primaryKey;size:128"`
+	UserID                string    `gorm:"size:36;not null;default:'';index;uniqueIndex:idx_strategy_owner_key,priority:1"`
+	Key                   string    `gorm:"size:128;not null;uniqueIndex:idx_strategy_owner_key,priority:2"`
+	Name                  string    `gorm:"size:255;not null"`
+	Description           string    `gorm:"type:text;not null"`
+	Category              string    `gorm:"size:64;not null"`
+	ImplementationKey     string    `gorm:"size:128;not null;index"`
+	Status                string    `gorm:"size:32;not null;index"`
+	Version               int       `gorm:"not null;default:1"`
+	ParamSchemaJSON       string    `gorm:"type:text;not null"`
+	DefaultParamsJSON     string    `gorm:"type:text;not null"`
+	RequiredIndicatorsJSON string   `gorm:"type:text;not null"`
+	ChartOverlaysJSON     string    `gorm:"type:text;not null"`
+	UISchemaJSON          string    `gorm:"type:text;not null"`
+	ExecutionOptionsJSON  string    `gorm:"type:text;not null"`
+	MetadataJSON          string    `gorm:"type:text;not null"`
+	CreatedAt             time.Time `gorm:"not null"`
+	UpdatedAt             time.Time `gorm:"not null"`
 }
 
 func (StrategyRecord) TableName() string {
@@ -31,8 +32,9 @@ func (StrategyRecord) TableName() string {
 }
 
 type Strategy struct {
-	ID                string           `json:"id"`
-	Key               string           `json:"key"`
+	ID                string            `json:"id"`
+	UserID            string            `json:"user_id,omitempty"`
+	Key               string            `json:"key"`
 	Name              string           `json:"name"`
 	Description       string           `json:"description"`
 	Category          string           `json:"category"`
@@ -114,6 +116,7 @@ func (r StrategyRecord) toStrategy() (*Strategy, error) {
 
 	return &Strategy{
 		ID:                 r.ID,
+		UserID:             r.UserID,
 		Key:                r.Key,
 		Name:               r.Name,
 		Description:        r.Description,
@@ -133,7 +136,7 @@ func (r StrategyRecord) toStrategy() (*Strategy, error) {
 	}, nil
 }
 
-func buildRecord(payload StrategyPayload, createdAt, updatedAt time.Time) (StrategyRecord, error) {
+func buildRecord(userID string, payload StrategyPayload, createdAt, updatedAt time.Time) (StrategyRecord, error) {
 	paramSchemaJSON, err := marshalJSON(payload.ParamSchema, make([]ParamSchemaItem, 0))
 	if err != nil {
 		return StrategyRecord{}, fmt.Errorf("encode param_schema failed: %w", err)
@@ -165,6 +168,7 @@ func buildRecord(payload StrategyPayload, createdAt, updatedAt time.Time) (Strat
 
 	return StrategyRecord{
 		ID:                    payload.ID,
+		UserID:                userID,
 		Key:                   payload.Key,
 		Name:                  payload.Name,
 		Description:           payload.Description,

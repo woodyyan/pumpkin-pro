@@ -7,10 +7,11 @@ import (
 )
 
 type Config struct {
-	Port            string
-	QuantServiceURL string
-	DB              DBConfig
+	Port             string
+	QuantServiceURL  string
+	DB               DBConfig
 	StrategySeedPath string
+	Auth             AuthConfig
 }
 
 type DBConfig struct {
@@ -22,6 +23,12 @@ type DBConfig struct {
 	Password string
 	Name     string
 	SSLMode  string
+}
+
+type AuthConfig struct {
+	JWTSecret             string
+	AccessTokenTTLMinutes int
+	RefreshTokenTTLHours  int
 }
 
 func Load() Config {
@@ -38,6 +45,11 @@ func Load() Config {
 			Password: getEnv("DB_PASSWORD", "postgres"),
 			Name:     getEnv("DB_NAME", "pumpkin_pro"),
 			SSLMode:  getEnv("DB_SSLMODE", "disable"),
+		},
+		Auth: AuthConfig{
+			JWTSecret:             getEnv("AUTH_JWT_SECRET", "dev-only-change-me"),
+			AccessTokenTTLMinutes: getEnvAsInt("AUTH_ACCESS_TOKEN_TTL_MINUTES", 120),
+			RefreshTokenTTLHours:  getEnvAsInt("AUTH_REFRESH_TOKEN_TTL_HOURS", 168),
 		},
 	}
 }

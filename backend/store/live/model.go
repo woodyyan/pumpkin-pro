@@ -3,6 +3,7 @@ package live
 import "time"
 
 type WatchlistRecord struct {
+	UserID    string    `gorm:"primaryKey;size:36"`
 	Symbol    string    `gorm:"primaryKey;size:16"`
 	Name      string    `gorm:"size:128;not null;default:''"`
 	Exchange  string    `gorm:"size:16;not null;default:'HKEX'"`

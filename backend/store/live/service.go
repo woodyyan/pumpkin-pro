@@ -26,7 +26,11 @@ type Service struct {
 	marketClient    *MarketClient
 	warmupMinSample int
 
-	mu           sync.Mutex
+	mu     sync.Mutex
+	states map[string]*userLiveState
+}
+
+type userLiveState struct {
 	sessionState SessionState
 	activeSymbol string
 	runtimes     map[string]*symbolRuntime
@@ -58,19 +62,19 @@ func NewService(repo *Repository) *Service {
 		repo:            repo,
 		marketClient:    NewMarketClient(),
 		warmupMinSample: 20,
-		sessionState:    SessionIdle,
-		runtimes:        map[string]*symbolRuntime{},
+		states:          map[string]*userLiveState{},
 	}
 }
 
-func (s *Service) ListWatchlist(ctx context.Context) (*WatchlistState, error) {
-	items, err := s.repo.List(ctx)
+func (s *Service) ListWatchlist(ctx context.Context, userID string) (*WatchlistState, error) {
+	items, err := s.repo.List(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	state := s.ensureUserState(userID)
 
 	active := ""
 	for _, item := range items {
@@ -80,26 +84,26 @@ func (s *Service) ListWatchlist(ctx context.Context) (*WatchlistState, error) {
 		}
 	}
 	if active != "" {
-		s.activeSymbol = active
-		if _, ok := s.runtimes[active]; !ok {
-			s.runtimes[active] = &symbolRuntime{}
+		state.activeSymbol = active
+		if _, ok := state.runtimes[active]; !ok {
+			state.runtimes[active] = &symbolRuntime{}
 		}
-		if s.sessionState == SessionIdle || s.sessionState == SessionStopped {
-			s.sessionState = SessionWarming
+		if state.sessionState == SessionIdle || state.sessionState == SessionStopped {
+			state.sessionState = SessionWarming
 		}
 	} else {
-		s.activeSymbol = ""
-		s.sessionState = SessionIdle
+		state.activeSymbol = ""
+		state.sessionState = SessionIdle
 	}
 
 	return &WatchlistState{
-		SessionState: s.sessionState,
-		ActiveSymbol: s.activeSymbol,
+		SessionState: state.sessionState,
+		ActiveSymbol: state.activeSymbol,
 		Items:        items,
 	}, nil
 }
 
-func (s *Service) AddWatchlist(ctx context.Context, symbol, name string) (*WatchlistItem, error) {
+func (s *Service) AddWatchlist(ctx context.Context, userID, symbol, name string) (*WatchlistItem, error) {
 	normalized, err := normalizeHKSymbol(symbol)
 	if err != nil {
 		return nil, err
@@ -108,84 +112,87 @@ func (s *Service) AddWatchlist(ctx context.Context, symbol, name string) (*Watch
 	if cleanName == "" {
 		cleanName = normalized
 	}
-	item, err := s.repo.Create(ctx, normalized, cleanName)
+	item, err := s.repo.Create(ctx, userID, normalized, cleanName)
 	if err != nil {
 		return nil, err
 	}
 
 	s.mu.Lock()
-	if _, ok := s.runtimes[normalized]; !ok {
-		s.runtimes[normalized] = &symbolRuntime{}
+	state := s.ensureUserState(userID)
+	if _, ok := state.runtimes[normalized]; !ok {
+		state.runtimes[normalized] = &symbolRuntime{}
 	}
-	if s.activeSymbol == "" {
-		s.activeSymbol = normalized
-		s.sessionState = SessionWarming
+	if state.activeSymbol == "" {
+		state.activeSymbol = normalized
+		state.sessionState = SessionWarming
 		item.IsActive = true
-		_, _ = s.repo.SetActiveSymbol(ctx, normalized)
+		_, _ = s.repo.SetActiveSymbol(ctx, userID, normalized)
 	}
 	s.mu.Unlock()
 
 	return item, nil
 }
 
-func (s *Service) DeleteWatchlist(ctx context.Context, symbol string) error {
+func (s *Service) DeleteWatchlist(ctx context.Context, userID, symbol string) error {
 	normalized, err := normalizeHKSymbol(symbol)
 	if err != nil {
 		return err
 	}
 
-	item, err := s.repo.GetBySymbol(ctx, normalized)
+	item, err := s.repo.GetBySymbol(ctx, userID, normalized)
 	if err != nil {
 		return err
 	}
 
-	if err := s.repo.Delete(ctx, normalized); err != nil {
+	if err := s.repo.Delete(ctx, userID, normalized); err != nil {
 		return err
 	}
 
 	s.mu.Lock()
-	delete(s.runtimes, normalized)
+	state := s.ensureUserState(userID)
+	delete(state.runtimes, normalized)
 	if item.IsActive {
-		items, listErr := s.repo.List(ctx)
+		items, listErr := s.repo.List(ctx, userID)
 		if listErr == nil && len(items) > 0 {
 			nextSymbol := items[0].Symbol
-			if _, setErr := s.repo.SetActiveSymbol(ctx, nextSymbol); setErr == nil {
-				s.activeSymbol = nextSymbol
-				s.sessionState = SessionWarming
+			if _, setErr := s.repo.SetActiveSymbol(ctx, userID, nextSymbol); setErr == nil {
+				state.activeSymbol = nextSymbol
+				state.sessionState = SessionWarming
 			}
 		} else {
-			s.activeSymbol = ""
-			s.sessionState = SessionIdle
+			state.activeSymbol = ""
+			state.sessionState = SessionIdle
 		}
 	}
 	s.mu.Unlock()
 	return nil
 }
 
-func (s *Service) ActivateSymbol(ctx context.Context, symbol string, resetWindow bool) (*ActivateResult, error) {
+func (s *Service) ActivateSymbol(ctx context.Context, userID, symbol string, resetWindow bool) (*ActivateResult, error) {
 	normalized, err := normalizeHKSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.repo.SetActiveSymbol(ctx, normalized); err != nil {
+	if _, err := s.repo.SetActiveSymbol(ctx, userID, normalized); err != nil {
 		return nil, err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	previous := s.activeSymbol
-	s.activeSymbol = normalized
-	s.sessionState = SessionWarming
+	state := s.ensureUserState(userID)
+	previous := state.activeSymbol
+	state.activeSymbol = normalized
+	state.sessionState = SessionWarming
 	if resetWindow {
-		s.runtimes[normalized] = &symbolRuntime{}
-	} else if _, ok := s.runtimes[normalized]; !ok {
-		s.runtimes[normalized] = &symbolRuntime{}
+		state.runtimes[normalized] = &symbolRuntime{}
+	} else if _, ok := state.runtimes[normalized]; !ok {
+		state.runtimes[normalized] = &symbolRuntime{}
 	}
 
 	return &ActivateResult{
 		PreviousSymbol:  previous,
 		ActiveSymbol:    normalized,
-		SessionState:    s.sessionState,
+		SessionState:    state.sessionState,
 		WarmupMinSample: s.warmupMinSample,
 	}, nil
 }
@@ -193,13 +200,12 @@ func (s *Service) ActivateSymbol(ctx context.Context, symbol string, resetWindow
 func (s *Service) GetMarketOverview(ctx context.Context) (*MarketOverview, error) {
 	overview, err := s.marketClient.FetchMarketOverview(ctx)
 	if err != nil {
-		s.setDegradedIfRunning()
 		return nil, err
 	}
 	return overview, nil
 }
 
-func (s *Service) GetSymbolSnapshot(ctx context.Context, symbol string) (*SymbolSnapshot, bool, SessionState, error) {
+func (s *Service) GetSymbolSnapshot(ctx context.Context, userID, symbol string) (*SymbolSnapshot, bool, SessionState, error) {
 	normalized, err := normalizeHKSymbol(symbol)
 	if err != nil {
 		return nil, false, SessionIdle, err
@@ -207,27 +213,28 @@ func (s *Service) GetSymbolSnapshot(ctx context.Context, symbol string) (*Symbol
 
 	snapshot, err := s.marketClient.FetchSymbolSnapshot(ctx, normalized)
 	if err != nil {
-		s.setDegradedIfRunning()
+		s.setDegradedIfRunning(userID)
 		return nil, false, SessionDegraded, err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	state := s.ensureUserState(userID)
 
-	rt := s.ensureRuntime(normalized)
+	rt := s.ensureRuntime(state, normalized)
 	s.processRuntimeUpdate(rt, snapshot, nil)
-	isActive := normalized == s.activeSymbol
+	isActive := normalized == state.activeSymbol
 	if isActive {
 		if len(rt.PriceSamples) >= s.warmupMinSample {
-			s.sessionState = SessionRunning
+			state.sessionState = SessionRunning
 		} else {
-			s.sessionState = SessionWarming
+			state.sessionState = SessionWarming
 		}
 	}
-	return snapshot, isActive, s.sessionState, nil
+	return snapshot, isActive, state.sessionState, nil
 }
 
-func (s *Service) GetOverlay(ctx context.Context, symbol string, windowMinutes int, benchmark string) (*OverlayPayload, error) {
+func (s *Service) GetOverlay(ctx context.Context, userID, symbol string, windowMinutes int, benchmark string) (*OverlayPayload, error) {
 	normalizedSymbol, err := normalizeHKSymbol(symbol)
 	if err != nil {
 		return nil, err
@@ -242,20 +249,21 @@ func (s *Service) GetOverlay(ctx context.Context, symbol string, windowMinutes i
 
 	symbolSnapshot, benchmarkSnapshot, err := s.marketClient.FetchOverlaySnapshot(ctx, normalizedSymbol, normalizedBenchmark)
 	if err != nil {
-		s.setDegradedIfRunning()
+		s.setDegradedIfRunning(userID)
 		return nil, err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	state := s.ensureUserState(userID)
 
-	rt := s.ensureRuntime(normalizedSymbol)
+	rt := s.ensureRuntime(state, normalizedSymbol)
 	s.processRuntimeUpdate(rt, symbolSnapshot, benchmarkSnapshot)
-	if normalizedSymbol == s.activeSymbol {
+	if normalizedSymbol == state.activeSymbol {
 		if len(rt.PriceSamples) >= s.warmupMinSample {
-			s.sessionState = SessionRunning
+			state.sessionState = SessionRunning
 		} else {
-			s.sessionState = SessionWarming
+			state.sessionState = SessionWarming
 		}
 	}
 
@@ -271,19 +279,19 @@ func (s *Service) GetOverlay(ctx context.Context, symbol string, windowMinutes i
 		Symbol:        normalizedSymbol,
 		Benchmark:     normalizedBenchmark,
 		WindowMinutes: windowMinutes,
-		SessionState:  s.sessionState,
+		SessionState:  state.sessionState,
 		Series:        series,
 		Metrics:       metrics,
 		UpdatedAt:     updatedAt,
 	}, nil
 }
 
-func (s *Service) ListPriceVolumeAnomalies(ctx context.Context, symbol string, since time.Time, limit int, types []string) ([]PriceVolumeAnomaly, SessionState, error) {
+func (s *Service) ListPriceVolumeAnomalies(ctx context.Context, userID, symbol string, since time.Time, limit int, types []string) ([]PriceVolumeAnomaly, SessionState, error) {
 	normalized, err := normalizeHKSymbol(symbol)
 	if err != nil {
 		return nil, SessionIdle, err
 	}
-	if _, _, _, err := s.GetSymbolSnapshot(ctx, normalized); err != nil {
+	if _, _, _, err := s.GetSymbolSnapshot(ctx, userID, normalized); err != nil {
 		return nil, SessionDegraded, err
 	}
 
@@ -297,7 +305,8 @@ func (s *Service) ListPriceVolumeAnomalies(ctx context.Context, symbol string, s
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rt := s.ensureRuntime(normalized)
+	state := s.ensureUserState(userID)
+	rt := s.ensureRuntime(state, normalized)
 	items := make([]PriceVolumeAnomaly, 0, len(rt.PriceVolumeEvents))
 	for _, event := range rt.PriceVolumeEvents {
 		t, err := time.Parse(time.RFC3339, event.DetectedAt)
@@ -320,21 +329,22 @@ func (s *Service) ListPriceVolumeAnomalies(ctx context.Context, symbol string, s
 	if len(items) > limit {
 		items = items[:limit]
 	}
-	return items, s.sessionState, nil
+	return items, state.sessionState, nil
 }
 
-func (s *Service) ListBlockFlowAnomalies(ctx context.Context, symbol string, since time.Time, limit int) ([]BlockFlowAnomaly, SessionState, error) {
+func (s *Service) ListBlockFlowAnomalies(ctx context.Context, userID, symbol string, since time.Time, limit int) ([]BlockFlowAnomaly, SessionState, error) {
 	normalized, err := normalizeHKSymbol(symbol)
 	if err != nil {
 		return nil, SessionIdle, err
 	}
-	if _, _, _, err := s.GetSymbolSnapshot(ctx, normalized); err != nil {
+	if _, _, _, err := s.GetSymbolSnapshot(ctx, userID, normalized); err != nil {
 		return nil, SessionDegraded, err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rt := s.ensureRuntime(normalized)
+	state := s.ensureUserState(userID)
+	rt := s.ensureRuntime(state, normalized)
 	items := make([]BlockFlowAnomaly, 0, len(rt.BlockFlowEvents))
 	for _, event := range rt.BlockFlowEvents {
 		t, err := time.Parse(time.RFC3339, event.DetectedAt)
@@ -352,14 +362,26 @@ func (s *Service) ListBlockFlowAnomalies(ctx context.Context, symbol string, sin
 	if len(items) > limit {
 		items = items[:limit]
 	}
-	return items, s.sessionState, nil
+	return items, state.sessionState, nil
 }
 
-func (s *Service) ensureRuntime(symbol string) *symbolRuntime {
-	rt, ok := s.runtimes[symbol]
+func (s *Service) ensureUserState(userID string) *userLiveState {
+	state, ok := s.states[userID]
+	if !ok {
+		state = &userLiveState{
+			sessionState: SessionIdle,
+			runtimes:     map[string]*symbolRuntime{},
+		}
+		s.states[userID] = state
+	}
+	return state
+}
+
+func (s *Service) ensureRuntime(state *userLiveState, symbol string) *symbolRuntime {
+	rt, ok := state.runtimes[symbol]
 	if !ok {
 		rt = &symbolRuntime{}
-		s.runtimes[symbol] = rt
+		state.runtimes[symbol] = rt
 	}
 	return rt
 }
@@ -556,11 +578,12 @@ func detectBlockFlowAnomalies(symbol string, netInflow float64, turnoverDelta fl
 	return []BlockFlowAnomaly{event}
 }
 
-func (s *Service) setDegradedIfRunning() {
+func (s *Service) setDegradedIfRunning(userID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.sessionState == SessionRunning || s.sessionState == SessionWarming {
-		s.sessionState = SessionDegraded
+	state := s.ensureUserState(userID)
+	if state.sessionState == SessionRunning || state.sessionState == SessionWarming {
+		state.sessionState = SessionDegraded
 	}
 }
 

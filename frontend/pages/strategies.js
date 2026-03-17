@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { requestJson } from '../lib/api';
+import { useAuth } from '../lib/auth-context';
+import { isAuthRequiredError } from '../lib/auth-storage';
 import {
   getInputAttributes,
   validateStrategyParams,
@@ -22,6 +24,7 @@ const STATUS_OPTIONS = [
 ];
 
 export default function StrategyLibraryPage() {
+  const { openAuthModal } = useAuth();
   const [strategies, setStrategies] = useState([]);
   const [selectedId, setSelectedId] = useState('');
   const [selectedDetail, setSelectedDetail] = useState(null);
@@ -34,7 +37,17 @@ export default function StrategyLibraryPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [errorNeedsLogin, setErrorNeedsLogin] = useState(false);
   const [success, setSuccess] = useState('');
+
+  const updateError = (nextError, nextNeedsLogin = false) => {
+    setError(nextError);
+    setErrorNeedsLogin(nextNeedsLogin);
+  };
+
+  const applyRequestError = (err, fallbackText) => {
+    updateError(err.message || fallbackText, isAuthRequiredError(err));
+  };
 
   const activePreset = useMemo(() => {
     if (mode === 'create' || mode === 'edit') {
@@ -71,7 +84,7 @@ export default function StrategyLibraryPage() {
 
   const loadStrategies = async (preferredId) => {
     setLoadingList(true);
-    setError('');
+    updateError('');
     try {
       const items = await fetchStrategyCollection();
       const nextId = preferredId || selectedId || items[0]?.id || '';
@@ -81,7 +94,7 @@ export default function StrategyLibraryPage() {
         resetWorkspace();
       }
     } catch (err) {
-      setError(err.message || '加载策略列表失败');
+      applyRequestError(err, '加载策略列表失败');
     } finally {
       setLoadingList(false);
     }
@@ -90,7 +103,7 @@ export default function StrategyLibraryPage() {
   const loadStrategyDetail = async (strategyId) => {
     if (!strategyId) return;
     setLoadingDetail(true);
-    setError('');
+    updateError('');
     try {
       const data = await requestJson(`/api/strategies/${strategyId}`, undefined, '加载策略详情失败');
       const nextDetail = data?.item || null;
@@ -102,7 +115,7 @@ export default function StrategyLibraryPage() {
       setDraftOrigin(nextDraft);
       setCreateMenuOpen(false);
     } catch (err) {
-      setError(err.message || '加载策略详情失败');
+      applyRequestError(err, '加载策略详情失败');
     } finally {
       setLoadingDetail(false);
     }
@@ -118,7 +131,7 @@ export default function StrategyLibraryPage() {
   };
 
   const requestWorkspaceAction = async (action) => {
-    setError('');
+    updateError('');
     setSuccess('');
     setCreateMenuOpen(false);
     if (shouldConfirmBeforeAction(action, { isDirty, mode, selectedId })) {
@@ -155,7 +168,7 @@ export default function StrategyLibraryPage() {
     if (!selectedDetail) return;
     const nextDraft = buildDraftFromStrategy(selectedDetail);
     setSuccess('');
-    setError('');
+    updateError('');
     setMode('edit');
     setDraft(nextDraft);
     setDraftOrigin(nextDraft);
@@ -163,7 +176,7 @@ export default function StrategyLibraryPage() {
 
   const cancelEditing = () => {
     setPendingAction(null);
-    setError('');
+    updateError('');
     setSuccess('');
     setCreateMenuOpen(false);
     if (selectedDetail) {
@@ -197,12 +210,12 @@ export default function StrategyLibraryPage() {
     const definition = buildPresetDefinition(preset);
     const validationError = validateDraft(draft, definition, preset);
     if (validationError) {
-      setError(validationError);
+      updateError(validationError);
       return false;
     }
 
     setSaving(true);
-    setError('');
+    updateError('');
     setSuccess('');
     try {
       const payload = buildPayloadFromDraft(draft);
@@ -236,7 +249,7 @@ export default function StrategyLibraryPage() {
       setSuccess(isCreating ? '策略已创建。' : '策略已更新。');
       return true;
     } catch (err) {
-      setError(err.message || '保存策略失败');
+      applyRequestError(err, '保存策略失败');
       return false;
     } finally {
       setSaving(false);
@@ -471,7 +484,13 @@ export default function StrategyLibraryPage() {
               </>
             )}
 
-            {error ? <ErrorBanner text={error} /> : null}
+            {error ? (
+              <ErrorBanner
+                text={error}
+                showLoginAction={errorNeedsLogin}
+                onLogin={() => openAuthModal('login', '策略创建与编辑需要登录后使用。')}
+              />
+            ) : null}
             {success ? <SuccessBanner text={success} /> : null}
           </div>
         </section>
@@ -684,8 +703,21 @@ function MiniStat({ label, value }) {
   );
 }
 
-function ErrorBanner({ text }) {
-  return <div className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-red-200">{text}</div>;
+function ErrorBanner({ text, showLoginAction = false, onLogin }) {
+  return (
+    <div className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-red-200">
+      <div>{text}</div>
+      {showLoginAction ? (
+        <button
+          type="button"
+          onClick={onLogin}
+          className="mt-2 inline-flex rounded-lg border border-rose-300/40 px-2.5 py-1 text-xs text-rose-100 transition hover:bg-rose-500/15"
+        >
+          去登录
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 function SuccessBanner({ text }) {

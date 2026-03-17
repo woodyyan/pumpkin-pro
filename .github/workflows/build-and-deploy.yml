@@ -71,6 +71,10 @@ jobs:
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["https://mirror.ccs.tencentyun.com"]
 
       - name: Resolve image variables
         id: resolve_images
@@ -103,6 +107,8 @@ jobs:
         run: |
           docker buildx build \
             --platform "${{ steps.resolve_images.outputs.image_platform }}" \
+            --cache-from "type=registry,ref=${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-backend:buildcache" \
+            --cache-to "type=registry,ref=${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-backend:buildcache,mode=max" \
             -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-backend:${{ steps.resolve_images.outputs.image_tag }}" \
             -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-backend:latest" \
             --push ./backend
@@ -111,6 +117,8 @@ jobs:
         run: |
           docker buildx build \
             --platform "${{ steps.resolve_images.outputs.image_platform }}" \
+            --cache-from "type=registry,ref=${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-frontend:buildcache" \
+            --cache-to "type=registry,ref=${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-frontend:buildcache,mode=max" \
             -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-frontend:${{ steps.resolve_images.outputs.image_tag }}" \
             -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-frontend:latest" \
             --push ./frontend
@@ -119,6 +127,8 @@ jobs:
         run: |
           docker buildx build \
             --platform "${{ steps.resolve_images.outputs.image_platform }}" \
+            --cache-from "type=registry,ref=${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-quant:buildcache" \
+            --cache-to "type=registry,ref=${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-quant:buildcache,mode=max" \
             -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-quant:${{ steps.resolve_images.outputs.image_tag }}" \
             -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-quant:latest" \
             --push ./quant

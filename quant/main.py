@@ -10,6 +10,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from config import EXECUTION_PRICE
 from data.data_loader import DataLoader, generate_sample_data
 from data.scripts.akshare_loader import fetch_stock_data, resolve_stock_name_with_debug
 from engine.backtest_engine import BacktestEngine
@@ -198,7 +199,8 @@ def run_backtest_api(req: BacktestRequest):
             raise HTTPException(status_code=400, detail="可用行情数据为空，无法回测")
 
         results_df, trades_df, enriched_df = execute_backtest(raw_data, resolved_strategy, req.capital, req.fee_pct)
-        metrics = calculate_metrics(results_df, trades_df, req.capital)
+        buy_and_hold_curve = build_buy_and_hold_curve(results_df, req.capital, req.fee_pct)
+        metrics = calculate_metrics(results_df, trades_df, req.capital, buy_and_hold_curve)
         signal_summary = build_signal_summary(enriched_df)
 
         response = {
@@ -213,6 +215,7 @@ def run_backtest_api(req: BacktestRequest):
             "kline_data": df_to_json_safe(build_visual_dataset(results_df, resolved_strategy)),
             "analysis": {
                 "equity_curve": df_to_json_safe(build_equity_curve(results_df)),
+                "buy_and_hold_curve": df_to_json_safe(buy_and_hold_curve),
                 "drawdown_curve": df_to_json_safe(build_drawdown_curve(results_df)),
                 "monthly_returns": monthly_returns_to_json(build_monthly_returns(results_df)),
             },
@@ -379,14 +382,97 @@ def execute_backtest(
     return results_df, trades_df, data_with_signals
 
 
-def calculate_metrics(results_df: pd.DataFrame, trades_df: pd.DataFrame, capital: float) -> Dict:
+def calculate_metrics(
+    results_df: pd.DataFrame,
+    trades_df: pd.DataFrame,
+    capital: float,
+    buy_and_hold_curve: Optional[pd.DataFrame] = None,
+) -> Dict:
     metrics_calc = PerformanceMetrics(
         portfolio_values=results_df["portfolio_value"].tolist(),
         daily_returns=results_df["daily_return"].tolist(),
         trades=trades_df.to_dict("records"),
         initial_capital=capital,
     )
-    return dict_to_json_safe(metrics_calc.calculate_all_metrics())
+    metrics = metrics_calc.calculate_all_metrics()
+
+    if buy_and_hold_curve is not None and not buy_and_hold_curve.empty:
+        buy_and_hold_final_capital = float(buy_and_hold_curve["portfolio_value"].iloc[-1])
+        buy_and_hold_return_pct = (buy_and_hold_final_capital - capital) / capital * 100 if capital else 0.0
+        buy_and_hold_max_drawdown_pct = calculate_max_drawdown_pct(buy_and_hold_curve["portfolio_value"])
+
+        metrics["buy_and_hold_final_capital"] = buy_and_hold_final_capital
+        metrics["buy_and_hold_return_pct"] = buy_and_hold_return_pct
+        metrics["buy_and_hold_max_drawdown_pct"] = buy_and_hold_max_drawdown_pct
+        metrics["excess_return_pct"] = metrics.get("total_return_pct", 0.0) - buy_and_hold_return_pct
+
+    return dict_to_json_safe(metrics)
+
+
+def build_buy_and_hold_curve(results_df: pd.DataFrame, capital: float, fee_pct: float) -> pd.DataFrame:
+    required_columns = {"date", "close"}
+    if results_df.empty or not required_columns.issubset(set(results_df.columns)):
+        return pd.DataFrame(columns=["date", "portfolio_value", "cumulative_return"])
+
+    buy_index = 0
+    buy_price_column = "close"
+    if EXECUTION_PRICE == "next_open" and "open" in results_df.columns and len(results_df) > 1:
+        buy_index = 1
+        buy_price_column = "open"
+
+    buy_price = float(results_df.iloc[buy_index][buy_price_column]) if len(results_df) > buy_index else 0.0
+    buy_and_hold_shares = 0
+    buy_and_hold_cash = capital
+
+    if buy_price > 0 and capital > 0:
+        estimated_fee = capital * fee_pct
+        investable_cash = capital - estimated_fee
+        buy_and_hold_shares = int(investable_cash / buy_price)
+
+        if buy_and_hold_shares > 0:
+            buy_amount = buy_and_hold_shares * buy_price
+            buy_fee = buy_amount * fee_pct
+            buy_and_hold_cash = capital - buy_amount - buy_fee
+
+    close_series = pd.to_numeric(results_df["close"], errors="coerce")
+    curve_rows: List[Dict[str, Any]] = []
+    last_valid_close = buy_price if buy_price > 0 else None
+
+    for position, (_, row) in enumerate(results_df.iterrows()):
+        close_price = close_series.iloc[position]
+        if pd.notna(close_price):
+            last_valid_close = float(close_price)
+
+        if position < buy_index or buy_and_hold_shares <= 0:
+            portfolio_value = capital
+        else:
+            reference_price = last_valid_close if last_valid_close is not None else 0.0
+            portfolio_value = buy_and_hold_cash + buy_and_hold_shares * reference_price
+
+        cumulative_return = (portfolio_value / capital - 1.0) if capital else 0.0
+        curve_rows.append(
+            {
+                "date": row["date"],
+                "portfolio_value": portfolio_value,
+                "cumulative_return": cumulative_return,
+            }
+        )
+
+    return pd.DataFrame(curve_rows)
+
+
+def calculate_max_drawdown_pct(values: pd.Series) -> float:
+    if values is None:
+        return 0.0
+
+    series = pd.Series(values).replace([np.inf, -np.inf], np.nan).dropna()
+    if series.empty:
+        return 0.0
+
+    rolling_max = series.cummax()
+    drawdown_series = (series - rolling_max) / rolling_max * 100
+    drawdown_min = drawdown_series.min()
+    return abs(float(drawdown_min)) if drawdown_min < 0 else 0.0
 
 
 def build_data_summary(

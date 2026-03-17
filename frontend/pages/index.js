@@ -60,6 +60,8 @@ export default function BacktestPage() {
 
     return [
       { title: '总收益率', value: result.metrics.total_return_pct, type: 'percent' },
+      { title: '买入并持有收益', value: result.metrics.buy_and_hold_return_pct, type: 'percent' },
+      { title: '超额收益（策略-买入持有）', value: result.metrics.excess_return_pct, type: 'percent' },
       { title: '年化收益率', value: result.metrics.annual_return_pct, type: 'percent' },
       { title: '最大回撤', value: -Math.abs(result.metrics.max_drawdown_pct || 0), type: 'percent' },
       { title: '夏普比率', value: result.metrics.sharpe_ratio, type: 'number' },
@@ -196,18 +198,33 @@ export default function BacktestPage() {
 
       if (equityChartContainerRef.current && result.analysis?.equity_curve?.length) {
         const equityChart = createChart(equityChartContainerRef.current, buildChartOptions(equityChartContainerRef.current.clientWidth, 240, ColorType));
-        const equitySeries = equityChart.addAreaSeries({
+        const strategyEquitySeries = equityChart.addAreaSeries({
           lineColor: '#e67e22',
           topColor: 'rgba(230, 126, 34, 0.35)',
           bottomColor: 'rgba(230, 126, 34, 0.03)',
           lineWidth: 2,
         });
-        equitySeries.setData(
+        strategyEquitySeries.setData(
           result.analysis.equity_curve.map((item) => ({
             time: item.date,
             value: item.portfolio_value,
           })),
         );
+
+        if (result.analysis?.buy_and_hold_curve?.length) {
+          const buyHoldSeries = equityChart.addLineSeries({
+            color: '#38bdf8',
+            lineWidth: 2,
+            title: '买入并持有',
+          });
+          buyHoldSeries.setData(
+            result.analysis.buy_and_hold_curve.map((item) => ({
+              time: item.date,
+              value: item.portfolio_value,
+            })),
+          );
+        }
+
         equityChart.timeScale().fitContent();
         equityChartRef.current = equityChart;
         registerResize(equityChart, equityChartContainerRef.current);
@@ -553,8 +570,16 @@ export default function BacktestPage() {
           </SectionCard>
 
           <section className="grid gap-6 xl:grid-cols-2">
-            <SectionCard title="资产曲线" description="观察组合权益随时间变化。">
+            <SectionCard title="资产曲线" description="橙色为策略收益曲线，蓝色为买入并持有（全仓不动）基准。">
               <div ref={equityChartContainerRef} className="h-[240px] w-full" />
+              <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/55">
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#e67e22]" />策略收益
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#38bdf8]" />买入并持有
+                </span>
+              </div>
             </SectionCard>
             <SectionCard title={rsiKey ? 'RSI 指标' : '回撤曲线'} description={rsiKey ? 'RSI 策略下展示区间强弱指标。' : '观察回测期间的净值回撤过程。'}>
               <div ref={auxChartContainerRef} className="h-[240px] w-full" />
@@ -567,6 +592,8 @@ export default function BacktestPage() {
                 <StatRow label="回测标的" value={result.data_summary?.ticker_display || result.data_summary?.ticker || '示例/CSV'} />
                 <StatRow label="股票名称" value={result.data_summary?.ticker_name || (result.data_source === 'online' ? '未识别' : '不适用')} />
                 <StatRow label="交易日数量" value={`${result.data_summary?.total_records || 0} 天`} />
+                <StatRow label="买入并持有收益" value={formatPercent(result.metrics?.buy_and_hold_return_pct)} />
+                <StatRow label="超额收益（策略-买入并持有）" value={formatPercent(result.metrics?.excess_return_pct)} />
                 <StatRow label="日收益胜率" value={formatPercent(result.metrics?.daily_win_rate_pct)} />
                 <StatRow label="波动率" value={formatPercent(result.metrics?.volatility_pct)} />
                 <StatRow label="最佳单日" value={formatPercent(result.metrics?.best_day_pct)} />

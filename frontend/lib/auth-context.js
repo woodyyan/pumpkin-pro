@@ -155,6 +155,18 @@ export function useAuth() {
   return value
 }
 
+const AUTH_DIALOG_THEME = {
+  overlay: 'bg-black/70 backdrop-blur-[2px]',
+  panel: 'w-full max-w-[25.5rem] rounded-[1.75rem] bg-[#121317]/95 p-6 shadow-[0_22px_68px_rgba(0,0,0,0.56)] ring-1 ring-primary/25 sm:min-w-[25.5rem]',
+  closeBtn: 'bg-[#1f232d] text-slate-300 hover:bg-[#2a303c] hover:text-white',
+  hintCard: 'rounded-2xl bg-[#1a1d25] px-4 py-3 text-sm leading-6 text-slate-200',
+  modeWrap: 'mb-6 grid grid-cols-2 gap-2 rounded-2xl bg-[#1a1d25] p-1',
+  modeActive: 'bg-primary text-black font-semibold',
+  modeIdle: 'text-slate-300 hover:bg-white/5 hover:text-white',
+  input: 'w-full rounded-2xl border border-[#303543] bg-[#191d27] px-4 py-2.5 text-sm text-white outline-none transition focus:border-primary focus:bg-[#202633]',
+  submit: 'w-full rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-black transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-65',
+}
+
 function AuthDialog({
   open,
   mode,
@@ -210,77 +222,89 @@ function AuthDialog({
     }
   }
 
+  const theme = AUTH_DIALOG_THEME
+
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
+    <div className={`fixed inset-0 z-[80] flex items-center justify-center px-4 py-8 ${theme.overlay}`}>
+      <div className={theme.panel}>
         <div className="mb-5 flex items-start justify-between gap-4">
-          <div>
+          <div className="space-y-1">
             <h2 className="text-xl font-semibold text-white">{mode === 'register' ? '注册账号' : '登录账号'}</h2>
-            <p className="mt-2 text-sm text-white/55">{reason || '登录后可使用策略创建、实盘关注池等用户功能。'}</p>
+            <p className="text-sm text-slate-300">{mode === 'register' ? '创建一个新账号，开始你的交易旅程。' : '欢迎回来，继续你的交易计划。'}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-white/10 px-2 py-1 text-xs text-white/70 transition hover:border-white/25 hover:text-white"
+            className={`grid size-8 place-items-center rounded-full text-base leading-none transition ${theme.closeBtn}`}
+            aria-label="关闭"
           >
-            关闭
+            ×
           </button>
         </div>
 
-        <div className="mb-4 flex items-center gap-2 rounded-xl border border-white/10 bg-black/25 p-1">
+
+        <div className={`mb-5 ${theme.hintCard}`}>
+          {reason || '登录后可使用策略创建、实盘关注池等用户功能。'}
+        </div>
+
+        <div className={theme.modeWrap}>
           <button
             type="button"
             onClick={() => onSwitchMode('login')}
-            className={`flex-1 rounded-lg px-3 py-2 text-sm transition ${mode === 'login' ? 'bg-primary text-black font-semibold' : 'text-white/70 hover:text-white'}`}
+            className={`rounded-xl px-3 py-2 text-sm transition ${mode === 'login' ? theme.modeActive : theme.modeIdle}`}
           >
             登录
           </button>
           <button
             type="button"
             onClick={() => onSwitchMode('register')}
-            className={`flex-1 rounded-lg px-3 py-2 text-sm transition ${mode === 'register' ? 'bg-primary text-black font-semibold' : 'text-white/70 hover:text-white'}`}
+            className={`rounded-xl px-3 py-2 text-sm transition ${mode === 'register' ? theme.modeActive : theme.modeIdle}`}
           >
             注册
           </button>
         </div>
 
-        <form onSubmit={submit} className="space-y-3">
-          <input
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            type="email"
-            autoComplete="email"
-            placeholder="邮箱"
-            className="w-full rounded-xl border border-border bg-black/20 px-4 py-2.5 text-sm text-white outline-none transition focus:border-primary"
-          />
-          <input
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            type="password"
-            autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-            placeholder="密码"
-            className="w-full rounded-xl border border-border bg-black/20 px-4 py-2.5 text-sm text-white outline-none transition focus:border-primary"
-          />
-          {mode === 'register' ? (
+        <form onSubmit={submit} className="space-y-4">
+          <div className="space-y-3">
             <input
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              type="password"
-              autoComplete="new-password"
-              placeholder="确认密码"
-              className="w-full rounded-xl border border-border bg-black/20 px-4 py-2.5 text-sm text-white outline-none transition focus:border-primary"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              type="email"
+              autoComplete="email"
+              placeholder="邮箱"
+              className={theme.input}
             />
-          ) : null}
+            <input
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              type="password"
+              autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+              placeholder="密码"
+              className={theme.input}
+            />
+            {mode === 'register' ? (
+              <input
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                type="password"
+                autoComplete="new-password"
+                placeholder="确认密码"
+                className={theme.input}
+              />
+            ) : null}
+          </div>
 
-          {error ? <div className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{error}</div> : null}
+          {error ? <div className="rounded-xl bg-rose-500/12 px-3 py-2 text-sm text-rose-200">{error}</div> : null}
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-65"
-          >
-            {submitting ? '提交中...' : mode === 'register' ? '注册并登录' : '登录'}
-          </button>
+          <div className="pt-2">
+            <button
+              type="submit"
+              disabled={submitting}
+              className={theme.submit}
+            >
+              {submitting ? '提交中...' : mode === 'register' ? '注册并登录' : '登录'}
+            </button>
+          </div>
         </form>
       </div>
     </div>

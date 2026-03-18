@@ -8,11 +8,34 @@ const DATA_SOURCE_OPTIONS = [
   { value: 'sample', label: '示例行情', description: '自动生成示例历史行情数据' },
 ];
 
+function formatDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function buildDefaultDateRange() {
+  const endDate = new Date();
+  endDate.setHours(0, 0, 0, 0);
+  endDate.setDate(endDate.getDate() - 1);
+
+  const startDate = new Date(endDate);
+  startDate.setFullYear(startDate.getFullYear() - 1);
+
+  return {
+    startDate: formatDateInputValue(startDate),
+    endDate: formatDateInputValue(endDate),
+  };
+}
+
+const defaultDateRange = buildDefaultDateRange();
+
 const DEFAULT_FORM = {
   dataSource: 'online',
   ticker: '600519',
-  startDate: '2023-01-01',
-  endDate: '2023-12-31',
+  startDate: defaultDateRange.startDate,
+  endDate: defaultDateRange.endDate,
   capital: 100000,
   feePct: 0.001,
   strategyId: '',

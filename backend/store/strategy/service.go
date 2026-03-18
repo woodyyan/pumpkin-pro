@@ -127,7 +127,10 @@ func (s *Service) Create(ctx context.Context, userID string, payload StrategyPay
 }
 
 func (s *Service) Update(ctx context.Context, userID string, strategyID string, payload StrategyPayload) (*Strategy, error) {
-	existing, err := s.repo.GetByID(ctx, strategyID, userID, false)
+	if strings.TrimSpace(userID) == "" {
+		return nil, ErrForbidden
+	}
+	existing, err := s.repo.GetByID(ctx, strategyID, userID, true)
 	if err != nil {
 		return nil, err
 	}

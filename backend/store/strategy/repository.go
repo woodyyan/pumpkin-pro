@@ -98,7 +98,9 @@ func (r *Repository) Update(ctx context.Context, strategyID string, userID strin
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(existing.UserID) == "" || strings.TrimSpace(existing.UserID) != strings.TrimSpace(userID) {
+	ownerID := strings.TrimSpace(existing.UserID)
+	currentUserID := strings.TrimSpace(userID)
+	if ownerID != "" && ownerID != currentUserID {
 		return nil, ErrForbidden
 	}
 
@@ -111,7 +113,7 @@ func (r *Repository) Update(ctx context.Context, strategyID string, userID strin
 	if err := r.db.WithContext(ctx).Model(&StrategyRecord{}).Where("id = ?", strategyID).Updates(record).Error; err != nil {
 		return nil, translateWriteError(err)
 	}
-	return r.GetByID(ctx, strategyID, userID, false)
+	return r.GetByID(ctx, strategyID, userID, true)
 }
 
 func (r *Repository) getRecordByID(ctx context.Context, id string) (*StrategyRecord, error) {

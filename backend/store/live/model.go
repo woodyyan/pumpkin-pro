@@ -125,6 +125,57 @@ type OverlayPayload struct {
 	UpdatedAt     string         `json:"updated_at"`
 }
 
+type DailyBar struct {
+	Date   string  `json:"date"`
+	Open   float64 `json:"open"`
+	High   float64 `json:"high"`
+	Low    float64 `json:"low"`
+	Close  float64 `json:"close"`
+	Volume float64 `json:"volume"`
+}
+
+type SupportSummary struct {
+	NearestLevel string  `json:"nearest_level"`
+	NearestPrice float64 `json:"nearest_price"`
+	DistancePct  float64 `json:"distance_pct"`
+	Strength     string  `json:"strength"`
+	Status       string  `json:"status"`
+}
+
+type SupportLevel struct {
+	Level           string   `json:"level"`
+	Price           float64  `json:"price"`
+	BandLow         float64  `json:"band_low"`
+	BandHigh        float64  `json:"band_high"`
+	DistancePct     float64  `json:"distance_pct"`
+	Strength        string   `json:"strength"`
+	Score           float64  `json:"score"`
+	Status          string   `json:"status"`
+	Sources         []string `json:"sources"`
+	TouchCount      int      `json:"touch_count"`
+	LastValidatedAt string   `json:"last_validated_at"`
+}
+
+type SupportMeta struct {
+	Algorithm          string `json:"algorithm"`
+	SampleCount        int    `json:"sample_count"`
+	MinRequiredSamples int    `json:"min_required_samples"`
+	IsWarmup           bool   `json:"is_warmup"`
+	UpdatedAt          string `json:"updated_at"`
+}
+
+type SupportLevelsPayload struct {
+	Symbol       string         `json:"symbol"`
+	Period       string         `json:"period"`
+	LookbackDays int            `json:"lookback_days"`
+	AsOf         string         `json:"as_of"`
+	PriceRef     float64        `json:"price_ref"`
+	SessionState SessionState   `json:"session_state"`
+	Summary      SupportSummary `json:"summary"`
+	Levels       []SupportLevel `json:"levels"`
+	Meta         SupportMeta    `json:"meta"`
+}
+
 type WatchlistState struct {
 	SessionState SessionState    `json:"session_state"`
 	ActiveSymbol string          `json:"active_symbol,omitempty"`

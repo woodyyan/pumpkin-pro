@@ -2,13 +2,16 @@ package live
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,6 +22,10 @@ var (
 		"HSCEI":  "hkHSCEI",
 		"HSTECH": "hkHSTECH",
 	}
+)
+
+const (
+	dailyBarsCacheTTL = 5 * time.Minute
 )
 
 type quoteData struct {
@@ -37,11 +44,26 @@ type quoteData struct {
 
 type MarketClient struct {
 	httpClient *http.Client
+
+	cacheMu        sync.Mutex
+	dailyBarsCache map[string]dailyBarsCacheEntry
+}
+
+type dailyBarsCacheEntry struct {
+	bars     []DailyBar
+	expireAt time.Time
+}
+
+type dailyBarsNode struct {
+	Day    [][]any `json:"day"`
+	QFQDay [][]any `json:"qfqday"`
+	HFQDay [][]any `json:"hfqday"`
 }
 
 func NewMarketClient() *MarketClient {
 	return &MarketClient{
-		httpClient: &http.Client{Timeout: 4 * time.Second},
+		httpClient:     &http.Client{Timeout: 4 * time.Second},
+		dailyBarsCache: map[string]dailyBarsCacheEntry{},
 	}
 }
 
@@ -215,6 +237,286 @@ func (c *MarketClient) FetchMarketOverview(ctx context.Context) (*MarketOverview
 		Advancers:      0,
 		Decliners:      0,
 	}, nil
+}
+
+func (c *MarketClient) FetchSymbolDailyBars(ctx context.Context, symbol string, lookbackDays int) ([]DailyBar, error) {
+	normalized, err := normalizeHKSymbol(symbol)
+	if err != nil {
+		return nil, err
+	}
+	if lookbackDays <= 0 {
+		lookbackDays = 120
+	}
+
+	cacheKey := fmt.Sprintf("%s:%d", normalized, lookbackDays)
+	now := time.Now().UTC()
+	if bars := c.getDailyBarsCache(cacheKey, now); len(bars) > 0 {
+		return bars, nil
+	}
+
+	bars, err := c.fetchDailyBarsFromTencent(ctx, normalized, lookbackDays)
+	if err != nil {
+		return nil, err
+	}
+	if len(bars) == 0 {
+		return nil, ErrDataSourceDown
+	}
+
+	c.setDailyBarsCache(cacheKey, bars, now)
+	return cloneDailyBars(bars), nil
+}
+
+func (c *MarketClient) getDailyBarsCache(key string, now time.Time) []DailyBar {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	entry, ok := c.dailyBarsCache[key]
+	if !ok || now.After(entry.expireAt) {
+		if ok {
+			delete(c.dailyBarsCache, key)
+		}
+		return nil
+	}
+	return cloneDailyBars(entry.bars)
+}
+
+func (c *MarketClient) setDailyBarsCache(key string, bars []DailyBar, now time.Time) {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	c.dailyBarsCache[key] = dailyBarsCacheEntry{
+		bars:     cloneDailyBars(bars),
+		expireAt: now.Add(dailyBarsCacheTTL),
+	}
+}
+
+func cloneDailyBars(bars []DailyBar) []DailyBar {
+	if len(bars) == 0 {
+		return nil
+	}
+	cloned := make([]DailyBar, len(bars))
+	copy(cloned, bars)
+	return cloned
+}
+
+func (c *MarketClient) fetchDailyBarsFromTencent(ctx context.Context, symbol string, lookbackDays int) ([]DailyBar, error) {
+	digits := strings.TrimSuffix(strings.ToLower(symbol), ".hk")
+	code := "hk" + digits
+	window := lookbackDays + 20
+	if window < 120 {
+		window = 120
+	}
+
+	urls := []string{
+		fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/hkfqkline/get?param=%s,day,,,%d,qfq", code, window),
+		fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/kline/kline?param=%s,day,,,%d", code, window),
+	}
+
+	var lastErr error
+	for _, targetURL := range urls {
+		bars, err := c.fetchDailyBarsByURL(ctx, targetURL, code)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if len(bars) == 0 {
+			continue
+		}
+		if len(bars) > lookbackDays {
+			bars = bars[len(bars)-lookbackDays:]
+		}
+		return bars, nil
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("%w: %v", ErrDataSourceDown, lastErr)
+	}
+	return nil, ErrDataSourceDown
+}
+
+func (c *MarketClient) fetchDailyBarsByURL(ctx context.Context, targetURL, code string) ([]DailyBar, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("daily bars status=%d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var payload struct {
+		Code int                      `json:"code"`
+		Msg  string                   `json:"msg"`
+		Data map[string]dailyBarsNode `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	if payload.Code != 0 || len(payload.Data) == 0 {
+		if strings.TrimSpace(payload.Msg) != "" {
+			return nil, fmt.Errorf("daily bars api code=%d msg=%s", payload.Code, strings.TrimSpace(payload.Msg))
+		}
+		return nil, ErrDataSourceDown
+	}
+
+	rows := [][]any{}
+	if node, ok := payload.Data[code]; ok {
+		rows = pickDailyRows(node)
+	} else {
+		for _, node := range payload.Data {
+			rows = pickDailyRows(node)
+			if len(rows) > 0 {
+				break
+			}
+		}
+	}
+	if len(rows) == 0 {
+		return nil, ErrDataSourceDown
+	}
+
+	bars := make([]DailyBar, 0, len(rows))
+	for _, row := range rows {
+		if len(row) < 6 {
+			continue
+		}
+		date := parseDailyBarText(row[0])
+		if date == "" {
+			continue
+		}
+		open, ok1 := parseDailyBarFloat(row[1])
+		closeValue, ok2 := parseDailyBarFloat(row[2])
+		high, ok3 := parseDailyBarFloat(row[3])
+		low, ok4 := parseDailyBarFloat(row[4])
+		volume, ok5 := parseDailyBarFloat(row[5])
+		if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 {
+			continue
+		}
+		if low <= 0 || high <= 0 || closeValue <= 0 {
+			continue
+		}
+		if high < low {
+			high, low = low, high
+		}
+		bars = append(bars, DailyBar{
+			Date:   date,
+			Open:   open,
+			High:   high,
+			Low:    low,
+			Close:  closeValue,
+			Volume: math.Max(volume, 0),
+		})
+	}
+	if len(bars) == 0 {
+		return nil, ErrDataSourceDown
+	}
+
+	deduped := dedupeAndSortDailyBars(bars)
+	if len(deduped) == 0 {
+		return nil, ErrDataSourceDown
+	}
+	return deduped, nil
+}
+
+func pickDailyRows(node dailyBarsNode) [][]any {
+	if len(node.QFQDay) > 0 {
+		return node.QFQDay
+	}
+	if len(node.Day) > 0 {
+		return node.Day
+	}
+	return node.HFQDay
+}
+
+func parseDailyBarText(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case json.Number:
+		return strings.TrimSpace(typed.String())
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(typed), 'f', -1, 32)
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case uint64:
+		return strconv.FormatUint(typed, 10)
+	default:
+		return ""
+	}
+}
+
+func parseDailyBarFloat(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case uint64:
+		return float64(typed), true
+	case json.Number:
+		parsed, err := typed.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
+	default:
+		return 0, false
+	}
+}
+
+func dedupeAndSortDailyBars(input []DailyBar) []DailyBar {
+	if len(input) == 0 {
+		return nil
+	}
+	byDate := make(map[string]DailyBar, len(input))
+	for _, bar := range input {
+		if strings.TrimSpace(bar.Date) == "" {
+			continue
+		}
+		byDate[bar.Date] = bar
+	}
+	if len(byDate) == 0 {
+		return nil
+	}
+
+	dates := make([]string, 0, len(byDate))
+	for date := range byDate {
+		dates = append(dates, date)
+	}
+	sort.Slice(dates, func(i, j int) bool {
+		t1, err1 := time.Parse("2006-01-02", dates[i])
+		t2, err2 := time.Parse("2006-01-02", dates[j])
+		if err1 != nil || err2 != nil {
+			return dates[i] < dates[j]
+		}
+		return t1.Before(t2)
+	})
+
+	bars := make([]DailyBar, 0, len(dates))
+	for _, date := range dates {
+		bars = append(bars, byDate[date])
+	}
+	return bars
 }
 
 func (c *MarketClient) fetchFields(ctx context.Context, codes []string) (map[string][]string, error) {

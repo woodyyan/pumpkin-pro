@@ -6,6 +6,8 @@ import { isAuthRequiredError } from '../lib/auth-storage'
 
 const POLL_MS = 2000
 const OVERLAY_WINDOW_MINUTES = 60
+const SUPPORT_REFRESH_MS = 60 * 1000
+const SUPPORT_LOOKBACK_DAYS = 120
 
 export default function LiveTradingPage() {
   const { openAuthModal } = useAuth()
@@ -13,6 +15,8 @@ export default function LiveTradingPage() {
   const [marketOverview, setMarketOverview] = useState(null)
   const [snapshotPayload, setSnapshotPayload] = useState(null)
   const [overlayPayload, setOverlayPayload] = useState(null)
+  const [supportPayload, setSupportPayload] = useState(null)
+  const [supportError, setSupportError] = useState('')
   const [priceVolumeEvents, setPriceVolumeEvents] = useState([])
   const [blockFlowEvents, setBlockFlowEvents] = useState([])
   const [symbolInput, setSymbolInput] = useState('00700.HK')
@@ -21,9 +25,17 @@ export default function LiveTradingPage() {
   const [error, setError] = useState('')
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState('')
+  const supportRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
 
   const activeSymbol = watchlist.active_symbol
   const sessionState = watchlist.session_state || 'idle'
+  const supportSummary = supportPayload?.summary || null
+  const supportLevels = Array.isArray(supportPayload?.levels) ? supportPayload.levels : []
+  const supportStatusAccent = supportSummary?.status === '跌破支撑'
+    ? 'down'
+    : supportSummary?.status === '临近支撑' || supportSummary?.status === '回踩支撑'
+      ? 'up'
+      : 'normal'
 
   const updateError = (nextError, nextNeedsLogin = false) => {
     setError(nextError)
@@ -54,7 +66,33 @@ export default function LiveTradingPage() {
     setMarketOverview(data)
   }
 
-  const loadSymbolPanels = async (symbol) => {
+  const loadSupportLevels = async (symbol, { force = false } = {}) => {
+    if (!symbol) return
+
+    const now = Date.now()
+    const cache = supportRefreshRef.current
+    const hitRefreshWindow = !force && cache.symbol === symbol && now - cache.refreshedAt < SUPPORT_REFRESH_MS
+    if (hitRefreshWindow) {
+      return
+    }
+
+    try {
+      const encoded = encodeURIComponent(symbol)
+      const supportData = await requestJson(
+        `/api/live/symbols/${encoded}/support-levels?period=daily&lookback_days=${SUPPORT_LOOKBACK_DAYS}`
+      )
+      setSupportPayload(supportData)
+      setSupportError('')
+      supportRefreshRef.current = { symbol, refreshedAt: now }
+    } catch (err) {
+      setSupportError(err.message || '止跌参考数据暂不可用')
+      if (force) {
+        setSupportPayload(null)
+      }
+    }
+  }
+
+  const loadSymbolPanels = async (symbol, { forceSupport = false } = {}) => {
     if (!symbol) return
     const encoded = encodeURIComponent(symbol)
     const [snapshotData, overlayData, pvData, blockData] = await Promise.all([
@@ -74,6 +112,8 @@ export default function LiveTradingPage() {
       ...prev,
       session_state: snapshotData.session_state || prev.session_state,
     }))
+
+    await loadSupportLevels(symbol, { force: forceSupport })
   }
 
   const runPolling = async () => {
@@ -82,7 +122,11 @@ export default function LiveTradingPage() {
       const watchState = await loadWatchlist()
       await loadMarketOverview()
       if (watchState.active_symbol) {
-        await loadSymbolPanels(watchState.active_symbol)
+        await loadSymbolPanels(watchState.active_symbol, { forceSupport: true })
+      } else {
+        setSupportPayload(null)
+        setSupportError('')
+        supportRefreshRef.current = { symbol: '', refreshedAt: 0 }
       }
     } catch (err) {
       applyRequestError(err, '实时数据刷新失败')
@@ -124,7 +168,7 @@ export default function LiveTradingPage() {
       setNameInput('')
       const nextWatchlist = await loadWatchlist()
       if (nextWatchlist.active_symbol) {
-        await loadSymbolPanels(nextWatchlist.active_symbol)
+        await loadSymbolPanels(nextWatchlist.active_symbol, { forceSupport: true })
       }
     } catch (err) {
       applyRequestError(err, '添加关注失败')
@@ -142,7 +186,7 @@ export default function LiveTradingPage() {
         body: JSON.stringify({ reset_window: true }),
       })
       await loadWatchlist()
-      await loadSymbolPanels(symbol)
+      await loadSymbolPanels(symbol, { forceSupport: true })
     } catch (err) {
       applyRequestError(err, '切换激活标的失败')
     }
@@ -156,10 +200,13 @@ export default function LiveTradingPage() {
       if (!nextWatchlist.active_symbol) {
         setSnapshotPayload(null)
         setOverlayPayload(null)
+        setSupportPayload(null)
+        setSupportError('')
         setPriceVolumeEvents([])
         setBlockFlowEvents([])
+        supportRefreshRef.current = { symbol: '', refreshedAt: 0 }
       } else {
-        await loadSymbolPanels(nextWatchlist.active_symbol)
+        await loadSymbolPanels(nextWatchlist.active_symbol, { forceSupport: true })
       }
     } catch (err) {
       applyRequestError(err, '删除关注失败')
@@ -326,6 +373,92 @@ export default function LiveTradingPage() {
             )}
           </section>
 
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-white">可能止跌价位（近{SUPPORT_LOOKBACK_DAYS}天）</h3>
+                <p className="mt-1 text-xs text-white/60">
+                  基于最近 {SUPPORT_LOOKBACK_DAYS} 个交易日，综合价格形态计算出的止跌参考区间。
+                </p>
+              </div>
+              <div className="text-xs text-white/55">
+                {supportPayload?.meta?.updated_at ? `更新时间：${formatDateTime(supportPayload.meta.updated_at)}` : '等待数据'}
+              </div>
+            </div>
+
+            {supportError ? (
+              <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{supportError}</div>
+            ) : null}
+
+            {!supportSummary ? (
+              <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">
+                暂无可用止跌参考数据（可能仍在预热或样本不足）。
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <MetricMini
+                    label="最近止跌价"
+                    value={supportSummary.nearest_price ? formatNumber(supportSummary.nearest_price, 3) : '--'}
+                    accent={supportStatusAccent}
+                    emphasis
+                  />
+                  <MetricMini
+                    label="距最近止跌价"
+                    value={formatDistancePct(supportSummary.distance_pct)}
+                    accent={supportSummary.distance_pct >= 0 ? 'normal' : 'down'}
+                  />
+                  <MetricMini
+                    label="止跌强度"
+                    value={supportSummary.strength || '--'}
+                    accent={supportSummary.strength === '强' ? 'up' : supportSummary.strength === '弱' ? 'down' : 'normal'}
+                  />
+                  <MetricMini
+                    label="止跌状态"
+                    value={formatSupportStatus(supportSummary.status)}
+                    accent={supportStatusAccent}
+                    emphasis
+                  />
+                </div>
+
+                <div className="rounded-xl border border-border bg-black/20 p-3">
+                  <div className="text-xs text-white/55">字段说明</div>
+                  <ul className="mt-2 space-y-1 text-xs text-white/70">
+                    <li>• 距最近止跌价：当前价与最近止跌参考价的百分比距离（正数=当前价在参考价上方）。</li>
+                    <li>• 止跌强度：综合历史触达次数、最近验证时间、反弹幅度得到的分级。</li>
+                    <li>• 止跌状态：接近止跌区 / 回踩止跌区 / 高于止跌区 / 跌破止跌区。</li>
+                  </ul>
+                </div>
+
+                <div className="space-y-2">
+                  {supportLevels.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-white/50">暂无止跌明细</div>
+                  ) : (
+                    supportLevels.map((level, index) => {
+                      const levelLabel = formatSupportLevelLabel(level.level, index)
+                      return (
+                        <div key={level.level} className="rounded-xl border border-border bg-black/20 px-3 py-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-sm font-semibold text-white">{levelLabel} · {formatNumber(level.price, 3)}</div>
+                            <div className="text-xs text-white/60">{formatSupportStatus(level.status)}</div>
+                          </div>
+                          <div className="mt-2 grid gap-2 text-xs text-white/70 md:grid-cols-2 xl:grid-cols-4">
+                            <div>止跌区间：{formatNumber(level.band_low, 3)} ~ {formatNumber(level.band_high, 3)}</div>
+                            <div>距当前价：{formatDistancePct(level.distance_pct)}</div>
+                            <div>强度：{level.strength || '--'}（{formatNumber(level.score, 1)}）</div>
+                            <div>历史触达次数：{level.touch_count ?? '--'}</div>
+                            <div>来源：{formatSupportSources(level.sources)}</div>
+                            <div>最近验证：{level.last_validated_at || '--'}</div>
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+
           <section className="grid gap-4 xl:grid-cols-2">
             <EventPanel title="量价异动" events={priceVolumeEvents} renderEvent={(item) => (
               <>
@@ -482,10 +615,16 @@ function MetricCard({ label, value }) {
   )
 }
 
-function MetricMini({ label, value, accent = 'normal' }) {
+function MetricMini({ label, value, accent = 'normal', emphasis = false }) {
   const color = accent === 'up' ? 'text-emerald-300' : accent === 'down' ? 'text-rose-300' : 'text-white'
+  const emphasisTone = accent === 'up'
+    ? 'border-emerald-400/45 bg-emerald-500/10 ring-1 ring-emerald-300/20'
+    : accent === 'down'
+      ? 'border-rose-400/45 bg-rose-500/10 ring-1 ring-rose-300/20'
+      : 'border-primary/45 bg-primary/10 ring-1 ring-primary/25'
+
   return (
-    <div className="rounded-xl border border-border bg-black/20 px-3 py-2">
+    <div className={`rounded-xl border px-3 py-2 ${emphasis ? emphasisTone : 'border-border bg-black/20'}`}>
       <div className="text-xs text-white/50">{label}</div>
       <div className={`mt-1 text-sm font-semibold ${color}`}>{value}</div>
     </div>
@@ -532,6 +671,50 @@ function formatMarketIndexTitle(name, code) {
   }
 
   return codeMap[upperCode] || rawName || upperCode || '--'
+}
+
+function formatDistancePct(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  const num = Number(value)
+  const sign = num > 0 ? '+' : ''
+  return `${sign}${num.toFixed(2)}%`
+}
+
+function formatSupportStatus(status) {
+  const normalized = String(status || '').trim()
+  const statusMap = {
+    临近支撑: '接近止跌区',
+    回踩支撑: '回踩止跌区',
+    位于支撑上方: '高于止跌区',
+    跌破支撑: '跌破止跌区',
+  }
+  return statusMap[normalized] || normalized || '--'
+}
+
+function formatSupportLevelLabel(level, index = 0) {
+  const normalized = String(level || '').trim().toUpperCase()
+  const labelMap = {
+    S1: '最近止跌价',
+    S2: '第二止跌价',
+    S3: '第三止跌价',
+  }
+
+  if (labelMap[normalized]) {
+    return labelMap[normalized]
+  }
+
+  return index === 0 ? '最近止跌价' : `第${index + 1}止跌价`
+}
+
+function formatSupportSources(sources) {
+  if (!Array.isArray(sources) || sources.length === 0) return '--'
+  const map = {
+    swing: 'Swing',
+    pivot: 'Pivot',
+    ma60: 'MA60',
+    ma120: 'MA120',
+  }
+  return sources.map((item) => map[item] || String(item || '').toUpperCase()).join(' + ')
 }
 
 function formatPercent(value) {

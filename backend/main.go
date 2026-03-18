@@ -559,6 +559,23 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 			return
 		}
 		writeLiveJSON(w, http.StatusOK, overlay)
+	case "support-levels":
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+			return
+		}
+		period := strings.TrimSpace(r.URL.Query().Get("period"))
+		lookbackDays, parseErr := parseLookbackDays(r.URL.Query().Get("lookback_days"), 120)
+		if parseErr != nil {
+			a.writeLiveError(w, fmt.Errorf("%w: lookback_days must be a positive integer", live.ErrInvalidArgument))
+			return
+		}
+		supportPayload, err := a.liveService.GetSupportLevels(r.Context(), userID, symbol, period, lookbackDays)
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, supportPayload)
 	case "anomalies/price-volume":
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
@@ -632,6 +649,18 @@ func parseWindowMinutes(raw string, fallback int) int {
 	return value
 }
 
+func parseLookbackDays(raw string, fallback int) (int, error) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(text)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("invalid lookback_days")
+	}
+	return value, nil
+}
+
 func splitCSV(raw string) []string {
 	parts := strings.Split(raw, ",")
 	items := make([]string, 0, len(parts))
@@ -688,14 +717,18 @@ func (a *appServer) writeLiveError(w http.ResponseWriter, err error) {
 		statusCode = http.StatusNotFound
 		code = "ACTIVE_SYMBOL_NOT_FOUND"
 		message = "关注股票不存在"
+	case errors.Is(err, live.ErrInvalidArgument):
+		statusCode = http.StatusBadRequest
+		code = "INVALID_ARGUMENT"
+		message = err.Error()
 	case errors.Is(err, live.ErrDataSourceDown):
 		statusCode = http.StatusServiceUnavailable
 		code = "DATA_SOURCE_UNAVAILABLE"
 		message = "行情数据源暂时不可用"
 	case errors.Is(err, live.ErrWarmupNotReady):
-		statusCode = http.StatusTooEarly
+		statusCode = http.StatusUnprocessableEntity
 		code = "WARMUP_NOT_READY"
-		message = "数据预热中，请稍后重试"
+		message = "样本不足，支撑位计算仍在预热中"
 	}
 	writeJSON(w, statusCode, map[string]any{
 		"request_id": requestID,

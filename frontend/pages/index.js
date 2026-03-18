@@ -623,19 +623,6 @@ export default function BacktestPage() {
                 <StatRow label="最差单日" value={formatPercent(result.metrics?.worst_day_pct)} />
               </div>
 
-              {result.data_summary?.ticker_name_debug?.message && (
-                <div className="mt-4 rounded-xl border border-white/5 bg-black/20 px-4 py-4 text-sm leading-7 text-white/60">
-                  <div className="font-medium text-white">名称识别日志</div>
-                  <div className="mt-2">{result.data_summary.ticker_name_debug.message}</div>
-                  {(result.data_summary.ticker_name_debug.errors || []).length > 0 && (
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-red-200/80">
-                      {result.data_summary.ticker_name_debug.errors.map((item, index) => (
-                        <li key={`${item}-${index}`}>{item}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
             </SectionCard>
 
             <SectionCard title="信号统计" description="查看策略发出的买卖信号数量。">

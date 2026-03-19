@@ -85,7 +85,7 @@ export default function LiveTradingPage() {
       setSupportError('')
       supportRefreshRef.current = { symbol, refreshedAt: now }
     } catch (err) {
-      setSupportError(err.message || '止跌参考数据暂不可用')
+      setSupportError(err.message || '支撑位数据暂不可用')
       if (force) {
         setSupportPayload(null)
       }
@@ -376,9 +376,9 @@ export default function LiveTradingPage() {
           <section className="rounded-2xl border border-border bg-card p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="text-base font-semibold text-white">可能止跌价位（近{SUPPORT_LOOKBACK_DAYS}天）</h3>
+                <h3 className="text-base font-semibold text-white">支撑位（近{SUPPORT_LOOKBACK_DAYS}天）</h3>
                 <p className="mt-1 text-xs text-white/60">
-                  基于最近 {SUPPORT_LOOKBACK_DAYS} 个交易日，综合价格形态计算出的止跌参考区间。
+                  基于最近 {SUPPORT_LOOKBACK_DAYS} 个交易日，综合价格形态计算出的支撑参考区间。
                 </p>
               </div>
               <div className="text-xs text-white/55">
@@ -392,29 +392,29 @@ export default function LiveTradingPage() {
 
             {!supportSummary ? (
               <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">
-                暂无可用止跌参考数据（可能仍在预热或样本不足）。
+                暂无可用支撑位数据（可能仍在预热或样本不足）。
               </div>
             ) : (
               <div className="mt-4 space-y-4">
                 <div className="grid gap-3 md:grid-cols-4">
                   <MetricMini
-                    label="最近止跌价"
+                    label="最近支撑位"
                     value={supportSummary.nearest_price ? formatNumber(supportSummary.nearest_price, 3) : '--'}
                     accent={supportStatusAccent}
                     emphasis
                   />
                   <MetricMini
-                    label="距最近止跌价"
+                    label="距最近支撑位"
                     value={formatDistancePct(supportSummary.distance_pct)}
                     accent={supportSummary.distance_pct >= 0 ? 'normal' : 'down'}
                   />
                   <MetricMini
-                    label="止跌强度"
+                    label="支撑强度"
                     value={supportSummary.strength || '--'}
                     accent={supportSummary.strength === '强' ? 'up' : supportSummary.strength === '弱' ? 'down' : 'normal'}
                   />
                   <MetricMini
-                    label="止跌状态"
+                    label="支撑状态"
                     value={formatSupportStatus(supportSummary.status)}
                     accent={supportStatusAccent}
                     emphasis
@@ -424,15 +424,16 @@ export default function LiveTradingPage() {
                 <div className="rounded-xl border border-border bg-black/20 p-3">
                   <div className="text-xs text-white/55">字段说明</div>
                   <ul className="mt-2 space-y-1 text-xs text-white/70">
-                    <li>• 距最近止跌价：当前价与最近止跌参考价的百分比距离（正数=当前价在参考价上方）。</li>
-                    <li>• 止跌强度：综合历史触达次数、最近验证时间、反弹幅度得到的分级。</li>
-                    <li>• 止跌状态：接近止跌区 / 回踩止跌区 / 高于止跌区 / 跌破止跌区。</li>
+                    <li>• 支撑位：历史上价格多次止跌或反弹的参考价位（区间），用于判断下方承接力度，不代表一定反弹。</li>
+                    <li>• 距最近支撑位：当前价与最近支撑位的百分比距离（正数=当前价在支撑位上方）。</li>
+                    <li>• 支撑强度：综合历史触达次数、最近验证时间、反弹幅度得到的分级。</li>
+                    <li>• 支撑状态：接近支撑区 / 回踩支撑区 / 高于支撑区 / 跌破支撑区。</li>
                   </ul>
                 </div>
 
                 <div className="space-y-2">
                   {supportLevels.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-white/50">暂无止跌明细</div>
+                    <div className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-white/50">暂无支撑位明细</div>
                   ) : (
                     supportLevels.map((level, index) => {
                       const levelLabel = formatSupportLevelLabel(level.level, index)
@@ -443,7 +444,7 @@ export default function LiveTradingPage() {
                             <div className="text-xs text-white/60">{formatSupportStatus(level.status)}</div>
                           </div>
                           <div className="mt-2 grid gap-2 text-xs text-white/70 md:grid-cols-2 xl:grid-cols-4">
-                            <div>止跌区间：{formatNumber(level.band_low, 3)} ~ {formatNumber(level.band_high, 3)}</div>
+                            <div>支撑区间：{formatNumber(level.band_low, 3)} ~ {formatNumber(level.band_high, 3)}</div>
                             <div>距当前价：{formatDistancePct(level.distance_pct)}</div>
                             <div>强度：{level.strength || '--'}（{formatNumber(level.score, 1)}）</div>
                             <div>历史触达次数：{level.touch_count ?? '--'}</div>
@@ -683,10 +684,10 @@ function formatDistancePct(value) {
 function formatSupportStatus(status) {
   const normalized = String(status || '').trim()
   const statusMap = {
-    临近支撑: '接近止跌区',
-    回踩支撑: '回踩止跌区',
-    位于支撑上方: '高于止跌区',
-    跌破支撑: '跌破止跌区',
+    临近支撑: '接近支撑区',
+    回踩支撑: '回踩支撑区',
+    位于支撑上方: '高于支撑区',
+    跌破支撑: '跌破支撑区',
   }
   return statusMap[normalized] || normalized || '--'
 }
@@ -694,16 +695,16 @@ function formatSupportStatus(status) {
 function formatSupportLevelLabel(level, index = 0) {
   const normalized = String(level || '').trim().toUpperCase()
   const labelMap = {
-    S1: '最近止跌价',
-    S2: '第二止跌价',
-    S3: '第三止跌价',
+    S1: '最近支撑位',
+    S2: '第二支撑位',
+    S3: '第三支撑位',
   }
 
   if (labelMap[normalized]) {
     return labelMap[normalized]
   }
 
-  return index === 0 ? '最近止跌价' : `第${index + 1}止跌价`
+  return index === 0 ? '最近支撑位' : `第${index + 1}支撑位`
 }
 
 function formatSupportSources(sources) {

@@ -176,6 +176,48 @@ type SupportLevelsPayload struct {
 	Meta         SupportMeta    `json:"meta"`
 }
 
+type ResistanceSummary struct {
+	NearestLevel string  `json:"nearest_level"`
+	NearestPrice float64 `json:"nearest_price"`
+	DistancePct  float64 `json:"distance_pct"`
+	Strength     string  `json:"strength"`
+	Status       string  `json:"status"`
+}
+
+type ResistanceLevel struct {
+	Level           string   `json:"level"`
+	Price           float64  `json:"price"`
+	BandLow         float64  `json:"band_low"`
+	BandHigh        float64  `json:"band_high"`
+	DistancePct     float64  `json:"distance_pct"`
+	Strength        string   `json:"strength"`
+	Score           float64  `json:"score"`
+	Status          string   `json:"status"`
+	Sources         []string `json:"sources"`
+	TouchCount      int      `json:"touch_count"`
+	LastValidatedAt string   `json:"last_validated_at"`
+}
+
+type ResistanceMeta struct {
+	Algorithm          string `json:"algorithm"`
+	SampleCount        int    `json:"sample_count"`
+	MinRequiredSamples int    `json:"min_required_samples"`
+	IsWarmup           bool   `json:"is_warmup"`
+	UpdatedAt          string `json:"updated_at"`
+}
+
+type ResistanceLevelsPayload struct {
+	Symbol       string            `json:"symbol"`
+	Period       string            `json:"period"`
+	LookbackDays int               `json:"lookback_days"`
+	AsOf         string            `json:"as_of"`
+	PriceRef     float64           `json:"price_ref"`
+	SessionState SessionState      `json:"session_state"`
+	Summary      ResistanceSummary `json:"summary"`
+	Levels       []ResistanceLevel `json:"levels"`
+	Meta         ResistanceMeta    `json:"meta"`
+}
+
 type WatchlistState struct {
 	SessionState SessionState    `json:"session_state"`
 	ActiveSymbol string          `json:"active_symbol,omitempty"`

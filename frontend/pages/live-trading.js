@@ -17,6 +17,8 @@ export default function LiveTradingPage() {
   const [overlayPayload, setOverlayPayload] = useState(null)
   const [supportPayload, setSupportPayload] = useState(null)
   const [supportError, setSupportError] = useState('')
+  const [resistancePayload, setResistancePayload] = useState(null)
+  const [resistanceError, setResistanceError] = useState('')
   const [priceVolumeEvents, setPriceVolumeEvents] = useState([])
   const [blockFlowEvents, setBlockFlowEvents] = useState([])
   const [symbolInput, setSymbolInput] = useState('00700.HK')
@@ -26,15 +28,23 @@ export default function LiveTradingPage() {
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState('')
   const supportRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
+  const resistanceRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
 
   const activeSymbol = watchlist.active_symbol
   const sessionState = watchlist.session_state || 'idle'
   const supportSummary = supportPayload?.summary || null
   const supportLevels = Array.isArray(supportPayload?.levels) ? supportPayload.levels : []
+  const resistanceSummary = resistancePayload?.summary || null
+  const resistanceLevels = Array.isArray(resistancePayload?.levels) ? resistancePayload.levels : []
   const supportStatusAccent = supportSummary?.status === '跌破支撑'
     ? 'down'
     : supportSummary?.status === '临近支撑' || supportSummary?.status === '回踩支撑'
       ? 'up'
+      : 'normal'
+  const resistanceStatusAccent = resistanceSummary?.status === '突破压力'
+    ? 'up'
+    : resistanceSummary?.status === '临近压力' || resistanceSummary?.status === '回踩压力'
+      ? 'down'
       : 'normal'
 
   const updateError = (nextError, nextNeedsLogin = false) => {
@@ -92,6 +102,32 @@ export default function LiveTradingPage() {
     }
   }
 
+  const loadResistanceLevels = async (symbol, { force = false } = {}) => {
+    if (!symbol) return
+
+    const now = Date.now()
+    const cache = resistanceRefreshRef.current
+    const hitRefreshWindow = !force && cache.symbol === symbol && now - cache.refreshedAt < SUPPORT_REFRESH_MS
+    if (hitRefreshWindow) {
+      return
+    }
+
+    try {
+      const encoded = encodeURIComponent(symbol)
+      const resistanceData = await requestJson(
+        `/api/live/symbols/${encoded}/resistance-levels?period=daily&lookback_days=${SUPPORT_LOOKBACK_DAYS}`
+      )
+      setResistancePayload(resistanceData)
+      setResistanceError('')
+      resistanceRefreshRef.current = { symbol, refreshedAt: now }
+    } catch (err) {
+      setResistanceError(err.message || '压力位数据暂不可用')
+      if (force) {
+        setResistancePayload(null)
+      }
+    }
+  }
+
   const loadSymbolPanels = async (symbol, { forceSupport = false } = {}) => {
     if (!symbol) return
     const encoded = encodeURIComponent(symbol)
@@ -113,7 +149,10 @@ export default function LiveTradingPage() {
       session_state: snapshotData.session_state || prev.session_state,
     }))
 
-    await loadSupportLevels(symbol, { force: forceSupport })
+    await Promise.all([
+      loadSupportLevels(symbol, { force: forceSupport }),
+      loadResistanceLevels(symbol, { force: forceSupport }),
+    ])
   }
 
   const runPolling = async () => {
@@ -126,7 +165,10 @@ export default function LiveTradingPage() {
       } else {
         setSupportPayload(null)
         setSupportError('')
+        setResistancePayload(null)
+        setResistanceError('')
         supportRefreshRef.current = { symbol: '', refreshedAt: 0 }
+        resistanceRefreshRef.current = { symbol: '', refreshedAt: 0 }
       }
     } catch (err) {
       applyRequestError(err, '实时数据刷新失败')
@@ -202,9 +244,12 @@ export default function LiveTradingPage() {
         setOverlayPayload(null)
         setSupportPayload(null)
         setSupportError('')
+        setResistancePayload(null)
+        setResistanceError('')
         setPriceVolumeEvents([])
         setBlockFlowEvents([])
         supportRefreshRef.current = { symbol: '', refreshedAt: 0 }
+        resistanceRefreshRef.current = { symbol: '', refreshedAt: 0 }
       } else {
         await loadSymbolPanels(nextWatchlist.active_symbol, { forceSupport: true })
       }
@@ -445,6 +490,93 @@ export default function LiveTradingPage() {
                           </div>
                           <div className="mt-2 grid gap-2 text-xs text-white/70 md:grid-cols-2 xl:grid-cols-4">
                             <div>支撑区间：{formatNumber(level.band_low, 3)} ~ {formatNumber(level.band_high, 3)}</div>
+                            <div>距当前价：{formatDistancePct(level.distance_pct)}</div>
+                            <div>强度：{level.strength || '--'}（{formatNumber(level.score, 1)}）</div>
+                            <div>历史触达次数：{level.touch_count ?? '--'}</div>
+                            <div>来源：{formatSupportSources(level.sources)}</div>
+                            <div>最近验证：{level.last_validated_at || '--'}</div>
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-white">压力位（近{SUPPORT_LOOKBACK_DAYS}天）</h3>
+                <p className="mt-1 text-xs text-white/60">
+                  基于最近 {SUPPORT_LOOKBACK_DAYS} 个交易日，综合价格形态计算出的压力参考区间。
+                </p>
+              </div>
+              <div className="text-xs text-white/55">
+                {resistancePayload?.meta?.updated_at ? `更新时间：${formatDateTime(resistancePayload.meta.updated_at)}` : '等待数据'}
+              </div>
+            </div>
+
+            {resistanceError ? (
+              <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{resistanceError}</div>
+            ) : null}
+
+            {!resistanceSummary ? (
+              <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">
+                暂无可用压力位数据（可能仍在预热或样本不足）。
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <MetricMini
+                    label="最近压力位"
+                    value={resistanceSummary.nearest_price ? formatNumber(resistanceSummary.nearest_price, 3) : '--'}
+                    accent={resistanceStatusAccent}
+                    emphasis
+                  />
+                  <MetricMini
+                    label="距最近压力位"
+                    value={formatDistancePct(resistanceSummary.distance_pct)}
+                    accent={resistanceSummary.distance_pct >= 0 ? 'normal' : 'up'}
+                  />
+                  <MetricMini
+                    label="压力强度"
+                    value={resistanceSummary.strength || '--'}
+                    accent={resistanceSummary.strength === '强' ? 'down' : resistanceSummary.strength === '弱' ? 'up' : 'normal'}
+                  />
+                  <MetricMini
+                    label="压力状态"
+                    value={formatResistanceStatus(resistanceSummary.status)}
+                    accent={resistanceStatusAccent}
+                    emphasis
+                  />
+                </div>
+
+                <div className="rounded-xl border border-border bg-black/20 p-3">
+                  <div className="text-xs text-white/55">字段说明</div>
+                  <ul className="mt-2 space-y-1 text-xs text-white/70">
+                    <li>• 压力位：历史上价格多次受阻回落的参考价位（区间），用于判断上方抛压，不代表一定下跌。</li>
+                    <li>• 距最近压力位：当前价与最近压力位的百分比距离（正数=当前价在压力位下方）。</li>
+                    <li>• 压力强度：综合历史触达次数、最近验证时间、回落幅度得到的分级。</li>
+                    <li>• 压力状态：接近压力区 / 回踩压力区 / 位于压力区下方 / 突破压力区。</li>
+                  </ul>
+                </div>
+
+                <div className="space-y-2">
+                  {resistanceLevels.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-white/50">暂无压力位明细</div>
+                  ) : (
+                    resistanceLevels.map((level, index) => {
+                      const levelLabel = formatResistanceLevelLabel(level.level, index)
+                      return (
+                        <div key={level.level} className="rounded-xl border border-border bg-black/20 px-3 py-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-sm font-semibold text-white">{levelLabel} · {formatNumber(level.price, 3)}</div>
+                            <div className="text-xs text-white/60">{formatResistanceStatus(level.status)}</div>
+                          </div>
+                          <div className="mt-2 grid gap-2 text-xs text-white/70 md:grid-cols-2 xl:grid-cols-4">
+                            <div>压力区间：{formatNumber(level.band_low, 3)} ~ {formatNumber(level.band_high, 3)}</div>
                             <div>距当前价：{formatDistancePct(level.distance_pct)}</div>
                             <div>强度：{level.strength || '--'}（{formatNumber(level.score, 1)}）</div>
                             <div>历史触达次数：{level.touch_count ?? '--'}</div>
@@ -705,6 +837,32 @@ function formatSupportLevelLabel(level, index = 0) {
   }
 
   return index === 0 ? '最近支撑位' : `第${index + 1}支撑位`
+}
+
+function formatResistanceStatus(status) {
+  const normalized = String(status || '').trim()
+  const statusMap = {
+    临近压力: '接近压力区',
+    回踩压力: '回踩压力区',
+    位于压力下方: '位于压力区下方',
+    突破压力: '突破压力区',
+  }
+  return statusMap[normalized] || normalized || '--'
+}
+
+function formatResistanceLevelLabel(level, index = 0) {
+  const normalized = String(level || '').trim().toUpperCase()
+  const labelMap = {
+    R1: '最近压力位',
+    R2: '第二压力位',
+    R3: '第三压力位',
+  }
+
+  if (labelMap[normalized]) {
+    return labelMap[normalized]
+  }
+
+  return index === 0 ? '最近压力位' : `第${index + 1}压力位`
 }
 
 function formatSupportSources(sources) {

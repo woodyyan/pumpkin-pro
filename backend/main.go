@@ -576,6 +576,23 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 			return
 		}
 		writeLiveJSON(w, http.StatusOK, supportPayload)
+	case "resistance-levels":
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+			return
+		}
+		period := strings.TrimSpace(r.URL.Query().Get("period"))
+		lookbackDays, parseErr := parseLookbackDays(r.URL.Query().Get("lookback_days"), 120)
+		if parseErr != nil {
+			a.writeLiveError(w, fmt.Errorf("%w: lookback_days must be a positive integer", live.ErrInvalidArgument))
+			return
+		}
+		resistancePayload, err := a.liveService.GetResistanceLevels(r.Context(), userID, symbol, period, lookbackDays)
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, resistancePayload)
 	case "anomalies/price-volume":
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")

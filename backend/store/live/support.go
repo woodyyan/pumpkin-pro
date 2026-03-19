@@ -12,7 +12,9 @@ import (
 const (
 	supportPeriodDaily         = "daily"
 	defaultSupportLookbackDays = 120
+	defaultMALookbackDays      = 240
 	minSupportSampleCount      = 60
+	minMASampleCount           = 200
 	maxSupportLevels           = 3
 	swingLookaround            = 3
 )
@@ -108,6 +110,81 @@ func (s *Service) GetSupportLevels(ctx context.Context, userID, symbol, period s
 			UpdatedAt:          now,
 		},
 	}, nil
+}
+
+func (s *Service) GetMovingAverages(ctx context.Context, userID, symbol, period string, lookbackDays int) (*MovingAveragesPayload, error) {
+	normalizedSymbol, err := normalizeHKSymbol(symbol)
+	if err != nil {
+		return nil, err
+	}
+
+	normalizedPeriod := strings.ToLower(strings.TrimSpace(period))
+	if normalizedPeriod == "" {
+		normalizedPeriod = supportPeriodDaily
+	}
+	if normalizedPeriod != supportPeriodDaily {
+		return nil, fmt.Errorf("%w: period only supports daily", ErrInvalidArgument)
+	}
+
+	if lookbackDays == 0 {
+		lookbackDays = defaultMALookbackDays
+	}
+	if lookbackDays < minMASampleCount || lookbackDays > 480 {
+		return nil, fmt.Errorf("%w: lookback_days must be between 200 and 480", ErrInvalidArgument)
+	}
+
+	bars, err := s.marketClient.FetchSymbolDailyBars(ctx, normalizedSymbol, lookbackDays)
+	if err != nil {
+		return nil, err
+	}
+	if len(bars) < minMASampleCount {
+		return nil, ErrWarmupNotReady
+	}
+
+	lastBar := bars[len(bars)-1]
+	if lastBar.Close <= 0 {
+		return nil, ErrDataSourceDown
+	}
+
+	ma20 := movingAverageClose(bars, 20)
+	ma200 := movingAverageClose(bars, 200)
+	if ma20 <= 0 || ma200 <= 0 {
+		return nil, ErrWarmupNotReady
+	}
+
+	distanceToMA20Pct := (lastBar.Close - ma20) / ma20 * 100
+	distanceToMA200Pct := (lastBar.Close - ma200) / ma200 * 100
+
+	return &MovingAveragesPayload{
+		Symbol:             normalizedSymbol,
+		Period:             supportPeriodDaily,
+		LookbackDays:       lookbackDays,
+		AsOf:               lastBar.Date,
+		PriceRef:           roundTo(lastBar.Close, 4),
+		MA20:               roundTo(ma20, 4),
+		MA200:              roundTo(ma200, 4),
+		DistanceToMA20Pct:  roundTo(distanceToMA20Pct, 2),
+		DistanceToMA200Pct: roundTo(distanceToMA200Pct, 2),
+		Status:             classifyMAStatus(lastBar.Close, ma20, ma200),
+		SessionState:       s.resolveSessionState(userID),
+		UpdatedAt:          time.Now().UTC().Format(time.RFC3339),
+	}, nil
+}
+
+func classifyMAStatus(priceRef, ma20, ma200 float64) string {
+	if priceRef <= 0 || ma20 <= 0 || ma200 <= 0 {
+		return "数据不足"
+	}
+	switch {
+	case priceRef >= ma20 && priceRef >= ma200:
+		return "双双站上"
+	case priceRef < ma20 && priceRef < ma200:
+		return "双双跌破"
+	case priceRef >= ma20 && priceRef < ma200:
+		return "站上MA20但低于MA200"
+	default:
+		return "跌破MA20但高于MA200"
+	}
 }
 
 func (s *Service) resolveSessionState(userID string) SessionState {

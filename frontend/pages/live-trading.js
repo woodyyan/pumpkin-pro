@@ -8,6 +8,7 @@ const POLL_MS = 2000
 const OVERLAY_WINDOW_MINUTES = 60
 const SUPPORT_REFRESH_MS = 60 * 1000
 const SUPPORT_LOOKBACK_DAYS = 120
+const MA_LOOKBACK_DAYS = 240
 
 export default function LiveTradingPage() {
   const { openAuthModal } = useAuth()
@@ -19,6 +20,8 @@ export default function LiveTradingPage() {
   const [supportError, setSupportError] = useState('')
   const [resistancePayload, setResistancePayload] = useState(null)
   const [resistanceError, setResistanceError] = useState('')
+  const [movingAveragePayload, setMovingAveragePayload] = useState(null)
+  const [movingAverageError, setMovingAverageError] = useState('')
   const [priceVolumeEvents, setPriceVolumeEvents] = useState([])
   const [blockFlowEvents, setBlockFlowEvents] = useState([])
   const [symbolInput, setSymbolInput] = useState('00700.HK')
@@ -29,6 +32,7 @@ export default function LiveTradingPage() {
   const [lastUpdateAt, setLastUpdateAt] = useState('')
   const supportRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const resistanceRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
+  const movingAverageRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
 
   const activeSymbol = watchlist.active_symbol
   const sessionState = watchlist.session_state || 'idle'
@@ -44,6 +48,11 @@ export default function LiveTradingPage() {
   const resistanceStatusAccent = resistanceSummary?.status === '突破压力'
     ? 'up'
     : resistanceSummary?.status === '临近压力' || resistanceSummary?.status === '回踩压力'
+      ? 'down'
+      : 'normal'
+  const movingAverageStatusAccent = movingAveragePayload?.status === '双双站上'
+    ? 'up'
+    : movingAveragePayload?.status === '双双跌破'
       ? 'down'
       : 'normal'
 
@@ -128,6 +137,32 @@ export default function LiveTradingPage() {
     }
   }
 
+  const loadMovingAverages = async (symbol, { force = false } = {}) => {
+    if (!symbol) return
+
+    const now = Date.now()
+    const cache = movingAverageRefreshRef.current
+    const hitRefreshWindow = !force && cache.symbol === symbol && now - cache.refreshedAt < SUPPORT_REFRESH_MS
+    if (hitRefreshWindow) {
+      return
+    }
+
+    try {
+      const encoded = encodeURIComponent(symbol)
+      const movingAverageData = await requestJson(
+        `/api/live/symbols/${encoded}/moving-averages?period=daily&lookback_days=${MA_LOOKBACK_DAYS}`
+      )
+      setMovingAveragePayload(movingAverageData)
+      setMovingAverageError('')
+      movingAverageRefreshRef.current = { symbol, refreshedAt: now }
+    } catch (err) {
+      setMovingAverageError(err.message || '均线指标暂不可用')
+      if (force) {
+        setMovingAveragePayload(null)
+      }
+    }
+  }
+
   const loadSymbolPanels = async (symbol, { forceSupport = false } = {}) => {
     if (!symbol) return
     const encoded = encodeURIComponent(symbol)
@@ -152,6 +187,7 @@ export default function LiveTradingPage() {
     await Promise.all([
       loadSupportLevels(symbol, { force: forceSupport }),
       loadResistanceLevels(symbol, { force: forceSupport }),
+      loadMovingAverages(symbol, { force: forceSupport }),
     ])
   }
 
@@ -167,8 +203,11 @@ export default function LiveTradingPage() {
         setSupportError('')
         setResistancePayload(null)
         setResistanceError('')
+        setMovingAveragePayload(null)
+        setMovingAverageError('')
         supportRefreshRef.current = { symbol: '', refreshedAt: 0 }
         resistanceRefreshRef.current = { symbol: '', refreshedAt: 0 }
+        movingAverageRefreshRef.current = { symbol: '', refreshedAt: 0 }
       }
     } catch (err) {
       applyRequestError(err, '实时数据刷新失败')
@@ -246,10 +285,13 @@ export default function LiveTradingPage() {
         setSupportError('')
         setResistancePayload(null)
         setResistanceError('')
+        setMovingAveragePayload(null)
+        setMovingAverageError('')
         setPriceVolumeEvents([])
         setBlockFlowEvents([])
         supportRefreshRef.current = { symbol: '', refreshedAt: 0 }
         resistanceRefreshRef.current = { symbol: '', refreshedAt: 0 }
+        movingAverageRefreshRef.current = { symbol: '', refreshedAt: 0 }
       } else {
         await loadSymbolPanels(nextWatchlist.active_symbol, { forceSupport: true })
       }
@@ -381,6 +423,46 @@ export default function LiveTradingPage() {
                 <MetricMini label="成交量" value={formatCompact(snapshotPayload.snapshot.volume)} />
                 <MetricMini label="成交额(HKD)" value={formatCompact(snapshotPayload.snapshot.turnover)} />
                 <MetricMini label="振幅" value={formatPercent(snapshotPayload.snapshot.amplitude)} />
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-white">均线指标（MA20 / MA200）</h3>
+                <p className="mt-1 text-xs text-white/60">基于最近 {MA_LOOKBACK_DAYS} 个交易日收盘价计算。</p>
+              </div>
+              <div className="text-xs text-white/55">
+                {movingAveragePayload?.updated_at ? `更新时间：${formatDateTime(movingAveragePayload.updated_at)}` : '等待数据'}
+              </div>
+            </div>
+
+            {movingAverageError ? (
+              <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{movingAverageError}</div>
+            ) : null}
+
+            {!movingAveragePayload ? (
+              <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">
+                暂无可用均线数据（可能仍在预热或样本不足）。
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <div className="grid gap-3 md:grid-cols-5">
+                  <MetricMini label="MA20" value={formatNumber(movingAveragePayload.ma20, 3)} accent={movingAveragePayload.price_ref >= movingAveragePayload.ma20 ? 'up' : 'down'} />
+                  <MetricMini label="MA200" value={formatNumber(movingAveragePayload.ma200, 3)} accent={movingAveragePayload.price_ref >= movingAveragePayload.ma200 ? 'up' : 'down'} />
+                  <MetricMini label="距 MA20" value={formatDistancePct(movingAveragePayload.distance_to_ma20_pct)} accent={movingAveragePayload.distance_to_ma20_pct >= 0 ? 'up' : 'down'} />
+                  <MetricMini label="距 MA200" value={formatDistancePct(movingAveragePayload.distance_to_ma200_pct)} accent={movingAveragePayload.distance_to_ma200_pct >= 0 ? 'up' : 'down'} />
+                  <MetricMini label="位置状态" value={formatMAStatus(movingAveragePayload.status)} accent={movingAverageStatusAccent} emphasis />
+                </div>
+
+                <div className="rounded-xl border border-border bg-black/20 p-3">
+                  <div className="text-xs text-white/55">字段说明</div>
+                  <ul className="mt-2 space-y-1 text-xs text-white/70">
+                    <li>• MA20 / MA200：分别表示 20 日与 200 日日均收盘价。</li>
+                    <li>• 距 MA：当前价相对均线的偏离百分比（正数=当前价在均线上方）。</li>
+                  </ul>
+                </div>
               </div>
             )}
           </section>
@@ -863,6 +945,17 @@ function formatResistanceLevelLabel(level, index = 0) {
   }
 
   return index === 0 ? '最近压力位' : `第${index + 1}压力位`
+}
+
+function formatMAStatus(status) {
+  const normalized = String(status || '').trim()
+  const statusMap = {
+    双双站上: '价格高于 MA20 / MA200',
+    双双跌破: '价格低于 MA20 / MA200',
+    '站上MA20但低于MA200': '短强长弱（上 MA20 下 MA200）',
+    '跌破MA20但高于MA200': '短弱长强（下 MA20 上 MA200）',
+  }
+  return statusMap[normalized] || normalized || '--'
 }
 
 function formatSupportSources(sources) {

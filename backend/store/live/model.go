@@ -218,6 +218,21 @@ type ResistanceLevelsPayload struct {
 	Meta         ResistanceMeta    `json:"meta"`
 }
 
+type MovingAveragesPayload struct {
+	Symbol             string       `json:"symbol"`
+	Period             string       `json:"period"`
+	LookbackDays       int          `json:"lookback_days"`
+	AsOf               string       `json:"as_of"`
+	PriceRef           float64      `json:"price_ref"`
+	MA20               float64      `json:"ma20"`
+	MA200              float64      `json:"ma200"`
+	DistanceToMA20Pct  float64      `json:"distance_to_ma20_pct"`
+	DistanceToMA200Pct float64      `json:"distance_to_ma200_pct"`
+	Status             string       `json:"status"`
+	SessionState       SessionState `json:"session_state"`
+	UpdatedAt          string       `json:"updated_at"`
+}
+
 type WatchlistState struct {
 	SessionState SessionState    `json:"session_state"`
 	ActiveSymbol string          `json:"active_symbol,omitempty"`

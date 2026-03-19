@@ -593,6 +593,23 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 			return
 		}
 		writeLiveJSON(w, http.StatusOK, resistancePayload)
+	case "moving-averages":
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+			return
+		}
+		period := strings.TrimSpace(r.URL.Query().Get("period"))
+		lookbackDays, parseErr := parseLookbackDays(r.URL.Query().Get("lookback_days"), 240)
+		if parseErr != nil {
+			a.writeLiveError(w, fmt.Errorf("%w: lookback_days must be a positive integer", live.ErrInvalidArgument))
+			return
+		}
+		movingAveragesPayload, err := a.liveService.GetMovingAverages(r.Context(), userID, symbol, period, lookbackDays)
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, movingAveragesPayload)
 	case "anomalies/price-volume":
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
@@ -745,7 +762,7 @@ func (a *appServer) writeLiveError(w http.ResponseWriter, err error) {
 	case errors.Is(err, live.ErrWarmupNotReady):
 		statusCode = http.StatusUnprocessableEntity
 		code = "WARMUP_NOT_READY"
-		message = "样本不足，支撑位计算仍在预热中"
+		message = "样本不足，指标计算仍在预热中"
 	}
 	writeJSON(w, statusCode, map[string]any{
 		"request_id": requestID,

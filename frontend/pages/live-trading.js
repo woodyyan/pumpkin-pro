@@ -834,7 +834,7 @@ export default function LiveTradingPage() {
               <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">请先在左侧选择一个激活标的。</div>
             ) : (
               <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <MetricMini label="最新价" value={formatNumber(snapshotPayload.snapshot.last_price, 3)} />
+                <MetricMini label="最新价" value={formatNumber(snapshotPayload.snapshot.last_price, 3)} featured />
                 <MetricMini label="涨跌幅" value={formatPercent(snapshotPayload.snapshot.change_rate)} accent={snapshotPayload.snapshot.change_rate >= 0 ? 'up' : 'down'} />
                 <MetricMini label="量比" value={formatNumber(snapshotPayload.snapshot.volume_ratio, 2)} />
                 <MetricMini label="成交量" value={formatCompact(snapshotPayload.snapshot.volume)} />
@@ -1247,18 +1247,23 @@ function MetricCard({ label, value }) {
   )
 }
 
-function MetricMini({ label, value, accent = 'normal', emphasis = false }) {
+function MetricMini({ label, value, accent = 'normal', emphasis = false, featured = false }) {
   const color = accent === 'up' ? 'text-emerald-300' : accent === 'down' ? 'text-rose-300' : 'text-white'
   const emphasisTone = accent === 'up'
     ? 'border-emerald-400/45 bg-emerald-500/10 ring-1 ring-emerald-300/20'
     : accent === 'down'
       ? 'border-rose-400/45 bg-rose-500/10 ring-1 ring-rose-300/20'
       : 'border-primary/45 bg-primary/10 ring-1 ring-primary/25'
+  const containerTone = featured
+    ? 'border-primary/55 bg-primary/12 ring-1 ring-primary/30 shadow-[0_10px_30px_rgba(76,106,255,0.16)]'
+    : emphasis
+      ? emphasisTone
+      : 'border-border bg-black/20'
 
   return (
-    <div className={`rounded-xl border px-3 py-2 ${emphasis ? emphasisTone : 'border-border bg-black/20'}`}>
-      <div className="text-xs text-white/50">{label}</div>
-      <div className={`mt-1 text-sm font-semibold ${color}`}>{value}</div>
+    <div className={`rounded-xl border px-3 py-2 ${featured ? 'px-4 py-3' : ''} ${containerTone}`}>
+      <div className={`text-xs ${featured ? 'text-primary/85' : 'text-white/50'}`}>{label}</div>
+      <div className={`mt-1 font-semibold ${color} ${featured ? 'text-2xl leading-none tracking-tight' : 'text-sm'}`}>{value}</div>
     </div>
   )
 }

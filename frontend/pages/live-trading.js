@@ -7,8 +7,12 @@ import { isAuthRequiredError } from '../lib/auth-storage'
 const POLL_MS = 2000
 const OVERLAY_WINDOW_MINUTES = 60
 const SUPPORT_REFRESH_MS = 60 * 1000
+const SIGNAL_CENTER_REFRESH_MS = 15 * 1000
 const SUPPORT_LOOKBACK_DAYS = 120
 const MA_LOOKBACK_DAYS = 240
+const SIGNAL_DISPATCH_INTERVAL_SECONDS = 2
+const SIGNAL_MAX_ATTEMPTS = 4
+const SIGNAL_BACKOFF_STEPS = ['1 分钟', '5 分钟', '15 分钟']
 
 export default function LiveTradingPage() {
   const { openAuthModal } = useAuth()
@@ -24,6 +28,22 @@ export default function LiveTradingPage() {
   const [movingAverageError, setMovingAverageError] = useState('')
   const [priceVolumeEvents, setPriceVolumeEvents] = useState([])
   const [blockFlowEvents, setBlockFlowEvents] = useState([])
+  const [activeStrategies, setActiveStrategies] = useState([])
+  const [signalConfigBySymbol, setSignalConfigBySymbol] = useState({})
+  const [webhookConfig, setWebhookConfig] = useState({
+    url: '',
+    has_secret: false,
+    is_enabled: true,
+    timeout_ms: 3000,
+    updated_at: '',
+  })
+  const [savingSignalSymbol, setSavingSignalSymbol] = useState('')
+  const [testingSignalSymbol, setTestingSignalSymbol] = useState('')
+  const [deliveryItems, setDeliveryItems] = useState([])
+  const [latestDelivery, setLatestDelivery] = useState(null)
+  const [signalNotice, setSignalNotice] = useState('')
+  const [signalError, setSignalError] = useState('')
+  const [signalErrorNeedsLogin, setSignalErrorNeedsLogin] = useState(false)
   const [symbolInput, setSymbolInput] = useState('00700.HK')
   const [nameInput, setNameInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -33,6 +53,7 @@ export default function LiveTradingPage() {
   const supportRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const resistanceRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const movingAverageRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
+  const signalCenterRefreshRef = useRef(0)
 
   const activeSymbol = watchlist.active_symbol
   const sessionState = watchlist.session_state || 'idle'
@@ -55,6 +76,7 @@ export default function LiveTradingPage() {
     : movingAveragePayload?.status === '双双跌破'
       ? 'down'
       : 'normal'
+  const webhookConfigured = Boolean(webhookConfig.url)
 
   const updateError = (nextError, nextNeedsLogin = false) => {
     setError(nextError)
@@ -65,9 +87,44 @@ export default function LiveTradingPage() {
     updateError(err.message || fallbackText, isAuthRequiredError(err))
   }
 
+  const applySignalError = (err, fallbackText) => {
+    setSignalNotice('')
+    setSignalError(err.message || fallbackText)
+    setSignalErrorNeedsLogin(isAuthRequiredError(err))
+  }
+
+  const updateLocalSignalConfig = (symbol, patch) => {
+    setSignalConfigBySymbol((prev) => {
+      const previous = prev[symbol] || {
+        symbol,
+        strategy_id: activeStrategies[0]?.id || '',
+        is_enabled: false,
+        cooldown_seconds: 300,
+        thresholds: {},
+      }
+      return {
+        ...prev,
+        [symbol]: {
+          ...previous,
+          ...patch,
+        },
+      }
+    })
+  }
+
   const sortedWatchlist = useMemo(() => {
     return [...(watchlist.items || [])].sort((a, b) => Number(b.is_active) - Number(a.is_active))
   }, [watchlist.items])
+
+  const strategyByID = useMemo(() => {
+    const mapped = {}
+    activeStrategies.forEach((strategy) => {
+      if (strategy?.id) {
+        mapped[strategy.id] = strategy
+      }
+    })
+    return mapped
+  }, [activeStrategies])
 
   const loadWatchlist = async () => {
     const data = await requestJson('/api/live/watchlist')
@@ -83,6 +140,107 @@ export default function LiveTradingPage() {
   const loadMarketOverview = async () => {
     const data = await requestJson('/api/live/market/overview')
     setMarketOverview(data)
+  }
+
+  const loadActiveStrategies = async () => {
+    const data = await requestJson('/api/strategies/active')
+    const items = Array.isArray(data?.items) ? data.items : []
+    setActiveStrategies(items)
+    return items
+  }
+
+  const loadSignalConfigs = async () => {
+    const data = await requestJson('/api/signal-configs')
+    const items = Array.isArray(data?.items) ? data.items : []
+    const mapped = {}
+    items.forEach((item) => {
+      if (item?.symbol) {
+        mapped[item.symbol] = item
+      }
+    })
+    setSignalConfigBySymbol(mapped)
+    return mapped
+  }
+
+  const loadWebhookConfig = async () => {
+    const data = await requestJson('/api/webhook')
+    const item = data?.item || null
+    if (!item) {
+      setWebhookConfig({
+        url: '',
+        has_secret: false,
+        is_enabled: true,
+        timeout_ms: 3000,
+        updated_at: '',
+      })
+      return null
+    }
+    setWebhookConfig({
+      url: item.url || '',
+      has_secret: Boolean(item.has_secret),
+      is_enabled: item.is_enabled !== false,
+      timeout_ms: Number(item.timeout_ms) > 0 ? Number(item.timeout_ms) : 3000,
+      updated_at: item.updated_at || '',
+    })
+    return item
+  }
+
+  const loadWebhookDeliveries = async () => {
+    const latestPromise = requestJson('/api/webhook-deliveries/latest').catch((err) => {
+      if (err?.status === 404) {
+        return { item: null }
+      }
+      throw err
+    })
+
+    const [latestData, listData] = await Promise.all([
+      latestPromise,
+      requestJson('/api/webhook-deliveries?limit=20'),
+    ])
+    setLatestDelivery(latestData?.item || null)
+    setDeliveryItems(Array.isArray(listData?.items) ? listData.items : [])
+  }
+
+  const loadSignalCenter = async ({ force = false } = {}) => {
+    const now = Date.now()
+    if (!force && now - signalCenterRefreshRef.current < SIGNAL_CENTER_REFRESH_MS) {
+      return
+    }
+    const [strategies] = await Promise.all([
+      loadActiveStrategies(),
+      loadSignalConfigs(),
+      loadWebhookConfig(),
+      loadWebhookDeliveries(),
+    ])
+
+    setSignalConfigBySymbol((prev) => {
+      const next = { ...prev }
+      const defaultStrategyID = strategies[0]?.id || ''
+      sortedWatchlist.forEach((item) => {
+        if (!next[item.symbol]) {
+          next[item.symbol] = {
+            symbol: item.symbol,
+            strategy_id: defaultStrategyID,
+            is_enabled: false,
+            cooldown_seconds: 300,
+            thresholds: {},
+          }
+        }
+      })
+      return next
+    })
+
+    signalCenterRefreshRef.current = now
+  }
+
+  const getSignalConfigForSymbol = (symbol) => {
+    return signalConfigBySymbol[symbol] || {
+      symbol,
+      strategy_id: activeStrategies[0]?.id || '',
+      is_enabled: false,
+      cooldown_seconds: 300,
+      thresholds: {},
+    }
   }
 
   const loadSupportLevels = async (symbol, { force = false } = {}) => {
@@ -212,6 +370,13 @@ export default function LiveTradingPage() {
     } catch (err) {
       applyRequestError(err, '实时数据刷新失败')
     }
+
+    try {
+      setSignalError('')
+      await loadSignalCenter({ force: true })
+    } catch (err) {
+      applySignalError(err, '信号中心数据刷新失败')
+    }
   }
 
   useEffect(() => {
@@ -229,6 +394,13 @@ export default function LiveTradingPage() {
         }
       } catch (err) {
         applyRequestError(err, '实时数据刷新失败')
+      }
+
+      try {
+        setSignalError('')
+        await loadSignalCenter()
+      } catch (err) {
+        applySignalError(err, '信号中心数据刷新失败')
       }
     }, POLL_MS)
 
@@ -278,6 +450,11 @@ export default function LiveTradingPage() {
     try {
       await requestJson(`/api/live/watchlist/${encodeURIComponent(symbol)}`, { method: 'DELETE' })
       const nextWatchlist = await loadWatchlist()
+      setSignalConfigBySymbol((prev) => {
+        const next = { ...prev }
+        delete next[symbol]
+        return next
+      })
       if (!nextWatchlist.active_symbol) {
         setSnapshotPayload(null)
         setOverlayPayload(null)
@@ -300,12 +477,62 @@ export default function LiveTradingPage() {
     }
   }
 
+  const handleSaveSymbolSignalConfig = async (symbol) => {
+    const config = getSignalConfigForSymbol(symbol)
+    setSavingSignalSymbol(symbol)
+    setSignalNotice('')
+    setSignalError('')
+    try {
+      const result = await requestJson(`/api/signal-configs/${encodeURIComponent(symbol)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy_id: config.strategy_id,
+          is_enabled: Boolean(config.is_enabled),
+          cooldown_seconds: Number(config.cooldown_seconds) || 300,
+          thresholds: config.thresholds || {},
+        }),
+      })
+      if (result?.item?.symbol) {
+        setSignalConfigBySymbol((prev) => ({
+          ...prev,
+          [result.item.symbol]: result.item,
+        }))
+      }
+      setSignalNotice(`${symbol} 信号配置已保存`)
+    } catch (err) {
+      applySignalError(err, `${symbol} 信号配置保存失败`)
+    } finally {
+      setSavingSignalSymbol('')
+    }
+  }
+
+  const handleTestSymbolSignal = async (symbol) => {
+    setTestingSignalSymbol(symbol)
+    setSignalNotice('')
+    setSignalError('')
+    try {
+      await requestJson(`/api/signal-configs/${encodeURIComponent(symbol)}/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ side: 'BUY' }),
+      })
+      await loadWebhookDeliveries()
+      setSignalNotice(`${symbol} 测试信号已送达`)
+    } catch (err) {
+      await loadWebhookDeliveries().catch(() => null)
+      applySignalError(err, `${symbol} 测试信号未送达`)
+    } finally {
+      setTestingSignalSymbol('')
+    }
+  }
+
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-border bg-card p-6">
         <h1 className="text-2xl font-semibold tracking-tight">实盘监控</h1>
         <p className="mt-3 text-sm leading-7 text-white/65">
-          当前仅提供实时监控与异动捕获，不触发任何下单行为。系统采用“关注池 + 激活标的”模型：可维护多只关注股票，但同一时刻只监控 1 只激活标的。
+          当前仅提供实时监控与异动捕获，不触发任何下单行为。监控面板采用“关注池 + 激活标的”模型（同一时刻展示 1 只激活标的），信号推送支持对关注池内多只股票分别配置与发送。
         </p>
       </section>
 
@@ -395,6 +622,196 @@ export default function LiveTradingPage() {
               ) : null}
             </div>
           ) : null}
+
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-white">交易信号推送（Webhook）</h3>
+                <p className="mt-1 text-xs text-white/60">Webhook 在设置页统一管理；本页只做按股票独立信号配置。支持多股票并行发送。</p>
+              </div>
+              <div className="text-xs text-white/55">
+                {webhookConfig.updated_at ? `配置更新时间：${formatDateTime(webhookConfig.updated_at)}` : '未配置'}
+              </div>
+            </div>
+
+            {signalError ? (
+              <div className="mt-3 rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                <div>{signalError}</div>
+                {signalErrorNeedsLogin ? (
+                  <button
+                    type="button"
+                    onClick={() => openAuthModal('login', '信号推送配置需要登录后才能继续。')}
+                    className="mt-2 inline-flex rounded-lg border border-rose-300/40 px-2.5 py-1 text-xs text-rose-100 transition hover:bg-rose-500/15"
+                  >
+                    去登录
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
+            {signalNotice ? (
+              <div className="mt-3 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{signalNotice}</div>
+            ) : null}
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
+              <div className="space-y-3 rounded-xl border border-border bg-black/20 p-4">
+                <div className="text-sm font-semibold text-white">Webhook 用户级配置状态</div>
+                <div className="text-xs text-white/70">Webhook 配置已迁移到设置页统一管理，这里仅展示状态。</div>
+                <div className="space-y-1 text-xs text-white/75">
+                  <div>配置状态：{webhookConfigured ? <span className="text-emerald-300">已配置</span> : <span className="text-amber-300">未配置</span>}</div>
+                  <div>启用状态：{webhookConfig.is_enabled ? <span className="text-emerald-300">已启用</span> : <span className="text-rose-300">已禁用</span>}</div>
+                  <div>签名状态：{webhookConfig.has_secret ? <span className="text-emerald-300">已启用（HMAC）</span> : <span className="text-amber-300">未启用（可选）</span>}</div>
+                  <div>更新时间：{webhookConfig.updated_at ? formatDateTime(webhookConfig.updated_at) : '--'}</div>
+                </div>
+                {!webhookConfigured || !webhookConfig.is_enabled ? (
+                  <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                    请先在设置页配置 Webhook URL 并启用，否则测试信号与实盘信号无法发送。
+                  </div>
+                ) : null}
+                {webhookConfigured && webhookConfig.is_enabled && !webhookConfig.has_secret ? (
+                  <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                    当前未配置 Secret，将以不带签名方式发送 Webhook。建议在接收端需要验签时补充 Secret。
+                  </div>
+                ) : null}
+                <a
+                  href="/settings"
+                  className="inline-flex rounded-lg border border-border px-3 py-1.5 text-xs text-white/85 transition hover:border-primary hover:text-primary"
+                >
+                  前往设置页管理 Webhook
+                </a>
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-border bg-black/20 p-4">
+                <div className="text-sm font-semibold text-white">最近发送状态</div>
+                {!latestDelivery ? (
+                  <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-white/50">暂无投递记录</div>
+                ) : (
+                  <div className="space-y-2 text-xs text-white/75">
+                    <div>标的：{latestDelivery.symbol || '--'}</div>
+                    <div>状态：<span className={deliveryStatusColor(latestDelivery.status)}>{formatDeliveryStatus(latestDelivery.status)}</span></div>
+                    <div>HTTP：{latestDelivery.http_status || '--'} · 耗时：{latestDelivery.latency_ms ?? '--'}ms</div>
+                    <div>时间：{formatDateTime(latestDelivery.updated_at)}</div>
+                    {latestDelivery.error_message ? <div className="text-rose-300">错误：{latestDelivery.error_message}</div> : null}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              <div className="text-sm font-semibold text-white">股票级信号配置</div>
+              <div className="text-xs text-white/55">每只股票可展开查看“何时发送、发送频率/重试、Webhook 内容模板（Payload）”。</div>
+              {sortedWatchlist.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border px-4 py-4 text-xs text-white/50">请先添加关注股票，再配置信号。</div>
+              ) : (
+                sortedWatchlist.map((item) => {
+                  const config = getSignalConfigForSymbol(item.symbol)
+                  const selectedStrategy = strategyByID[config.strategy_id] || null
+                  const payloadTemplate = buildSignalPayloadTemplate(item.symbol, config.strategy_id)
+                  return (
+                    <div key={`signal-config-${item.symbol}`} className="rounded-xl border border-border bg-black/20 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-sm font-medium text-white">{item.symbol}</div>
+                        <label className="flex items-center gap-2 text-xs text-white/75">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(config.is_enabled)}
+                            onChange={(event) => updateLocalSignalConfig(item.symbol, { is_enabled: event.target.checked })}
+                          />
+                          启用该股票信号
+                        </label>
+                      </div>
+                      <div className="mt-3 grid gap-2 md:grid-cols-[1.2fr_1fr_auto_auto]">
+                        <select
+                          value={config.strategy_id || ''}
+                          onChange={(event) => updateLocalSignalConfig(item.symbol, { strategy_id: event.target.value })}
+                          className="rounded-lg border border-border bg-black/30 px-2 py-1.5 text-xs text-white outline-none transition focus:border-primary"
+                        >
+                          <option value="">请选择策略</option>
+                          {activeStrategies.map((strategy) => (
+                            <option key={strategy.id} value={strategy.id}>{strategy.name}</option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          min={10}
+                          max={3600}
+                          value={config.cooldown_seconds ?? 300}
+                          onChange={(event) => updateLocalSignalConfig(item.symbol, { cooldown_seconds: Number(event.target.value) || 300 })}
+                          className="rounded-lg border border-border bg-black/30 px-2 py-1.5 text-xs text-white outline-none transition focus:border-primary"
+                        />
+                        <button
+                          type="button"
+                          disabled={savingSignalSymbol === item.symbol}
+                          onClick={() => handleSaveSymbolSignalConfig(item.symbol)}
+                          className="rounded-lg border border-border px-2 py-1.5 text-xs text-white/80 transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {savingSignalSymbol === item.symbol ? '保存中...' : '保存'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={testingSignalSymbol === item.symbol}
+                          onClick={() => handleTestSymbolSignal(item.symbol)}
+                          className="rounded-lg border border-emerald-400/40 px-2 py-1.5 text-xs text-emerald-300 transition hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {testingSignalSymbol === item.symbol ? '校验中...' : '验证送达'}
+                        </button>
+                      </div>
+                      <div className="mt-2 text-[11px] text-white/50">冷却时间：秒（10~3600）。用于抑制同一股票短时间重复推送。</div>
+
+                      <details className="mt-3 rounded-lg border border-border/80 bg-black/30 p-3">
+                        <summary className="cursor-pointer text-xs font-medium text-white/85">查看该股票发送逻辑与 Payload 模板</summary>
+                        <div className="mt-3 space-y-3 text-xs text-white/75">
+                          <div className="space-y-1">
+                            <div>触发时机：当前显式触发入口为“验证送达”按钮；点击后会立即创建测试事件，并同步校验本次 webhook 是否真实送达。</div>
+                            <div>发送节奏：常规信号仍由后台投递器约每 {SIGNAL_DISPATCH_INTERVAL_SECONDS} 秒扫描待发送队列。</div>
+                            <div>失败重试：最多 {SIGNAL_MAX_ATTEMPTS} 次（含首发），退避间隔 {SIGNAL_BACKOFF_STEPS.join(' / ')}。</div>
+                            <div>该股冷却周期：{Number(config.cooldown_seconds) || 300} 秒（同一股票重复信号抑制）。</div>
+                            <div>策略周期线索：{formatStrategyCycleHint(selectedStrategy)}</div>
+                            {selectedStrategy?.description ? <div>策略说明：{selectedStrategy.description}</div> : null}
+                          </div>
+
+                          <div>
+                            <div className="mb-1 text-white/65">Webhook Headers</div>
+                            <ul className="list-disc space-y-0.5 pl-4 text-white/70">
+                              <li>Content-Type: application/json</li>
+                              <li>X-Pumpkin-Event-Id: sig_xxx</li>
+                              <li>X-Pumpkin-Timestamp: Unix 秒时间戳</li>
+                              <li>X-Pumpkin-Signature: 仅配置 Secret 时附带（HMAC-SHA256）</li>
+                            </ul>
+                          </div>
+
+                          <div>
+                            <div className="mb-1 text-white/65">Payload 模板（text 消息）</div>
+                            <pre className="overflow-x-auto rounded-lg border border-border/80 bg-black/50 p-2 text-[11px] leading-5 text-emerald-200">{JSON.stringify(payloadTemplate, null, 2)}</pre>
+                          </div>
+                        </div>
+                      </details>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
+            <div className="mt-4">
+              <div className="text-sm font-semibold text-white">最近 20 次投递</div>
+              {!deliveryItems.length ? (
+                <div className="mt-2 rounded-xl border border-dashed border-border px-4 py-4 text-xs text-white/50">暂无投递记录</div>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {deliveryItems.map((item) => (
+                    <div key={`${item.event_id}-${item.updated_at}`} className="rounded-xl border border-border bg-black/20 px-3 py-2 text-xs text-white/75">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="font-medium text-white">{item.symbol || '--'} · {item.event_id}</div>
+                        <div className={deliveryStatusColor(item.status)}>{formatDeliveryStatus(item.status)}</div>
+                      </div>
+                      <div className="mt-1">Attempt {item.attempt_no} · HTTP {item.http_status || '--'} · {item.latency_ms ?? '--'}ms · {formatDateTime(item.updated_at)}</div>
+                      {item.error_message ? <div className="mt-1 text-rose-300">{item.error_message}</div> : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
 
           <section className="rounded-2xl border border-border bg-card p-5">
             <h3 className="text-base font-semibold text-white">港股大盘概览</h3>
@@ -956,6 +1373,73 @@ function formatMAStatus(status) {
     '跌破MA20但高于MA200': '短弱长强（下 MA20 上 MA200）',
   }
   return statusMap[normalized] || normalized || '--'
+}
+
+function formatStrategyCycleHint(strategy) {
+  if (!strategy) return '未选择策略，无法判断策略周期'
+
+  const schemaItems = Array.isArray(strategy.param_schema) ? strategy.param_schema : []
+  const defaultParams = strategy.default_params && typeof strategy.default_params === 'object'
+    ? strategy.default_params
+    : {}
+  const cycleItems = schemaItems.filter((item) => {
+    const key = String(item?.key || '').toLowerCase()
+    const label = String(item?.label || '')
+    return /周期|窗口|回看/.test(label) || /period|window|lookback/.test(key)
+  })
+
+  if (cycleItems.length === 0) {
+    return '策略未声明固定周期参数（由策略实现实时判定）'
+  }
+
+  return cycleItems.map((item) => {
+    const key = String(item?.key || '').trim()
+    const label = String(item?.label || key || '参数').trim()
+    const value = defaultParams[key] ?? item?.default
+    return `${label}=${value ?? '--'}`
+  }).join('，')
+}
+
+function buildSignalPayloadTemplate(symbol, strategyID) {
+  const lines = [
+    'Hi，我是消息推送股票交易信号',
+    '类型：正式信号',
+    `股票：${symbol || '00700.HK'}`,
+    '方向：BUY',
+    '时间：2026-03-19 18:00:00',
+  ]
+
+  if (strategyID) {
+    lines.push(`策略：${strategyID}`)
+  }
+  lines.push('原因：策略触发原因说明')
+
+  return {
+    msgtype: 'text',
+    text: {
+      content: lines.join('\n'),
+    },
+  }
+}
+
+function formatDeliveryStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase()
+  const labels = {
+    pending: '待发送',
+    processing: '发送中',
+    retrying: '重试中',
+    delivered: '已送达',
+    failed: '已失败',
+  }
+  return labels[normalized] || normalized || '--'
+}
+
+function deliveryStatusColor(status) {
+  const normalized = String(status || '').trim().toLowerCase()
+  if (normalized === 'delivered') return 'text-emerald-300'
+  if (normalized === 'failed') return 'text-rose-300'
+  if (normalized === 'retrying') return 'text-amber-300'
+  return 'text-white/75'
 }
 
 function formatSupportSources(sources) {

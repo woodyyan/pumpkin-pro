@@ -17,6 +17,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store"
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
+	"github.com/woodyyan/pumpkin-pro/backend/store/signal"
 	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
 )
 
@@ -27,6 +28,7 @@ type appServer struct {
 	authService     *auth.Service
 	strategyService *strategy.Service
 	liveService     *live.Service
+	signalService   *signal.Service
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -428,6 +430,186 @@ func (a *appServer) handleStrategyDetail(w http.ResponseWriter, r *http.Request,
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "Only GET and PUT methods are allowed")
 	}
+}
+
+func (a *appServer) handleWebhookConfig(w http.ResponseWriter, r *http.Request) {
+	userID := currentUserID(r)
+	switch r.Method {
+	case http.MethodGet:
+		item, err := a.signalService.GetWebhookEndpoint(r.Context(), userID)
+		if err != nil {
+			a.writeSignalError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"item": item})
+	case http.MethodPut:
+		payload, err := decodeBodyAsMap(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Webhook 配置请求格式错误")
+			return
+		}
+		input := signal.WebhookConfigInput{
+			URL:       asString(payload["url"]),
+			Secret:    asString(payload["secret"]),
+			IsEnabled: asBoolPtr(payload["is_enabled"]),
+			TimeoutMS: asInt(payload["timeout_ms"]),
+		}
+		item, err := a.signalService.UpsertWebhookEndpoint(r.Context(), userID, input)
+		if err != nil {
+			a.writeSignalError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"item": item})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Only GET and PUT methods are allowed")
+	}
+}
+
+func (a *appServer) handleWebhookTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	payload, err := decodeBodyAsMap(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Webhook 测试请求格式错误")
+		return
+	}
+	result, err := a.signalService.SendTestSignal(r.Context(), currentUserID(r), signal.TestSignalInput{
+		Symbol: asString(payload["symbol"]),
+		Side:   asString(payload["side"]),
+	})
+	if err != nil {
+		a.writeSignalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *appServer) handleSignalConfigs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	items, err := a.signalService.ListSymbolConfigs(r.Context(), currentUserID(r))
+	if err != nil {
+		a.writeSignalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *appServer) handleSignalConfigSubroutes(w http.ResponseWriter, r *http.Request) {
+	suffix := strings.TrimPrefix(r.URL.Path, "/api/signal-configs/")
+	suffix = strings.Trim(strings.TrimSpace(suffix), "/")
+	if suffix == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	if strings.HasSuffix(suffix, "/test") {
+		symbol := strings.TrimSpace(strings.TrimSuffix(suffix, "/test"))
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+			return
+		}
+		payload, err := decodeBodyAsMap(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "测试信号请求格式错误")
+			return
+		}
+		result, err := a.signalService.SendTestSignal(r.Context(), currentUserID(r), signal.TestSignalInput{
+			Symbol: symbol,
+			Side:   asString(payload["side"]),
+		})
+		if err != nil {
+			a.writeSignalError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+
+	symbol := suffix
+	switch r.Method {
+	case http.MethodPut:
+		payload, err := decodeBodyAsMap(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "信号配置请求格式错误")
+			return
+		}
+		input := signal.SymbolSignalConfigInput{
+			StrategyID:      asString(payload["strategy_id"]),
+			IsEnabled:       asBoolPtr(payload["is_enabled"]),
+			CooldownSeconds: asInt(payload["cooldown_seconds"]),
+			Thresholds:      asMap(payload["thresholds"]),
+		}
+
+		if strings.TrimSpace(input.StrategyID) != "" {
+			if _, err := a.strategyService.GetByID(r.Context(), currentUserID(r), input.StrategyID); err != nil {
+				a.writeStrategyError(w, err)
+				return
+			}
+		}
+
+		item, err := a.signalService.UpsertSymbolConfig(r.Context(), currentUserID(r), symbol, input)
+		if err != nil {
+			a.writeSignalError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"item": item})
+	case http.MethodDelete:
+		if err := a.signalService.DeleteSymbolConfig(r.Context(), currentUserID(r), symbol); err != nil {
+			a.writeSignalError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "symbol": strings.ToUpper(symbol)})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Only PUT, DELETE and POST methods are allowed")
+	}
+}
+
+func (a *appServer) handleSignalEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	symbol := strings.TrimSpace(r.URL.Query().Get("symbol"))
+	limit := parseLimit(r.URL.Query().Get("limit"), 20)
+	items, err := a.signalService.ListSignalEvents(r.Context(), currentUserID(r), symbol, limit)
+	if err != nil {
+		a.writeSignalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *appServer) handleWebhookDeliveries(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	symbol := strings.TrimSpace(r.URL.Query().Get("symbol"))
+	limit := parseLimit(r.URL.Query().Get("limit"), 20)
+	items, err := a.signalService.ListDeliveries(r.Context(), currentUserID(r), symbol, limit)
+	if err != nil {
+		a.writeSignalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *appServer) handleWebhookDeliveriesLatest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	item, err := a.signalService.GetLatestDelivery(r.Context(), currentUserID(r))
+	if err != nil {
+		a.writeSignalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"item": item})
 }
 
 func (a *appServer) handleLiveWatchlist(w http.ResponseWriter, r *http.Request) {
@@ -860,6 +1042,48 @@ func asString(input any) string {
 	return strings.TrimSpace(text)
 }
 
+func asBoolPtr(input any) *bool {
+	if input == nil {
+		return nil
+	}
+	value, ok := input.(bool)
+	if !ok {
+		return nil
+	}
+	return &value
+}
+
+func asInt(input any) int {
+	switch value := input.(type) {
+	case int:
+		return value
+	case int8:
+		return int(value)
+	case int16:
+		return int(value)
+	case int32:
+		return int(value)
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	case json.Number:
+		parsed, err := strconv.Atoi(value.String())
+		if err != nil {
+			return 0
+		}
+		return parsed
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			return 0
+		}
+		return parsed
+	default:
+		return 0
+	}
+}
+
 func (a *appServer) writeStrategyError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, strategy.ErrNotFound):
@@ -869,6 +1093,31 @@ func (a *appServer) writeStrategyError(w http.ResponseWriter, err error) {
 	case errors.Is(err, strategy.ErrInvalid):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, strategy.ErrForbidden):
+		writeError(w, http.StatusForbidden, "该操作需要登录后使用")
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+func (a *appServer) writeSignalError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, signal.ErrNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, signal.ErrConflict):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, signal.ErrInvalidInput):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, signal.ErrWebhookMissing):
+		writeError(w, http.StatusBadRequest, "请先配置并保存 Webhook")
+	case errors.Is(err, signal.ErrWebhookOff):
+		writeError(w, http.StatusConflict, "Webhook 已禁用，请先启用")
+	case errors.Is(err, signal.ErrWebhookDeliveryUndelivered):
+		detail := strings.TrimPrefix(err.Error(), signal.ErrWebhookDeliveryUndelivered.Error()+": ")
+		if strings.TrimSpace(detail) == "" {
+			detail = "Webhook 未送达，请查看投递结果"
+		}
+		writeError(w, http.StatusBadGateway, detail)
+	case errors.Is(err, signal.ErrForbidden):
 		writeError(w, http.StatusForbidden, "该操作需要登录后使用")
 	default:
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -910,11 +1159,18 @@ func main() {
 	liveRepo := live.NewRepository(storeInstance.DB)
 	liveService := live.NewService(liveRepo)
 
+	signalRepo := signal.NewRepository(storeInstance.DB)
+	signalService := signal.NewService(signalRepo, signal.ServiceConfig{
+		SecretKey: cfg.Auth.JWTSecret,
+	})
+	signalService.StartDispatcher(context.Background())
+
 	server := &appServer{
 		cfg:             cfg,
 		authService:     authService,
 		strategyService: strategyService,
 		liveService:     liveService,
+		signalService:   signalService,
 	}
 
 	mux := http.NewServeMux()
@@ -932,6 +1188,14 @@ func main() {
 	mux.HandleFunc("/api/strategies", server.withOptionalAuth(server.handleStrategies))
 	mux.HandleFunc("/api/strategies/active", server.withOptionalAuth(server.handleActiveStrategies))
 	mux.HandleFunc("/api/strategies/", server.withOptionalAuth(server.handleStrategySubroutes))
+
+	mux.HandleFunc("/api/webhook", server.withRequiredAuth(server.handleWebhookConfig))
+	mux.HandleFunc("/api/webhook/test", server.withRequiredAuth(server.handleWebhookTest))
+	mux.HandleFunc("/api/signal-configs", server.withRequiredAuth(server.handleSignalConfigs))
+	mux.HandleFunc("/api/signal-configs/", server.withRequiredAuth(server.handleSignalConfigSubroutes))
+	mux.HandleFunc("/api/signal-events", server.withRequiredAuth(server.handleSignalEvents))
+	mux.HandleFunc("/api/webhook-deliveries", server.withRequiredAuth(server.handleWebhookDeliveries))
+	mux.HandleFunc("/api/webhook-deliveries/latest", server.withRequiredAuth(server.handleWebhookDeliveriesLatest))
 
 	mux.HandleFunc("/api/live/watchlist", server.withRequiredAuth(server.handleLiveWatchlist))
 	mux.HandleFunc("/api/live/watchlist/", server.withRequiredAuth(server.handleLiveWatchlistSubroutes))

@@ -740,7 +740,7 @@ func (s *Service) buildWebhookPayload(event SignalEventRecord) (map[string]any, 
 }
 
 func buildWebhookTextContent(event SignalEventRecord, reason map[string]any) string {
-	lines := []string{"Hi，我是消息推送股票交易信号"}
+	lines := []string{"股票交易信号来啦！"}
 	if event.IsTest {
 		lines = append(lines, "类型：测试信号")
 	} else {

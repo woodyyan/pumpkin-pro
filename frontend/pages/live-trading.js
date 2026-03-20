@@ -39,8 +39,6 @@ export default function LiveTradingPage() {
   })
   const [savingSignalSymbol, setSavingSignalSymbol] = useState('')
   const [testingSignalSymbol, setTestingSignalSymbol] = useState('')
-  const [deliveryItems, setDeliveryItems] = useState([])
-  const [latestDelivery, setLatestDelivery] = useState(null)
   const [signalNotice, setSignalNotice] = useState('')
   const [signalError, setSignalError] = useState('')
   const [signalErrorNeedsLogin, setSignalErrorNeedsLogin] = useState(false)
@@ -185,22 +183,6 @@ export default function LiveTradingPage() {
     return item
   }
 
-  const loadWebhookDeliveries = async () => {
-    const latestPromise = requestJson('/api/webhook-deliveries/latest').catch((err) => {
-      if (err?.status === 404) {
-        return { item: null }
-      }
-      throw err
-    })
-
-    const [latestData, listData] = await Promise.all([
-      latestPromise,
-      requestJson('/api/webhook-deliveries?limit=20'),
-    ])
-    setLatestDelivery(latestData?.item || null)
-    setDeliveryItems(Array.isArray(listData?.items) ? listData.items : [])
-  }
-
   const loadSignalCenter = async ({ force = false } = {}) => {
     const now = Date.now()
     if (!force && now - signalCenterRefreshRef.current < SIGNAL_CENTER_REFRESH_MS) {
@@ -210,7 +192,6 @@ export default function LiveTradingPage() {
       loadActiveStrategies(),
       loadSignalConfigs(),
       loadWebhookConfig(),
-      loadWebhookDeliveries(),
     ])
 
     setSignalConfigBySymbol((prev) => {
@@ -517,10 +498,8 @@ export default function LiveTradingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ side: 'BUY' }),
       })
-      await loadWebhookDeliveries()
       setSignalNotice(`${symbol} 测试信号已送达`)
     } catch (err) {
-      await loadWebhookDeliveries().catch(() => null)
       applySignalError(err, `${symbol} 测试信号未送达`)
     } finally {
       setTestingSignalSymbol('')
@@ -627,10 +606,10 @@ export default function LiveTradingPage() {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 className="text-base font-semibold text-white">交易信号推送（Webhook）</h3>
-                <p className="mt-1 text-xs text-white/60">Webhook 在设置页统一管理；本页只做按股票独立信号配置。支持多股票并行发送。</p>
+                <p className="mt-1 text-xs text-white/60">设置页统一管理 Webhook；本页只看配置摘要并配置各股票信号。</p>
               </div>
               <div className="text-xs text-white/55">
-                {webhookConfig.updated_at ? `配置更新时间：${formatDateTime(webhookConfig.updated_at)}` : '未配置'}
+                {webhookConfig.updated_at ? `更新于 ${formatDateTime(webhookConfig.updated_at)}` : '未配置'}
               </div>
             </div>
 
@@ -653,53 +632,33 @@ export default function LiveTradingPage() {
               <div className="mt-3 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{signalNotice}</div>
             ) : null}
 
-            <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
+            <div className="mt-4">
               <div className="space-y-3 rounded-xl border border-border bg-black/20 p-4">
-                <div className="text-sm font-semibold text-white">Webhook 用户级配置状态</div>
-                <div className="text-xs text-white/70">Webhook 配置已迁移到设置页统一管理，这里仅展示状态。</div>
-                <div className="space-y-1 text-xs text-white/75">
-                  <div>配置状态：{webhookConfigured ? <span className="text-emerald-300">已配置</span> : <span className="text-amber-300">未配置</span>}</div>
-                  <div>启用状态：{webhookConfig.is_enabled ? <span className="text-emerald-300">已启用</span> : <span className="text-rose-300">已禁用</span>}</div>
-                  <div>签名状态：{webhookConfig.has_secret ? <span className="text-emerald-300">已启用（HMAC）</span> : <span className="text-amber-300">未启用（可选）</span>}</div>
-                  <div>更新时间：{webhookConfig.updated_at ? formatDateTime(webhookConfig.updated_at) : '--'}</div>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className={`rounded-full px-2.5 py-1 ${webhookConfigured ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>
+                    {webhookConfigured ? '已配置 URL' : '未配置 URL'}
+                  </span>
+                  <span className={`rounded-full px-2.5 py-1 ${webhookConfig.is_enabled ? 'bg-emerald-500/15 text-emerald-200' : 'bg-rose-500/15 text-rose-200'}`}>
+                    {webhookConfig.is_enabled ? '已启用发送' : '已禁用发送'}
+                  </span>
                 </div>
                 {!webhookConfigured || !webhookConfig.is_enabled ? (
                   <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                    请先在设置页配置 Webhook URL 并启用，否则测试信号与实盘信号无法发送。
-                  </div>
-                ) : null}
-                {webhookConfigured && webhookConfig.is_enabled && !webhookConfig.has_secret ? (
-                  <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                    当前未配置 Secret，将以不带签名方式发送 Webhook。建议在接收端需要验签时补充 Secret。
+                    未配置或未启用时，测试信号和实盘信号都不会发出。
                   </div>
                 ) : null}
                 <a
                   href="/settings"
                   className="inline-flex rounded-lg border border-border px-3 py-1.5 text-xs text-white/85 transition hover:border-primary hover:text-primary"
                 >
-                  前往设置页管理 Webhook
+                  去设置页
                 </a>
-              </div>
-
-              <div className="space-y-3 rounded-xl border border-border bg-black/20 p-4">
-                <div className="text-sm font-semibold text-white">最近发送状态</div>
-                {!latestDelivery ? (
-                  <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-white/50">暂无投递记录</div>
-                ) : (
-                  <div className="space-y-2 text-xs text-white/75">
-                    <div>标的：{latestDelivery.symbol || '--'}</div>
-                    <div>状态：<span className={deliveryStatusColor(latestDelivery.status)}>{formatDeliveryStatus(latestDelivery.status)}</span></div>
-                    <div>HTTP：{latestDelivery.http_status || '--'} · 耗时：{latestDelivery.latency_ms ?? '--'}ms</div>
-                    <div>时间：{formatDateTime(latestDelivery.updated_at)}</div>
-                    {latestDelivery.error_message ? <div className="text-rose-300">错误：{latestDelivery.error_message}</div> : null}
-                  </div>
-                )}
               </div>
             </div>
 
             <div className="mt-4 space-y-2">
               <div className="text-sm font-semibold text-white">股票级信号配置</div>
-              <div className="text-xs text-white/55">每只股票可展开查看“何时发送、发送频率/重试、Webhook 内容模板（Payload）”。</div>
+              <div className="text-xs text-white/55">每只股票可配置策略、冷却时间并做送达验证；展开可查看触发条件与 Payload。</div>
               {sortedWatchlist.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-border px-4 py-4 text-xs text-white/50">请先添加关注股票，再配置信号。</div>
               ) : (
@@ -709,16 +668,56 @@ export default function LiveTradingPage() {
                   const payloadTemplate = buildSignalPayloadTemplate(item.symbol, config.strategy_id)
                   return (
                     <div key={`signal-config-${item.symbol}`} className="rounded-xl border border-border bg-black/20 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-medium text-white">{item.symbol}</div>
-                        <label className="flex items-center gap-2 text-xs text-white/75">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(config.is_enabled)}
-                            onChange={(event) => updateLocalSignalConfig(item.symbol, { is_enabled: event.target.checked })}
-                          />
-                          启用该股票信号
-                        </label>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium text-white">{item.symbol}</div>
+                          <div className="mt-1 text-xs text-white/55">
+                            {Boolean(config.is_enabled)
+                              ? '该股票信号已开启，满足策略条件后会进入发送流程。'
+                              : '该股票信号当前关闭，开启后才会按策略推送。'}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={Boolean(config.is_enabled)}
+                          aria-label={`${item.symbol} 股票信号开关`}
+                          onClick={() => updateLocalSignalConfig(item.symbol, { is_enabled: !Boolean(config.is_enabled) })}
+                          className={`inline-flex min-w-[260px] items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40 ${
+                            config.is_enabled
+                              ? 'border-emerald-300/60 bg-emerald-500/18 text-emerald-50 shadow-[0_12px_30px_rgba(16,185,129,0.22)]'
+                              : 'border-amber-300/35 bg-amber-500/10 text-white/88 shadow-[0_10px_26px_rgba(245,158,11,0.12)] hover:border-amber-300/55 hover:bg-amber-500/14'
+                          }`}
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="flex items-center gap-2">
+                              <span className="font-semibold">{config.is_enabled ? '股票信号已开启' : '股票信号未开启'}</span>
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] ${
+                                  config.is_enabled
+                                    ? 'bg-emerald-950/45 text-emerald-100'
+                                    : 'bg-amber-950/45 text-amber-100'
+                                }`}
+                              >
+                                {config.is_enabled ? 'ON' : 'OFF'}
+                              </span>
+                            </span>
+                            <span className={`mt-1 block text-xs ${config.is_enabled ? 'text-emerald-100/80' : 'text-amber-100/75'}`}>
+                              {config.is_enabled ? '满足策略条件后会进入正式推送。' : '点击开启后，才会按所选策略推送。'}
+                            </span>
+                          </span>
+                          <span
+                            className={`relative inline-flex h-8 w-14 shrink-0 rounded-full border transition ${
+                              config.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-amber-200/30 bg-black/25'
+                            }`}
+                          >
+                            <span
+                              className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow-[0_4px_12px_rgba(15,23,42,0.35)] transition-all ${
+                                config.is_enabled ? 'left-7' : 'left-1'
+                              }`}
+                            />
+                          </span>
+                        </button>
                       </div>
                       <div className="mt-3 grid gap-2 md:grid-cols-[1.2fr_1fr_auto_auto]">
                         <select
@@ -759,14 +758,15 @@ export default function LiveTradingPage() {
                       <div className="mt-2 text-[11px] text-white/50">冷却时间：秒（10~3600）。用于抑制同一股票短时间重复推送。</div>
 
                       <details className="mt-3 rounded-lg border border-border/80 bg-black/30 p-3">
-                        <summary className="cursor-pointer text-xs font-medium text-white/85">查看该股票发送逻辑与 Payload 模板</summary>
+                        <summary className="cursor-pointer text-xs font-medium text-white/85">查看触发条件与 Payload 模板</summary>
                         <div className="mt-3 space-y-3 text-xs text-white/75">
                           <div className="space-y-1">
-                            <div>触发时机：当前显式触发入口为“验证送达”按钮；点击后会立即创建测试事件，并同步校验本次 webhook 是否真实送达。</div>
-                            <div>发送节奏：常规信号仍由后台投递器约每 {SIGNAL_DISPATCH_INTERVAL_SECONDS} 秒扫描待发送队列。</div>
+                            <div>交易信号何时触发：启用该股票信号后，只要所选策略在后台判定满足条件，就会创建正式信号并投递到 Webhook。</div>
+                            <div>验证送达：点击“验证送达”会立即发送一条测试信号，并同步校验本次 webhook 是否真实送达。</div>
+                            <div>后台投递节奏：约每 {SIGNAL_DISPATCH_INTERVAL_SECONDS} 秒扫描待发送队列。</div>
                             <div>失败重试：最多 {SIGNAL_MAX_ATTEMPTS} 次（含首发），退避间隔 {SIGNAL_BACKOFF_STEPS.join(' / ')}。</div>
-                            <div>该股冷却周期：{Number(config.cooldown_seconds) || 300} 秒（同一股票重复信号抑制）。</div>
-                            <div>策略周期线索：{formatStrategyCycleHint(selectedStrategy)}</div>
+                            <div>该股冷却时间：{Number(config.cooldown_seconds) || 300} 秒（同一股票重复信号抑制）。</div>
+                            <div>策略参数线索：{formatStrategyCycleHint(selectedStrategy)}</div>
                             {selectedStrategy?.description ? <div>策略说明：{selectedStrategy.description}</div> : null}
                           </div>
 
@@ -792,25 +792,6 @@ export default function LiveTradingPage() {
               )}
             </div>
 
-            <div className="mt-4">
-              <div className="text-sm font-semibold text-white">最近 20 次投递</div>
-              {!deliveryItems.length ? (
-                <div className="mt-2 rounded-xl border border-dashed border-border px-4 py-4 text-xs text-white/50">暂无投递记录</div>
-              ) : (
-                <div className="mt-2 space-y-2">
-                  {deliveryItems.map((item) => (
-                    <div key={`${item.event_id}-${item.updated_at}`} className="rounded-xl border border-border bg-black/20 px-3 py-2 text-xs text-white/75">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="font-medium text-white">{item.symbol || '--'} · {item.event_id}</div>
-                        <div className={deliveryStatusColor(item.status)}>{formatDeliveryStatus(item.status)}</div>
-                      </div>
-                      <div className="mt-1">Attempt {item.attempt_no} · HTTP {item.http_status || '--'} · {item.latency_ms ?? '--'}ms · {formatDateTime(item.updated_at)}</div>
-                      {item.error_message ? <div className="mt-1 text-rose-300">{item.error_message}</div> : null}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
           </section>
 
           <section className="rounded-2xl border border-border bg-card p-5">
@@ -834,7 +815,19 @@ export default function LiveTradingPage() {
               <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">请先在左侧选择一个激活标的。</div>
             ) : (
               <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <MetricMini label="最新价" value={formatNumber(snapshotPayload.snapshot.last_price, 3)} featured />
+                <MetricMini
+                  label="最新价"
+                  value={formatNumber(snapshotPayload.snapshot.last_price, 3)}
+                  accent={
+                    snapshotPayload.snapshot.change_rate > 0
+                      ? 'up'
+                      : snapshotPayload.snapshot.change_rate < 0
+                        ? 'down'
+                        : 'normal'
+                  }
+                  featured
+                  marketAccent
+                />
                 <MetricMini label="涨跌幅" value={formatPercent(snapshotPayload.snapshot.change_rate)} accent={snapshotPayload.snapshot.change_rate >= 0 ? 'up' : 'down'} />
                 <MetricMini label="量比" value={formatNumber(snapshotPayload.snapshot.volume_ratio, 2)} />
                 <MetricMini label="成交量" value={formatCompact(snapshotPayload.snapshot.volume)} />
@@ -1247,22 +1240,38 @@ function MetricCard({ label, value }) {
   )
 }
 
-function MetricMini({ label, value, accent = 'normal', emphasis = false, featured = false }) {
-  const color = accent === 'up' ? 'text-emerald-300' : accent === 'down' ? 'text-rose-300' : 'text-white'
+function MetricMini({ label, value, accent = 'normal', emphasis = false, featured = false, marketAccent = false }) {
+  const risingColor = marketAccent ? 'text-rose-300' : 'text-emerald-300'
+  const fallingColor = marketAccent ? 'text-emerald-300' : 'text-rose-300'
+  const color = accent === 'up' ? risingColor : accent === 'down' ? fallingColor : 'text-white'
   const emphasisTone = accent === 'up'
     ? 'border-emerald-400/45 bg-emerald-500/10 ring-1 ring-emerald-300/20'
     : accent === 'down'
       ? 'border-rose-400/45 bg-rose-500/10 ring-1 ring-rose-300/20'
       : 'border-primary/45 bg-primary/10 ring-1 ring-primary/25'
+  const featuredTone = accent === 'up'
+    ? 'border-rose-400/50 bg-rose-500/12 ring-1 ring-rose-300/25 shadow-[0_10px_30px_rgba(251,113,133,0.18)]'
+    : accent === 'down'
+      ? 'border-emerald-400/50 bg-emerald-500/12 ring-1 ring-emerald-300/25 shadow-[0_10px_30px_rgba(52,211,153,0.18)]'
+      : 'border-primary/55 bg-primary/12 ring-1 ring-primary/30 shadow-[0_10px_30px_rgba(76,106,255,0.16)]'
   const containerTone = featured
-    ? 'border-primary/55 bg-primary/12 ring-1 ring-primary/30 shadow-[0_10px_30px_rgba(76,106,255,0.16)]'
+    ? marketAccent
+      ? featuredTone
+      : 'border-primary/55 bg-primary/12 ring-1 ring-primary/30 shadow-[0_10px_30px_rgba(76,106,255,0.16)]'
     : emphasis
       ? emphasisTone
       : 'border-border bg-black/20'
+  const featuredLabelColor = marketAccent
+    ? accent === 'up'
+      ? 'text-rose-200/90'
+      : accent === 'down'
+        ? 'text-emerald-200/90'
+        : 'text-primary/85'
+    : 'text-primary/85'
 
   return (
     <div className={`rounded-xl border px-3 py-2 ${featured ? 'px-4 py-3' : ''} ${containerTone}`}>
-      <div className={`text-xs ${featured ? 'text-primary/85' : 'text-white/50'}`}>{label}</div>
+      <div className={`text-xs ${featured ? featuredLabelColor : 'text-white/50'}`}>{label}</div>
       <div className={`mt-1 font-semibold ${color} ${featured ? 'text-2xl leading-none tracking-tight' : 'text-sm'}`}>{value}</div>
     </div>
   )
@@ -1407,7 +1416,7 @@ function formatStrategyCycleHint(strategy) {
 
 function buildSignalPayloadTemplate(symbol, strategyID) {
   const lines = [
-    'Hi，我是消息推送股票交易信号',
+    '股票交易信号来啦！',
     '类型：正式信号',
     `股票：${symbol || '00700.HK'}`,
     '方向：BUY',
@@ -1427,25 +1436,6 @@ function buildSignalPayloadTemplate(symbol, strategyID) {
   }
 }
 
-function formatDeliveryStatus(status) {
-  const normalized = String(status || '').trim().toLowerCase()
-  const labels = {
-    pending: '待发送',
-    processing: '发送中',
-    retrying: '重试中',
-    delivered: '已送达',
-    failed: '已失败',
-  }
-  return labels[normalized] || normalized || '--'
-}
-
-function deliveryStatusColor(status) {
-  const normalized = String(status || '').trim().toLowerCase()
-  if (normalized === 'delivered') return 'text-emerald-300'
-  if (normalized === 'failed') return 'text-rose-300'
-  if (normalized === 'retrying') return 'text-amber-300'
-  return 'text-white/75'
-}
 
 function formatSupportSources(sources) {
   if (!Array.isArray(sources) || sources.length === 0) return '--'

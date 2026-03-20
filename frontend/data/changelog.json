@@ -1,0 +1,135 @@
+{
+  "last_updated": "2026-03-20",
+  "manual_entry_template": {
+    "date": "YYYY-MM-DD",
+    "type": "新功能",
+    "title": "请填写中文标题",
+    "summary": "请填写一段面向用户的中文说明",
+    "scope": "模块名称",
+    "commit": "短提交哈希，可选",
+    "raw_subject": "原始 commit message，可选",
+    "visible": true
+  },
+  "items": [
+    {
+      "date": "2026-03-20",
+      "type": "修复优化",
+      "title": "优化实盘交易信号配置展示",
+      "summary": "增强股票级信号开关与 Webhook 配置摘要的状态表达，减少页面干扰信息，便于快速判断当前配置是否生效。",
+      "scope": "实盘交易",
+      "commit": "c6b39e4",
+      "raw_subject": "feat: polish live trading signal config",
+      "visible": true
+    },
+    {
+      "date": "2026-03-20",
+      "type": "修复优化",
+      "title": "强化激活标的最新价展示",
+      "summary": "将激活标的快照中的“最新价”提升为重点信息，放大字号并按涨跌联动颜色高亮，关键价格变化更醒目。",
+      "scope": "实盘交易",
+      "commit": "1711963",
+      "raw_subject": "feat: highlight live trading latest price",
+      "visible": true
+    },
+    {
+      "date": "2026-03-20",
+      "type": "新功能",
+      "title": "新增 Webhook 投递管理能力",
+      "summary": "支持统一管理交易信号 Webhook 的保存、测试与投递状态校验，便于快速确认外部通知是否真正送达。",
+      "scope": "设置 / Webhook",
+      "commit": "62c389c",
+      "raw_subject": "feat: add signal webhook delivery management",
+      "visible": true
+    },
+    {
+      "date": "2026-03-19",
+      "type": "新功能",
+      "title": "实盘页新增均线看板模块",
+      "summary": "为实盘交易页面补充 MA20 与 MA200 指标接口和展示模块，帮助更快观察趋势位置与关键均线关系。",
+      "scope": "实盘交易",
+      "commit": "212ed4b",
+      "raw_subject": "feat(live): add MA20/MA200 api and dashboard module",
+      "visible": true
+    },
+    {
+      "date": "2026-03-19",
+      "type": "新功能",
+      "title": "上线阻力位分析模块 v1",
+      "summary": "实盘交易页面新增阻力位分析能力，便于结合价格位置更直观地判断上方压力区间。",
+      "scope": "实盘交易",
+      "commit": "3550ed9",
+      "raw_subject": "feat(live): add resistance levels v1",
+      "visible": true
+    },
+    {
+      "date": "2026-03-18",
+      "type": "修复优化",
+      "title": "优化支撑位稳定性与说明文案",
+      "summary": "增强支撑位相关逻辑的稳健性，同时简化页面表达，减少理解门槛。",
+      "scope": "实盘交易",
+      "commit": "7672fe0",
+      "raw_subject": "fix(live): harden support levels and simplify wording",
+      "visible": true
+    },
+    {
+      "date": "2026-03-18",
+      "type": "修复优化",
+      "title": "移除回测页调试日志面板",
+      "summary": "清理回测页面中仅用于调试的股票名称日志面板，让主要分析区域更干净。",
+      "scope": "回测引擎",
+      "commit": "95290e4",
+      "raw_subject": "fix(backtest): remove ticker name debug log panel",
+      "visible": true
+    },
+    {
+      "date": "2026-03-18",
+      "type": "修复优化",
+      "title": "修正策略更新后的误报提示",
+      "summary": "解决策略更新成功后仍可能出现“未找到”提示的问题，减少误判与重复操作。",
+      "scope": "策略库",
+      "commit": "c7f3fe1",
+      "raw_subject": "fix(strategy): avoid false not found after successful update",
+      "visible": true
+    },
+    {
+      "date": "2026-03-18",
+      "type": "修复优化",
+      "title": "回测默认时间范围切换为最近一年",
+      "summary": "新建回测时默认选中“截至昨天的最近一年”时间区间，减少每次手动调整日期的操作。",
+      "scope": "回测引擎",
+      "commit": "539724e",
+      "raw_subject": "feat(backtest): set default date range to last year ending yesterday",
+      "visible": true
+    },
+    {
+      "date": "2026-03-18",
+      "type": "新功能",
+      "title": "完善登录弹窗主题样式",
+      "summary": "统一登录与注册弹窗的视觉风格，使账号入口与整体界面风格更一致。",
+      "scope": "账号体系",
+      "commit": "f071969",
+      "raw_subject": "feat: finalize auth dialog b-theme styling",
+      "visible": true
+    },
+    {
+      "date": "2026-03-17",
+      "type": "新功能",
+      "title": "新增账号入口并打通鉴权流程",
+      "summary": "顶部导航新增登录与注册入口，并补齐实盘页、策略页等需要登录后操作的交互流程。",
+      "scope": "账号体系",
+      "commit": "4ed0587",
+      "raw_subject": "feat: add auth entrypoints and polish live/strategy auth flows",
+      "visible": true
+    },
+    {
+      "date": "2026-03-17",
+      "type": "修复优化",
+      "title": "回测结果新增买入并持有基准对比",
+      "summary": "在回测结果中补充买入并持有收益对比，方便更直观看出策略是否跑赢基准。",
+      "scope": "回测引擎",
+      "commit": "1534018",
+      "raw_subject": "feat(backtest): add buy-hold benchmark and build cache",
+      "visible": true
+    }
+  ]
+}

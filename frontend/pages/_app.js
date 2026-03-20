@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: '/live-trading', label: '实盘交易' },
   { href: '/stock-picker', label: '选股平台' },
   { href: '/settings', label: '设置' },
+  { href: '/changelog', label: '更新日志' },
 ]
 
 function AppLayout({ Component, pageProps }) {

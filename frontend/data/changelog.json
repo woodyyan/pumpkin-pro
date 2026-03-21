@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-03-20",
+  "last_updated": "2026-03-21",
   "manual_entry_template": {
     "date": "YYYY-MM-DD",
     "type": "新功能",
@@ -11,6 +11,15 @@
     "visible": true
   },
   "items": [
+    {
+      "date": "2026-03-21",
+      "type": "修复优化",
+      "title": "未登录浏览实盘页时不再反复闪动",
+      "summary": "未登录访问实盘交易页时，现在只保留公共行情更新；关注池、激活标的、Webhook 与信号配置等账号级区域会改为登录后加载或静态引导，浏览更稳定。",
+      "scope": "实盘交易",
+      "raw_subject": "fix(live): gate logged-out private polling and update changelog",
+      "visible": true
+    },
     {
       "date": "2026-03-20",
       "type": "修复优化",

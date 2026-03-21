@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
@@ -13,10 +13,18 @@ const MA_LOOKBACK_DAYS = 240
 const SIGNAL_DISPATCH_INTERVAL_SECONDS = 2
 const SIGNAL_MAX_ATTEMPTS = 4
 const SIGNAL_BACKOFF_STEPS = ['1 分钟', '5 分钟', '15 分钟']
+const DEFAULT_WATCHLIST = { items: [], active_symbol: '', session_state: 'idle' }
+const DEFAULT_WEBHOOK_CONFIG = {
+  url: '',
+  has_secret: false,
+  is_enabled: true,
+  timeout_ms: 3000,
+  updated_at: '',
+}
 
 export default function LiveTradingPage() {
-  const { openAuthModal } = useAuth()
-  const [watchlist, setWatchlist] = useState({ items: [], active_symbol: '', session_state: 'idle' })
+  const { isLoggedIn, openAuthModal, ready } = useAuth()
+  const [watchlist, setWatchlist] = useState(DEFAULT_WATCHLIST)
   const [marketOverview, setMarketOverview] = useState(null)
   const [snapshotPayload, setSnapshotPayload] = useState(null)
   const [overlayPayload, setOverlayPayload] = useState(null)
@@ -30,13 +38,7 @@ export default function LiveTradingPage() {
   const [blockFlowEvents, setBlockFlowEvents] = useState([])
   const [activeStrategies, setActiveStrategies] = useState([])
   const [signalConfigBySymbol, setSignalConfigBySymbol] = useState({})
-  const [webhookConfig, setWebhookConfig] = useState({
-    url: '',
-    has_secret: false,
-    is_enabled: true,
-    timeout_ms: 3000,
-    updated_at: '',
-  })
+  const [webhookConfig, setWebhookConfig] = useState(DEFAULT_WEBHOOK_CONFIG)
   const [savingSignalSymbol, setSavingSignalSymbol] = useState('')
   const [testingSignalSymbol, setTestingSignalSymbol] = useState('')
   const [signalNotice, setSignalNotice] = useState('')
@@ -74,7 +76,37 @@ export default function LiveTradingPage() {
     : movingAveragePayload?.status === '双双跌破'
       ? 'down'
       : 'normal'
+  const privateAccessReady = ready && isLoggedIn
   const webhookConfigured = Boolean(webhookConfig.url)
+
+  const resetPrivateState = useCallback(() => {
+    setWatchlist(DEFAULT_WATCHLIST)
+    setSnapshotPayload(null)
+    setOverlayPayload(null)
+    setSupportPayload(null)
+    setSupportError('')
+    setResistancePayload(null)
+    setResistanceError('')
+    setMovingAveragePayload(null)
+    setMovingAverageError('')
+    setPriceVolumeEvents([])
+    setBlockFlowEvents([])
+    setActiveStrategies([])
+    setSignalConfigBySymbol({})
+    setWebhookConfig(DEFAULT_WEBHOOK_CONFIG)
+    setSavingSignalSymbol('')
+    setTestingSignalSymbol('')
+    setSignalNotice('')
+    setSignalError('')
+    setSignalErrorNeedsLogin(false)
+    setError('')
+    setErrorNeedsLogin(false)
+    setLastUpdateAt('')
+    supportRefreshRef.current = { symbol: '', refreshedAt: 0 }
+    resistanceRefreshRef.current = { symbol: '', refreshedAt: 0 }
+    movingAverageRefreshRef.current = { symbol: '', refreshedAt: 0 }
+    signalCenterRefreshRef.current = 0
+  }, [])
 
   const updateError = (nextError, nextNeedsLogin = false) => {
     setError(nextError)
@@ -164,13 +196,7 @@ export default function LiveTradingPage() {
     const data = await requestJson('/api/webhook')
     const item = data?.item || null
     if (!item) {
-      setWebhookConfig({
-        url: '',
-        has_secret: false,
-        is_enabled: true,
-        timeout_ms: 3000,
-        updated_at: '',
-      })
+      setWebhookConfig(DEFAULT_WEBHOOK_CONFIG)
       return null
     }
     setWebhookConfig({
@@ -330,64 +356,83 @@ export default function LiveTradingPage() {
     ])
   }
 
-  const runPolling = async () => {
+  const loadPublicPanels = async () => {
     try {
-      updateError('')
-      const watchState = await loadWatchlist()
       await loadMarketOverview()
-      if (watchState.active_symbol) {
-        await loadSymbolPanels(watchState.active_symbol, { forceSupport: true })
-      } else {
-        setSupportPayload(null)
-        setSupportError('')
-        setResistancePayload(null)
-        setResistanceError('')
-        setMovingAveragePayload(null)
-        setMovingAverageError('')
-        supportRefreshRef.current = { symbol: '', refreshedAt: 0 }
-        resistanceRefreshRef.current = { symbol: '', refreshedAt: 0 }
-        movingAverageRefreshRef.current = { symbol: '', refreshedAt: 0 }
+      updateError('')
+    } catch (err) {
+      applyRequestError(err, '实时数据刷新失败')
+    }
+  }
+
+  const loadPrivatePanels = async ({ bootstrap = false } = {}) => {
+    try {
+      if (bootstrap) {
+        const watchState = await loadWatchlist()
+        if (watchState.active_symbol) {
+          await loadSymbolPanels(watchState.active_symbol, { forceSupport: true })
+        } else {
+          setSnapshotPayload(null)
+          setOverlayPayload(null)
+          setSupportPayload(null)
+          setSupportError('')
+          setResistancePayload(null)
+          setResistanceError('')
+          setMovingAveragePayload(null)
+          setMovingAverageError('')
+          setPriceVolumeEvents([])
+          setBlockFlowEvents([])
+          setLastUpdateAt('')
+          supportRefreshRef.current = { symbol: '', refreshedAt: 0 }
+          resistanceRefreshRef.current = { symbol: '', refreshedAt: 0 }
+          movingAverageRefreshRef.current = { symbol: '', refreshedAt: 0 }
+        }
+      } else if (activeSymbol) {
+        await loadSymbolPanels(activeSymbol)
+      }
+
+      if (bootstrap || activeSymbol) {
+        updateError('')
       }
     } catch (err) {
       applyRequestError(err, '实时数据刷新失败')
     }
 
     try {
+      await loadSignalCenter({ force: bootstrap })
       setSignalError('')
-      await loadSignalCenter({ force: true })
+      setSignalErrorNeedsLogin(false)
     } catch (err) {
       applySignalError(err, '信号中心数据刷新失败')
     }
   }
 
   useEffect(() => {
-    runPolling()
+    if (!ready) return
+
+    loadPublicPanels()
+    if (privateAccessReady) {
+      loadPrivatePanels({ bootstrap: true })
+    } else {
+      resetPrivateState()
+    }
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [ready, privateAccessReady])
 
   useEffect(() => {
-    const timer = setInterval(async () => {
-      try {
-        updateError('')
-        await loadMarketOverview()
-        if (activeSymbol) {
-          await loadSymbolPanels(activeSymbol)
-        }
-      } catch (err) {
-        applyRequestError(err, '实时数据刷新失败')
-      }
+    if (!ready) return
 
-      try {
-        setSignalError('')
-        await loadSignalCenter()
-      } catch (err) {
-        applySignalError(err, '信号中心数据刷新失败')
+    const timer = setInterval(() => {
+      loadPublicPanels()
+      if (privateAccessReady) {
+        loadPrivatePanels()
       }
     }, POLL_MS)
 
     return () => clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSymbol])
+  }, [activeSymbol, ready, privateAccessReady])
 
   const handleAddWatch = async (event) => {
     event.preventDefault()
@@ -517,75 +562,105 @@ export default function LiveTradingPage() {
 
       <section className="grid gap-6 lg:grid-cols-[320px_1fr]">
         <div className="space-y-4 rounded-2xl border border-border bg-card p-5">
-          <div>
-            <h2 className="text-lg font-semibold text-white">关注股票池</h2>
-            <p className="mt-1 text-xs text-white/50">仅港股代码（如 00700.HK）</p>
-          </div>
+          {privateAccessReady ? (
+            <>
+              <div>
+                <h2 className="text-lg font-semibold text-white">关注股票池</h2>
+                <p className="mt-1 text-xs text-white/50">仅港股代码（如 00700.HK）</p>
+              </div>
 
-          <form onSubmit={handleAddWatch} className="space-y-3">
-            <input
-              value={symbolInput}
-              onChange={(event) => setSymbolInput(event.target.value.toUpperCase())}
-              placeholder="00700.HK"
-              className="w-full rounded-xl border border-border bg-black/20 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
-            />
-            <input
-              value={nameInput}
-              onChange={(event) => setNameInput(event.target.value)}
-              placeholder="备注名称（可选）"
-              className="w-full rounded-xl border border-border bg-black/20 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
-            />
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full rounded-xl bg-primary px-4 py-2 text-sm font-medium text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {submitting ? '添加中...' : '添加到关注池'}
-            </button>
-          </form>
+              <form onSubmit={handleAddWatch} className="space-y-3">
+                <input
+                  value={symbolInput}
+                  onChange={(event) => setSymbolInput(event.target.value.toUpperCase())}
+                  placeholder="00700.HK"
+                  className="w-full rounded-xl border border-border bg-black/20 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                />
+                <input
+                  value={nameInput}
+                  onChange={(event) => setNameInput(event.target.value)}
+                  placeholder="备注名称（可选）"
+                  className="w-full rounded-xl border border-border bg-black/20 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                />
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full rounded-xl bg-primary px-4 py-2 text-sm font-medium text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {submitting ? '添加中...' : '添加到关注池'}
+                </button>
+              </form>
 
-          <div className="space-y-2">
-            {sortedWatchlist.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-white/50">暂无关注股票</div>
-            ) : (
-              sortedWatchlist.map((item) => (
-                <div key={item.symbol} className="rounded-xl border border-border bg-black/20 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-sm font-medium text-white">{item.symbol}</div>
-                      <div className="text-xs text-white/55">{item.name || '未命名'}</div>
+              <div className="space-y-2">
+                {sortedWatchlist.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-white/50">暂无关注股票</div>
+                ) : (
+                  sortedWatchlist.map((item) => (
+                    <div key={item.symbol} className="rounded-xl border border-border bg-black/20 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-medium text-white">{item.symbol}</div>
+                          <div className="text-xs text-white/55">{item.name || '未命名'}</div>
+                        </div>
+                        {item.is_active && <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-[11px] text-emerald-300">激活中</span>}
+                      </div>
+                      <div className="mt-3 flex gap-2">
+                        {!item.is_active && (
+                          <button
+                            onClick={() => handleActivate(item.symbol)}
+                            className="flex-1 rounded-lg border border-border px-2 py-1 text-xs text-white/80 transition hover:border-primary hover:text-primary"
+                          >
+                            设为激活
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDelete(item.symbol)}
+                          className="rounded-lg border border-rose-400/40 px-2 py-1 text-xs text-rose-300 transition hover:bg-rose-500/10"
+                        >
+                          删除
+                        </button>
+                      </div>
                     </div>
-                    {item.is_active && <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-[11px] text-emerald-300">激活中</span>}
-                  </div>
-                  <div className="mt-3 flex gap-2">
-                    {!item.is_active && (
-                      <button
-                        onClick={() => handleActivate(item.symbol)}
-                        className="flex-1 rounded-lg border border-border px-2 py-1 text-xs text-white/80 transition hover:border-primary hover:text-primary"
-                      >
-                        设为激活
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDelete(item.symbol)}
-                      className="rounded-lg border border-rose-400/40 px-2 py-1 text-xs text-rose-300 transition hover:bg-rose-500/10"
-                    >
-                      删除
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+                  ))
+                )}
+              </div>
+            </>
+          ) : (
+            <AccessPromptCard
+              title={ready ? '登录后管理关注股票池' : '正在确认账号状态'}
+              description={
+                ready
+                  ? '关注池、激活标的切换和异动跟踪都属于账号级工作台。未登录时页面只保留公共行情，不再持续请求这些私有数据。'
+                  : '正在检查你的登录状态，确认后会自动决定是否加载关注池与信号配置。'
+              }
+              buttonLabel={ready ? '登录后继续' : '请稍候'}
+              onAction={ready ? () => openAuthModal('login', '登录后即可管理关注池、激活标的与实盘信号配置。') : undefined}
+              disabled={!ready}
+            />
+          )}
         </div>
 
         <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-4">
-            <MetricCard label="会话状态" value={sessionStateLabel(sessionState)} />
-            <MetricCard label="激活标的" value={activeSymbol || '未设置'} />
-            <MetricCard label="最后刷新" value={lastUpdateAt ? formatDateTime(lastUpdateAt) : '--'} />
-            <MetricCard label="行情来源" value={formatSource(snapshotPayload?.snapshot?.source)} />
-          </div>
+          {privateAccessReady ? (
+            <div className="grid gap-4 md:grid-cols-4">
+              <MetricCard label="会话状态" value={sessionStateLabel(sessionState)} />
+              <MetricCard label="激活标的" value={activeSymbol || '未设置'} />
+              <MetricCard label="最后刷新" value={lastUpdateAt ? formatDateTime(lastUpdateAt) : '--'} />
+              <MetricCard label="行情来源" value={formatSource(snapshotPayload?.snapshot?.source)} />
+            </div>
+          ) : (
+            <AccessPromptCard
+              title={ready ? '登录后开启完整实盘工作台' : '正在确认账号状态'}
+              description={
+                ready
+                  ? '未登录时只刷新公共行情，关注池、激活标的快照、信号配置与异动监控都会在登录后再加载，界面也不会再被私有接口的 401 轮询打闪。'
+                  : '正在检查你的登录状态，确认后会自动切换到对应的数据视图。'
+              }
+              buttonLabel={ready ? '登录查看完整数据' : '请稍候'}
+              onAction={ready ? () => openAuthModal('login', '登录后即可查看关注池、激活标的快照与交易信号配置。') : undefined}
+              disabled={!ready}
+            />
+          )}
 
           {error ? (
             <div className="rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
@@ -602,197 +677,199 @@ export default function LiveTradingPage() {
             </div>
           ) : null}
 
-          <section className="rounded-2xl border border-border bg-card p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold text-white">交易信号推送（Webhook）</h3>
-                <p className="mt-1 text-xs text-white/60">设置页统一管理 Webhook；本页只看配置摘要并配置各股票信号。</p>
-              </div>
-              <div className="text-xs text-white/55">
-                {webhookConfig.updated_at ? `更新于 ${formatDateTime(webhookConfig.updated_at)}` : '未配置'}
-              </div>
-            </div>
-
-            {signalError ? (
-              <div className="mt-3 rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-                <div>{signalError}</div>
-                {signalErrorNeedsLogin ? (
-                  <button
-                    type="button"
-                    onClick={() => openAuthModal('login', '信号推送配置需要登录后才能继续。')}
-                    className="mt-2 inline-flex rounded-lg border border-rose-300/40 px-2.5 py-1 text-xs text-rose-100 transition hover:bg-rose-500/15"
-                  >
-                    去登录
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-
-            {signalNotice ? (
-              <div className="mt-3 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{signalNotice}</div>
-            ) : null}
-
-            <div className="mt-4">
-              <div className="space-y-3 rounded-xl border border-border bg-black/20 p-4">
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className={`rounded-full px-2.5 py-1 ${webhookConfigured ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>
-                    {webhookConfigured ? '已配置 URL' : '未配置 URL'}
-                  </span>
-                  <span className={`rounded-full px-2.5 py-1 ${webhookConfig.is_enabled ? 'bg-emerald-500/15 text-emerald-200' : 'bg-rose-500/15 text-rose-200'}`}>
-                    {webhookConfig.is_enabled ? '已启用发送' : '已禁用发送'}
-                  </span>
+          {privateAccessReady ? (
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold text-white">交易信号推送（Webhook）</h3>
+                  <p className="mt-1 text-xs text-white/60">设置页统一管理 Webhook；本页只看配置摘要并配置各股票信号。</p>
                 </div>
-                {!webhookConfigured || !webhookConfig.is_enabled ? (
-                  <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                    未配置或未启用时，测试信号和实盘信号都不会发出。
-                  </div>
-                ) : null}
-                <a
-                  href="/settings"
-                  className="inline-flex rounded-lg border border-border px-3 py-1.5 text-xs text-white/85 transition hover:border-primary hover:text-primary"
-                >
-                  去设置页
-                </a>
+                <div className="text-xs text-white/55">
+                  {webhookConfig.updated_at ? `更新于 ${formatDateTime(webhookConfig.updated_at)}` : '未配置'}
+                </div>
               </div>
-            </div>
 
-            <div className="mt-4 space-y-2">
-              <div className="text-sm font-semibold text-white">股票级信号配置</div>
-              <div className="text-xs text-white/55">每只股票可配置策略、冷却时间并做送达验证；展开可查看触发条件与 Payload。</div>
-              {sortedWatchlist.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border px-4 py-4 text-xs text-white/50">请先添加关注股票，再配置信号。</div>
-              ) : (
-                sortedWatchlist.map((item) => {
-                  const config = getSignalConfigForSymbol(item.symbol)
-                  const selectedStrategy = strategyByID[config.strategy_id] || null
-                  const payloadTemplate = buildSignalPayloadTemplate(item.symbol, config.strategy_id)
-                  return (
-                    <div key={`signal-config-${item.symbol}`} className="rounded-xl border border-border bg-black/20 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-medium text-white">{item.symbol}</div>
-                          <div className="mt-1 text-xs text-white/55">
-                            {Boolean(config.is_enabled)
-                              ? '该股票信号已开启，满足策略条件后会进入发送流程。'
-                              : '该股票信号当前关闭，开启后才会按策略推送。'}
+              {signalError ? (
+                <div className="mt-3 rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                  <div>{signalError}</div>
+                  {signalErrorNeedsLogin ? (
+                    <button
+                      type="button"
+                      onClick={() => openAuthModal('login', '信号推送配置需要登录后才能继续。')}
+                      className="mt-2 inline-flex rounded-lg border border-rose-300/40 px-2.5 py-1 text-xs text-rose-100 transition hover:bg-rose-500/15"
+                    >
+                      去登录
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {signalNotice ? (
+                <div className="mt-3 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{signalNotice}</div>
+              ) : null}
+
+              <div className="mt-4">
+                <div className="space-y-3 rounded-xl border border-border bg-black/20 p-4">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className={`rounded-full px-2.5 py-1 ${webhookConfigured ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>
+                      {webhookConfigured ? '已配置 URL' : '未配置 URL'}
+                    </span>
+                    <span className={`rounded-full px-2.5 py-1 ${webhookConfig.is_enabled ? 'bg-emerald-500/15 text-emerald-200' : 'bg-rose-500/15 text-rose-200'}`}>
+                      {webhookConfig.is_enabled ? '已启用发送' : '已禁用发送'}
+                    </span>
+                  </div>
+                  {!webhookConfigured || !webhookConfig.is_enabled ? (
+                    <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                      未配置或未启用时，测试信号和实盘信号都不会发出。
+                    </div>
+                  ) : null}
+                  <a
+                    href="/settings"
+                    className="inline-flex rounded-lg border border-border px-3 py-1.5 text-xs text-white/85 transition hover:border-primary hover:text-primary"
+                  >
+                    去设置页
+                  </a>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                <div className="text-sm font-semibold text-white">股票级信号配置</div>
+                <div className="text-xs text-white/55">每只股票可配置策略、冷却时间并做送达验证；展开可查看触发条件与 Payload。</div>
+                {sortedWatchlist.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border px-4 py-4 text-xs text-white/50">请先添加关注股票，再配置信号。</div>
+                ) : (
+                  sortedWatchlist.map((item) => {
+                    const config = getSignalConfigForSymbol(item.symbol)
+                    const selectedStrategy = strategyByID[config.strategy_id] || null
+                    const payloadTemplate = buildSignalPayloadTemplate(item.symbol, config.strategy_id)
+                    return (
+                      <div key={`signal-config-${item.symbol}`} className="rounded-xl border border-border bg-black/20 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-medium text-white">{item.symbol}</div>
+                            <div className="mt-1 text-xs text-white/55">
+                              {Boolean(config.is_enabled)
+                                ? '该股票信号已开启，满足策略条件后会进入发送流程。'
+                                : '该股票信号当前关闭，开启后才会按策略推送。'}
+                            </div>
                           </div>
-                        </div>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={Boolean(config.is_enabled)}
-                          aria-label={`${item.symbol} 股票信号开关`}
-                          onClick={() => updateLocalSignalConfig(item.symbol, { is_enabled: !Boolean(config.is_enabled) })}
-                          className={`inline-flex min-w-[260px] items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40 ${
-                            config.is_enabled
-                              ? 'border-emerald-300/60 bg-emerald-500/18 text-emerald-50 shadow-[0_12px_30px_rgba(16,185,129,0.22)]'
-                              : 'border-amber-300/35 bg-amber-500/10 text-white/88 shadow-[0_10px_26px_rgba(245,158,11,0.12)] hover:border-amber-300/55 hover:bg-amber-500/14'
-                          }`}
-                        >
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-center gap-2">
-                              <span className="font-semibold">{config.is_enabled ? '股票信号已开启' : '股票信号未开启'}</span>
-                              <span
-                                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] ${
-                                  config.is_enabled
-                                    ? 'bg-emerald-950/45 text-emerald-100'
-                                    : 'bg-amber-950/45 text-amber-100'
-                                }`}
-                              >
-                                {config.is_enabled ? 'ON' : 'OFF'}
-                              </span>
-                            </span>
-                            <span className={`mt-1 block text-xs ${config.is_enabled ? 'text-emerald-100/80' : 'text-amber-100/75'}`}>
-                              {config.is_enabled ? '满足策略条件后会进入正式推送。' : '点击开启后，才会按所选策略推送。'}
-                            </span>
-                          </span>
-                          <span
-                            className={`relative inline-flex h-8 w-14 shrink-0 rounded-full border transition ${
-                              config.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-amber-200/30 bg-black/25'
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={Boolean(config.is_enabled)}
+                            aria-label={`${item.symbol} 股票信号开关`}
+                            onClick={() => updateLocalSignalConfig(item.symbol, { is_enabled: !Boolean(config.is_enabled) })}
+                            className={`inline-flex min-w-[260px] items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40 ${
+                              config.is_enabled
+                                ? 'border-emerald-300/60 bg-emerald-500/18 text-emerald-50 shadow-[0_12px_30px_rgba(16,185,129,0.22)]'
+                                : 'border-amber-300/35 bg-amber-500/10 text-white/88 shadow-[0_10px_26px_rgba(245,158,11,0.12)] hover:border-amber-300/55 hover:bg-amber-500/14'
                             }`}
                           >
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center gap-2">
+                                <span className="font-semibold">{config.is_enabled ? '股票信号已开启' : '股票信号未开启'}</span>
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] ${
+                                    config.is_enabled
+                                      ? 'bg-emerald-950/45 text-emerald-100'
+                                      : 'bg-amber-950/45 text-amber-100'
+                                  }`}
+                                >
+                                  {config.is_enabled ? 'ON' : 'OFF'}
+                                </span>
+                              </span>
+                              <span className={`mt-1 block text-xs ${config.is_enabled ? 'text-emerald-100/80' : 'text-amber-100/75'}`}>
+                                {config.is_enabled ? '满足策略条件后会进入正式推送。' : '点击开启后，才会按所选策略推送。'}
+                              </span>
+                            </span>
                             <span
-                              className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow-[0_4px_12px_rgba(15,23,42,0.35)] transition-all ${
-                                config.is_enabled ? 'left-7' : 'left-1'
+                              className={`relative inline-flex h-8 w-14 shrink-0 rounded-full border transition ${
+                                config.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-amber-200/30 bg-black/25'
                               }`}
-                            />
-                          </span>
-                        </button>
-                      </div>
-                      <div className="mt-3 grid gap-2 md:grid-cols-[1.2fr_1fr_auto_auto]">
-                        <select
-                          value={config.strategy_id || ''}
-                          onChange={(event) => updateLocalSignalConfig(item.symbol, { strategy_id: event.target.value })}
-                          className="rounded-lg border border-border bg-black/30 px-2 py-1.5 text-xs text-white outline-none transition focus:border-primary"
-                        >
-                          <option value="">请选择策略</option>
-                          {activeStrategies.map((strategy) => (
-                            <option key={strategy.id} value={strategy.id}>{strategy.name}</option>
-                          ))}
-                        </select>
-                        <input
-                          type="number"
-                          min={10}
-                          max={3600}
-                          value={config.cooldown_seconds ?? 300}
-                          onChange={(event) => updateLocalSignalConfig(item.symbol, { cooldown_seconds: Number(event.target.value) || 300 })}
-                          className="rounded-lg border border-border bg-black/30 px-2 py-1.5 text-xs text-white outline-none transition focus:border-primary"
-                        />
-                        <button
-                          type="button"
-                          disabled={savingSignalSymbol === item.symbol}
-                          onClick={() => handleSaveSymbolSignalConfig(item.symbol)}
-                          className="rounded-lg border border-border px-2 py-1.5 text-xs text-white/80 transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {savingSignalSymbol === item.symbol ? '保存中...' : '保存'}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={testingSignalSymbol === item.symbol}
-                          onClick={() => handleTestSymbolSignal(item.symbol)}
-                          className="rounded-lg border border-emerald-400/40 px-2 py-1.5 text-xs text-emerald-300 transition hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {testingSignalSymbol === item.symbol ? '校验中...' : '验证送达'}
-                        </button>
-                      </div>
-                      <div className="mt-2 text-[11px] text-white/50">冷却时间：秒（10~3600）。用于抑制同一股票短时间重复推送。</div>
-
-                      <details className="mt-3 rounded-lg border border-border/80 bg-black/30 p-3">
-                        <summary className="cursor-pointer text-xs font-medium text-white/85">查看触发条件与 Payload 模板</summary>
-                        <div className="mt-3 space-y-3 text-xs text-white/75">
-                          <div className="space-y-1">
-                            <div>交易信号何时触发：启用该股票信号后，只要所选策略在后台判定满足条件，就会创建正式信号并投递到 Webhook。</div>
-                            <div>验证送达：点击“验证送达”会立即发送一条测试信号，并同步校验本次 webhook 是否真实送达。</div>
-                            <div>后台投递节奏：约每 {SIGNAL_DISPATCH_INTERVAL_SECONDS} 秒扫描待发送队列。</div>
-                            <div>失败重试：最多 {SIGNAL_MAX_ATTEMPTS} 次（含首发），退避间隔 {SIGNAL_BACKOFF_STEPS.join(' / ')}。</div>
-                            <div>该股冷却时间：{Number(config.cooldown_seconds) || 300} 秒（同一股票重复信号抑制）。</div>
-                            <div>策略参数线索：{formatStrategyCycleHint(selectedStrategy)}</div>
-                            {selectedStrategy?.description ? <div>策略说明：{selectedStrategy.description}</div> : null}
-                          </div>
-
-                          <div>
-                            <div className="mb-1 text-white/65">Webhook Headers</div>
-                            <ul className="list-disc space-y-0.5 pl-4 text-white/70">
-                              <li>Content-Type: application/json</li>
-                              <li>X-Pumpkin-Event-Id: sig_xxx</li>
-                              <li>X-Pumpkin-Timestamp: Unix 秒时间戳</li>
-                              <li>X-Pumpkin-Signature: 仅配置 Secret 时附带（HMAC-SHA256）</li>
-                            </ul>
-                          </div>
-
-                          <div>
-                            <div className="mb-1 text-white/65">Payload 模板（text 消息）</div>
-                            <pre className="overflow-x-auto rounded-lg border border-border/80 bg-black/50 p-2 text-[11px] leading-5 text-emerald-200">{JSON.stringify(payloadTemplate, null, 2)}</pre>
-                          </div>
+                            >
+                              <span
+                                className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow-[0_4px_12px_rgba(15,23,42,0.35)] transition-all ${
+                                  config.is_enabled ? 'left-7' : 'left-1'
+                                }`}
+                              />
+                            </span>
+                          </button>
                         </div>
-                      </details>
-                    </div>
-                  )
-                })
-              )}
-            </div>
+                        <div className="mt-3 grid gap-2 md:grid-cols-[1.2fr_1fr_auto_auto]">
+                          <select
+                            value={config.strategy_id || ''}
+                            onChange={(event) => updateLocalSignalConfig(item.symbol, { strategy_id: event.target.value })}
+                            className="rounded-lg border border-border bg-black/30 px-2 py-1.5 text-xs text-white outline-none transition focus:border-primary"
+                          >
+                            <option value="">请选择策略</option>
+                            {activeStrategies.map((strategy) => (
+                              <option key={strategy.id} value={strategy.id}>{strategy.name}</option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            min={10}
+                            max={3600}
+                            value={config.cooldown_seconds ?? 300}
+                            onChange={(event) => updateLocalSignalConfig(item.symbol, { cooldown_seconds: Number(event.target.value) || 300 })}
+                            className="rounded-lg border border-border bg-black/30 px-2 py-1.5 text-xs text-white outline-none transition focus:border-primary"
+                          />
+                          <button
+                            type="button"
+                            disabled={savingSignalSymbol === item.symbol}
+                            onClick={() => handleSaveSymbolSignalConfig(item.symbol)}
+                            className="rounded-lg border border-border px-2 py-1.5 text-xs text-white/80 transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {savingSignalSymbol === item.symbol ? '保存中...' : '保存'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={testingSignalSymbol === item.symbol}
+                            onClick={() => handleTestSymbolSignal(item.symbol)}
+                            className="rounded-lg border border-emerald-400/40 px-2 py-1.5 text-xs text-emerald-300 transition hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {testingSignalSymbol === item.symbol ? '校验中...' : '验证送达'}
+                          </button>
+                        </div>
+                        <div className="mt-2 text-[11px] text-white/50">冷却时间：秒（10~3600）。用于抑制同一股票短时间重复推送。</div>
 
-          </section>
+                        <details className="mt-3 rounded-lg border border-border/80 bg-black/30 p-3">
+                          <summary className="cursor-pointer text-xs font-medium text-white/85">查看触发条件与 Payload 模板</summary>
+                          <div className="mt-3 space-y-3 text-xs text-white/75">
+                            <div className="space-y-1">
+                              <div>交易信号何时触发：启用该股票信号后，只要所选策略在后台判定满足条件，就会创建正式信号并投递到 Webhook。</div>
+                              <div>验证送达：点击“验证送达”会立即发送一条测试信号，并同步校验本次 webhook 是否真实送达。</div>
+                              <div>后台投递节奏：约每 {SIGNAL_DISPATCH_INTERVAL_SECONDS} 秒扫描待发送队列。</div>
+                              <div>失败重试：最多 {SIGNAL_MAX_ATTEMPTS} 次（含首发），退避间隔 {SIGNAL_BACKOFF_STEPS.join(' / ')}。</div>
+                              <div>该股冷却时间：{Number(config.cooldown_seconds) || 300} 秒（同一股票重复信号抑制）。</div>
+                              <div>策略参数线索：{formatStrategyCycleHint(selectedStrategy)}</div>
+                              {selectedStrategy?.description ? <div>策略说明：{selectedStrategy.description}</div> : null}
+                            </div>
+
+                            <div>
+                              <div className="mb-1 text-white/65">Webhook Headers</div>
+                              <ul className="list-disc space-y-0.5 pl-4 text-white/70">
+                                <li>Content-Type: application/json</li>
+                                <li>X-Pumpkin-Event-Id: sig_xxx</li>
+                                <li>X-Pumpkin-Timestamp: Unix 秒时间戳</li>
+                                <li>X-Pumpkin-Signature: 仅配置 Secret 时附带（HMAC-SHA256）</li>
+                              </ul>
+                            </div>
+
+                            <div>
+                              <div className="mb-1 text-white/65">Payload 模板（text 消息）</div>
+                              <pre className="overflow-x-auto rounded-lg border border-border/80 bg-black/50 p-2 text-[11px] leading-5 text-emerald-200">{JSON.stringify(payloadTemplate, null, 2)}</pre>
+                            </div>
+                          </div>
+                        </details>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+
+            </section>
+          ) : null}
 
           <section className="rounded-2xl border border-border bg-card p-5">
             <h3 className="text-base font-semibold text-white">港股大盘概览</h3>
@@ -809,8 +886,10 @@ export default function LiveTradingPage() {
             </div>
           </section>
 
-          <section className="rounded-2xl border border-border bg-card p-5">
-            <h3 className="text-base font-semibold text-white">激活标的快照</h3>
+          {privateAccessReady ? (
+            <>
+              <section className="rounded-2xl border border-border bg-card p-5">
+                <h3 className="text-base font-semibold text-white">激活标的快照</h3>
             {!snapshotPayload?.snapshot ? (
               <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">请先在左侧选择一个激活标的。</div>
             ) : (
@@ -1084,23 +1163,25 @@ export default function LiveTradingPage() {
             )}
           </section>
 
-          <section className="grid gap-4 xl:grid-cols-2">
-            <EventPanel title="量价异动" events={priceVolumeEvents} renderEvent={(item) => (
-              <>
-                <div className="font-medium text-white">{item.anomaly_type}</div>
-                <div className="text-xs text-white/55">评分：{formatNumber(item.score, 1)} · {formatDateTime(item.detected_at)}</div>
-              </>
-            )} />
+              <section className="grid gap-4 xl:grid-cols-2">
+                <EventPanel title="量价异动" events={priceVolumeEvents} renderEvent={(item) => (
+                  <>
+                    <div className="font-medium text-white">{item.anomaly_type}</div>
+                    <div className="text-xs text-white/55">评分：{formatNumber(item.score, 1)} · {formatDateTime(item.detected_at)}</div>
+                  </>
+                )} />
 
-            <EventPanel title="大单流向" events={blockFlowEvents} renderEvent={(item) => (
-              <>
-                <div className="font-medium text-white">净流向：{formatCompact(item.net_inflow)}</div>
-                <div className="text-xs text-white/55">
-                  强度 {formatPercent(item.direction_strength)} · 连续性 {formatPercent(item.continuity)} · {formatDateTime(item.detected_at)}
-                </div>
-              </>
-            )} />
-          </section>
+                <EventPanel title="大单流向" events={blockFlowEvents} renderEvent={(item) => (
+                  <>
+                    <div className="font-medium text-white">净流向：{formatCompact(item.net_inflow)}</div>
+                    <div className="text-xs text-white/55">
+                      强度 {formatPercent(item.direction_strength)} · 连续性 {formatPercent(item.continuity)} · {formatDateTime(item.detected_at)}
+                    </div>
+                  </>
+                )} />
+              </section>
+            </>
+          ) : null}
         </div>
       </section>
     </div>
@@ -1228,6 +1309,27 @@ function EventPanel({ title, events, renderEvent }) {
         )}
       </div>
     </section>
+  )
+}
+
+function AccessPromptCard({ title, description, buttonLabel, onAction, disabled = false }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-primary/30 bg-primary/10 p-5">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-2">
+          <div className="text-lg font-semibold text-white">{title}</div>
+          <p className="max-w-2xl text-sm leading-7 text-white/65">{description}</p>
+        </div>
+        <button
+          type="button"
+          disabled={disabled || typeof onAction !== 'function'}
+          onClick={onAction}
+          className="inline-flex shrink-0 items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {buttonLabel}
+        </button>
+      </div>
+    </div>
   )
 }
 

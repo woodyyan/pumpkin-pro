@@ -12,6 +12,12 @@ type Config struct {
 	DB               DBConfig
 	StrategySeedPath string
 	Auth             AuthConfig
+	AdminSeed        AdminSeedConfig
+}
+
+type AdminSeedConfig struct {
+	Email    string
+	Password string
 }
 
 type DBConfig struct {
@@ -36,6 +42,10 @@ func Load() Config {
 		Port:             getEnv("PORT", "8080"),
 		QuantServiceURL:  trimTrailingSlash(getEnv("QUANT_SERVICE_URL", "http://localhost:8000")),
 		StrategySeedPath: getEnv("STRATEGY_SEED_PATH", "seed/strategies.json"),
+		AdminSeed: AdminSeedConfig{
+			Email:    getEnv("ADMIN_SEED_EMAIL", ""),
+			Password: getEnv("ADMIN_SEED_PASSWORD", ""),
+		},
 		DB: DBConfig{
 			Type:     strings.ToLower(getEnv("DB_TYPE", "sqlite")),
 			Path:     getEnv("DB_PATH", "data/pumpkin.db"),

@@ -40,6 +40,9 @@ services:
       - DB_NAME=${DB_NAME:-pumpkin_pro}
       - DB_SSLMODE=${DB_SSLMODE:-disable}
       - STRATEGY_SEED_PATH=${STRATEGY_SEED_PATH:-seed/strategies.json}
+      - AUTH_JWT_SECRET=${AUTH_JWT_SECRET:-local-dev-jwt-secret-change-me}
+      - ADMIN_SEED_EMAIL=${ADMIN_SEED_EMAIL:-}
+      - ADMIN_SEED_PASSWORD=${ADMIN_SEED_PASSWORD:-}
     volumes:
       - ./data:/app/data
     depends_on:

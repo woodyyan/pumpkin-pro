@@ -15,6 +15,7 @@ import (
 
 	"github.com/woodyyan/pumpkin-pro/backend/config"
 	"github.com/woodyyan/pumpkin-pro/backend/store"
+	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"github.com/woodyyan/pumpkin-pro/backend/store/signal"
@@ -29,6 +30,7 @@ type appServer struct {
 	strategyService *strategy.Service
 	liveService     *live.Service
 	signalService   *signal.Service
+	adminService    *admin.Service
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -1146,6 +1148,65 @@ func (a *appServer) writeSignalError(w http.ResponseWriter, err error) {
 	}
 }
 
+// ── Super Admin ──
+
+func (a *appServer) withSuperAdminAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := parseBearerToken(r.Header.Get("Authorization"))
+		if token == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"code": "ADMIN_AUTH_REQUIRED", "detail": "需要超级管理员登录"})
+			return
+		}
+		claims, err := a.adminService.ParseAdminToken(token)
+		if err != nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"code": "ADMIN_AUTH_REQUIRED", "detail": "超管登录已失效，请重新登录"})
+			return
+		}
+		_ = claims
+		next(w, r)
+	}
+}
+
+func (a *appServer) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	var input admin.AdminLoginInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "登录请求格式错误")
+		return
+	}
+	result, err := a.adminService.Login(r.Context(), input)
+	if err != nil {
+		switch {
+		case errors.Is(err, admin.ErrInvalidInput):
+			writeJSON(w, http.StatusBadRequest, map[string]any{"code": "INVALID_INPUT", "detail": "请输入邮箱和密码"})
+		case errors.Is(err, admin.ErrInvalidCredential):
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"code": "INVALID_CREDENTIAL", "detail": "邮箱或密码错误"})
+		case errors.Is(err, admin.ErrForbidden):
+			writeJSON(w, http.StatusForbidden, map[string]any{"code": "FORBIDDEN", "detail": "当前管理员账号不可用"})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"code": "INTERNAL_ERROR", "detail": err.Error()})
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *appServer) handleAdminStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	stats, err := a.adminService.GetStats(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "获取统计数据失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
 func writeError(w http.ResponseWriter, statusCode int, detail string) {
 	writeJSON(w, statusCode, map[string]string{"detail": detail})
 }
@@ -1187,12 +1248,22 @@ func main() {
 	})
 	signalService.StartDispatcher(context.Background())
 
+	adminRepo := admin.NewRepository(storeInstance.DB)
+	adminService := admin.NewService(adminRepo, admin.ServiceConfig{
+		JWTSecret: strings.TrimSpace(cfg.Auth.JWTSecret),
+		AccessTTL: 2 * time.Hour,
+	})
+	if err := adminService.SeedAdmin(context.Background(), cfg.AdminSeed.Email, cfg.AdminSeed.Password); err != nil {
+		log.Printf("Admin seed skipped: %v", err)
+	}
+
 	server := &appServer{
 		cfg:             cfg,
 		authService:     authService,
 		strategyService: strategyService,
 		liveService:     liveService,
 		signalService:   signalService,
+		adminService:    adminService,
 	}
 
 	mux := http.NewServeMux()
@@ -1223,6 +1294,9 @@ func main() {
 	mux.HandleFunc("/api/live/watchlist/", server.withRequiredAuth(server.handleLiveWatchlistSubroutes))
 	mux.HandleFunc("/api/live/market/overview", server.handleLiveMarketOverview)
 	mux.HandleFunc("/api/live/symbols/", server.withOptionalAuth(server.handleLiveSymbolsSubroutes))
+
+	mux.HandleFunc("/api/admin/login", server.handleAdminLogin)
+	mux.HandleFunc("/api/admin/stats", server.withSuperAdminAuth(server.handleAdminStats))
 
 	handler := corsMiddleware(mux)
 	log.Printf("🚀 Pumpkin Go Backend is running on port %s (db=%s)", cfg.Port, cfg.DB.Type)

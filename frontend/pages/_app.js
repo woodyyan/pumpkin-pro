@@ -136,10 +136,15 @@ function AccountEntry() {
   )
 }
 
-export default function MyApp(props) {
+export default function MyApp({ Component, pageProps, router }) {
+  // /admin 使用独立布局，不显示主站导航
+  if (router.pathname === '/admin') {
+    return <Component {...pageProps} />
+  }
+
   return (
     <AuthProvider>
-      <AppLayout {...props} />
+      <AppLayout Component={Component} pageProps={pageProps} />
     </AuthProvider>
   )
 }

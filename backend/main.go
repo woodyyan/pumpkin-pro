@@ -427,8 +427,30 @@ func (a *appServer) handleStrategyDetail(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"item": updated})
+	case http.MethodDelete:
+		userID := currentUserID(r)
+		if strings.TrimSpace(userID) == "" {
+			writeError(w, http.StatusForbidden, "该操作需要登录后使用")
+			return
+		}
+
+		refCount, err := a.signalService.CountSymbolConfigRefsByStrategy(r.Context(), userID, strategyID)
+		if err != nil {
+			a.writeSignalError(w, err)
+			return
+		}
+		if refCount > 0 {
+			writeError(w, http.StatusConflict, fmt.Sprintf("该策略已被 %d 个股票信号配置引用，请先在实盘页更换后再删除", refCount))
+			return
+		}
+
+		if err := a.strategyService.Delete(r.Context(), userID, strategyID); err != nil {
+			a.writeStrategyError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "id": strategyID})
 	default:
-		writeError(w, http.StatusMethodNotAllowed, "Only GET and PUT methods are allowed")
+		writeError(w, http.StatusMethodNotAllowed, "Only GET, PUT and DELETE methods are allowed")
 	}
 }
 

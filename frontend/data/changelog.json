@@ -13,6 +13,15 @@
   "items": [
     {
       "date": "2026-03-21",
+      "type": "新功能",
+      "title": "策略库支持删除自建策略",
+      "summary": "策略库新增删除能力：仅可删除当前账号创建的策略；若该策略仍被股票信号配置引用，会直接拦截并提示先解除关联，避免误删影响已启用配置。",
+      "scope": "策略库",
+      "raw_subject": "feat(strategy): allow deleting owned strategy with dependency guard",
+      "visible": true
+    },
+    {
+      "date": "2026-03-21",
       "type": "修复优化",
       "title": "实盘页信号配置保存入口更清晰",
       "summary": "股票级信号配置的保存按钮调整到更全局位置，并明确保存会同时提交开关、策略和冷却时间；实盘页移除“验证送达”入口，统一在设置页进行送达验证。",

@@ -142,6 +142,16 @@ func (s *Service) Update(ctx context.Context, userID string, strategyID string, 
 	return s.repo.Update(ctx, existing.ID, userID, normalized)
 }
 
+func (s *Service) Delete(ctx context.Context, userID string, strategyID string) error {
+	if strings.TrimSpace(userID) == "" {
+		return ErrForbidden
+	}
+	if strings.TrimSpace(strategyID) == "" {
+		return ErrInvalid
+	}
+	return s.repo.Delete(ctx, strings.TrimSpace(strategyID), userID)
+}
+
 func (s *Service) BuildRuntimeStrategy(ctx context.Context, userID string, strategyID string, strategyName string, overrideParams map[string]any) (*RuntimeStrategy, error) {
 	var selected *Strategy
 	var err error

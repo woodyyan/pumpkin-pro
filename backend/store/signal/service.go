@@ -292,6 +292,17 @@ func (s *Service) DeleteSymbolConfig(ctx context.Context, userID, symbol string)
 	return s.repo.DeleteSymbolConfig(ctx, userID, normalizedSymbol)
 }
 
+func (s *Service) CountSymbolConfigRefsByStrategy(ctx context.Context, userID, strategyID string) (int64, error) {
+	if strings.TrimSpace(userID) == "" {
+		return 0, ErrForbidden
+	}
+	strategyID = strings.TrimSpace(strategyID)
+	if strategyID == "" {
+		return 0, fmt.Errorf("%w: strategy_id 不能为空", ErrInvalidInput)
+	}
+	return s.repo.CountSymbolConfigsByStrategy(ctx, strings.TrimSpace(userID), strategyID)
+}
+
 func (s *Service) EmitSignal(ctx context.Context, input EmitSignalInput) (*SignalEvent, error) {
 	userID := strings.TrimSpace(input.UserID)
 	if userID == "" {

@@ -142,6 +142,17 @@ func (r *Repository) DeleteSymbolConfig(ctx context.Context, userID, symbol stri
 	return nil
 }
 
+func (r *Repository) CountSymbolConfigsByStrategy(ctx context.Context, userID, strategyID string) (int64, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Model(&SymbolSignalConfigRecord{}).
+		Where("user_id = ? AND strategy_id = ?", userID, strategyID).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func (r *Repository) CreateEventWithDelivery(ctx context.Context, event SignalEventRecord, delivery WebhookDeliveryRecord) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&event).Error; err != nil {

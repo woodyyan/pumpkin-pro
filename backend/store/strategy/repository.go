@@ -116,6 +116,30 @@ func (r *Repository) Update(ctx context.Context, strategyID string, userID strin
 	return r.GetByID(ctx, strategyID, userID, true)
 }
 
+func (r *Repository) Delete(ctx context.Context, strategyID string, userID string) error {
+	existing, err := r.getRecordByID(ctx, strategyID)
+	if err != nil {
+		return err
+	}
+
+	currentUserID := strings.TrimSpace(userID)
+	ownerID := strings.TrimSpace(existing.UserID)
+	if ownerID == "" || ownerID != currentUserID {
+		return ErrForbidden
+	}
+
+	result := r.db.WithContext(ctx).
+		Where("id = ? AND user_id = ?", strategyID, currentUserID).
+		Delete(&StrategyRecord{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *Repository) getRecordByID(ctx context.Context, id string) (*StrategyRecord, error) {
 	var record StrategyRecord
 	if err := r.db.WithContext(ctx).First(&record, "id = ?", id).Error; err != nil {

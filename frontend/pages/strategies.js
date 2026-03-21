@@ -37,6 +37,8 @@ export default function StrategyLibraryPage() {
   const [loadingList, setLoadingList] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [error, setError] = useState('');
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false);
   const [success, setSuccess] = useState('');
@@ -73,6 +75,10 @@ export default function StrategyLibraryPage() {
       : '';
 
   const detailDescription = resolveStrategyDescription(selectedDetail?.description, activePreset);
+  const canDeleteSelected = mode === 'view'
+    && Boolean(selectedDetail?.id)
+    && Boolean(String(selectedDetail?.user_id || '').trim())
+    && !loadingDetail;
 
   useEffect(() => {
     loadStrategies();
@@ -149,6 +155,7 @@ export default function StrategyLibraryPage() {
     setDraft(null);
     setDraftOrigin(null);
     setCreateMenuOpen(false);
+    setDeleteConfirmOpen(false);
   };
 
   const requestWorkspaceAction = async (action) => {
@@ -208,6 +215,42 @@ export default function StrategyLibraryPage() {
       return;
     }
     resetWorkspace();
+  };
+
+  const requestDeleteStrategy = () => {
+    if (!canDeleteSelected) return;
+    setDeleteConfirmOpen(true);
+    updateError('');
+    setSuccess('');
+  };
+
+  const handleDeleteStrategy = async () => {
+    if (!selectedDetail?.id || deleting) return;
+
+    setDeleting(true);
+    updateError('');
+    setSuccess('');
+    try {
+      await requestJson(
+        `/api/strategies/${selectedDetail.id}`,
+        { method: 'DELETE' },
+        '删除策略失败',
+      );
+      const deletedID = selectedDetail.id;
+      const items = await fetchStrategyCollection();
+      const fallbackId = items.find((item) => item.id !== deletedID)?.id || items[0]?.id || '';
+      setDeleteConfirmOpen(false);
+      if (fallbackId) {
+        await loadStrategyDetail(fallbackId);
+      } else {
+        resetWorkspace();
+      }
+      setSuccess('策略已删除。');
+    } catch (err) {
+      applyRequestError(err, '删除策略失败');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const updateDraftField = (key, value) => {
@@ -391,14 +434,25 @@ export default function StrategyLibraryPage() {
 
               <div className="flex flex-wrap items-center gap-2">
                 {mode === 'view' ? (
-                  <button
-                    type="button"
-                    onClick={startEdit}
-                    disabled={!selectedDetail || loadingDetail}
-                    className="rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-white whitespace-nowrap transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    编辑当前策略
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={startEdit}
+                      disabled={!selectedDetail || loadingDetail}
+                      className="rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-white whitespace-nowrap transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      编辑当前策略
+                    </button>
+                    {canDeleteSelected ? (
+                      <button
+                        type="button"
+                        onClick={requestDeleteStrategy}
+                        className="rounded-xl border border-negative/40 bg-negative/10 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-negative/20"
+                      >
+                        删除策略
+                      </button>
+                    ) : null}
+                  </>
                 ) : (
                   <>
                     <button
@@ -525,6 +579,19 @@ export default function StrategyLibraryPage() {
           onDiscardAndContinue={handleDiscardAndContinue}
           onStay={() => setPendingAction(null)}
           saving={saving}
+        />
+      ) : null}
+
+      {deleteConfirmOpen ? (
+        <DeleteConfirmDialog
+          strategyName={selectedDetail?.name || ''}
+          deleting={deleting}
+          onCancel={() => {
+            if (!deleting) {
+              setDeleteConfirmOpen(false);
+            }
+          }}
+          onConfirm={handleDeleteStrategy}
         />
       ) : null}
     </div>
@@ -681,6 +748,42 @@ function ConfirmDialog({ title, description, onSaveAndContinue, onDiscardAndCont
             className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {saving ? '保存中...' : '保存并切换'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteConfirmDialog({ strategyName, deleting, onCancel, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
+        <div className="space-y-3">
+          <div className="text-lg font-semibold text-white">确认删除策略</div>
+          <p className="text-sm leading-7 text-white/65">
+            确认删除“{strategyName || '当前策略'}”？删除后不可恢复。
+          </p>
+          <p className="text-xs leading-6 text-white/45">
+            若该策略仍被股票信号配置引用，系统会阻止删除并提示你先替换引用。
+          </p>
+        </div>
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={deleting}
+            className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm font-medium text-white/75 transition hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={deleting}
+            className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-negative/20 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {deleting ? '删除中...' : '确认删除'}
           </button>
         </div>
       </div>

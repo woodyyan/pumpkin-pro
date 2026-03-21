@@ -5,7 +5,7 @@ import { useAuth } from '../lib/auth-context'
 import { isAuthRequiredError } from '../lib/auth-storage'
 
 export default function SettingsPage() {
-  const { openAuthModal } = useAuth()
+  const { openAuthModal, isLoggedIn, ready, user } = useAuth()
   const [webhookConfig, setWebhookConfig] = useState({
     url: '',
     has_secret: false,
@@ -21,6 +21,7 @@ export default function SettingsPage() {
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [latestDelivery, setLatestDelivery] = useState(null)
   const [deliveryItems, setDeliveryItems] = useState([])
+  const authIdentityKey = String(user?.id || user?.email || '')
 
   const applyError = (err, fallbackText) => {
     setNotice('')
@@ -77,9 +78,28 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
+    if (!ready) return
+
+    if (!isLoggedIn) {
+      setWebhookConfig({
+        url: '',
+        has_secret: false,
+        is_enabled: true,
+        timeout_ms: 3000,
+        updated_at: '',
+      })
+      setSecretInput('')
+      setLatestDelivery(null)
+      setDeliveryItems([])
+      setNotice('')
+      setError('')
+      setErrorNeedsLogin(false)
+      return
+    }
+
     loadPage()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [ready, isLoggedIn, authIdentityKey])
 
   const handleSaveWebhook = async () => {
     setSaving(true)

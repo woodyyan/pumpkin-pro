@@ -28,7 +28,7 @@ const DEFAULT_WEBHOOK_CONFIG = {
 }
 
 export default function LiveTradingPage() {
-  const { isLoggedIn, openAuthModal, ready } = useAuth()
+  const { isLoggedIn, openAuthModal, ready, user } = useAuth()
   const [watchlist, setWatchlist] = useState(DEFAULT_WATCHLIST)
   const [marketOverview, setMarketOverview] = useState(null)
   const [snapshotPayload, setSnapshotPayload] = useState(null)
@@ -82,6 +82,7 @@ export default function LiveTradingPage() {
       ? 'down'
       : 'normal'
   const privateAccessReady = ready && isLoggedIn
+  const authIdentityKey = String(user?.id || user?.email || '')
   const webhookConfigured = Boolean(webhookConfig.url)
 
   const resetPrivateState = useCallback(() => {
@@ -436,7 +437,7 @@ export default function LiveTradingPage() {
     }
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, privateAccessReady])
+  }, [ready, privateAccessReady, authIdentityKey])
 
   useEffect(() => {
     if (!ready) return
@@ -450,7 +451,7 @@ export default function LiveTradingPage() {
 
     return () => clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSymbol, ready, privateAccessReady])
+  }, [activeSymbol, ready, privateAccessReady, authIdentityKey])
 
   const handleAddWatch = async (event) => {
     event.preventDefault()

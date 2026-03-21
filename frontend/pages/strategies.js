@@ -25,7 +25,7 @@ const STATUS_OPTIONS = [
 ];
 
 export default function StrategyLibraryPage() {
-  const { openAuthModal } = useAuth();
+  const { openAuthModal, isLoggedIn, ready, user } = useAuth();
   const [strategies, setStrategies] = useState([]);
   const [selectedId, setSelectedId] = useState('');
   const [selectedDetail, setSelectedDetail] = useState(null);
@@ -42,6 +42,7 @@ export default function StrategyLibraryPage() {
   const [error, setError] = useState('');
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false);
   const [success, setSuccess] = useState('');
+  const authIdentityKey = String(user?.id || user?.email || '');
 
   const updateError = (nextError, nextNeedsLogin = false) => {
     setError(nextError);
@@ -81,8 +82,10 @@ export default function StrategyLibraryPage() {
     && !loadingDetail;
 
   useEffect(() => {
+    if (!ready) return;
     loadStrategies();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, isLoggedIn, authIdentityKey]);
 
   const fetchStrategyCollection = async () => {
     const data = await requestJson('/api/strategies', undefined, '加载策略列表失败');

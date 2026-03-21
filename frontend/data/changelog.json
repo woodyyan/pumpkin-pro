@@ -14,6 +14,15 @@
     {
       "date": "2026-03-21",
       "type": "修复优化",
+      "title": "策略参数全面补齐单位标注",
+      "summary": "为策略库全部默认策略参数补充单位说明（如天、层、比例、倍、RSI 点），并在比例参数中加入换算示例，避免数字含义不清。",
+      "scope": "策略库",
+      "raw_subject": "fix(strategies): add clear units for all preset params",
+      "visible": true
+    },
+    {
+      "date": "2026-03-21",
+      "type": "修复优化",
       "title": "精简实盘页信号配置说明文案",
       "summary": "移除股票级信号配置中的两段解释性提示，仅保留必要操作信息，让多标的场景下的配置区更清爽、理解更直接。",
       "scope": "实盘交易",

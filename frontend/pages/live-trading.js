@@ -46,7 +46,6 @@ export default function LiveTradingPage() {
   const [signalConfigView, setSignalConfigView] = useState('active')
   const [webhookConfig, setWebhookConfig] = useState(DEFAULT_WEBHOOK_CONFIG)
   const [savingSignalSymbol, setSavingSignalSymbol] = useState('')
-  const [testingSignalSymbol, setTestingSignalSymbol] = useState('')
   const [signalNotice, setSignalNotice] = useState('')
   const [signalError, setSignalError] = useState('')
   const [signalErrorNeedsLogin, setSignalErrorNeedsLogin] = useState(false)
@@ -102,7 +101,6 @@ export default function LiveTradingPage() {
     setSignalConfigView('active')
     setWebhookConfig(DEFAULT_WEBHOOK_CONFIG)
     setSavingSignalSymbol('')
-    setTestingSignalSymbol('')
     setSignalNotice('')
     setSignalError('')
     setSignalErrorNeedsLogin(false)
@@ -553,24 +551,6 @@ export default function LiveTradingPage() {
     }
   }
 
-  const handleTestSymbolSignal = async (symbol) => {
-    setTestingSignalSymbol(symbol)
-    setSignalNotice('')
-    setSignalError('')
-    try {
-      await requestJson(`/api/signal-configs/${encodeURIComponent(symbol)}/test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ side: 'BUY' }),
-      })
-      setSignalNotice(`${symbol} 测试信号已送达`)
-    } catch (err) {
-      applySignalError(err, `${symbol} 测试信号未送达`)
-    } finally {
-      setTestingSignalSymbol('')
-    }
-  }
-
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-border bg-card p-6">
@@ -740,7 +720,7 @@ export default function LiveTradingPage() {
                   </div>
                   {!webhookConfigured || !webhookConfig.is_enabled ? (
                     <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                      未配置或未启用时，测试信号和实盘信号都不会发出。
+                      未配置或未启用时，股票信号不会发出。
                     </div>
                   ) : null}
                   <a
@@ -866,7 +846,7 @@ export default function LiveTradingPage() {
                             </span>
                           </button>
                         </div>
-                        <div className="mt-3 grid gap-2 md:grid-cols-[1.2fr_1fr_auto_auto]">
+                        <div className="mt-3 grid gap-2 md:grid-cols-[1.2fr_1fr]">
                           <select
                             value={config.strategy_id || ''}
                             onChange={(event) => updateLocalSignalConfig(item.symbol, { strategy_id: event.target.value })}
@@ -885,31 +865,24 @@ export default function LiveTradingPage() {
                             onChange={(event) => updateLocalSignalConfig(item.symbol, { cooldown_seconds: Number(event.target.value) || 300 })}
                             className="rounded-lg border border-border bg-black/30 px-2 py-1.5 text-xs text-white outline-none transition focus:border-primary"
                           />
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-[11px] text-white/50">冷却时间：秒（10~3600）。保存会同时提交开关、策略和冷却时间。</div>
                           <button
                             type="button"
                             disabled={savingSignalSymbol === item.symbol}
                             onClick={() => handleSaveSymbolSignalConfig(item.symbol)}
-                            className="rounded-lg border border-border px-2 py-1.5 text-xs text-white/80 transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
+                            className="rounded-lg border border-border px-3 py-1.5 text-xs text-white/80 transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            {savingSignalSymbol === item.symbol ? '保存中...' : '保存'}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={testingSignalSymbol === item.symbol}
-                            onClick={() => handleTestSymbolSignal(item.symbol)}
-                            className="rounded-lg border border-emerald-400/40 px-2 py-1.5 text-xs text-emerald-300 transition hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {testingSignalSymbol === item.symbol ? '校验中...' : '验证送达'}
+                            {savingSignalSymbol === item.symbol ? '保存中...' : '保存该股票配置'}
                           </button>
                         </div>
-                        <div className="mt-2 text-[11px] text-white/50">冷却时间：秒（10~3600）。用于抑制同一股票短时间重复推送。</div>
 
                         <details className="mt-3 rounded-lg border border-border/80 bg-black/30 p-3">
                           <summary className="cursor-pointer text-xs font-medium text-white/85">查看触发条件与 Payload 模板</summary>
                           <div className="mt-3 space-y-3 text-xs text-white/75">
                             <div className="space-y-1">
                               <div>交易信号何时触发：启用该股票信号后，只要所选策略在后台判定满足条件，就会创建正式信号并投递到 Webhook。</div>
-                              <div>验证送达：点击“验证送达”会立即发送一条测试信号，并同步校验本次 webhook 是否真实送达。</div>
                               <div>后台投递节奏：约每 {SIGNAL_DISPATCH_INTERVAL_SECONDS} 秒扫描待发送队列。</div>
                               <div>失败重试：最多 {SIGNAL_MAX_ATTEMPTS} 次（含首发），退避间隔 {SIGNAL_BACKOFF_STEPS.join(' / ')}。</div>
                               <div>该股冷却时间：{Number(config.cooldown_seconds) || 300} 秒（同一股票重复信号抑制）。</div>

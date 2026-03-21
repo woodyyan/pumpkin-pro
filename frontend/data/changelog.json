@@ -14,6 +14,15 @@
     {
       "date": "2026-03-21",
       "type": "修复优化",
+      "title": "实盘页信号配置保存入口更清晰",
+      "summary": "股票级信号配置的保存按钮调整到更全局位置，并明确保存会同时提交开关、策略和冷却时间；实盘页移除“验证送达”入口，统一在设置页进行送达验证。",
+      "scope": "实盘交易",
+      "raw_subject": "fix(live): move symbol signal save action and remove duplicate test entry",
+      "visible": true
+    },
+    {
+      "date": "2026-03-21",
+      "type": "修复优化",
       "title": "策略参数全面补齐单位标注",
       "summary": "为策略库全部默认策略参数补充单位说明（如天、层、比例、倍、RSI 点），并在比例参数中加入换算示例，避免数字含义不清。",
       "scope": "策略库",

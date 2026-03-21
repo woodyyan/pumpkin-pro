@@ -163,7 +163,7 @@ export default function SettingsPage() {
       <section className="rounded-2xl border border-border bg-card p-8">
         <h1 className="text-2xl font-semibold tracking-tight">设置</h1>
         <p className="mt-3 text-sm leading-7 text-white/65">
-          用户级能力统一在这里管理。Webhook 配置已从实盘页迁移到本页，实盘页仅保留股票级信号规则。
+          用户级能力统一在这里管理。
         </p>
       </section>
 

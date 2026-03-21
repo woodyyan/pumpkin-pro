@@ -406,7 +406,7 @@ export default function BacktestPage() {
             <div>
               <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">历史回测工作台</h1>
               <p className="mt-3 text-sm md:text-base text-white/65 leading-7">
-                历史回测已接入策略库。你可以直接选择已启用的策略模板，参数由策略库统一维护，回测页面不再提供参数改写入口。
+                历史回测已接入策略库。你可以直接选择已启用的策略模板，参数由策略库统一维护。
               </p>
             </div>
           </div>
@@ -520,7 +520,7 @@ export default function BacktestPage() {
           </div>
         </SectionCard>
 
-        <SectionCard title="策略设置" description={selectedStrategy?.description || '选择策略库中的启用策略用于回测。'}>
+        <SectionCard title="策略设置">
           <div className="space-y-6">
             <Field label="回测策略">
               <select

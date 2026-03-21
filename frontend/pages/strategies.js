@@ -486,7 +486,7 @@ export default function StrategyLibraryPage() {
               <EmptyState text="请选择左侧策略，或通过“新建策略”开始创建。" />
             ) : (
               <>
-                <SectionBlock title="基础信息" description="该区域只保留真实需要维护的名称、状态与说明。">
+                <SectionBlock title="基础信息">
                   {mode === 'view' ? (
                     <div className="space-y-5">
                       <DetailGrid>

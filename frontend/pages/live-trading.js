@@ -13,6 +13,11 @@ const MA_LOOKBACK_DAYS = 240
 const SIGNAL_DISPATCH_INTERVAL_SECONDS = 2
 const SIGNAL_MAX_ATTEMPTS = 4
 const SIGNAL_BACKOFF_STEPS = ['1 分钟', '5 分钟', '15 分钟']
+const SIGNAL_CONFIG_VIEWS = [
+  { key: 'active', label: '激活标的' },
+  { key: 'enabled', label: '已开启' },
+  { key: 'all', label: '全部股票' },
+]
 const DEFAULT_WATCHLIST = { items: [], active_symbol: '', session_state: 'idle' }
 const DEFAULT_WEBHOOK_CONFIG = {
   url: '',
@@ -38,6 +43,7 @@ export default function LiveTradingPage() {
   const [blockFlowEvents, setBlockFlowEvents] = useState([])
   const [activeStrategies, setActiveStrategies] = useState([])
   const [signalConfigBySymbol, setSignalConfigBySymbol] = useState({})
+  const [signalConfigView, setSignalConfigView] = useState('active')
   const [webhookConfig, setWebhookConfig] = useState(DEFAULT_WEBHOOK_CONFIG)
   const [savingSignalSymbol, setSavingSignalSymbol] = useState('')
   const [testingSignalSymbol, setTestingSignalSymbol] = useState('')
@@ -93,6 +99,7 @@ export default function LiveTradingPage() {
     setBlockFlowEvents([])
     setActiveStrategies([])
     setSignalConfigBySymbol({})
+    setSignalConfigView('active')
     setWebhookConfig(DEFAULT_WEBHOOK_CONFIG)
     setSavingSignalSymbol('')
     setTestingSignalSymbol('')
@@ -249,6 +256,19 @@ export default function LiveTradingPage() {
       thresholds: {},
     }
   }
+
+  const visibleSignalWatchlist = useMemo(() => {
+    if (signalConfigView === 'all') {
+      return sortedWatchlist
+    }
+    if (signalConfigView === 'enabled') {
+      return sortedWatchlist.filter((item) => Boolean(signalConfigBySymbol[item.symbol]?.is_enabled))
+    }
+    if (!activeSymbol) {
+      return []
+    }
+    return sortedWatchlist.filter((item) => item.symbol === activeSymbol)
+  }, [activeSymbol, signalConfigBySymbol, signalConfigView, sortedWatchlist])
 
   const loadSupportLevels = async (symbol, { force = false } = {}) => {
     if (!symbol) return
@@ -732,13 +752,61 @@ export default function LiveTradingPage() {
                 </div>
               </div>
 
-              <div className="mt-4 space-y-2">
-                <div className="text-sm font-semibold text-white">股票级信号配置</div>
-                <div className="text-xs text-white/55">每只股票可配置策略、冷却时间并做送达验证；展开可查看触发条件与 Payload。</div>
+              <div className="mt-4 space-y-3">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-white">股票级信号配置</div>
+                  </div>
+                  {sortedWatchlist.length > 0 ? (
+                    <div className="rounded-full border border-border bg-black/20 px-3 py-1 text-[11px] text-white/65">
+                      当前激活：{activeSymbol || '未设置'}
+                    </div>
+                  ) : null}
+                </div>
+
+                {sortedWatchlist.length > 1 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {SIGNAL_CONFIG_VIEWS.map((view) => {
+                      const isActiveView = signalConfigView === view.key
+                      const count = view.key === 'all'
+                        ? sortedWatchlist.length
+                        : view.key === 'enabled'
+                          ? sortedWatchlist.filter((item) => Boolean(getSignalConfigForSymbol(item.symbol).is_enabled)).length
+                          : activeSymbol
+                            ? 1
+                            : 0
+
+                      return (
+                        <button
+                          key={view.key}
+                          type="button"
+                          onClick={() => setSignalConfigView(view.key)}
+                          className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition ${
+                            isActiveView
+                              ? 'border-primary bg-primary/12 text-primary'
+                              : 'border-white/15 bg-black/15 text-white/65 hover:border-white/30 hover:text-white'
+                          }`}
+                        >
+                          <span>{view.label}</span>
+                          <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${isActiveView ? 'bg-primary/20 text-primary' : 'bg-white/10 text-white/60'}`}>
+                            {count}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : null}
+
                 {sortedWatchlist.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border px-4 py-4 text-xs text-white/50">请先添加关注股票，再配置信号。</div>
+                ) : signalConfigView === 'active' && !activeSymbol ? (
+                  <div className="rounded-xl border border-dashed border-border px-4 py-4 text-xs text-white/50">当前还没有激活标的，请先在关注池里设置激活股票。</div>
+                ) : visibleSignalWatchlist.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border px-4 py-4 text-xs text-white/50">
+                    {signalConfigView === 'enabled' ? '当前没有已开启信号的股票。' : '当前视图下暂无可配置股票。'}
+                  </div>
                 ) : (
-                  sortedWatchlist.map((item) => {
+                  visibleSignalWatchlist.map((item) => {
                     const config = getSignalConfigForSymbol(item.symbol)
                     const selectedStrategy = strategyByID[config.strategy_id] || null
                     const payloadTemplate = buildSignalPayloadTemplate(item.symbol, config.strategy_id)
@@ -746,7 +814,10 @@ export default function LiveTradingPage() {
                       <div key={`signal-config-${item.symbol}`} className="rounded-xl border border-border bg-black/20 p-3">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
-                            <div className="text-sm font-medium text-white">{item.symbol}</div>
+                            <div className="flex items-center gap-2 text-sm font-medium text-white">
+                              <span>{item.symbol}</span>
+                              {item.is_active ? <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] text-emerald-200">激活标的</span> : null}
+                            </div>
                             <div className="mt-1 text-xs text-white/55">
                               {Boolean(config.is_enabled)
                                 ? '该股票信号已开启，满足策略条件后会进入发送流程。'

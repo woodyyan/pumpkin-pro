@@ -130,6 +130,46 @@
       "commit": "1534018",
       "raw_subject": "feat(backtest): add buy-hold benchmark and build cache",
       "visible": true
+    },
+    {
+      "date": "2026-03-16",
+      "type": "修复优化",
+      "title": "港股指数标题改为中文展示",
+      "summary": "实盘总览中的港股指数名称完成中文化处理，信息识别更直观，减少中英文混用带来的理解成本。",
+      "scope": "实盘交易",
+      "commit": "1f8a994",
+      "raw_subject": "feat(live): localize hk index titles in overview",
+      "visible": true
+    },
+    {
+      "date": "2026-03-16",
+      "type": "新功能",
+      "title": "实盘页新增行情数据来源提示",
+      "summary": "在实盘页面补充当前行情数据来源说明，帮助更快判断页面指标的取数上下文。",
+      "scope": "实盘交易",
+      "commit": "08455ba",
+      "raw_subject": "feat(live): show market data source on live page",
+      "visible": true
+    },
+    {
+      "date": "2026-03-14",
+      "type": "新功能",
+      "title": "新增叠加图表与相对强弱分析",
+      "summary": "实盘图表新增 Beta 与相对强弱叠加分析，便于同时观察标的表现与基准对比关系。",
+      "scope": "实盘交易",
+      "commit": "ec47bb4",
+      "raw_subject": "feat(live): add overlay chart with beta and relative strength",
+      "visible": true
+    },
+    {
+      "date": "2026-03-13",
+      "type": "新功能",
+      "title": "上线实时监控分层看板",
+      "summary": "新增 A1 到 A4 分层监控能力，并结合关注列表与异常提醒，帮助更高效地追踪重点股票动态。",
+      "scope": "实盘交易 / 监控",
+      "commit": "be674f3",
+      "raw_subject": "feat: implement live monitoring A1-A4 with watchlist and anomalies",
+      "visible": true
     }
   ]
 }

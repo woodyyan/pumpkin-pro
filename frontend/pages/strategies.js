@@ -15,6 +15,7 @@ import {
   createDraftFromType,
   getStrategyPresetByImplementation,
   getStrategyPresetByType,
+  resolveStrategyDescription,
 } from '../lib/strategy-presets';
 
 const STATUS_OPTIONS = [
@@ -69,7 +70,9 @@ export default function StrategyLibraryPage() {
     ? '当前正在新建策略。系统已自动生成默认名称，你只需要继续完善状态、说明和参数。'
     : mode === 'edit'
       ? '当前正在编辑这条策略。保存成功后将自动回到只读状态。'
-      : '当前策略库已简化为 4 种固定策略。页面只保留日常维护真正需要的名称、状态、说明和参数。';
+      : '';
+
+  const detailDescription = resolveStrategyDescription(selectedDetail?.description, activePreset);
 
   useEffect(() => {
     loadStrategies();
@@ -115,6 +118,24 @@ export default function StrategyLibraryPage() {
       setDraftOrigin(nextDraft);
       setCreateMenuOpen(false);
     } catch (err) {
+      const message = String(err?.message || '');
+      if (message.includes('strategy not found')) {
+        try {
+          const items = await fetchStrategyCollection();
+          const fallbackId = items[0]?.id || '';
+          if (!items.some((item) => item.id === strategyId)) {
+            if (fallbackId && fallbackId !== strategyId) {
+              await loadStrategyDetail(fallbackId);
+            } else if (!fallbackId) {
+              resetWorkspace();
+            }
+            updateError('该策略当前不可访问（可能已被删除，或登录态已过期）。如果这是你新建的策略，请重新登录后重试。', true);
+            return;
+          }
+        } catch {
+          // 忽略刷新失败，继续走原始错误展示
+        }
+      }
       applyRequestError(err, '加载策略详情失败');
     } finally {
       setLoadingDetail(false);
@@ -354,7 +375,7 @@ export default function StrategyLibraryPage() {
                 </div>
                 <div>
                   <h2 className="text-2xl font-semibold text-white">{workspaceTitle}</h2>
-                  <p className="mt-2 max-w-3xl text-sm leading-6 text-white/55">{workspaceDescription}</p>
+                  {workspaceDescription ? <p className="mt-2 max-w-3xl text-sm leading-6 text-white/55">{workspaceDescription}</p> : null}
                 </div>
                 {selectedDetail && mode !== 'create' ? (
                   <div className="flex flex-wrap gap-3 text-xs text-white/40">
@@ -415,7 +436,7 @@ export default function StrategyLibraryPage() {
                         <DetailItem label="策略名称" value={selectedDetail?.name} />
                         <DetailItem label="状态" value={selectedDetail?.status ? <StatusBadge status={selectedDetail.status} /> : '--'} />
                       </DetailGrid>
-                      <InfoBlock title="策略说明" content={selectedDetail?.description || '暂无说明'} />
+                      <InfoBlock title="策略说明" content={detailDescription || '暂无说明'} />
                     </div>
                   ) : (
                     <div className="space-y-4">

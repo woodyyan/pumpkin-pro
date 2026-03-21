@@ -56,7 +56,7 @@ func (a *appServer) withOptionalAuth(next http.HandlerFunc) http.HandlerFunc {
 
 		claims, err := a.authService.ParseAccessToken(token)
 		if err != nil {
-			next(w, r)
+			writeAuthRequired(w)
 			return
 		}
 		ctx := auth.WithCurrentUser(r.Context(), auth.CurrentUser{UserID: claims.UserID, Email: claims.Email})

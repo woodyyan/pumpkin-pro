@@ -13,7 +13,8 @@ export const STRATEGY_PRESETS = [
     namePrefix: '趋势跟踪策略',
     idPrefix: 'trend-strategy',
     keyPrefix: 'trend_strategy',
-    defaultDescription: '短均线上穿长均线买入，下穿卖出，适合趋势型行情。',
+    defaultDescription: '策略逻辑：短均线向上突破长均线时买入，短均线向下跌破长均线时卖出，适合单边趋势更明确的行情。示例：短均线=20、长均线=60，当 MA20 从下方向上穿越 MA60 触发买入；后续 MA20 再次跌破 MA60 时触发卖出。',
+    legacyDescriptions: ['短均线上穿长均线买入，下穿卖出，适合趋势型行情。'],
     paramSchema: [
       {
         key: 'ma_short',
@@ -60,7 +61,8 @@ export const STRATEGY_PRESETS = [
     namePrefix: '网格交易策略',
     idPrefix: 'grid-strategy',
     keyPrefix: 'grid_strategy',
-    defaultDescription: '围绕基准价分层挂单，适合震荡市场分批低买高卖。',
+    defaultDescription: '策略逻辑：围绕基准价按固定步长上下分层挂单，价格下探逐级买入、价格反弹逐级卖出，适合区间震荡市场。示例：基准价 100、网格数量=5、步长=3%，可在 97/94/91 分层买入，在 103/106/109 分层止盈。',
+    legacyDescriptions: ['围绕基准价分层挂单，适合震荡市场分批低买高卖。'],
     paramSchema: [
       {
         key: 'grid_count',
@@ -102,7 +104,8 @@ export const STRATEGY_PRESETS = [
     namePrefix: '均值回归策略',
     idPrefix: 'bollinger-strategy',
     keyPrefix: 'bollinger_strategy',
-    defaultDescription: '价格跌破下轨买入、突破上轨卖出，捕捉回归均值机会。',
+    defaultDescription: '策略逻辑：价格偏离布林带区间后，等待回归中轨的机会；常见做法是接近/跌破下轨时分批买入，接近/突破上轨时分批卖出。示例：周期=20、标准差=2，当价格触及下轨且出现止跌信号可尝试买入，反弹至中轨或上轨附近逐步止盈。',
+    legacyDescriptions: ['价格跌破下轨买入、突破上轨卖出，捕捉回归均值机会。'],
     paramSchema: [
       {
         key: 'bb_period',
@@ -150,7 +153,8 @@ export const STRATEGY_PRESETS = [
     namePrefix: '区间交易策略',
     idPrefix: 'rsi-strategy',
     keyPrefix: 'rsi_strategy',
-    defaultDescription: 'RSI 从低位回升买入，从高位回落卖出，适合箱体行情。',
+    defaultDescription: '策略逻辑：RSI 从低位阈值向上突破时视为超卖修复买点，RSI 从高位阈值向下跌破时视为超买回落卖点，适合箱体或弱趋势震荡。示例：RSI 周期=14、低位=30、高位=70，当 RSI 从 28 回升并上穿 30 触发买入；当 RSI 从 74 回落并跌破 70 触发卖出。',
+    legacyDescriptions: ['RSI 从低位回升买入，从高位回落卖出，适合箱体行情。'],
     paramSchema: [
       {
         key: 'rsi_period',
@@ -236,7 +240,7 @@ export function buildDraftFromStrategy(strategy) {
     id: strategy?.id || '',
     key: strategy?.key || '',
     name: strategy?.name || '',
-    description: strategy?.description || preset.defaultDescription,
+    description: resolveStrategyDescription(strategy?.description, preset),
     category: strategy?.category || preset.category,
     status: strategy?.status || 'draft',
     version: strategy?.version || 1,
@@ -298,6 +302,24 @@ export function buildPayloadFromDraft(draft) {
     execution_options: preset.executionOptions,
     metadata: preset.metadata,
   };
+}
+
+export function resolveStrategyDescription(description, preset) {
+  if (!preset) {
+    return description || '';
+  }
+
+  const trimmed = (description || '').trim();
+  if (!trimmed) {
+    return preset.defaultDescription;
+  }
+
+  const legacy = new Set((preset.legacyDescriptions || []).map((item) => (item || '').trim()).filter(Boolean));
+  if (legacy.has(trimmed)) {
+    return preset.defaultDescription;
+  }
+
+  return trimmed;
 }
 
 function pickNextIndex(preset, strategies) {

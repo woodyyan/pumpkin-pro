@@ -17,6 +17,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store"
 	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
+	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"github.com/woodyyan/pumpkin-pro/backend/store/signal"
 	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
@@ -25,12 +26,13 @@ import (
 var supportedDataSources = []string{"online", "csv", "sample"}
 
 type appServer struct {
-	cfg             config.Config
-	authService     *auth.Service
-	strategyService *strategy.Service
-	liveService     *live.Service
-	signalService   *signal.Service
-	adminService    *admin.Service
+	cfg              config.Config
+	authService      *auth.Service
+	strategyService  *strategy.Service
+	liveService      *live.Service
+	signalService    *signal.Service
+	adminService     *admin.Service
+	backtestService  *backtest.Service
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -286,7 +288,141 @@ func (a *appServer) handleBacktest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID := currentUserID(r)
+	startTime := time.Now()
+
+	// If logged-in user, intercept the response to save it
+	if strings.TrimSpace(userID) != "" {
+		a.proxyToQuantAndSave(w, r, "/api/backtest", encodedBody, userID, payload, startTime)
+		return
+	}
+
 	a.proxyToQuant(w, r, "/api/backtest", encodedBody)
+}
+
+func (a *appServer) proxyToQuantAndSave(w http.ResponseWriter, r *http.Request, targetPath string, body []byte, userID string, requestPayload map[string]any, startTime time.Time) {
+	targetURL := a.cfg.QuantServiceURL + targetPath
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, bytes.NewReader(body))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create proxy request")
+		return
+	}
+
+	copyForwardHeaders(r, req)
+	if req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("Error calling quant service: %v", err)
+		writeError(w, http.StatusServiceUnavailable, "Failed to connect to quant engine")
+		return
+	}
+	defer resp.Body.Close()
+
+	// Read the full response body
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Error reading quant response: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to read quant engine response")
+		return
+	}
+
+	durationMS := time.Since(startTime).Milliseconds()
+
+	// Write back to the client
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	w.WriteHeader(resp.StatusCode)
+	if _, err := w.Write(respBody); err != nil {
+		log.Printf("Error writing response: %v", err)
+	}
+
+	// Async save to DB
+	go func() {
+		var result map[string]any
+		if err := json.Unmarshal(respBody, &result); err != nil {
+			log.Printf("[backtest] failed to unmarshal response for saving: %v", err)
+			return
+		}
+
+		status := "success"
+		if resp.StatusCode >= 400 {
+			status = "failed"
+		}
+
+		a.backtestService.SaveRunAsync(userID, requestPayload, result, durationMS, status)
+	}()
+}
+
+func (a *appServer) handleBacktestRuns(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+
+	userID := currentUserID(r)
+	limit := parseLimit(r.URL.Query().Get("limit"), 20)
+	offset := parseOffset(r.URL.Query().Get("offset"), 0)
+
+	items, total, err := a.backtestService.List(r.Context(), userID, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "加载回测历史失败")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"total": total,
+	})
+}
+
+func (a *appServer) handleBacktestRunSubroutes(w http.ResponseWriter, r *http.Request) {
+	suffix := strings.TrimPrefix(r.URL.Path, "/api/backtest/runs/")
+	suffix = strings.TrimSpace(strings.Trim(suffix, "/"))
+	if suffix == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	runID := suffix
+	userID := currentUserID(r)
+
+	switch r.Method {
+	case http.MethodGet:
+		detail, err := a.backtestService.GetByID(r.Context(), userID, runID)
+		if err != nil {
+			a.writeBacktestError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, detail)
+	case http.MethodDelete:
+		if err := a.backtestService.Delete(r.Context(), userID, runID); err != nil {
+			a.writeBacktestError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "id": runID})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Only GET and DELETE methods are allowed")
+	}
+}
+
+func (a *appServer) writeBacktestError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, backtest.ErrNotFound):
+		writeError(w, http.StatusNotFound, "回测记录不存在")
+	case errors.Is(err, backtest.ErrForbidden):
+		writeError(w, http.StatusForbidden, "该操作需要登录后使用")
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
 }
 
 func (a *appServer) handleBacktestOptions(w http.ResponseWriter, r *http.Request) {
@@ -878,6 +1014,14 @@ func parseLimit(raw string, fallback int) int {
 	return value
 }
 
+func parseOffset(raw string, fallback int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value < 0 {
+		return fallback
+	}
+	return value
+}
+
 func parseWindowMinutes(raw string, fallback int) int {
 	value, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || value <= 0 {
@@ -1257,13 +1401,17 @@ func main() {
 		log.Printf("Admin seed skipped: %v", err)
 	}
 
+	backtestRepo := backtest.NewRepository(storeInstance.DB)
+	backtestService := backtest.NewService(backtestRepo)
+
 	server := &appServer{
-		cfg:             cfg,
-		authService:     authService,
-		strategyService: strategyService,
-		liveService:     liveService,
-		signalService:   signalService,
-		adminService:    adminService,
+		cfg:              cfg,
+		authService:      authService,
+		strategyService:  strategyService,
+		liveService:      liveService,
+		signalService:    signalService,
+		adminService:     adminService,
+		backtestService:  backtestService,
 	}
 
 	mux := http.NewServeMux()
@@ -1278,6 +1426,8 @@ func main() {
 
 	mux.HandleFunc("/api/backtest", server.withOptionalAuth(server.handleBacktest))
 	mux.HandleFunc("/api/backtest/options", server.withOptionalAuth(server.handleBacktestOptions))
+	mux.HandleFunc("/api/backtest/runs", server.withRequiredAuth(server.handleBacktestRuns))
+	mux.HandleFunc("/api/backtest/runs/", server.withRequiredAuth(server.handleBacktestRunSubroutes))
 	mux.HandleFunc("/api/strategies", server.withOptionalAuth(server.handleStrategies))
 	mux.HandleFunc("/api/strategies/active", server.withOptionalAuth(server.handleActiveStrategies))
 	mux.HandleFunc("/api/strategies/", server.withOptionalAuth(server.handleStrategySubroutes))

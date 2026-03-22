@@ -6,6 +6,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/config"
 	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
+	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"github.com/woodyyan/pumpkin-pro/backend/store/signal"
 	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
@@ -33,6 +34,7 @@ func New(cfg config.DBConfig) (*Store, error) {
 		live.NewMigrator(),
 		signal.NewMigrator(),
 		admin.NewMigrator(),
+		backtest.NewMigrator(),
 	}
 	for _, migrator := range migrators {
 		if err := migrator.AutoMigrate(db); err != nil {

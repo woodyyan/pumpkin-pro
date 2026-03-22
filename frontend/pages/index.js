@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 
 import { requestJson } from '../lib/api';
+import { useAuth } from '../lib/auth-context';
 
 const DATA_SOURCE_OPTIONS = [
   { value: 'online', label: '在线下载', description: '下载 A 股 / 港股历史数据' },
@@ -57,12 +58,20 @@ const ERROR_FIELD_LABELS = {
 };
 
 export default function BacktestPage() {
+  const { isLoggedIn, openAuthModal } = useAuth();
   const [form, setForm] = useState(DEFAULT_FORM);
   const [strategies, setStrategies] = useState([]);
   const [strategiesLoading, setStrategiesLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
+
+  // ── History runs ──
+  const [historyRuns, setHistoryRuns] = useState([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [activeRunId, setActiveRunId] = useState(null);
+  const [historyExpanded, setHistoryExpanded] = useState(true);
 
   const priceChartContainerRef = useRef(null);
   const equityChartContainerRef = useRef(null);
@@ -75,6 +84,24 @@ export default function BacktestPage() {
     () => strategies.find((item) => item.id === form.strategyId) || null,
     [form.strategyId, strategies],
   );
+
+  const fetchHistory = useCallback(async () => {
+    if (!isLoggedIn) return;
+    setHistoryLoading(true);
+    try {
+      const data = await requestJson('/api/backtest/runs?limit=20', undefined, '加载回测历史失败');
+      setHistoryRuns(data?.items || []);
+      setHistoryTotal(data?.total || 0);
+    } catch {
+      // silently fail - history is not critical
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [isLoggedIn]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
 
   const resultStrategyParams = result?.strategy?.params || {};
 
@@ -381,6 +408,11 @@ export default function BacktestPage() {
       );
 
       setResult(responseData);
+      setActiveRunId(null);
+      // Refresh history list after a short delay (give backend async save time)
+      if (isLoggedIn) {
+        setTimeout(() => fetchHistory(), 800);
+      }
     } catch (err) {
       setResult(null);
       setError(err.message || '回测失败，请稍后重试。');
@@ -544,7 +576,7 @@ export default function BacktestPage() {
             </Field>
 
             <div className="rounded-2xl border border-dashed border-border bg-black/20 px-4 py-5 text-sm leading-7 text-white/60">
-              策略参数已统一收敛到“策略库”维护。回测引擎仅负责选择策略并执行回测，运行时将自动使用策略库中当前版本的默认参数。
+              策略参数已统一收敛到"策略库"维护。回测引擎仅负责选择策略并执行回测，运行时将自动使用策略库中当前版本的默认参数。
             </div>
 
             <div className="rounded-2xl border border-border bg-black/20 p-4 text-sm leading-7 text-white/65">
@@ -566,9 +598,93 @@ export default function BacktestPage() {
         </SectionCard>
       </section>
 
+      {/* ── 历史运行面板 ── */}
+      {isLoggedIn && (
+        <section className="rounded-2xl border border-border bg-card p-6">
+          <div className="mb-4 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setHistoryExpanded((prev) => !prev)}
+              className="flex items-center gap-2 text-lg font-semibold text-white hover:text-primary transition"
+            >
+              <span className={`inline-block transition-transform ${historyExpanded ? 'rotate-90' : ''}`}>▸</span>
+              历史运行
+              {historyTotal > 0 && <span className="text-sm font-normal text-white/40">({historyTotal})</span>}
+            </button>
+            {historyRuns.length > 0 && (
+              <button
+                type="button"
+                onClick={fetchHistory}
+                disabled={historyLoading}
+                className="text-xs text-white/40 hover:text-white/70 transition disabled:opacity-50"
+              >
+                {historyLoading ? '刷新中...' : '刷新'}
+              </button>
+            )}
+          </div>
+          {historyExpanded && (
+            <>
+              {historyLoading && historyRuns.length === 0 ? (
+                <div className="py-8 text-center text-sm text-white/40">加载中...</div>
+              ) : historyRuns.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border bg-black/20 px-4 py-8 text-center text-sm text-white/40">
+                  运行回测后，结果会自动保存在这里。
+                </div>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {historyRuns.map((run) => (
+                    <HistoryRunCard
+                      key={run.id}
+                      run={run}
+                      isActive={activeRunId === run.id}
+                      onSelect={async () => {
+                        if (activeRunId === run.id) return;
+                        setActiveRunId(run.id);
+                        setLoading(true);
+                        setError('');
+                        try {
+                          const detail = await requestJson(`/api/backtest/runs/${run.id}`, undefined, '加载回测结果失败');
+                          setResult(detail?.result || null);
+                        } catch (err) {
+                          setError(err.message || '加载回测结果失败');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                      onDelete={async () => {
+                        if (!confirm('确定删除这条回测记录？')) return;
+                        try {
+                          await requestJson(`/api/backtest/runs/${run.id}`, { method: 'DELETE' }, '删除失败');
+                          if (activeRunId === run.id) {
+                            setActiveRunId(null);
+                            setResult(null);
+                          }
+                          fetchHistory();
+                        } catch (err) {
+                          setError(err.message || '删除失败');
+                        }
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      )}
+
+      {!isLoggedIn && (
+        <div className="rounded-2xl border border-dashed border-border bg-card/60 px-6 py-6 text-center">
+          <span className="text-sm text-white/45">
+            <button type="button" onClick={() => openAuthModal('login', '登录后可保存和查看回测历史记录。')} className="text-primary hover:underline">登录</button>
+            {' '}后可保存和查看回测历史记录
+          </span>
+        </div>
+      )}
+
       {!result && !loading && (
         <div className="rounded-2xl border border-dashed border-border bg-card/60 px-6 py-16 text-center text-white/45">
-          选择数据源与策略后，点击“运行历史回测”，这里会展示 K 线、资产曲线、回撤分析和交易结果。
+          选择数据源与策略后，点击"运行历史回测"，这里会展示 K 线、资产曲线、回撤分析和交易结果。
         </div>
       )}
 
@@ -942,4 +1058,103 @@ function SignalCard({ label, value, color }) {
       <div className={`mt-3 text-3xl font-semibold ${color}`}>{formatInteger(value)}</div>
     </div>
   );
+}
+
+function HistoryRunCard({ run, isActive, onSelect, onDelete }) {
+  const metrics = run.metrics_summary || {};
+  const totalReturn = metrics.total_return_pct;
+  const maxDrawdown = metrics.max_drawdown_pct;
+  const sharpe = metrics.sharpe_ratio;
+  const trades = metrics.total_trades;
+
+  const returnColor = totalReturn != null && totalReturn >= 0 ? 'text-positive' : 'text-negative';
+
+  const createdAt = run.created_at ? formatRelativeTime(run.created_at) : '';
+
+  return (
+    <div
+      className={`group relative cursor-pointer rounded-2xl border p-4 transition ${
+        isActive
+          ? 'border-primary bg-primary/10 shadow-[0_0_0_1px_rgba(230,126,34,0.25)]'
+          : 'border-border bg-black/20 hover:border-white/20'
+      }`}
+      onClick={onSelect}
+    >
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onDelete();
+        }}
+        className="absolute right-3 top-3 hidden rounded-full p-1 text-white/25 transition hover:bg-white/10 hover:text-red-400 group-hover:block"
+        title="删除"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+
+      <div className="mb-2 pr-6 text-sm font-medium text-white leading-tight truncate" title={run.title}>
+        {run.title || '回测记录'}
+      </div>
+
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-white/55">
+        {totalReturn != null && (
+          <span>
+            收益{' '}
+            <span className={`font-medium ${returnColor}`}>
+              {totalReturn >= 0 ? '+' : ''}{Number(totalReturn).toFixed(2)}%
+            </span>
+          </span>
+        )}
+        {maxDrawdown != null && (
+          <span>
+            回撤{' '}
+            <span className="font-medium text-white/70">
+              -{Math.abs(Number(maxDrawdown)).toFixed(2)}%
+            </span>
+          </span>
+        )}
+        {sharpe != null && (
+          <span>
+            夏普{' '}
+            <span className="font-medium text-white/70">{Number(sharpe).toFixed(2)}</span>
+          </span>
+        )}
+        {trades != null && (
+          <span>
+            交易{' '}
+            <span className="font-medium text-white/70">{trades}笔</span>
+          </span>
+        )}
+      </div>
+
+      <div className="mt-2 flex items-center gap-3 text-[11px] text-white/30">
+        <span>{run.start_date} ~ {run.end_date}</span>
+        {createdAt && <span>{createdAt}</span>}
+        {run.status === 'failed' && (
+          <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] text-red-300">失败</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatRelativeTime(isoString) {
+  try {
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMinutes = Math.floor(diffMs / 60000);
+    if (diffMinutes < 1) return '刚刚';
+    if (diffMinutes < 60) return `${diffMinutes}分钟前`;
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return `${diffHours}小时前`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 30) return `${diffDays}天前`;
+    return date.toLocaleDateString('zh-CN');
+  } catch {
+    return '';
+  }
 }

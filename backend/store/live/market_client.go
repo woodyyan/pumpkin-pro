@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,11 +15,15 @@ import (
 )
 
 var (
-	symbolPattern          = regexp.MustCompile(`^\d{5}\.HK$`)
 	supportedBenchmarksMap = map[string]string{
+		// HK
 		"HSI":    "hkHSI",
 		"HSCEI":  "hkHSCEI",
 		"HSTECH": "hkHSTECH",
+		// A-share
+		"SHCI":  "sh000001",
+		"SZCI":  "sz399001",
+		"CYBZ":  "sz399006",
 	}
 )
 
@@ -67,26 +70,21 @@ func NewMarketClient() *MarketClient {
 	}
 }
 
-func normalizeHKSymbol(input string) (string, error) {
-	raw := strings.ToUpper(strings.TrimSpace(input))
-	raw = strings.TrimPrefix(raw, "HK")
-	raw = strings.TrimSuffix(raw, ".HK")
-	if raw == "" {
-		return "", ErrInvalidSymbol
-	}
-	if len(raw) < 5 {
-		raw = fmt.Sprintf("%05s", raw)
-	}
-	candidate := raw + ".HK"
-	if !symbolPattern.MatchString(candidate) {
-		return "", ErrInvalidSymbol
-	}
-	return candidate, nil
-}
-
 func quoteCodeFromSymbol(symbol string) string {
-	digits := strings.TrimSuffix(strings.ToUpper(symbol), ".HK")
-	return "hk" + digits
+	upper := strings.ToUpper(symbol)
+	switch {
+	case strings.HasSuffix(upper, ".HK"):
+		digits := strings.TrimSuffix(upper, ".HK")
+		return "hk" + digits
+	case strings.HasSuffix(upper, ".SH"):
+		digits := strings.TrimSuffix(upper, ".SH")
+		return "sh" + digits
+	case strings.HasSuffix(upper, ".SZ"):
+		digits := strings.TrimSuffix(upper, ".SZ")
+		return "sz" + digits
+	default:
+		return strings.ToLower(symbol)
+	}
 }
 
 func normalizeBenchmark(input string) string {
@@ -98,6 +96,15 @@ func normalizeBenchmark(input string) string {
 		return "HSI"
 	}
 	return candidate
+}
+
+// defaultBenchmarkForSymbol returns a sensible benchmark code based on the
+// stock's market. HK → HSI, A-share → SHCI.
+func defaultBenchmarkForSymbol(symbol string) string {
+	if IsAShare(symbol) {
+		return "SHCI"
+	}
+	return "HSI"
 }
 
 func quoteCodeFromBenchmark(benchmark string) string {
@@ -129,7 +136,7 @@ func buildSymbolSnapshot(normalized string, quote *quoteData) *SymbolSnapshot {
 }
 
 func (c *MarketClient) FetchSymbolSnapshot(ctx context.Context, symbol string) (*SymbolSnapshot, error) {
-	normalized, err := normalizeHKSymbol(symbol)
+	normalized, _, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +157,7 @@ func (c *MarketClient) FetchSymbolSnapshot(ctx context.Context, symbol string) (
 }
 
 func (c *MarketClient) FetchOverlaySnapshot(ctx context.Context, symbol, benchmark string) (*SymbolSnapshot, *BenchmarkSnapshot, error) {
-	normalizedSymbol, err := normalizeHKSymbol(symbol)
+	normalizedSymbol, _, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -196,8 +203,15 @@ func (c *MarketClient) FetchOverlaySnapshot(ctx context.Context, symbol, benchma
 	return symbolSnapshot, benchmarkSnapshot, nil
 }
 
-func (c *MarketClient) FetchMarketOverview(ctx context.Context) (*MarketOverview, error) {
-	codes := []string{"hkHSI", "hkHSCEI", "hkHSTECH"}
+func (c *MarketClient) FetchMarketOverview(ctx context.Context, exchange string) (*MarketOverview, error) {
+	var codes []string
+	switch strings.ToUpper(exchange) {
+	case "SSE", "SZSE":
+		codes = []string{"sh000001", "sz399001", "sz399006"}
+	default:
+		codes = []string{"hkHSI", "hkHSCEI", "hkHSTECH"}
+	}
+
 	fields, err := c.fetchFields(ctx, codes)
 	if err != nil {
 		return nil, err
@@ -219,8 +233,15 @@ func (c *MarketClient) FetchMarketOverview(ctx context.Context) (*MarketOverview
 			latestTS = quote.TS
 		}
 		totalTurnover += quote.Turnover
+
+		// Derive a short index code for the response.
+		indexCode := strings.ToUpper(code)
+		indexCode = strings.TrimPrefix(indexCode, "HK")
+		indexCode = strings.TrimPrefix(indexCode, "SH")
+		indexCode = strings.TrimPrefix(indexCode, "SZ")
+
 		indexes = append(indexes, IndexSnapshot{
-			Code:       strings.TrimPrefix(strings.ToUpper(code), "HK"),
+			Code:       indexCode,
 			Name:       strings.TrimSpace(quote.Name),
 			Last:       quote.Last,
 			ChangeRate: quote.ChangePct / 100,
@@ -240,7 +261,7 @@ func (c *MarketClient) FetchMarketOverview(ctx context.Context) (*MarketOverview
 }
 
 func (c *MarketClient) FetchSymbolDailyBars(ctx context.Context, symbol string, lookbackDays int) ([]DailyBar, error) {
-	normalized, err := normalizeHKSymbol(symbol)
+	normalized, _, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -298,16 +319,25 @@ func cloneDailyBars(bars []DailyBar) []DailyBar {
 }
 
 func (c *MarketClient) fetchDailyBarsFromTencent(ctx context.Context, symbol string, lookbackDays int) ([]DailyBar, error) {
-	digits := strings.TrimSuffix(strings.ToLower(symbol), ".hk")
-	code := "hk" + digits
+	code := quoteCodeFromSymbol(symbol)
 	window := lookbackDays + 20
 	if window < 120 {
 		window = 120
 	}
 
-	urls := []string{
-		fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/hkfqkline/get?param=%s,day,,,%d,qfq", code, window),
-		fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/kline/kline?param=%s,day,,,%d", code, window),
+	var urls []string
+	if IsAShare(symbol) {
+		// A-share K-line endpoints
+		urls = []string{
+			fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,day,,,%d,qfq", code, window),
+			fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/kline/kline?param=%s,day,,,%d", code, window),
+		}
+	} else {
+		// HK K-line endpoints
+		urls = []string{
+			fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/hkfqkline/get?param=%s,day,,,%d,qfq", code, window),
+			fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/kline/kline?param=%s,day,,,%d", code, window),
+		}
 	}
 
 	var lastErr error
@@ -565,6 +595,17 @@ func (c *MarketClient) fetchFields(ctx context.Context, codes []string) (map[str
 }
 
 func parseQuote(code string, fields []string) (*quoteData, error) {
+	lower := strings.ToLower(code)
+	isAShare := strings.HasPrefix(lower, "sh") || strings.HasPrefix(lower, "sz")
+
+	if isAShare {
+		return parseAShareQuote(code, fields)
+	}
+	return parseHKQuote(code, fields)
+}
+
+// parseHKQuote parses Tencent HK quote format.
+func parseHKQuote(code string, fields []string) (*quoteData, error) {
 	if len(fields) < 44 {
 		return nil, fmt.Errorf("%w: quote fields too short", ErrDataSourceDown)
 	}
@@ -606,7 +647,10 @@ func parseQuote(code string, fields []string) (*quoteData, error) {
 		ts = time.Now()
 	}
 
-	name := strings.TrimSpace(fields[46])
+	name := ""
+	if len(fields) > 46 {
+		name = strings.TrimSpace(fields[46])
+	}
 	if name == "" {
 		name = strings.TrimSpace(fields[1])
 	}
@@ -622,6 +666,79 @@ func parseQuote(code string, fields []string) (*quoteData, error) {
 		Turnover:   math.Max(turnover, 0),
 		ChangePct:  changePct,
 		VolumeRate: math.Max(volumeRate, 0),
+		TS:         ts,
+	}, nil
+}
+
+// parseAShareQuote parses Tencent A-share quote format.
+// A-share fields layout (0-indexed):
+//
+//	0: market, 1: code, 2: name, 3: last, 4: prev_close, 5: open,
+//	6: volume(手), 7: buy_volume, 8: sell_volume,
+//	9-28: bid/ask prices & volumes,
+//	29: datetime, 30: change, 31: change_pct, 32: high, 33: low,
+//	34: last/volume/turnover triple, 35: volume(手), 36: turnover(万),
+//	37: turnover_rate, 38: P/E, ...
+func parseAShareQuote(code string, fields []string) (*quoteData, error) {
+	if len(fields) < 37 {
+		return nil, fmt.Errorf("%w: A-share quote fields too short (%d)", ErrDataSourceDown, len(fields))
+	}
+
+	last, err := parseFloat(fields[3])
+	if err != nil {
+		return nil, err
+	}
+	prevClose, err := parseFloat(fields[4])
+	if err != nil {
+		return nil, err
+	}
+	high, err := parseFloat(fields[33])
+	if err != nil {
+		high, _ = parseFloat(fields[32])
+	}
+	low, err := parseFloat(fields[34])
+	if err != nil {
+		low, _ = parseFloat(fields[33])
+	}
+	// A-share volume (fields[6]) is in 手 (lots of 100 shares).
+	volume, err := parseFloat(fields[6])
+	if err != nil {
+		volume, _ = parseFloat(fields[36])
+	}
+	// A-share turnover (fields[37]) is in 万元 for some endpoints.
+	turnover, _ := parseFloat(fields[37])
+	if turnover == 0 {
+		turnover, _ = parseFloat(fields[36])
+	}
+	changePct, _ := parseFloat(fields[32])
+	if changePct == 0 {
+		changePct, _ = parseFloat(fields[31])
+	}
+
+	ts, err := time.ParseInLocation("20060102150405", strings.TrimSpace(fields[30]), time.Local)
+	if err != nil {
+		ts, err = time.ParseInLocation("2006/01/02 15:04:05", strings.TrimSpace(fields[30]), time.Local)
+		if err != nil {
+			ts = time.Now()
+		}
+	}
+
+	name := strings.TrimSpace(fields[1])
+	if name == "" && len(fields) > 2 {
+		name = strings.TrimSpace(fields[2])
+	}
+
+	return &quoteData{
+		Code:       code,
+		Name:       name,
+		Last:       math.Max(last, 0),
+		PrevClose:  math.Max(prevClose, 0),
+		High:       math.Max(high, 0),
+		Low:        math.Max(low, 0),
+		Volume:     math.Max(volume, 0),
+		Turnover:   math.Max(turnover, 0),
+		ChangePct:  changePct,
+		VolumeRate: 0,
 		TS:         ts,
 	}, nil
 }

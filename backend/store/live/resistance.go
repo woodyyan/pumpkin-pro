@@ -34,7 +34,7 @@ type resistanceBand struct {
 }
 
 func (s *Service) GetResistanceLevels(ctx context.Context, userID, symbol, period string, lookbackDays int) (*ResistanceLevelsPayload, error) {
-	normalizedSymbol, err := normalizeHKSymbol(symbol)
+	normalizedSymbol, _, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}

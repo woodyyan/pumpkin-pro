@@ -35,13 +35,16 @@ func (r *Repository) List(ctx context.Context, userID string) ([]WatchlistItem, 
 	return items, nil
 }
 
-func (r *Repository) Create(ctx context.Context, userID, symbol, name string) (*WatchlistItem, error) {
+func (r *Repository) Create(ctx context.Context, userID, symbol, name, exchange string) (*WatchlistItem, error) {
 	now := time.Now().UTC()
+	if exchange == "" {
+		exchange = "HKEX"
+	}
 	record := WatchlistRecord{
 		UserID:    userID,
 		Symbol:    symbol,
 		Name:      name,
-		Exchange:  "HKEX",
+		Exchange:  exchange,
 		IsActive:  false,
 		CreatedAt: now,
 		UpdatedAt: now,

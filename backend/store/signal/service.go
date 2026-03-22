@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 )
 
 const (
@@ -202,7 +203,7 @@ func (s *Service) UpsertSymbolConfig(ctx context.Context, userID, symbol string,
 	if strings.TrimSpace(userID) == "" {
 		return nil, ErrForbidden
 	}
-	normalizedSymbol, err := normalizeHKSymbol(symbol)
+	normalizedSymbol, _, err := live.NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +286,7 @@ func (s *Service) DeleteSymbolConfig(ctx context.Context, userID, symbol string)
 	if strings.TrimSpace(userID) == "" {
 		return ErrForbidden
 	}
-	normalizedSymbol, err := normalizeHKSymbol(symbol)
+	normalizedSymbol, _, err := live.NormalizeSymbol(symbol)
 	if err != nil {
 		return err
 	}
@@ -323,7 +324,7 @@ func (s *Service) EmitSignal(ctx context.Context, input EmitSignalInput) (*Signa
 		return nil, ErrWebhookOff
 	}
 
-	normalizedSymbol, err := normalizeHKSymbol(input.Symbol)
+	normalizedSymbol, _, err := live.NormalizeSymbol(input.Symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +384,7 @@ func (s *Service) SendTestSignal(ctx context.Context, userID string, input TestS
 		return nil, ErrForbidden
 	}
 
-	normalizedSymbol, err := normalizeHKSymbol(input.Symbol)
+	normalizedSymbol, _, err := live.NormalizeSymbol(input.Symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -524,7 +525,7 @@ func (s *Service) ListSignalEvents(ctx context.Context, userID, symbol string, l
 		return nil, ErrForbidden
 	}
 	if strings.TrimSpace(symbol) != "" {
-		normalized, err := normalizeHKSymbol(symbol)
+		normalized, _, err := live.NormalizeSymbol(symbol)
 		if err != nil {
 			return nil, err
 		}
@@ -551,7 +552,7 @@ func (s *Service) ListDeliveries(ctx context.Context, userID, symbol string, lim
 		return nil, ErrForbidden
 	}
 	if strings.TrimSpace(symbol) != "" {
-		normalized, err := normalizeHKSymbol(symbol)
+		normalized, _, err := live.NormalizeSymbol(symbol)
 		if err != nil {
 			return nil, err
 		}
@@ -898,27 +899,6 @@ func isPrivateHost(host string) bool {
 		return false
 	}
 	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalMulticast() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
-}
-
-func normalizeHKSymbol(input string) (string, error) {
-	raw := strings.ToUpper(strings.TrimSpace(input))
-	raw = strings.TrimPrefix(raw, "HK")
-	raw = strings.TrimSuffix(raw, ".HK")
-	if raw == "" {
-		return "", fmt.Errorf("%w: symbol 不能为空", ErrInvalidInput)
-	}
-	if len(raw) < 5 {
-		raw = fmt.Sprintf("%05s", raw)
-	}
-	if len(raw) != 5 {
-		return "", fmt.Errorf("%w: symbol 需为 5 位港股代码", ErrInvalidInput)
-	}
-	for _, ch := range raw {
-		if ch < '0' || ch > '9' {
-			return "", fmt.Errorf("%w: symbol 需为数字", ErrInvalidInput)
-		}
-	}
-	return raw + ".HK", nil
 }
 
 func normalizeSide(side string) (string, error) {

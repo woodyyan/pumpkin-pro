@@ -42,7 +42,7 @@ type supportBand struct {
 }
 
 func (s *Service) GetSupportLevels(ctx context.Context, userID, symbol, period string, lookbackDays int) (*SupportLevelsPayload, error) {
-	normalizedSymbol, err := normalizeHKSymbol(symbol)
+	normalizedSymbol, _, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (s *Service) GetSupportLevels(ctx context.Context, userID, symbol, period s
 }
 
 func (s *Service) GetMovingAverages(ctx context.Context, userID, symbol, period string, lookbackDays int) (*MovingAveragesPayload, error) {
-	normalizedSymbol, err := normalizeHKSymbol(symbol)
+	normalizedSymbol, _, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}

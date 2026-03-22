@@ -49,7 +49,7 @@ export default function LiveTradingPage() {
   const [signalNotice, setSignalNotice] = useState('')
   const [signalError, setSignalError] = useState('')
   const [signalErrorNeedsLogin, setSignalErrorNeedsLogin] = useState(false)
-  const [symbolInput, setSymbolInput] = useState('00700.HK')
+  const [symbolInput, setSymbolInput] = useState('')
   const [nameInput, setNameInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -61,6 +61,8 @@ export default function LiveTradingPage() {
   const signalCenterRefreshRef = useRef(0)
 
   const activeSymbol = watchlist.active_symbol
+  const activeExchange = detectExchange(activeSymbol)
+  const isActiveAShare = activeExchange === 'SSE' || activeExchange === 'SZSE'
   const sessionState = watchlist.session_state || 'idle'
   const supportSummary = supportPayload?.summary || null
   const supportLevels = Array.isArray(supportPayload?.levels) ? supportPayload.levels : []
@@ -174,7 +176,9 @@ export default function LiveTradingPage() {
   }
 
   const loadMarketOverview = async () => {
-    const data = await requestJson('/api/live/market/overview')
+    const exchangeParam = isActiveAShare ? 'SSE' : ''
+    const qs = exchangeParam ? `?exchange=${exchangeParam}` : ''
+    const data = await requestJson(`/api/live/market/overview${qs}`)
     setMarketOverview(data)
   }
 
@@ -567,14 +571,14 @@ export default function LiveTradingPage() {
             <>
               <div>
                 <h2 className="text-lg font-semibold text-white">关注股票池</h2>
-                <p className="mt-1 text-xs text-white/50">仅港股代码（如 00700.HK）</p>
+                <p className="mt-1 text-xs text-white/50">港股（00700）或 A 股（600519）</p>
               </div>
 
               <form onSubmit={handleAddWatch} className="space-y-3">
                 <input
                   value={symbolInput}
                   onChange={(event) => setSymbolInput(event.target.value.toUpperCase())}
-                  placeholder="00700.HK"
+                  placeholder="股票代码，如 00700 或 600519"
                   className="w-full rounded-xl border border-border bg-black/20 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
                 />
                 <input
@@ -917,13 +921,13 @@ export default function LiveTradingPage() {
           ) : null}
 
           <section className="rounded-2xl border border-border bg-card p-5">
-            <h3 className="text-base font-semibold text-white">港股大盘概览</h3>
+            <h3 className="text-base font-semibold text-white">{isActiveAShare ? 'A 股大盘概览' : '港股大盘概览'}</h3>
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               {(marketOverview?.indexes || []).map((index) => (
                 <div key={index.code} className="rounded-xl border border-border bg-black/20 p-3">
                   <div className="text-xs text-white/50">{formatMarketIndexTitle(index.name, index.code)}</div>
                   <div className="mt-1 text-lg font-semibold text-white">{formatNumber(index.last, 2)}</div>
-                  <div className={`text-xs ${index.change_rate >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                  <div className={`text-xs ${index.change_rate >= 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
                     {formatPercent(index.change_rate)}
                   </div>
                 </div>
@@ -955,7 +959,7 @@ export default function LiveTradingPage() {
                 <MetricMini label="涨跌幅" value={formatPercent(snapshotPayload.snapshot.change_rate)} accent={snapshotPayload.snapshot.change_rate >= 0 ? 'up' : 'down'} />
                 <MetricMini label="量比" value={formatNumber(snapshotPayload.snapshot.volume_ratio, 2)} />
                 <MetricMini label="成交量" value={formatCompact(snapshotPayload.snapshot.volume)} />
-                <MetricMini label="成交额(HKD)" value={formatCompact(snapshotPayload.snapshot.turnover)} />
+                <MetricMini label={`成交额(${isActiveAShare ? 'CNY' : 'HKD'})`} value={formatCompact(snapshotPayload.snapshot.turnover)} />
                 <MetricMini label="振幅" value={formatPercent(snapshotPayload.snapshot.amplitude)} />
               </div>
             )}
@@ -1461,6 +1465,9 @@ function formatMarketIndexTitle(name, code) {
     HSI: '恒生指数',
     HSCEI: '恒生中国企业指数',
     HSTECH: '恒生科技指数',
+    '000001': '上证指数',
+    '399001': '深证成指',
+    '399006': '创业板指',
   }
 
   return codeMap[upperCode] || rawName || upperCode || '--'
@@ -1565,7 +1572,7 @@ function buildSignalPayloadTemplate(symbol, strategyID) {
   const lines = [
     '股票交易信号来啦！',
     '类型：正式信号',
-    `股票：${symbol || '00700.HK'}`,
+    `股票：${symbol || '--'}`,
     '方向：BUY',
     '时间：2026-03-19 18:00:00',
   ]
@@ -1627,4 +1634,19 @@ function formatDateTime(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function detectExchange(symbol) {
+  if (!symbol) return 'HKEX'
+  const upper = String(symbol).toUpperCase()
+  if (upper.endsWith('.SH')) return 'SSE'
+  if (upper.endsWith('.SZ')) return 'SZSE'
+  if (upper.endsWith('.HK')) return 'HKEX'
+  // Bare digits: 6-digit starting with 6 → SSE, 0/3 → SZSE, else HK
+  const digits = upper.replace(/\D/g, '')
+  if (digits.length === 6) {
+    if (digits[0] === '6') return 'SSE'
+    if (digits[0] === '0' || digits[0] === '3') return 'SZSE'
+  }
+  return 'HKEX'
 }

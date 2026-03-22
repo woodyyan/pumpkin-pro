@@ -716,7 +716,7 @@ func (a *appServer) handleLiveMarketOverview(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
 		return
 	}
-	overview, err := a.liveService.GetMarketOverview(r.Context())
+	overview, err := a.liveService.GetMarketOverview(r.Context(), r.URL.Query().Get("exchange"))
 	if err != nil {
 		a.writeLiveError(w, err)
 		return
@@ -948,7 +948,7 @@ func (a *appServer) writeLiveError(w http.ResponseWriter, err error) {
 	case errors.Is(err, live.ErrInvalidSymbol):
 		statusCode = http.StatusBadRequest
 		code = "INVALID_SYMBOL"
-		message = "股票代码格式无效，需为 5 位港股代码（如 00700.HK）"
+		message = "股票代码格式无效，支持港股（如 00700.HK）或 A 股（如 600519.SH、000001.SZ）"
 	case errors.Is(err, live.ErrConflict):
 		statusCode = http.StatusConflict
 		code = "SYMBOL_ALREADY_EXISTS"

@@ -104,7 +104,7 @@ func (s *Service) ListWatchlist(ctx context.Context, userID string) (*WatchlistS
 }
 
 func (s *Service) AddWatchlist(ctx context.Context, userID, symbol, name string) (*WatchlistItem, error) {
-	normalized, err := normalizeHKSymbol(symbol)
+	normalized, exchange, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (s *Service) AddWatchlist(ctx context.Context, userID, symbol, name string)
 	if cleanName == "" {
 		cleanName = normalized
 	}
-	item, err := s.repo.Create(ctx, userID, normalized, cleanName)
+	item, err := s.repo.Create(ctx, userID, normalized, cleanName, exchange)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func (s *Service) AddWatchlist(ctx context.Context, userID, symbol, name string)
 }
 
 func (s *Service) DeleteWatchlist(ctx context.Context, userID, symbol string) error {
-	normalized, err := normalizeHKSymbol(symbol)
+	normalized, _, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ func (s *Service) DeleteWatchlist(ctx context.Context, userID, symbol string) er
 }
 
 func (s *Service) ActivateSymbol(ctx context.Context, userID, symbol string, resetWindow bool) (*ActivateResult, error) {
-	normalized, err := normalizeHKSymbol(symbol)
+	normalized, _, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -197,8 +197,8 @@ func (s *Service) ActivateSymbol(ctx context.Context, userID, symbol string, res
 	}, nil
 }
 
-func (s *Service) GetMarketOverview(ctx context.Context) (*MarketOverview, error) {
-	overview, err := s.marketClient.FetchMarketOverview(ctx)
+func (s *Service) GetMarketOverview(ctx context.Context, exchange string) (*MarketOverview, error) {
+	overview, err := s.marketClient.FetchMarketOverview(ctx, exchange)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +206,7 @@ func (s *Service) GetMarketOverview(ctx context.Context) (*MarketOverview, error
 }
 
 func (s *Service) GetSymbolSnapshot(ctx context.Context, userID, symbol string) (*SymbolSnapshot, bool, SessionState, error) {
-	normalized, err := normalizeHKSymbol(symbol)
+	normalized, _, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, false, SessionIdle, err
 	}
@@ -235,7 +235,7 @@ func (s *Service) GetSymbolSnapshot(ctx context.Context, userID, symbol string) 
 }
 
 func (s *Service) GetOverlay(ctx context.Context, userID, symbol string, windowMinutes int, benchmark string) (*OverlayPayload, error) {
-	normalizedSymbol, err := normalizeHKSymbol(symbol)
+	normalizedSymbol, _, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +287,7 @@ func (s *Service) GetOverlay(ctx context.Context, userID, symbol string, windowM
 }
 
 func (s *Service) ListPriceVolumeAnomalies(ctx context.Context, userID, symbol string, since time.Time, limit int, types []string) ([]PriceVolumeAnomaly, SessionState, error) {
-	normalized, err := normalizeHKSymbol(symbol)
+	normalized, _, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, SessionIdle, err
 	}
@@ -333,7 +333,7 @@ func (s *Service) ListPriceVolumeAnomalies(ctx context.Context, userID, symbol s
 }
 
 func (s *Service) ListBlockFlowAnomalies(ctx context.Context, userID, symbol string, since time.Time, limit int) ([]BlockFlowAnomaly, SessionState, error) {
-	normalized, err := normalizeHKSymbol(symbol)
+	normalized, _, err := NormalizeSymbol(symbol)
 	if err != nil {
 		return nil, SessionIdle, err
 	}

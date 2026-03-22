@@ -72,6 +72,7 @@ export default function BacktestPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [activeRunId, setActiveRunId] = useState(null);
   const [historyExpanded, setHistoryExpanded] = useState(true);
+  const [priceChartLegend, setPriceChartLegend] = useState([]);
 
   const priceChartContainerRef = useRef(null);
   const equityChartContainerRef = useRef(null);
@@ -161,11 +162,13 @@ export default function BacktestPage() {
     const renderCharts = async () => {
       if (!result?.kline_data?.length) {
         destroyCharts();
+        setPriceChartLegend([]);
         return;
       }
 
       const { createChart, ColorType } = await import('lightweight-charts');
       destroyCharts();
+      setPriceChartLegend([]);
 
       const resizeHandlers = [];
       const registerResize = (chart, container) => {
@@ -213,17 +216,20 @@ export default function BacktestPage() {
         const seriesSample = result.kline_data[0] || {};
         const maKeys = Object.keys(seriesSample).filter((key) => /^MA\d+$/.test(key)).sort((a, b) => Number(a.slice(2)) - Number(b.slice(2)));
         const maColors = ['#f59e0b', '#8b5cf6', '#38bdf8'];
+        const legendItems = [];
         maKeys.forEach((key, index) => {
+          const color = maColors[index % maColors.length];
           const lineSeries = priceChart.addLineSeries({
-            color: maColors[index % maColors.length],
+            color,
             lineWidth: 2,
-            title: key,
+            title: '',
           });
           lineSeries.setData(
             result.kline_data
               .filter((item) => item[key] !== null && item[key] !== undefined)
               .map((item) => ({ time: item.date, value: item[key] })),
           );
+          legendItems.push({ label: key, color });
         });
 
         const bollingerKeys = ['BB_upper', 'BB_mid', 'BB_lower'].filter((key) => Object.prototype.hasOwnProperty.call(seriesSample, key));
@@ -232,14 +238,18 @@ export default function BacktestPage() {
           BB_mid: { color: '#f59e0b', lineWidth: 1 },
           BB_lower: { color: '#38bdf8', lineWidth: 1 },
         };
+        const bollingerLabels = { BB_upper: '布林上轨', BB_mid: '布林中轨', BB_lower: '布林下轨' };
         bollingerKeys.forEach((key) => {
-          const lineSeries = priceChart.addLineSeries({ title: key, ...bollingerStyles[key] });
+          const style = bollingerStyles[key];
+          const lineSeries = priceChart.addLineSeries({ title: '', ...style });
           lineSeries.setData(
             result.kline_data
               .filter((item) => item[key] !== null && item[key] !== undefined)
               .map((item) => ({ time: item.date, value: item[key] })),
           );
+          legendItems.push({ label: bollingerLabels[key] || key, color: style.color });
         });
+        setPriceChartLegend(legendItems);
 
         priceChart.timeScale().fitContent();
         priceChartRef.current = priceChart;
@@ -706,6 +716,15 @@ export default function BacktestPage() {
 
           <SectionCard title="价格走势与交易信号" description="展示 K 线、策略指标叠加以及买卖点位。">
             <div ref={priceChartContainerRef} className="h-[430px] w-full" />
+            {priceChartLegend.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/55">
+                {priceChartLegend.map((item) => (
+                  <span key={item.label} className="inline-flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />{item.label}
+                  </span>
+                ))}
+              </div>
+            )}
           </SectionCard>
 
           <section className="grid gap-6 xl:grid-cols-2">

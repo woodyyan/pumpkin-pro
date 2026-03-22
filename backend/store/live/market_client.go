@@ -12,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 )
 
 var (
@@ -568,7 +571,9 @@ func (c *MarketClient) fetchFields(ctx context.Context, codes []string) (map[str
 		return nil, fmt.Errorf("%w: status=%d", ErrDataSourceDown, resp.StatusCode)
 	}
 
-	payload, err := io.ReadAll(resp.Body)
+	// Tencent qt.gtimg.cn returns GBK-encoded text; decode to UTF-8.
+	utf8Reader := transform.NewReader(resp.Body, simplifiedchinese.GBK.NewDecoder())
+	payload, err := io.ReadAll(utf8Reader)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrDataSourceDown, err)
 	}

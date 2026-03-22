@@ -110,6 +110,13 @@ func (s *Service) AddWatchlist(ctx context.Context, userID, symbol, name string)
 	}
 	cleanName := strings.TrimSpace(name)
 	if cleanName == "" {
+		// Auto-fetch stock name from market data when user does not provide one.
+		snapshot, fetchErr := s.marketClient.FetchSymbolSnapshot(ctx, normalized)
+		if fetchErr == nil && snapshot != nil && snapshot.Name != "" && snapshot.Name != normalized {
+			cleanName = snapshot.Name
+		}
+	}
+	if cleanName == "" {
 		cleanName = normalized
 	}
 	item, err := s.repo.Create(ctx, userID, normalized, cleanName, exchange)

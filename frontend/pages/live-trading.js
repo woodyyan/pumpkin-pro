@@ -64,6 +64,16 @@ export default function LiveTradingPage() {
   const activeExchange = detectExchange(activeSymbol)
   const isActiveAShare = activeExchange === 'SSE' || activeExchange === 'SZSE'
   const sessionState = watchlist.session_state || 'idle'
+
+  // Derive stock name: prefer live snapshot name → fallback to watchlist item name
+  const activeSymbolName = useMemo(() => {
+    const snapshotName = snapshotPayload?.snapshot?.name
+    if (snapshotName && snapshotName !== activeSymbol) return snapshotName
+    const item = (watchlist.items || []).find((i) => i.symbol === activeSymbol)
+    const itemName = item?.name
+    if (itemName && itemName !== activeSymbol) return itemName
+    return ''
+  }, [activeSymbol, snapshotPayload, watchlist.items])
   const supportSummary = supportPayload?.summary || null
   const supportLevels = Array.isArray(supportPayload?.levels) ? supportPayload.levels : []
   const resistanceSummary = resistancePayload?.summary || null
@@ -600,12 +610,14 @@ export default function LiveTradingPage() {
                 {sortedWatchlist.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-white/50">暂无关注股票</div>
                 ) : (
-                  sortedWatchlist.map((item) => (
+                  sortedWatchlist.map((item) => {
+                    const displayName = item.name && item.name !== item.symbol ? item.name : ''
+                    return (
                     <div key={item.symbol} className="rounded-xl border border-border bg-black/20 p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div>
-                          <div className="text-sm font-medium text-white">{item.symbol}</div>
-                          <div className="text-xs text-white/55">{item.name || '未命名'}</div>
+                          <div className="text-sm font-medium text-white">{displayName ? `${displayName}（${item.symbol}）` : item.symbol}</div>
+                          {!displayName && <div className="text-xs text-white/40">名称待获取</div>}
                         </div>
                         {item.is_active && <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-[11px] text-emerald-300">激活中</span>}
                       </div>
@@ -626,7 +638,8 @@ export default function LiveTradingPage() {
                         </button>
                       </div>
                     </div>
-                  ))
+                    )
+                  })
                 )}
               </div>
             </>
@@ -649,7 +662,7 @@ export default function LiveTradingPage() {
           {privateAccessReady ? (
             <div className="grid gap-4 md:grid-cols-4">
               <MetricCard label="会话状态" value={sessionStateLabel(sessionState)} />
-              <MetricCard label="激活标的" value={activeSymbol || '未设置'} />
+              <MetricCard label="激活标的" value={activeSymbol ? (activeSymbolName ? `${activeSymbolName}（${activeSymbol}）` : activeSymbol) : '未设置'} />
               <MetricCard label="最后刷新" value={lastUpdateAt ? formatDateTime(lastUpdateAt) : '--'} />
               <MetricCard label="行情来源" value={formatSource(snapshotPayload?.snapshot?.source)} />
             </div>
@@ -744,7 +757,7 @@ export default function LiveTradingPage() {
                   </div>
                   {sortedWatchlist.length > 0 ? (
                     <div className="rounded-full border border-border bg-black/20 px-3 py-1 text-[11px] text-white/65">
-                      当前激活：{activeSymbol || '未设置'}
+                      当前激活：{activeSymbol ? (activeSymbolName ? `${activeSymbolName}（${activeSymbol}）` : activeSymbol) : '未设置'}
                     </div>
                   ) : null}
                 </div>
@@ -795,12 +808,13 @@ export default function LiveTradingPage() {
                     const config = getSignalConfigForSymbol(item.symbol)
                     const selectedStrategy = strategyByID[config.strategy_id] || null
                     const payloadTemplate = buildSignalPayloadTemplate(item.symbol, config.strategy_id)
+                    const signalDisplayName = item.name && item.name !== item.symbol ? item.name : ''
                     return (
                       <div key={`signal-config-${item.symbol}`} className="rounded-xl border border-border bg-black/20 p-3">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div>
                             <div className="flex items-center gap-2 text-sm font-medium text-white">
-                              <span>{item.symbol}</span>
+                              <span>{signalDisplayName ? `${signalDisplayName}（${item.symbol}）` : item.symbol}</span>
                               {item.is_active ? <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] text-emerald-200">激活标的</span> : null}
                             </div>
                             <div className="mt-1 text-xs text-white/55">
@@ -938,7 +952,16 @@ export default function LiveTradingPage() {
           {privateAccessReady ? (
             <>
               <section className="rounded-2xl border border-border bg-card p-5">
-                <h3 className="text-base font-semibold text-white">激活标的快照</h3>
+                <h3 className="text-base font-semibold text-white">
+                  激活标的快照
+                  {snapshotPayload?.snapshot?.name && snapshotPayload.snapshot.name !== activeSymbol ? (
+                    <span className="ml-2 text-sm font-normal text-white/60">
+                      {snapshotPayload.snapshot.name}（{activeSymbol}）
+                    </span>
+                  ) : activeSymbol ? (
+                    <span className="ml-2 text-sm font-normal text-white/60">{activeSymbol}</span>
+                  ) : null}
+                </h3>
             {!snapshotPayload?.snapshot ? (
               <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">请先在左侧选择一个激活标的。</div>
             ) : (

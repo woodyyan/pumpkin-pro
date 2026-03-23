@@ -127,12 +127,7 @@ export default function BacktestPage() {
     const loadStrategies = async () => {
       setStrategiesLoading(true);
       try {
-        const response = await fetch('/api/strategies/active');
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data?.detail || '加载可用策略失败');
-        }
-
+        const data = await requestJson('/api/strategies/active', undefined, '加载可用策略失败');
         const items = data?.items || [];
         setStrategies(items);
         setForm((prev) => {

@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-03-22",
+  "last_updated": "2026-03-23",
   "manual_entry_template": {
     "date": "YYYY-MM-DD",
     "type": "新功能",
@@ -11,6 +11,15 @@
     "visible": true
   },
   "items": [
+    {
+      "date": "2026-03-23",
+      "type": "修复优化",
+      "title": "实盘页量价异动与大单流向改为图表展示",
+      "summary": "将实盘交易页中「量价异动」和「大单流向」两个模块从无限滚动列表升级为交互式图表：量价异动采用时间线散点图，按异动类型着色，Y 轴为评分；大单流向采用柱状图（红入绿出）叠加方向强度折线，资金进出一目了然。",
+      "scope": "实盘交易 / 前端",
+      "raw_subject": "feat(live-trading): replace event lists with lightweight-charts for anomaly & block-flow",
+      "visible": true
+    },
     {
       "date": "2026-03-22",
       "type": "修复优化",

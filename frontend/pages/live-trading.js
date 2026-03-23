@@ -1236,21 +1236,8 @@ export default function LiveTradingPage() {
           </section>
 
               <section className="grid gap-4 xl:grid-cols-2">
-                <EventPanel title="量价异动" events={priceVolumeEvents} renderEvent={(item) => (
-                  <>
-                    <div className="font-medium text-white">{item.anomaly_type}</div>
-                    <div className="text-xs text-white/55">评分：{formatNumber(item.score, 1)} · {formatDateTime(item.detected_at)}</div>
-                  </>
-                )} />
-
-                <EventPanel title="大单流向" events={blockFlowEvents} renderEvent={(item) => (
-                  <>
-                    <div className="font-medium text-white">净流向：{formatCompact(item.net_inflow)}</div>
-                    <div className="text-xs text-white/55">
-                      强度 {formatPercent(item.direction_strength)} · 连续性 {formatPercent(item.continuity)} · {formatDateTime(item.detected_at)}
-                    </div>
-                  </>
-                )} />
+                <PriceVolumeChart events={priceVolumeEvents} />
+                <BlockFlowChart events={blockFlowEvents} />
               </section>
             </>
           ) : null}
@@ -1365,23 +1352,269 @@ function toAscendingSeriesData(series, valueField) {
     .map(([time, value]) => ({ time, value }))
 }
 
-function EventPanel({ title, events, renderEvent }) {
+const ANOMALY_TYPE_META = {
+  volume_spike: { label: '量能突增', color: '#f59e0b' },
+  price_breakout_up: { label: '向上突破', color: '#ef4444' },
+  price_breakout_down: { label: '向下突破', color: '#22c55e' },
+}
+
+function PriceVolumeChart({ events }) {
+  const containerRef = useRef(null)
+  const chartRef = useRef(null)
+
+  useEffect(() => {
+    let cleanup = () => {}
+    let cancelled = false
+
+    const render = async () => {
+      if (!containerRef.current) return
+      if (chartRef.current) {
+        chartRef.current.remove()
+        chartRef.current = null
+      }
+      if (!events || events.length === 0) return
+
+      const { createChart, ColorType } = await import('lightweight-charts')
+      if (cancelled || !containerRef.current) return
+
+      const chart = createChart(containerRef.current, {
+        width: containerRef.current.clientWidth || 500,
+        height: 220,
+        layout: {
+          background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' },
+          textColor: '#E5E7EB',
+        },
+        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        timeScale: { borderColor: 'rgba(148,163,184,0.35)', timeVisible: true, secondsVisible: false },
+        grid: {
+          vertLines: { color: 'rgba(148,163,184,0.1)' },
+          horzLines: { color: 'rgba(148,163,184,0.1)' },
+        },
+      })
+
+      // Group by type → one line series per type
+      const byType = {}
+      for (const item of events) {
+        const type = item.anomaly_type || 'unknown'
+        if (!byType[type]) byType[type] = []
+        const ts = Math.floor(new Date(item.detected_at).getTime() / 1000)
+        if (!ts || Number.isNaN(ts)) continue
+        byType[type].push({ time: ts, value: item.score ?? 0 })
+      }
+
+      for (const [type, points] of Object.entries(byType)) {
+        const meta = ANOMALY_TYPE_META[type] || { color: '#94a3b8' }
+        const deduped = deduplicateTimeSeries(points)
+        const series = chart.addLineSeries({
+          color: meta.color,
+          lineWidth: 2,
+          title: '',
+          crosshairMarkerRadius: 5,
+          lastValueVisible: false,
+          priceLineVisible: false,
+        })
+        series.setData(deduped)
+        // Add circle markers for each point
+        series.setMarkers(
+          deduped.map((p) => ({
+            time: p.time,
+            position: 'inBar',
+            shape: 'circle',
+            color: meta.color,
+            size: 1.5,
+          })),
+        )
+      }
+
+      chart.timeScale().fitContent()
+      chartRef.current = chart
+
+      const onResize = () => {
+        if (!containerRef.current || !chartRef.current) return
+        chartRef.current.applyOptions({ width: containerRef.current.clientWidth || 500 })
+        chartRef.current.timeScale().fitContent()
+      }
+      window.addEventListener('resize', onResize)
+      cleanup = () => {
+        window.removeEventListener('resize', onResize)
+        if (chartRef.current) {
+          chartRef.current.remove()
+          chartRef.current = null
+        }
+      }
+    }
+
+    render()
+    return () => {
+      cancelled = true
+      cleanup()
+    }
+  }, [events])
+
+  const legendItems = Object.entries(ANOMALY_TYPE_META).map(([, meta]) => meta)
+
   return (
     <section className="rounded-2xl border border-border bg-card p-5">
-      <h3 className="text-base font-semibold text-white">{title}</h3>
-      <div className="mt-3 space-y-2">
-        {events.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border px-4 py-5 text-sm text-white/50">暂无事件</div>
-        ) : (
-          events.map((item) => (
-            <div key={item.event_id} className="rounded-xl border border-border bg-black/20 px-3 py-2">
-              {renderEvent(item)}
-            </div>
-          ))
-        )}
-      </div>
+      <h3 className="text-base font-semibold text-white">量价异动</h3>
+      <p className="mt-1 text-xs text-white/55">按时间分布的异动事件，Y 轴为评分（越高越显著）。</p>
+      {!events || events.length === 0 ? (
+        <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-white/50">暂无事件</div>
+      ) : (
+        <>
+          <div ref={containerRef} className="mt-3 w-full overflow-hidden rounded-xl border border-border bg-black/20" />
+          <div className="mt-2 flex flex-wrap gap-3 text-xs text-white/55">
+            {legendItems.map((item) => (
+              <span key={item.label} className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />{item.label}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
     </section>
   )
+}
+
+function BlockFlowChart({ events }) {
+  const containerRef = useRef(null)
+  const chartRef = useRef(null)
+
+  useEffect(() => {
+    let cleanup = () => {}
+    let cancelled = false
+
+    const render = async () => {
+      if (!containerRef.current) return
+      if (chartRef.current) {
+        chartRef.current.remove()
+        chartRef.current = null
+      }
+      if (!events || events.length === 0) return
+
+      const { createChart, ColorType } = await import('lightweight-charts')
+      if (cancelled || !containerRef.current) return
+
+      const chart = createChart(containerRef.current, {
+        width: containerRef.current.clientWidth || 500,
+        height: 220,
+        layout: {
+          background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' },
+          textColor: '#E5E7EB',
+        },
+        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        timeScale: { borderColor: 'rgba(148,163,184,0.35)', timeVisible: true, secondsVisible: false },
+        grid: {
+          vertLines: { color: 'rgba(148,163,184,0.1)' },
+          horzLines: { color: 'rgba(148,163,184,0.1)' },
+        },
+      })
+
+      // Histogram for net inflow (red = inflow, green = outflow)
+      const histogramSeries = chart.addHistogramSeries({
+        title: '',
+        priceLineVisible: false,
+        lastValueVisible: false,
+        priceFormat: { type: 'volume' },
+      })
+
+      const rawHistData = events
+        .map((item) => {
+          const ts = Math.floor(new Date(item.detected_at).getTime() / 1000)
+          if (!ts || Number.isNaN(ts)) return null
+          return {
+            time: ts,
+            value: item.net_inflow ?? 0,
+            color: (item.net_inflow ?? 0) >= 0 ? 'rgba(239, 68, 68, 0.75)' : 'rgba(34, 197, 94, 0.75)',
+          }
+        })
+        .filter(Boolean)
+
+      histogramSeries.setData(deduplicateTimeSeries(rawHistData))
+
+      // Overlay line for direction strength
+      const strengthSeries = chart.addLineSeries({
+        color: '#f59e0b',
+        lineWidth: 1.5,
+        title: '',
+        priceScaleId: 'strength',
+        lastValueVisible: false,
+        priceLineVisible: false,
+      })
+      chart.priceScale('strength').applyOptions({
+        scaleMargins: { top: 0.05, bottom: 0.05 },
+      })
+
+      const rawStrengthData = events
+        .map((item) => {
+          const ts = Math.floor(new Date(item.detected_at).getTime() / 1000)
+          if (!ts || Number.isNaN(ts)) return null
+          return { time: ts, value: item.direction_strength ?? 0 }
+        })
+        .filter(Boolean)
+
+      strengthSeries.setData(deduplicateTimeSeries(rawStrengthData))
+
+      chart.timeScale().fitContent()
+      chartRef.current = chart
+
+      const onResize = () => {
+        if (!containerRef.current || !chartRef.current) return
+        chartRef.current.applyOptions({ width: containerRef.current.clientWidth || 500 })
+        chartRef.current.timeScale().fitContent()
+      }
+      window.addEventListener('resize', onResize)
+      cleanup = () => {
+        window.removeEventListener('resize', onResize)
+        if (chartRef.current) {
+          chartRef.current.remove()
+          chartRef.current = null
+        }
+      }
+    }
+
+    render()
+    return () => {
+      cancelled = true
+      cleanup()
+    }
+  }, [events])
+
+  return (
+    <section className="rounded-2xl border border-border bg-card p-5">
+      <h3 className="text-base font-semibold text-white">大单流向</h3>
+      <p className="mt-1 text-xs text-white/55">柱状为净流向金额（红入绿出），折线为方向强度。</p>
+      {!events || events.length === 0 ? (
+        <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-white/50">暂无事件</div>
+      ) : (
+        <>
+          <div ref={containerRef} className="mt-3 w-full overflow-hidden rounded-xl border border-border bg-black/20" />
+          <div className="mt-2 flex flex-wrap gap-3 text-xs text-white/55">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-red-500" />资金流入
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-green-500" />资金流出
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-0.5 w-3 rounded-full bg-amber-500" />方向强度
+            </span>
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
+function deduplicateTimeSeries(points) {
+  if (!points || points.length === 0) return []
+  const sorted = [...points].sort((a, b) => a.time - b.time)
+  const result = [sorted[0]]
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].time !== result[result.length - 1].time) {
+      result.push(sorted[i])
+    }
+  }
+  return result
 }
 
 function AccessPromptCard({ title, description, buttonLabel, onAction, disabled = false }) {

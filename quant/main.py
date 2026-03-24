@@ -18,6 +18,13 @@ from result.metrics import PerformanceMetrics
 from strategy_library.models import StrategyDefinition, StrategyParamDefinition
 from strategy_library.registry import StrategyRegistry
 from strategy_library.resolver import ResolvedStrategy, StrategyResolver
+from screener.scanner import (
+    FILTERABLE_COLUMNS,
+    apply_filters,
+    df_to_records,
+    get_a_share_snapshot,
+    sort_and_paginate,
+)
 from strategy_library.service import StrategyService
 
 logger = logging.getLogger(__name__)
@@ -64,6 +71,19 @@ class RuntimeStrategyPayload(BaseModel):
     params: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ScreenerFilterRange(BaseModel):
+    min: Optional[float] = None
+    max: Optional[float] = None
+
+
+class ScreenerScanRequest(BaseModel):
+    filters: Dict[str, ScreenerFilterRange] = Field(default_factory=dict)
+    sort_by: str = Field(default="code")
+    sort_order: str = Field(default="asc")
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=50, ge=1, le=200)
+
+
 class BacktestRequest(BaseModel):
     data_source: str = Field(default="online", description="online/csv/sample")
     ticker: Optional[str] = Field(default=None, description="A股六位数字或港股五位数字")
@@ -88,6 +108,41 @@ def health_check():
         "strategies": [strategy.name for strategy in strategy_service.list_strategies(active_only=True)],
         "data_sources": SUPPORTED_DATA_SOURCES,
     }
+
+
+@app.post("/api/screener/scan")
+def screener_scan(req: ScreenerScanRequest):
+    """A 股全市场筛选：获取实时快照 → 多维指标范围过滤 → 排序 → 分页返回"""
+    try:
+        df = get_a_share_snapshot()
+
+        # 将 Pydantic 模型转为 dict
+        raw_filters = {}
+        for key, bounds in req.filters.items():
+            if key not in FILTERABLE_COLUMNS:
+                continue
+            entry = {}
+            if bounds.min is not None:
+                entry["min"] = bounds.min
+            if bounds.max is not None:
+                entry["max"] = bounds.max
+            if entry:
+                raw_filters[key] = entry
+
+        df = apply_filters(df, raw_filters)
+        page_df, total = sort_and_paginate(df, req.sort_by, req.sort_order, req.page, req.page_size)
+
+        return {
+            "total": total,
+            "page": req.page,
+            "page_size": req.page_size,
+            "items": df_to_records(page_df),
+        }
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("选股筛选异常")
+        raise HTTPException(status_code=500, detail=f"选股筛选失败: {exc}") from exc
 
 
 @app.get("/api/backtest/options")

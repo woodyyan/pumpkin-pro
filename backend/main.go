@@ -1351,6 +1351,20 @@ func (a *appServer) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
+func (a *appServer) handleScreenerScan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "请求体读取失败")
+		return
+	}
+	defer r.Body.Close()
+	a.proxyToQuant(w, r, "/api/screener/scan", body)
+}
+
 func writeError(w http.ResponseWriter, statusCode int, detail string) {
 	writeJSON(w, statusCode, map[string]string{"detail": detail})
 }
@@ -1447,6 +1461,8 @@ func main() {
 
 	mux.HandleFunc("/api/admin/login", server.handleAdminLogin)
 	mux.HandleFunc("/api/admin/stats", server.withSuperAdminAuth(server.handleAdminStats))
+
+	mux.HandleFunc("/api/screener/scan", server.withOptionalAuth(server.handleScreenerScan))
 
 	handler := corsMiddleware(mux)
 	log.Printf("🚀 Pumpkin Go Backend is running on port %s (db=%s)", cfg.Port, cfg.DB.Type)

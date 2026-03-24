@@ -251,6 +251,12 @@ export default function StockPickerPage() {
   const debouncedFilters = useDebounce(filters, 500)
   const initialLoadRef = useRef(false)
 
+  // ── AI 选股状态 ──
+  const [aiQuery, setAiQuery] = useState('')
+  const [aiParsing, setAiParsing] = useState(false)
+  const [aiSummary, setAiSummary] = useState('')
+  const [aiError, setAiError] = useState('')
+
   // ── 自选表 API ──
   const fetchWatchlists = useCallback(async () => {
     if (!isLoggedIn) { setWatchlists([]); return }
@@ -323,6 +329,41 @@ export default function StockPickerPage() {
   const exitWatchlistView = () => {
     setActiveWatchlistId(null)
     fetchScreener(filters, sortBy, sortOrder, page)
+  }
+
+  // ── AI 自然语言选股 ──
+  const handleAIParse = async () => {
+    const trimmed = aiQuery.trim()
+    if (!trimmed) return
+    setAiParsing(true)
+    setAiError('')
+    setAiSummary('')
+    try {
+      const res = await requestJson('/api/screener/ai-parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: trimmed }),
+      }, 'AI 解析失败')
+
+      if (res?.summary) setAiSummary(res.summary)
+
+      // 将 AI 返回的 { key: { min, max } } 映射回 FILTER_FIELDS 选项索引
+      const aiFilters = res?.filters || {}
+      const newFilters = {}
+      for (const [key, range] of Object.entries(aiFilters)) {
+        const field = FILTER_FIELDS.find((f) => f.key === key)
+        if (!field) continue
+        const bestIdx = findBestOptionIndex(field.options, range.min, range.max)
+        if (bestIdx > 0) newFilters[key] = bestIdx
+      }
+      setFilters(newFilters)
+      setActiveWatchlistId(null) // 退出自选表模式
+      if (!filtersExpanded) setFiltersExpanded(true)
+    } catch (err) {
+      setAiError(err.message || 'AI 解析失败')
+    } finally {
+      setAiParsing(false)
+    }
   }
 
   // 构建 API 请求参数：从 filters（存选项索引）映射到 { key: { min, max } }
@@ -438,6 +479,37 @@ export default function StockPickerPage() {
           <MiniStat label="当前页" value={items.length} suffix="只" />
         </div>
       </div>
+
+      {/* ─── AI 自然语言选股 ─── */}
+      <section className="rounded-2xl border border-border bg-card px-5 py-3">
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1">
+            <input
+              value={aiQuery}
+              onChange={(e) => setAiQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && !aiParsing && handleAIParse()}
+              placeholder={'用自然语言描述选股条件，如"市值 50 到 200 亿，PE 小于 20，换手率大于 3%"'}
+              className="w-full rounded-xl border border-white/15 bg-white/5 py-2 pl-3 pr-20 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary/50 focus:ring-1 focus:ring-primary/30"
+            />
+            <button
+              type="button"
+              onClick={handleAIParse}
+              disabled={aiParsing || !aiQuery.trim()}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg bg-primary/15 px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary/25 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {aiParsing ? '解析中...' : 'AI 选股'}
+            </button>
+          </div>
+        </div>
+        {aiSummary && (
+          <p className="mt-2 text-xs text-primary/70">
+            <span className="font-medium text-primary">AI 理解：</span>{aiSummary}
+          </p>
+        )}
+        {aiError && (
+          <p className="mt-2 text-xs text-red-300">{aiError}</p>
+        )}
+      </section>
 
       {/* ─── 筛选条件面板 ─── */}
       <section className="rounded-2xl border border-border bg-card">
@@ -695,6 +767,57 @@ function getPageNumbers(current, total) {
   if (current < total - 2) pages.push('...')
   pages.push(total)
   return pages
+}
+
+// ─── AI 结果 → 选项索引匹配 ──────────────────────────────────
+// 给定 AI 返回的 min/max，在字段的 options 里找到最接近的选项索引
+function findBestOptionIndex(options, aiMin, aiMax) {
+  let bestIdx = 0
+  let bestScore = -Infinity
+
+  for (let i = 1; i < options.length; i++) {
+    const opt = options[i]
+    const oMin = opt.min
+    const oMax = opt.max
+
+    // 计算匹配分数：完全包含 AI 范围的选项得分最高
+    let score = 0
+
+    // 方向匹配
+    if (aiMin !== null && aiMin !== undefined) {
+      if (oMin !== null && oMin !== undefined) {
+        // 两者都有下界 → 越接近越好
+        score -= Math.abs(aiMin - oMin)
+      } else {
+        score -= 1000 // 选项没有下界但 AI 需要
+      }
+    }
+    if (aiMax !== null && aiMax !== undefined) {
+      if (oMax !== null && oMax !== undefined) {
+        score -= Math.abs(aiMax - oMax)
+      } else {
+        score -= 1000
+      }
+    }
+
+    // 如果 AI 只有一个方向，优先选只有同方向的选项
+    if (aiMin !== null && aiMin !== undefined && (aiMax === null || aiMax === undefined)) {
+      if (oMin !== null && (oMax === null || oMax === undefined)) score += 500
+    }
+    if (aiMax !== null && aiMax !== undefined && (aiMin === null || aiMin === undefined)) {
+      if (oMax !== null && (oMin === null || oMin === undefined)) score += 500
+    }
+
+    // 完全匹配加分
+    if (oMin === aiMin && oMax === aiMax) score += 10000
+
+    if (score > bestScore) {
+      bestScore = score
+      bestIdx = i
+    }
+  }
+
+  return bestIdx
 }
 
 // ─── 自选表工具栏 ─────────────────────────────────────────────

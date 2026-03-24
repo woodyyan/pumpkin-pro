@@ -13,6 +13,13 @@ type Config struct {
 	StrategySeedPath string
 	Auth             AuthConfig
 	AdminSeed        AdminSeedConfig
+	AI               AIConfig
+}
+
+type AIConfig struct {
+	APIKey  string
+	BaseURL string
+	Model   string
 }
 
 type AdminSeedConfig struct {
@@ -60,6 +67,11 @@ func Load() Config {
 			JWTSecret:             getEnv("AUTH_JWT_SECRET", "dev-only-change-me"),
 			AccessTokenTTLMinutes: getEnvAsInt("AUTH_ACCESS_TOKEN_TTL_MINUTES", 120),
 			RefreshTokenTTLHours:  getEnvAsInt("AUTH_REFRESH_TOKEN_TTL_HOURS", 168),
+		},
+		AI: AIConfig{
+			APIKey:  getEnv("AI_API_KEY", ""),
+			BaseURL: trimTrailingSlash(getEnv("AI_BASE_URL", "https://api.openai.com/v1")),
+			Model:   getEnv("AI_MODEL", "gpt-4o-mini"),
 		},
 	}
 }

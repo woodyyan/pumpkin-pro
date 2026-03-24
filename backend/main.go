@@ -1353,6 +1353,32 @@ func (a *appServer) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
+func (a *appServer) handleScreenerAIParse(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	payload, err := decodeBodyAsMap(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	query := asString(payload["query"])
+
+	aiCfg := screener.AIConfig{
+		APIKey:  a.cfg.AI.APIKey,
+		BaseURL: a.cfg.AI.BaseURL,
+		Model:   a.cfg.AI.Model,
+	}
+
+	result, err := screener.ParseNaturalLanguage(r.Context(), aiCfg, query)
+	if err != nil {
+		a.writeScreenerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (a *appServer) handleScreenerScan(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
@@ -1543,6 +1569,7 @@ func main() {
 	mux.HandleFunc("/api/admin/stats", server.withSuperAdminAuth(server.handleAdminStats))
 
 	mux.HandleFunc("/api/screener/scan", server.withOptionalAuth(server.handleScreenerScan))
+	mux.HandleFunc("/api/screener/ai-parse", server.withOptionalAuth(server.handleScreenerAIParse))
 	mux.HandleFunc("/api/screener/watchlists", server.withRequiredAuth(server.handleScreenerWatchlists))
 	mux.HandleFunc("/api/screener/watchlists/", server.withRequiredAuth(server.handleScreenerWatchlistSubroutes))
 

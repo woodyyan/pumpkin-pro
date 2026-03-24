@@ -43,6 +43,9 @@ services:
       - AUTH_JWT_SECRET=${AUTH_JWT_SECRET:-local-dev-jwt-secret-change-me}
       - ADMIN_SEED_EMAIL=${ADMIN_SEED_EMAIL:-}
       - ADMIN_SEED_PASSWORD=${ADMIN_SEED_PASSWORD:-}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_BASE_URL=${AI_BASE_URL:-https://api.openai.com/v1}
+      - AI_MODEL=${AI_MODEL:-gpt-4o-mini}
     volumes:
       - ./data:/app/data
     depends_on:

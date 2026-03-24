@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { requestJson } from '../lib/api'
+import { useAuth } from '../lib/auth-context'
 
 // ─── 筛选条件配置（单下拉 · 预设区间） ──────────────────────
 // 每个选项自带 min/max，选中即生效，用户只需选一次
@@ -226,6 +227,8 @@ function useDebounce(value, delay) {
 
 // ─── 主页面组件 ──────────────────────────────────────────────
 export default function StockPickerPage() {
+  const { isLoggedIn, openAuthModal } = useAuth()
+
   const [filters, setFilters] = useState({})
   const [sortBy, setSortBy] = useState('code')
   const [sortOrder, setSortOrder] = useState('asc')
@@ -236,8 +239,91 @@ export default function StockPickerPage() {
   const [error, setError] = useState('')
   const [filtersExpanded, setFiltersExpanded] = useState(true)
 
+  // ── 自选表状态 ──
+  const [watchlists, setWatchlists] = useState([])
+  const [wlLoading, setWlLoading] = useState(false)
+  const [activeWatchlistId, setActiveWatchlistId] = useState(null) // 当前加载的自选表
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
+  const [saveName, setSaveName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [wlError, setWlError] = useState('')
+
   const debouncedFilters = useDebounce(filters, 500)
   const initialLoadRef = useRef(false)
+
+  // ── 自选表 API ──
+  const fetchWatchlists = useCallback(async () => {
+    if (!isLoggedIn) { setWatchlists([]); return }
+    setWlLoading(true)
+    try {
+      const res = await requestJson('/api/screener/watchlists', undefined, '加载自选表失败')
+      setWatchlists(res?.items || [])
+    } catch {
+      // 静默失败——列表不影响核心功能
+    } finally {
+      setWlLoading(false)
+    }
+  }, [isLoggedIn])
+
+  // 登录状态变化时刷新自选表列表
+  useEffect(() => { fetchWatchlists() }, [fetchWatchlists])
+
+  const saveWatchlist = async () => {
+    const trimmed = saveName.trim()
+    if (!trimmed) { setWlError('请输入自选表名称'); return }
+    const stocks = (data?.items || []).map((r) => ({ code: r.code, name: r.name }))
+    if (stocks.length === 0) { setWlError('当前筛选结果为空，无法保存'); return }
+    setSaving(true)
+    setWlError('')
+    try {
+      await requestJson('/api/screener/watchlists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed, stocks }),
+      }, '保存自选表失败')
+      setSaveDialogOpen(false)
+      setSaveName('')
+      fetchWatchlists()
+    } catch (err) {
+      setWlError(err.message || '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const loadWatchlist = async (id) => {
+    if (activeWatchlistId === id) { setActiveWatchlistId(null); return } // toggle off
+    setLoading(true)
+    setError('')
+    setActiveWatchlistId(id)
+    try {
+      const detail = await requestJson(`/api/screener/watchlists/${id}`, undefined, '加载自选表失败')
+      const wlDetail = detail?.item || {}
+      // 将自选表的股票展示在表格中（只包含 code/name，其余字段为空）
+      setData({ items: wlDetail.stocks || [], total: (wlDetail.stocks || []).length })
+    } catch (err) {
+      setError(err.message || '加载失败')
+      setActiveWatchlistId(null)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const deleteWatchlist = async (id) => {
+    try {
+      await requestJson(`/api/screener/watchlists/${id}`, { method: 'DELETE' }, '删除失败')
+      if (activeWatchlistId === id) setActiveWatchlistId(null)
+      fetchWatchlists()
+    } catch (err) {
+      setError(err.message || '删除失败')
+    }
+  }
+
+  // 退出自选表查看模式 → 重新用当前筛选条件查询
+  const exitWatchlistView = () => {
+    setActiveWatchlistId(null)
+    fetchScreener(filters, sortBy, sortOrder, page)
+  }
 
   // 构建 API 请求参数：从 filters（存选项索引）映射到 { key: { min, max } }
   const buildApiFilters = useCallback((rawFilters) => {
@@ -397,6 +483,33 @@ export default function StockPickerPage() {
           </div>
         )}
       </section>
+
+      {/* ─── 自选表工具栏 ─── */}
+      <WatchlistToolbar
+        isLoggedIn={isLoggedIn}
+        openAuthModal={openAuthModal}
+        watchlists={watchlists}
+        wlLoading={wlLoading}
+        activeWatchlistId={activeWatchlistId}
+        items={items}
+        onSave={() => { setSaveName(''); setWlError(''); setSaveDialogOpen(true) }}
+        onLoad={loadWatchlist}
+        onDelete={deleteWatchlist}
+        onExit={exitWatchlistView}
+      />
+
+      {/* ─── 保存自选表弹窗 ─── */}
+      {saveDialogOpen && (
+        <SaveWatchlistDialog
+          name={saveName}
+          onNameChange={setSaveName}
+          stockCount={items.length}
+          saving={saving}
+          error={wlError}
+          onSave={saveWatchlist}
+          onClose={() => setSaveDialogOpen(false)}
+        />
+      )}
 
       {/* ─── 错误提示 ─── */}
       {error && (
@@ -582,4 +695,172 @@ function getPageNumbers(current, total) {
   if (current < total - 2) pages.push('...')
   pages.push(total)
   return pages
+}
+
+// ─── 自选表工具栏 ─────────────────────────────────────────────
+function WatchlistToolbar({
+  isLoggedIn, openAuthModal, watchlists, wlLoading,
+  activeWatchlistId, items, onSave, onLoad, onDelete, onExit,
+}) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+
+  return (
+    <section className="rounded-2xl border border-border bg-card px-5 py-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2 text-sm text-white/70">
+          <span className="text-xs font-medium text-white/50">我的自选表</span>
+          {!isLoggedIn && (
+            <button
+              type="button"
+              onClick={() => openAuthModal('login', '登录后可保存和管理自选表')}
+              className="text-xs text-primary hover:text-primary/80 transition"
+            >
+              登录使用
+            </button>
+          )}
+        </div>
+
+        {isLoggedIn && (
+          <button
+            type="button"
+            disabled={!items.length}
+            onClick={onSave}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary/25 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <span>+</span> 保存当前结果
+          </button>
+        )}
+      </div>
+
+      {/* 自选表列表 */}
+      {isLoggedIn && (
+        <div className="mt-2">
+          {wlLoading ? (
+            <span className="text-xs text-white/30 animate-pulse">加载中...</span>
+          ) : watchlists.length === 0 ? (
+            <span className="text-xs text-white/25">暂无保存的自选表</span>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {watchlists.map((wl) => {
+                const isActive = activeWatchlistId === wl.id
+                const isDeleting = confirmDeleteId === wl.id
+                return (
+                  <div
+                    key={wl.id}
+                    className={`group inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs transition ${
+                      isActive
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-white/10 bg-white/5 text-white/60 hover:border-white/20 hover:text-white/80'
+                    }`}
+                  >
+                    <button type="button" onClick={() => onLoad(wl.id)} className="flex items-center gap-1">
+                      <span>{wl.name}</span>
+                      <span className="text-[10px] opacity-50">({wl.stock_count})</span>
+                    </button>
+                    {isDeleting ? (
+                      <span className="ml-1 flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => { onDelete(wl.id); setConfirmDeleteId(null) }}
+                          className="text-red-400 hover:text-red-300"
+                          title="确认删除"
+                        >
+                          ✓
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="text-white/40 hover:text-white/60"
+                          title="取消"
+                        >
+                          ✗
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(wl.id)}
+                        className="ml-0.5 text-white/20 hover:text-red-400 transition opacity-0 group-hover:opacity-100"
+                        title="删除"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* 自选表查看模式提示 */}
+          {activeWatchlistId && (
+            <div className="mt-2 flex items-center gap-2 text-xs text-primary/70">
+              <span>正在查看自选表内容</span>
+              <button
+                type="button"
+                onClick={onExit}
+                className="rounded border border-primary/30 px-2 py-0.5 text-primary hover:bg-primary/10 transition"
+              >
+                返回筛选
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ─── 保存自选表弹窗 ──────────────────────────────────────────
+function SaveWatchlistDialog({ name, onNameChange, stockCount, saving, error, onSave, onClose }) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-[2px] px-4">
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-[#121317]/95 p-5 shadow-xl ring-1 ring-primary/20">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-white">保存为自选表</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid size-7 place-items-center rounded-full bg-white/5 text-white/40 hover:bg-white/10 hover:text-white/70 transition"
+          >
+            ×
+          </button>
+        </div>
+        <div className="space-y-3">
+          <input
+            value={name}
+            onChange={(e) => onNameChange(e.target.value)}
+            placeholder="输入自选表名称"
+            maxLength={64}
+            autoFocus
+            onKeyDown={(e) => e.key === 'Enter' && !saving && onSave()}
+            className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none transition focus:border-primary/50 focus:ring-1 focus:ring-primary/30"
+          />
+          <p className="text-xs text-white/40">
+            将当前页 {stockCount} 只股票保存到自选表（单表最多 500 只）
+          </p>
+          {error && (
+            <p className="text-xs text-red-300">{error}</p>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-white/60 transition hover:border-white/25 hover:text-white/80"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saving || !name.trim()}
+              className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-black transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }

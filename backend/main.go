@@ -19,6 +19,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
+	"github.com/woodyyan/pumpkin-pro/backend/store/screener"
 	"github.com/woodyyan/pumpkin-pro/backend/store/signal"
 	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
 )
@@ -33,6 +34,7 @@ type appServer struct {
 	signalService    *signal.Service
 	adminService     *admin.Service
 	backtestService  *backtest.Service
+	screenerService  *screener.Service
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -1365,6 +1367,80 @@ func (a *appServer) handleScreenerScan(w http.ResponseWriter, r *http.Request) {
 	a.proxyToQuant(w, r, "/api/screener/scan", body)
 }
 
+func (a *appServer) handleScreenerWatchlists(w http.ResponseWriter, r *http.Request) {
+	userID := currentUserID(r)
+	switch r.Method {
+	case http.MethodGet:
+		items, err := a.screenerService.List(r.Context(), userID)
+		if err != nil {
+			a.writeScreenerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	case http.MethodPost:
+		var input screener.CreateWatchlistInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, http.StatusBadRequest, "自选表请求格式错误")
+			return
+		}
+		detail, err := a.screenerService.Create(r.Context(), userID, input)
+		if err != nil {
+			a.writeScreenerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"item": detail})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Only GET and POST methods are allowed")
+	}
+}
+
+func (a *appServer) handleScreenerWatchlistSubroutes(w http.ResponseWriter, r *http.Request) {
+	suffix := strings.TrimPrefix(r.URL.Path, "/api/screener/watchlists/")
+	suffix = strings.TrimSpace(strings.Trim(suffix, "/"))
+	if suffix == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	userID := currentUserID(r)
+	watchlistID := suffix
+
+	switch r.Method {
+	case http.MethodGet:
+		detail, err := a.screenerService.GetByID(r.Context(), userID, watchlistID)
+		if err != nil {
+			a.writeScreenerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"item": detail})
+	case http.MethodDelete:
+		if err := a.screenerService.Delete(r.Context(), userID, watchlistID); err != nil {
+			a.writeScreenerError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "id": watchlistID})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Only GET and DELETE methods are allowed")
+	}
+}
+
+func (a *appServer) writeScreenerError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, screener.ErrNotFound):
+		writeError(w, http.StatusNotFound, "自选表不存在")
+	case errors.Is(err, screener.ErrForbidden):
+		writeError(w, http.StatusForbidden, "该操作需要登录后使用")
+	case errors.Is(err, screener.ErrConflict):
+		writeError(w, http.StatusConflict, "同名自选表已存在")
+	case errors.Is(err, screener.ErrInvalid):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, screener.ErrLimit):
+		writeError(w, http.StatusConflict, err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
 func writeError(w http.ResponseWriter, statusCode int, detail string) {
 	writeJSON(w, statusCode, map[string]string{"detail": detail})
 }
@@ -1418,6 +1494,9 @@ func main() {
 	backtestRepo := backtest.NewRepository(storeInstance.DB)
 	backtestService := backtest.NewService(backtestRepo)
 
+	screenerRepo := screener.NewRepository(storeInstance.DB)
+	screenerService := screener.NewService(screenerRepo)
+
 	server := &appServer{
 		cfg:              cfg,
 		authService:      authService,
@@ -1426,6 +1505,7 @@ func main() {
 		signalService:    signalService,
 		adminService:     adminService,
 		backtestService:  backtestService,
+		screenerService:  screenerService,
 	}
 
 	mux := http.NewServeMux()
@@ -1463,6 +1543,8 @@ func main() {
 	mux.HandleFunc("/api/admin/stats", server.withSuperAdminAuth(server.handleAdminStats))
 
 	mux.HandleFunc("/api/screener/scan", server.withOptionalAuth(server.handleScreenerScan))
+	mux.HandleFunc("/api/screener/watchlists", server.withRequiredAuth(server.handleScreenerWatchlists))
+	mux.HandleFunc("/api/screener/watchlists/", server.withRequiredAuth(server.handleScreenerWatchlistSubroutes))
 
 	handler := corsMiddleware(mux)
 	log.Printf("🚀 Pumpkin Go Backend is running on port %s (db=%s)", cfg.Port, cfg.DB.Type)

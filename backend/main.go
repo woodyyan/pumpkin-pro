@@ -805,6 +805,20 @@ func (a *appServer) handleLiveWatchlist(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+func (a *appServer) handleLiveWatchlistSnapshots(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	snapshots, err := a.liveService.GetWatchlistSnapshots(r.Context(), userID)
+	if err != nil {
+		a.writeLiveError(w, err)
+		return
+	}
+	writeLiveJSON(w, http.StatusOK, map[string]any{"items": snapshots})
+}
+
 func (a *appServer) handleLiveWatchlistSubroutes(w http.ResponseWriter, r *http.Request) {
 	suffix := strings.TrimPrefix(r.URL.Path, "/api/live/watchlist/")
 	suffix = strings.TrimSpace(strings.Trim(suffix, "/"))
@@ -1561,6 +1575,7 @@ func main() {
 	mux.HandleFunc("/api/webhook-deliveries/latest", server.withRequiredAuth(server.handleWebhookDeliveriesLatest))
 
 	mux.HandleFunc("/api/live/watchlist", server.withRequiredAuth(server.handleLiveWatchlist))
+	mux.HandleFunc("/api/live/watchlist/snapshots", server.withRequiredAuth(server.handleLiveWatchlistSnapshots))
 	mux.HandleFunc("/api/live/watchlist/", server.withRequiredAuth(server.handleLiveWatchlistSubroutes))
 	mux.HandleFunc("/api/live/market/overview", server.handleLiveMarketOverview)
 	mux.HandleFunc("/api/live/symbols/", server.withOptionalAuth(server.handleLiveSymbolsSubroutes))

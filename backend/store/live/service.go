@@ -722,6 +722,61 @@ func buildOverlaySeries(samples []overlaySample) []OverlayPoint {
 	return points
 }
 
+// GetWatchlistSnapshots returns a snapshot for every item in the user's
+// watchlist in a single batch call. The underlying MarketClient.fetchFields
+// already supports multiple quote codes in one HTTP round-trip, so this avoids
+// the N+1 request problem on the overview page.
+func (s *Service) GetWatchlistSnapshots(ctx context.Context, userID string) ([]SymbolSnapshot, error) {
+	items, err := s.repo.List(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return []SymbolSnapshot{}, nil
+	}
+
+	// Build quote-code → normalized-symbol mapping.
+	type codeMapping struct {
+		quoteCode  string
+		normalized string
+	}
+	mappings := make([]codeMapping, 0, len(items))
+	codeList := make([]string, 0, len(items))
+	for _, item := range items {
+		normalized, _, normErr := NormalizeSymbol(item.Symbol)
+		if normErr != nil {
+			continue
+		}
+		qc := quoteCodeFromSymbol(normalized)
+		mappings = append(mappings, codeMapping{quoteCode: qc, normalized: normalized})
+		codeList = append(codeList, qc)
+	}
+
+	if len(codeList) == 0 {
+		return []SymbolSnapshot{}, nil
+	}
+
+	fields, err := s.marketClient.fetchFields(ctx, codeList)
+	if err != nil {
+		return nil, err
+	}
+
+	snapshots := make([]SymbolSnapshot, 0, len(mappings))
+	for _, m := range mappings {
+		raw, ok := fields[m.quoteCode]
+		if !ok {
+			continue
+		}
+		quote, parseErr := parseQuote(m.quoteCode, raw)
+		if parseErr != nil {
+			continue
+		}
+		snap := buildSymbolSnapshot(m.normalized, quote)
+		snapshots = append(snapshots, *snap)
+	}
+	return snapshots, nil
+}
+
 func buildOverlayMetrics(samples []overlaySample) OverlayMetrics {
 	metrics := OverlayMetrics{
 		Beta:             nil,

@@ -86,12 +86,10 @@ export default function ChangelogPage() {
               className="mt-5 max-w-2xl text-4xl leading-tight text-white md:text-5xl"
               style={{ fontFamily: 'Iowan Old Style, Palatino Linotype, Times New Roman, serif' }}
             >
-              把每一次产品变化，
-              <br />
-              讲成用户看得懂的更新说明。
+              产品更新日志
             </h1>
             <p className="mt-5 max-w-2xl text-sm leading-7 text-white/68 md:text-base">
-              这里记录南瓜交易系统近期面向用户可感知的功能变化。我们把技术提交整理成中文发布说明，尽量只保留真正值得用户知道的内容，让每次更新都更像产品公告，而不是代码流水账。
+              这里记录南瓜交易系统近期的功能更新，如果你有什么想要的功能都可以告诉我们。
             </p>
           </div>
 

@@ -238,3 +238,7 @@ type WatchlistState struct {
 	ActiveSymbol string          `json:"active_symbol,omitempty"`
 	Items        []WatchlistItem `json:"items"`
 }
+
+type WatchlistSnapshotsPayload struct {
+	Items []SymbolSnapshot `json:"items"`
+}

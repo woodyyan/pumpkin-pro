@@ -968,6 +968,27 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 			return
 		}
 		writeLiveJSON(w, http.StatusOK, movingAveragesPayload)
+	case "daily-bars":
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+			return
+		}
+		lookbackDays, parseErr := parseLookbackDays(r.URL.Query().Get("lookback_days"), 130)
+		if parseErr != nil {
+			a.writeLiveError(w, fmt.Errorf("%w: lookback_days must be a positive integer", live.ErrInvalidArgument))
+			return
+		}
+		bars, err := a.liveService.GetDailyBars(r.Context(), symbol, lookbackDays)
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, map[string]any{
+			"symbol":     strings.ToUpper(symbol),
+			"bars":       bars,
+			"count":      len(bars),
+			"updated_at": time.Now().UTC().Format(time.RFC3339),
+		})
 	case "anomalies/price-volume":
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")

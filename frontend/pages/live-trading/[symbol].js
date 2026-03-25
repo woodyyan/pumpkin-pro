@@ -23,6 +23,9 @@ export default function LiveTradingDetailPage() {
 
   const { isLoggedIn, openAuthModal, ready, user } = useAuth()
 
+  const [dailyBars, setDailyBars] = useState([])
+  const [dailyRange, setDailyRange] = useState('6M')
+  const [dailyLoading, setDailyLoading] = useState(false)
   const [snapshotPayload, setSnapshotPayload] = useState(null)
   const [overlayPayload, setOverlayPayload] = useState(null)
   const [supportPayload, setSupportPayload] = useState(null)
@@ -144,6 +147,36 @@ export default function LiveTradingDetailPage() {
       if (force) setMovingAveragePayload(null)
     }
   }
+
+  // ── Daily bars (history chart) ──
+
+  const DAILY_RANGE_MAP = {
+    '1D': 2, '1W': 7, '1M': 25, '3M': 65, '6M': 130,
+    '1Y': 260, '2Y': 520, '5Y': 1300, '10Y': 2600, ALL: 9999,
+  }
+  const DAILY_RANGE_LABELS = ['1D','1W','1M','3M','6M','1Y','2Y','5Y','10Y','ALL']
+
+  const loadDailyBars = useCallback(async (sym, range) => {
+    if (!sym) return
+    const lookback = DAILY_RANGE_MAP[range] || 130
+    setDailyLoading(true)
+    try {
+      const data = await requestJson(`/api/live/symbols/${encodeURIComponent(sym)}/daily-bars?lookback_days=${lookback}`)
+      setDailyBars(Array.isArray(data?.bars) ? data.bars : [])
+    } catch (_) {
+      setDailyBars([])
+    } finally {
+      setDailyLoading(false)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Load daily bars on mount and range change
+  useEffect(() => {
+    if (!ready || !symbol) return
+    loadDailyBars(symbol, dailyRange)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, symbol, dailyRange])
 
   const loadSignalCenter = async ({ force = false } = {}) => {
     const now = Date.now()
@@ -341,6 +374,36 @@ export default function LiveTradingDetailPage() {
               <MetricMini label={`成交额(${isAShare ? 'CNY' : 'HKD'})`} value={formatCompact(snapshot.turnover)} />
               <MetricMini label="振幅" value={formatPercent(snapshot.amplitude)} />
             </div>
+          )}
+        </section>
+
+        {/* Daily history chart */}
+        <section className="rounded-2xl border border-border bg-card p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <h3 className="text-base font-semibold text-white">历史走势</h3>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {DAILY_RANGE_LABELS.map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setDailyRange(key)}
+                className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                  dailyRange === key
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'bg-black/25 text-white/65 hover:bg-black/35 hover:text-white/85'
+                }`}
+              >
+                {key === 'ALL' ? '全部' : key.replace('D','天').replace('W','周').replace('M','月').replace('Y','年')}
+              </button>
+            ))}
+          </div>
+          {dailyLoading ? (
+            <div className="mt-4 flex items-center justify-center rounded-xl border border-dashed border-border py-16 text-sm text-white/50">加载中...</div>
+          ) : dailyBars.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">暂无历史数据。</div>
+          ) : (
+            <DailyHistoryChart bars={dailyBars} />
           )}
         </section>
 
@@ -562,6 +625,81 @@ export default function LiveTradingDetailPage() {
 }
 
 // ── Chart Components ──
+
+function DailyHistoryChart({ bars }) {
+  const containerRef = useRef(null)
+  const chartRef = useRef(null)
+
+  useEffect(() => {
+    let cleanup = () => {}
+    let cancelled = false
+    const render = async () => {
+      if (!containerRef.current || !Array.isArray(bars) || bars.length === 0) {
+        if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+        return
+      }
+      const { createChart, ColorType } = await import('lightweight-charts')
+      if (cancelled || !containerRef.current) return
+      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+
+      const chart = createChart(containerRef.current, {
+        width: containerRef.current.clientWidth || 700,
+        height: 320,
+        layout: { background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' }, textColor: '#E5E7EB' },
+        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        timeScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        grid: { vertLines: { color: 'rgba(148,163,184,0.1)' }, horzLines: { color: 'rgba(148,163,184,0.1)' } },
+        crosshair: { mode: 0 },
+      })
+
+      // Prepare data sorted by date
+      const sorted = [...bars]
+        .map((b) => ({ time: b.date, value: b.close }))
+        .filter((b) => b.time && !Number.isNaN(b.value))
+        .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
+
+      if (sorted.length === 0) {
+        chart.remove()
+        return
+      }
+
+      // Determine trend: rising (red) or falling (green) per Chinese convention
+      const firstClose = sorted[0].value
+      const lastClose = sorted[sorted.length - 1].value
+      const isRising = lastClose >= firstClose
+
+      const lineColor = isRising ? 'rgba(239, 68, 68, 0.9)' : 'rgba(34, 197, 94, 0.9)'
+      const topAreaColor = isRising ? 'rgba(239, 68, 68, 0.28)' : 'rgba(34, 197, 94, 0.28)'
+      const bottomAreaColor = isRising ? 'rgba(239, 68, 68, 0.02)' : 'rgba(34, 197, 94, 0.02)'
+
+      const areaSeries = chart.addAreaSeries({
+        lineColor,
+        topColor: topAreaColor,
+        bottomColor: bottomAreaColor,
+        lineWidth: 2,
+        priceFormat: { type: 'price', precision: 3, minMove: 0.001 },
+      })
+      areaSeries.setData(sorted)
+      chart.timeScale().fitContent()
+      chartRef.current = chart
+
+      const onResize = () => {
+        if (!containerRef.current || !chartRef.current) return
+        chartRef.current.applyOptions({ width: containerRef.current.clientWidth || 700 })
+        chartRef.current.timeScale().fitContent()
+      }
+      window.addEventListener('resize', onResize)
+      cleanup = () => {
+        window.removeEventListener('resize', onResize)
+        if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+      }
+    }
+    render()
+    return () => { cancelled = true; cleanup() }
+  }, [bars])
+
+  return <div ref={containerRef} className="mt-4 w-full overflow-hidden rounded-xl border border-border bg-black/20" />
+}
 
 function OverlayIntradayChart({ series, benchmark, symbol }) {
   const containerRef = useRef(null)

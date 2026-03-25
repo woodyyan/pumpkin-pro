@@ -722,6 +722,26 @@ func buildOverlaySeries(samples []overlaySample) []OverlayPoint {
 	return points
 }
 
+// GetDailyBars returns historical daily bars for a symbol.
+// lookbackDays is clamped to [1, 2600] (roughly 10 years of trading days).
+func (s *Service) GetDailyBars(ctx context.Context, symbol string, lookbackDays int) ([]DailyBar, error) {
+	normalized, _, err := NormalizeSymbol(symbol)
+	if err != nil {
+		return nil, err
+	}
+	if lookbackDays <= 0 {
+		lookbackDays = 130 // default ~6 months
+	}
+	if lookbackDays > 2600 {
+		lookbackDays = 2600
+	}
+	bars, err := s.marketClient.FetchSymbolDailyBars(ctx, normalized, lookbackDays)
+	if err != nil {
+		return nil, err
+	}
+	return bars, nil
+}
+
 // GetWatchlistSnapshots returns a snapshot for every item in the user's
 // watchlist in a single batch call. The underlying MarketClient.fetchFields
 // already supports multiple quote codes in one HTTP round-trip, so this avoids

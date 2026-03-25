@@ -204,6 +204,11 @@ function formatIndustryLabel(value) {
   return cleaned || raw
 }
 
+function normalizeIndustryText(value) {
+  if (value === null || value === undefined || value === '') return ''
+  return formatIndustryLabel(value).replace(/\s+/g, '').toLowerCase()
+}
+
 function formatValue(value, format) {
   if (value === null || value === undefined || value === '') return '--'
   const num = Number(value)
@@ -392,7 +397,7 @@ export default function StockPickerPage() {
 
       if (res?.summary) setAiSummary(res.summary)
 
-      // 将 AI 返回的 { key: { min, max } } 映射回筛选选项索引
+      // 将 AI 返回的结构化条件映射回筛选选项索引
       const aiFilters = res?.filters || {}
       const newFilters = {}
       for (const [key, range] of Object.entries(aiFilters)) {
@@ -401,6 +406,14 @@ export default function StockPickerPage() {
         const bestIdx = findBestOptionIndex(field.options, range.min, range.max)
         if (bestIdx > 0) newFilters[key] = bestIdx
       }
+
+      const aiIndustry = typeof res?.industry === 'string' ? res.industry.trim() : ''
+      if (aiIndustry) {
+        const industryField = filterFields.find((f) => f.key === 'industry')
+        const industryIdx = findBestIndustryOptionIndex(industryField?.options || [], aiIndustry)
+        if (industryIdx > 0) newFilters.industry = industryIdx
+      }
+
       setFilters(newFilters)
       setActiveWatchlistId(null) // 退出自选表模式
       if (!filtersExpanded) setFiltersExpanded(true)
@@ -545,7 +558,7 @@ export default function StockPickerPage() {
               value={aiQuery}
               onChange={(e) => setAiQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !aiParsing && handleAIParse()}
-              placeholder={'用自然语言描述选股条件，如"市值 50 到 200 亿，PE 小于 20，换手率大于 3%"'}
+              placeholder={'用自然语言描述选股条件，如"游戏行业，市值 50 到 200 亿，利润增长率大于 30%，PE 小于 20"'}
               className="w-full rounded-xl border border-white/15 bg-white/5 py-2 pl-3 pr-20 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary/50 focus:ring-1 focus:ring-primary/30"
             />
             <button
@@ -827,6 +840,39 @@ function getPageNumbers(current, total) {
 }
 
 // ─── AI 结果 → 选项索引匹配 ──────────────────────────────────
+function findBestIndustryOptionIndex(options, aiIndustry) {
+  const rawTarget = typeof aiIndustry === 'string' ? aiIndustry.trim() : ''
+  if (!rawTarget || !Array.isArray(options) || options.length <= 1) return 0
+
+  for (let i = 1; i < options.length; i++) {
+    const opt = options[i]
+    const optValue = typeof opt?.value === 'string' ? opt.value.trim() : ''
+    const optLabel = typeof opt?.label === 'string' ? opt.label.trim() : ''
+    if (rawTarget === optValue || rawTarget === optLabel) return i
+  }
+
+  const normalizedTarget = normalizeIndustryText(rawTarget)
+  if (!normalizedTarget) return 0
+
+  for (let i = 1; i < options.length; i++) {
+    const opt = options[i]
+    if (normalizedTarget === normalizeIndustryText(opt?.value) || normalizedTarget === normalizeIndustryText(opt?.label)) {
+      return i
+    }
+  }
+
+  for (let i = 1; i < options.length; i++) {
+    const opt = options[i]
+    const normalizedOption = normalizeIndustryText(opt?.value) || normalizeIndustryText(opt?.label)
+    if (!normalizedOption) continue
+    if (normalizedOption.includes(normalizedTarget) || normalizedTarget.includes(normalizedOption)) {
+      return i
+    }
+  }
+
+  return 0
+}
+
 // 给定 AI 返回的 min/max，在字段的 options 里找到最接近的选项索引
 function findBestOptionIndex(options, aiMin, aiMax) {
   let bestIdx = 0

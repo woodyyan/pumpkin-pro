@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-03-24",
+  "last_updated": "2026-03-25",
   "manual_entry_template": {
     "date": "YYYY-MM-DD",
     "type": "新功能",
@@ -11,6 +11,15 @@
     "visible": true
   },
   "items": [
+    {
+      "date": "2026-03-25",
+      "type": "新功能",
+      "title": "股票详情页新增历史走势图表",
+      "summary": "在行情看板的股票详情页新增「历史走势」模块，支持按 1 天、1 周、1 月、3 月、6 月、1 年、2 年、5 年、10 年和全部区间查看日线走势。图表位于实时快照下方，默认展示近 6 个月，并按 A 股惯例用红涨绿跌高亮整体趋势，切换区间时可快速回看不同周期表现。",
+      "scope": "行情看板 / 后端 / 前端",
+      "raw_subject": "feat: 股票详情页新增历史走势图表（日K线）",
+      "visible": true
+    },
     {
       "date": "2026-03-24",
       "type": "新功能",
@@ -96,7 +105,7 @@
       "date": "2026-03-21",
       "type": "修复优化",
       "title": "行情看板信号配置保存入口更清晰",
-      "summary": "股票级信号配置的保存按钮调整到更全局位置，并明确保存会同时提交开关、策略和冷却时间；行情看板页移除"验证送达"入口，统一在设置页进行送达验证。",
+      "summary": "股票级信号配置的保存按钮调整到更全局位置，并明确保存会同时提交开关、策略和冷却时间；行情看板页移除「验证送达」入口，统一在设置页进行送达验证。",
       "scope": "行情看板",
       "raw_subject": "fix(live): move symbol signal save action and remove duplicate test entry",
       "visible": true
@@ -142,7 +151,7 @@
       "date": "2026-03-20",
       "type": "修复优化",
       "title": "强化激活标的最新价展示",
-      "summary": "将激活标的快照中的"最新价"提升为重点信息，放大字号并按涨跌联动颜色高亮，关键价格变化更醒目。",
+      "summary": "将激活标的快照中的「最新价」提升为重点信息，放大字号并按涨跌联动颜色高亮，关键价格变化更醒目。",
       "scope": "行情看板",
       "commit": "1711963",
       "raw_subject": "feat: highlight live trading latest price",
@@ -202,7 +211,7 @@
       "date": "2026-03-18",
       "type": "修复优化",
       "title": "修正策略更新后的误报提示",
-      "summary": "解决策略更新成功后仍可能出现"未找到"提示的问题，减少误判与重复操作。",
+      "summary": "解决策略更新成功后仍可能出现「未找到」提示的问题，减少误判与重复操作。",
       "scope": "策略库",
       "commit": "c7f3fe1",
       "raw_subject": "fix(strategy): avoid false not found after successful update",
@@ -212,7 +221,7 @@
       "date": "2026-03-18",
       "type": "修复优化",
       "title": "回测默认时间范围切换为最近一年",
-      "summary": "新建回测时默认选中"截至昨天的最近一年"时间区间，减少每次手动调整日期的操作。",
+      "summary": "新建回测时默认选中「截至昨天的最近一年」时间区间，减少每次手动调整日期的操作。",
       "scope": "回测引擎",
       "commit": "539724e",
       "raw_subject": "feat(backtest): set default date range to last year ending yesterday",

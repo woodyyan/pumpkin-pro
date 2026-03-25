@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 
@@ -32,6 +32,24 @@ const FILTER_FIELDS = [
       { label: '跌幅 3~5%',    min: -5,   max: -3 },
       { label: '跌幅 >5%',     min: null, max: -5 },
       { label: '跌停 (≤-9.8%)',min: null, max: -9.8 },
+    ],
+  },
+  {
+    key: 'industry', label: '行业', type: 'enum',
+    options: [
+      { label: '不限', value: '' },
+    ],
+  },
+  {
+    key: 'profit_growth_rate', label: '利润增长率',
+    options: [
+      { label: '不限',          min: null, max: null },
+      { label: '下滑 (<0%)',    min: null, max: 0 },
+      { label: '0 - 20%',      min: 0,    max: 20 },
+      { label: '20 - 50%',     min: 20,   max: 50 },
+      { label: '50 - 100%',    min: 50,   max: 100 },
+      { label: '100 - 200%',   min: 100,  max: 200 },
+      { label: '200% 以上',     min: 200,  max: null },
     ],
   },
   {
@@ -156,25 +174,36 @@ const FILTER_FIELDS = [
 
 // ─── 表格列配置 ──────────────────────────────────────────────
 const TABLE_COLUMNS = [
-  { key: 'code',            label: '代码',       sortable: true,  width: 80,  format: 'code' },
-  { key: 'name',            label: '名称',       sortable: true,  width: 90,  format: 'text' },
-  { key: 'price',           label: '最新价',     sortable: true,  width: 80,  format: 'price' },
-  { key: 'change_pct',      label: '涨跌幅',     sortable: true,  width: 80,  format: 'percent', colorize: true },
-  { key: 'change_amt',      label: '涨跌额',     sortable: true,  width: 80,  format: 'price',   colorize: true },
-  { key: 'volume',          label: '成交量(手)',  sortable: true,  width: 100, format: 'integer' },
-  { key: 'turnover',        label: '成交额',     sortable: true,  width: 100, format: 'bigNumber' },
-  { key: 'amplitude',       label: '振幅',       sortable: true,  width: 70,  format: 'percent' },
-  { key: 'turnover_rate',   label: '换手率',     sortable: true,  width: 70,  format: 'percent' },
-  { key: 'volume_ratio',    label: '量比',       sortable: true,  width: 60,  format: 'number' },
-  { key: 'pe',              label: 'PE',         sortable: true,  width: 70,  format: 'number' },
-  { key: 'pb',              label: 'PB',         sortable: true,  width: 60,  format: 'number' },
-  { key: 'total_mv',        label: '总市值',     sortable: true,  width: 100, format: 'bigNumber' },
-  { key: 'float_mv',        label: '流通市值',   sortable: true,  width: 100, format: 'bigNumber' },
-  { key: 'change_pct_60d',  label: '60日涨幅',   sortable: true,  width: 85,  format: 'percent', colorize: true },
-  { key: 'change_pct_ytd',  label: 'YTD涨幅',   sortable: true,  width: 85,  format: 'percent', colorize: true },
+  { key: 'code',               label: '代码',         sortable: true,  width: 80,  format: 'code' },
+  { key: 'name',               label: '名称',         sortable: true,  width: 90,  format: 'text' },
+  { key: 'industry',           label: '行业',         sortable: true,  width: 120, format: 'industry' },
+  { key: 'price',              label: '最新价',       sortable: true,  width: 80,  format: 'price' },
+  { key: 'change_pct',         label: '涨跌幅',       sortable: true,  width: 80,  format: 'percent', colorize: true },
+  { key: 'change_amt',         label: '涨跌额',       sortable: true,  width: 80,  format: 'price',   colorize: true },
+  { key: 'volume',             label: '成交量(手)',   sortable: true,  width: 100, format: 'integer' },
+  { key: 'turnover',           label: '成交额',       sortable: true,  width: 100, format: 'bigNumber' },
+  { key: 'amplitude',          label: '振幅',         sortable: true,  width: 70,  format: 'percent' },
+  { key: 'turnover_rate',      label: '换手率',       sortable: true,  width: 70,  format: 'percent' },
+  { key: 'volume_ratio',       label: '量比',         sortable: true,  width: 60,  format: 'number' },
+  { key: 'pe',                 label: 'PE',           sortable: true,  width: 70,  format: 'number' },
+  { key: 'pb',                 label: 'PB',           sortable: true,  width: 60,  format: 'number' },
+  { key: 'profit_growth_rate', label: '利润增长率',   sortable: true,  width: 95,  format: 'percent' },
+  { key: 'total_mv',           label: '总市值',       sortable: true,  width: 100, format: 'bigNumber' },
+  { key: 'float_mv',           label: '流通市值',     sortable: true,  width: 100, format: 'bigNumber' },
+  { key: 'change_pct_60d',     label: '60日涨幅',     sortable: true,  width: 85,  format: 'percent', colorize: true },
+  { key: 'change_pct_ytd',     label: 'YTD涨幅',      sortable: true,  width: 85,  format: 'percent', colorize: true },
 ]
 
 // ─── 格式化工具 ──────────────────────────────────────────────
+const INDUSTRY_LEVEL_SUFFIX_RE = /\s*[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+$/u
+
+function formatIndustryLabel(value) {
+  if (value === null || value === undefined || value === '') return '--'
+  const raw = String(value).trim()
+  const cleaned = raw.replace(INDUSTRY_LEVEL_SUFFIX_RE, '').trim()
+  return cleaned || raw
+}
+
 function formatValue(value, format) {
   if (value === null || value === undefined || value === '') return '--'
   const num = Number(value)
@@ -184,6 +213,8 @@ function formatValue(value, format) {
       return String(value).padStart(6, '0')
     case 'text':
       return String(value)
+    case 'industry':
+      return formatIndustryLabel(value)
     case 'price':
       return isNaN(num) ? '--' : num.toFixed(2)
     case 'percent':
@@ -238,6 +269,7 @@ export default function StockPickerPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [filtersExpanded, setFiltersExpanded] = useState(true)
+  const [industryOptions, setIndustryOptions] = useState([])
 
   // ── 自选表状态 ──
   const [watchlists, setWatchlists] = useState([])
@@ -256,6 +288,19 @@ export default function StockPickerPage() {
   const [aiParsing, setAiParsing] = useState(false)
   const [aiSummary, setAiSummary] = useState('')
   const [aiError, setAiError] = useState('')
+
+  const filterFields = useMemo(() => {
+    const resolvedIndustryOptions = [
+      { label: '不限', value: '' },
+      ...industryOptions.map((industry) => ({ label: formatIndustryLabel(industry), value: industry })),
+    ]
+
+    return FILTER_FIELDS.map((field) => (
+      field.key === 'industry'
+        ? { ...field, options: resolvedIndustryOptions }
+        : field
+    ))
+  }, [industryOptions])
 
   // ── 自选表 API ──
   const fetchWatchlists = useCallback(async () => {
@@ -347,12 +392,12 @@ export default function StockPickerPage() {
 
       if (res?.summary) setAiSummary(res.summary)
 
-      // 将 AI 返回的 { key: { min, max } } 映射回 FILTER_FIELDS 选项索引
+      // 将 AI 返回的 { key: { min, max } } 映射回筛选选项索引
       const aiFilters = res?.filters || {}
       const newFilters = {}
       for (const [key, range] of Object.entries(aiFilters)) {
-        const field = FILTER_FIELDS.find((f) => f.key === key)
-        if (!field) continue
+        const field = filterFields.find((f) => f.key === key)
+        if (!field || field.type === 'enum') continue
         const bestIdx = findBestOptionIndex(field.options, range.min, range.max)
         if (bestIdx > 0) newFilters[key] = bestIdx
       }
@@ -366,47 +411,59 @@ export default function StockPickerPage() {
     }
   }
 
-  // 构建 API 请求参数：从 filters（存选项索引）映射到 { key: { min, max } }
-  const buildApiFilters = useCallback((rawFilters) => {
-    const result = {}
+  // 构建 API 请求参数：数值字段映射到 filters，枚举字段走顶层参数
+  const buildScanPayload = useCallback((rawFilters) => {
+    const payload = { filters: {} }
+
     for (const [key, optionIdx] of Object.entries(rawFilters)) {
-      const field = FILTER_FIELDS.find((f) => f.key === key)
+      const field = filterFields.find((f) => f.key === key)
       if (!field) continue
+
       const opt = field.options[optionIdx]
       if (!opt) continue
+
+      if (field.type === 'enum') {
+        if (opt.value) payload[key] = opt.value
+        continue
+      }
+
       const entry = {}
       if (opt.min !== null && opt.min !== undefined) entry.min = opt.min
       if (opt.max !== null && opt.max !== undefined) entry.max = opt.max
       if (Object.keys(entry).length > 0) {
-        result[key] = entry
+        payload.filters[key] = entry
       }
     }
-    return result
-  }, [])
+
+    return payload
+  }, [filterFields])
 
   const fetchScreener = useCallback(async (currentFilters, currentSortBy, currentSortOrder, currentPage) => {
     setLoading(true)
     setError('')
     try {
-      const apiFilters = buildApiFilters(currentFilters)
+      const scanPayload = buildScanPayload(currentFilters)
       const result = await requestJson('/api/screener/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          filters: apiFilters,
+          ...scanPayload,
           sort_by: currentSortBy,
           sort_order: currentSortOrder,
           page: currentPage,
           page_size: pageSize,
         }),
       }, '选股查询失败')
+      if (Array.isArray(result?.industries)) {
+        setIndustryOptions(result.industries)
+      }
       setData(result)
     } catch (err) {
       setError(err.message || '查询失败')
     } finally {
       setLoading(false)
     }
-  }, [buildApiFilters, pageSize])
+  }, [buildScanPayload, pageSize])
 
   // 初始加载
   useEffect(() => {
@@ -532,11 +589,11 @@ export default function StockPickerPage() {
         {filtersExpanded && (
           <div className="border-t border-border px-5 pb-4 pt-3">
             <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-4">
-              {FILTER_FIELDS.map((field) => (
+              {filterFields.map((field) => (
                 <FilterSelect
                   key={field.key}
                   field={field}
-                  selectedIdx={filters[field.key] || 0}
+                  selectedIdx={filters[field.key] ?? 0}
                   onChange={handleFilterChange}
                 />
               ))}

@@ -23,6 +23,7 @@ from screener.scanner import (
     apply_filters,
     df_to_records,
     get_a_share_snapshot,
+    get_industry_options,
     sort_and_paginate,
 )
 from strategy_library.service import StrategyService
@@ -78,6 +79,7 @@ class ScreenerFilterRange(BaseModel):
 
 class ScreenerScanRequest(BaseModel):
     filters: Dict[str, ScreenerFilterRange] = Field(default_factory=dict)
+    industry: Optional[str] = Field(default=None)
     sort_by: str = Field(default="code")
     sort_order: str = Field(default="asc")
     page: int = Field(default=1, ge=1)
@@ -129,7 +131,8 @@ def screener_scan(req: ScreenerScanRequest):
             if entry:
                 raw_filters[key] = entry
 
-        df = apply_filters(df, raw_filters)
+        industries = get_industry_options(df)
+        df = apply_filters(df, raw_filters, industry=req.industry)
         page_df, total = sort_and_paginate(df, req.sort_by, req.sort_order, req.page, req.page_size)
 
         return {
@@ -137,6 +140,7 @@ def screener_scan(req: ScreenerScanRequest):
             "page": req.page,
             "page_size": req.page_size,
             "items": df_to_records(page_df),
+            "industries": industries,
         }
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

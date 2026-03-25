@@ -46,12 +46,18 @@ COLUMN_MAP = {
     "年初至今涨跌幅": "change_pct_ytd",
 }
 
+FUNDAMENTAL_COLUMN_MAP = {
+    "股票代码": "code",
+    "所处行业": "industry",
+    "净利润-同比增长": "profit_growth_rate",
+}
+
 # 可被用于范围筛选的数值列
 FILTERABLE_COLUMNS = [
     "price", "change_pct", "total_mv", "pe", "pb",
     "turnover_rate", "volume_ratio", "amplitude",
     "turnover", "change_pct_60d", "change_pct_ytd", "float_mv",
-    "volume", "change_amt",
+    "volume", "change_amt", "profit_growth_rate",
 ]
 
 # 需要转为 float 的列（排除 code / name）
@@ -60,6 +66,7 @@ NUMERIC_COLUMNS = [
     "amplitude", "high", "low", "open", "prev_close",
     "volume_ratio", "turnover_rate", "pe", "pb",
     "total_mv", "float_mv", "change_pct_60d", "change_pct_ytd",
+    "profit_growth_rate",
 ]
 
 # ---------------------------------------------------------------------------
@@ -69,6 +76,12 @@ _cache_lock = threading.Lock()
 _cache_data: Optional[pd.DataFrame] = None
 _cache_ts: float = 0.0
 _CACHE_TTL = 300  # 5 分钟
+
+_fundamentals_cache_data: Optional[pd.DataFrame] = None
+_fundamentals_cache_ts: float = 0.0
+_fundamentals_cache_report_date: Optional[str] = None
+_FUNDAMENTALS_CACHE_TTL = 21600  # 6 小时
+_MIN_COMPLETE_FUNDAMENTALS_ROWS = 4500
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +235,121 @@ def _get_snapshot_via_qq() -> pd.DataFrame:
     return df
 
 
+def _build_report_date_candidates(limit: int = 8) -> List[str]:
+    """生成最近若干个季报/年报日期候选列表，按时间从近到远排序。"""
+    today = pd.Timestamp.today().normalize()
+    candidates: List[str] = []
+
+    for year in range(today.year, today.year - 3, -1):
+        for month, day in ((12, 31), (9, 30), (6, 30), (3, 31)):
+            report_date = pd.Timestamp(year=year, month=month, day=day)
+            if report_date > today:
+                continue
+            candidates.append(report_date.strftime("%Y%m%d"))
+            if len(candidates) >= limit:
+                return candidates
+
+    return candidates
+
+
+def _prepare_fundamentals_df(raw_df: Optional[pd.DataFrame]) -> pd.DataFrame:
+    if raw_df is None or raw_df.empty:
+        return pd.DataFrame(columns=["code", "industry", "profit_growth_rate"])
+
+    available_columns = [column for column in FUNDAMENTAL_COLUMN_MAP if column in raw_df.columns]
+    if "股票代码" not in available_columns:
+        return pd.DataFrame(columns=["code", "industry", "profit_growth_rate"])
+
+    df = raw_df[available_columns].copy().rename(columns=FUNDAMENTAL_COLUMN_MAP)
+    df["code"] = df["code"].astype(str).str.zfill(6)
+
+    if "industry" not in df.columns:
+        df["industry"] = None
+    else:
+        df["industry"] = df["industry"].apply(
+            lambda value: None if pd.isna(value) or not str(value).strip() else str(value).strip()
+        )
+
+    if "profit_growth_rate" not in df.columns:
+        df["profit_growth_rate"] = np.nan
+    else:
+        df["profit_growth_rate"] = pd.to_numeric(df["profit_growth_rate"], errors="coerce")
+
+    return df[["code", "industry", "profit_growth_rate"]].drop_duplicates(subset=["code"], keep="first")
+
+
+def _load_latest_fundamentals() -> Tuple[pd.DataFrame, Optional[str]]:
+    fallback_df = pd.DataFrame(columns=["code", "industry", "profit_growth_rate"])
+    fallback_report_date: Optional[str] = None
+    fallback_rows = 0
+
+    for report_date in _build_report_date_candidates():
+        try:
+            raw_df = ak.stock_yjbb_em(date=report_date)
+        except Exception as exc:
+            logger.warning("加载业绩报表失败 report_date=%s error=%s", report_date, exc)
+            continue
+
+        prepared_df = _prepare_fundamentals_df(raw_df)
+        row_count = len(prepared_df)
+        if row_count == 0:
+            continue
+
+        logger.info("业绩报表加载成功 report_date=%s rows=%d", report_date, row_count)
+        if row_count >= _MIN_COMPLETE_FUNDAMENTALS_ROWS:
+            return prepared_df, report_date
+
+        if row_count > fallback_rows:
+            fallback_df = prepared_df
+            fallback_report_date = report_date
+            fallback_rows = row_count
+
+    if fallback_rows > 0:
+        logger.info(
+            "使用覆盖率最高的业绩报表作为财务补充字段 report_date=%s rows=%d",
+            fallback_report_date,
+            fallback_rows,
+        )
+        return fallback_df, fallback_report_date
+
+    return fallback_df, None
+
+
+def _get_latest_fundamentals() -> Tuple[pd.DataFrame, Optional[str]]:
+    global _fundamentals_cache_data, _fundamentals_cache_ts, _fundamentals_cache_report_date
+
+    with _cache_lock:
+        if _fundamentals_cache_data is not None and (time.time() - _fundamentals_cache_ts) < _FUNDAMENTALS_CACHE_TTL:
+            logger.debug(
+                "fundamentals 缓存命中，缓存年龄 %.1fs，report_date=%s",
+                time.time() - _fundamentals_cache_ts,
+                _fundamentals_cache_report_date,
+            )
+            return _fundamentals_cache_data.copy(), _fundamentals_cache_report_date
+
+    fundamentals_df, report_date = _load_latest_fundamentals()
+
+    with _cache_lock:
+        _fundamentals_cache_data = fundamentals_df.copy()
+        _fundamentals_cache_ts = time.time()
+        _fundamentals_cache_report_date = report_date
+
+    return fundamentals_df, report_date
+
+
+def get_industry_options(df: pd.DataFrame) -> List[str]:
+    if df is None or df.empty or "industry" not in df.columns:
+        return []
+
+    return sorted(
+        {
+            str(value).strip()
+            for value in df["industry"].dropna().tolist()
+            if str(value).strip()
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # 主入口：先试东财，失败则回退腾讯
 # ---------------------------------------------------------------------------
@@ -263,6 +391,22 @@ def get_a_share_snapshot() -> pd.DataFrame:
             logger.error("腾讯备用数据源也失败: %s", exc)
             raise RuntimeError("获取 A 股行情数据失败，请稍后重试") from exc
 
+    fundamentals_df, report_date = _get_latest_fundamentals()
+    if not fundamentals_df.empty:
+        df = df.merge(fundamentals_df, on="code", how="left")
+        logger.info(
+            "已合并财务字段 report_date=%s matched=%d/%d",
+            report_date,
+            int(df["industry"].notna().sum()),
+            len(df),
+        )
+    else:
+        df["industry"] = None
+        df["profit_growth_rate"] = np.nan
+        logger.warning("未获取到财务字段补充数据，行业与利润增长率将为空")
+
+    df["profit_growth_rate"] = pd.to_numeric(df["profit_growth_rate"], errors="coerce")
+
     elapsed = time.time() - start
     logger.info("全市场快照加载完成: %d 只股票, 耗时 %.2fs", len(df), elapsed)
 
@@ -276,12 +420,21 @@ def get_a_share_snapshot() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # 筛选
 # ---------------------------------------------------------------------------
-def apply_filters(df: pd.DataFrame, filters: Dict[str, Dict[str, Any]]) -> pd.DataFrame:
+def apply_filters(
+    df: pd.DataFrame,
+    filters: Dict[str, Dict[str, Any]],
+    industry: Optional[str] = None,
+) -> pd.DataFrame:
     """
-    按 min/max 范围过滤 DataFrame。
+    先按行业精确匹配，再按 min/max 范围过滤 DataFrame。
     filters 示例:
         {"price": {"min": 10, "max": 100}, "pe": {"max": 30}}
     """
+    if industry and str(industry).strip():
+        if "industry" not in df.columns:
+            return df.iloc[0:0]
+        df = df[df["industry"] == str(industry).strip()]
+
     if not filters:
         return df
 
@@ -312,7 +465,7 @@ def apply_filters(df: pd.DataFrame, filters: Dict[str, Dict[str, Any]]) -> pd.Da
 # ---------------------------------------------------------------------------
 # 排序 + 分页
 # ---------------------------------------------------------------------------
-SORTABLE_COLUMNS = set(COLUMN_MAP.values())
+SORTABLE_COLUMNS = set(COLUMN_MAP.values()) | {"industry", "profit_growth_rate"}
 
 
 def sort_and_paginate(

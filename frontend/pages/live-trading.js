@@ -11,7 +11,8 @@ export default function LiveTradingOverviewPage() {
   const { isLoggedIn, openAuthModal, ready, user } = useAuth()
   const [watchlist, setWatchlist] = useState({ items: [], active_symbol: '', session_state: 'idle' })
   const [snapshots, setSnapshots] = useState([])
-  const [marketOverview, setMarketOverview] = useState(null)
+  const [marketOverviewA, setMarketOverviewA] = useState(null)
+  const [marketOverviewHK, setMarketOverviewHK] = useState(null)
   const [symbolInput, setSymbolInput] = useState('')
   const [nameInput, setNameInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -20,15 +21,6 @@ export default function LiveTradingOverviewPage() {
   const [lastUpdateAt, setLastUpdateAt] = useState('')
 
   const privateAccessReady = ready && isLoggedIn
-  const authIdentityKey = String(user?.id || user?.email || '')
-
-  // Determine if any watchlist item is A-share to choose market overview exchange
-  const hasAShare = useMemo(() => {
-    return (watchlist.items || []).some((item) => {
-      const exchange = detectExchange(item.symbol)
-      return exchange === 'SSE' || exchange === 'SZSE'
-    })
-  }, [watchlist.items])
 
   const resetPrivateState = useCallback(() => {
     setWatchlist({ items: [], active_symbol: '', session_state: 'idle' })
@@ -76,10 +68,12 @@ export default function LiveTradingOverviewPage() {
   }
 
   const loadMarketOverview = async () => {
-    const exchangeParam = hasAShare ? 'SSE' : ''
-    const qs = exchangeParam ? `?exchange=${exchangeParam}` : ''
-    const data = await requestJson(`/api/live/market/overview${qs}`)
-    setMarketOverview(data)
+    const [aRes, hkRes] = await Promise.allSettled([
+      requestJson('/api/live/market/overview?exchange=SSE'),
+      requestJson('/api/live/market/overview'),
+    ])
+    if (aRes.status === 'fulfilled') setMarketOverviewA(aRes.value)
+    if (hkRes.status === 'fulfilled') setMarketOverviewHK(hkRes.value)
   }
 
   const loadPrivateData = async ({ bootstrap = false } = {}) => {
@@ -112,7 +106,7 @@ export default function LiveTradingOverviewPage() {
       resetPrivateState()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, privateAccessReady, authIdentityKey])
+  }, [ready, privateAccessReady])
 
   // Polling
   useEffect(() => {
@@ -125,7 +119,7 @@ export default function LiveTradingOverviewPage() {
     }, POLL_MS)
     return () => clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, privateAccessReady, authIdentityKey, hasAShare])
+  }, [ready, privateAccessReady])
 
   const handleAddWatch = async (event) => {
     event.preventDefault()
@@ -176,19 +170,43 @@ export default function LiveTradingOverviewPage() {
         </p>
       </section>
 
-      {/* Market overview */}
-      <section className="rounded-2xl border border-border bg-card p-5">
-        <h3 className="text-base font-semibold text-white">{hasAShare ? 'A 股大盘概览' : '港股大盘概览'}</h3>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          {(marketOverview?.indexes || []).map((index) => (
-            <div key={index.code} className="rounded-xl border border-border bg-black/20 p-3">
-              <div className="text-xs text-white/50">{formatMarketIndexTitle(index.name, index.code)}</div>
-              <div className="mt-1 text-lg font-semibold text-white">{formatNumber(index.last, 2)}</div>
-              <div className={`text-xs ${index.change_rate >= 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
-                {formatPercent(index.change_rate)}
-              </div>
-            </div>
-          ))}
+      {/* Market overview — A shares + HK side by side */}
+      <section className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <h3 className="text-base font-semibold text-white">A 股大盘</h3>
+          <div className="mt-4 grid gap-3">
+            {(marketOverviewA?.indexes || []).length > 0 ? (
+              marketOverviewA.indexes.map((index) => (
+                <div key={index.code} className="rounded-xl border border-border bg-black/20 p-3">
+                  <div className="text-xs text-white/50">{formatMarketIndexTitle(index.name, index.code)}</div>
+                  <div className="mt-1 text-lg font-semibold text-white">{formatNumber(index.last, 2)}</div>
+                  <div className={`text-xs ${index.change_rate >= 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                    {formatPercent(index.change_rate)}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-xs text-white/40">加载中...</div>
+            )}
+          </div>
+        </div>
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <h3 className="text-base font-semibold text-white">港股大盘</h3>
+          <div className="mt-4 grid gap-3">
+            {(marketOverviewHK?.indexes || []).length > 0 ? (
+              marketOverviewHK.indexes.map((index) => (
+                <div key={index.code} className="rounded-xl border border-border bg-black/20 p-3">
+                  <div className="text-xs text-white/50">{formatMarketIndexTitle(index.name, index.code)}</div>
+                  <div className="mt-1 text-lg font-semibold text-white">{formatNumber(index.last, 2)}</div>
+                  <div className={`text-xs ${index.change_rate >= 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                    {formatPercent(index.change_rate)}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-xs text-white/40">加载中...</div>
+            )}
+          </div>
         </div>
       </section>
 

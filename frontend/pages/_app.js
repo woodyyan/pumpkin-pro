@@ -9,7 +9,7 @@ import { AuthProvider, useAuth } from '../lib/auth-context'
 const NAV_ITEMS = [
   { href: '/strategies', label: '策略库' },
   { href: '/', label: '回测引擎' },
-  { href: '/live-trading', label: '实盘交易' },
+  { href: '/live-trading', label: '行情看板' },
   { href: '/stock-picker', label: '选股平台' },
   { href: '/settings', label: '设置' },
   { href: '/changelog', label: '更新日志' },

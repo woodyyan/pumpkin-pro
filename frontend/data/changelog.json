@@ -14,9 +14,9 @@
     {
       "date": "2026-03-24",
       "type": "新功能",
-      "title": "实盘页升级为多股票概览 + 独立详情页",
-      "summary": "实盘交易页面全面重构：概览页以卡片网格展示所有关注股票的实时行情快照（最新价、涨跌幅、量比、成交量等），点击任意卡片即可在新浏览器标签页打开该股票的独立详情页，包含完整的分时叠加、均线指标、支撑/压力位、量价异动、大单流向和信号推送配置。每只股票独立刷新，方便同时盯多只股票。",
-      "scope": "实盘交易 / 全栈",
+      "title": "行情看板升级为多股票概览 + 独立详情页",
+      "summary": "行情看板页面全面重构：概览页以卡片网格展示所有关注股票的实时行情快照（最新价、涨跌幅、量比、成交量等），点击任意卡片即可在新浏览器标签页打开该股票的独立详情页，包含完整的分时叠加、均线指标、支撑/压力位、量价异动、大单流向和信号推送配置。每只股票独立刷新，方便同时盯多只股票。",
+      "scope": "行情看板 / 全栈",
       "raw_subject": "feat(live): refactor into overview dashboard + per-symbol detail pages",
       "visible": true
     },
@@ -41,9 +41,9 @@
     {
       "date": "2026-03-23",
       "type": "修复优化",
-      "title": "实盘页量价异动与大单流向改为图表展示",
-      "summary": "将实盘交易页中「量价异动」和「大单流向」两个模块从无限滚动列表升级为交互式图表：量价异动采用时间线散点图，按异动类型着色，Y 轴为评分；大单流向采用柱状图（红入绿出）叠加方向强度折线，资金进出一目了然。",
-      "scope": "实盘交易 / 前端",
+      "title": "行情看板量价异动与大单流向改为图表展示",
+      "summary": "将行情看板页中「量价异动」和「大单流向」两个模块从无限滚动列表升级为交互式图表：量价异动采用时间线散点图，按异动类型着色，Y 轴为评分；大单流向采用柱状图（红入绿出）叠加方向强度折线，资金进出一目了然。",
+      "scope": "行情看板 / 前端",
       "raw_subject": "feat(live-trading): replace event lists with lightweight-charts for anomaly & block-flow",
       "visible": true
     },
@@ -68,9 +68,9 @@
     {
       "date": "2026-03-22",
       "type": "新功能",
-      "title": "实盘交易页全面支持 A 股",
-      "summary": "实盘交易现已同时支持港股与 A 股：输入 6 位代码自动识别沪深市场，行情快照、K 线数据、大盘指数均按市场切换；前端货币标签、涨跌色、指数看板随市场联动，无需手动选择。",
-      "scope": "实盘交易 / 后端 / 前端",
+      "title": "行情看板全面支持 A 股",
+      "summary": "行情看板现已同时支持港股与 A 股：输入 6 位代码自动识别沪深市场，行情快照、K 线数据、大盘指数均按市场切换；前端货币标签、涨跌色、指数看板随市场联动，无需手动选择。",
+      "scope": "行情看板 / 后端 / 前端",
       "raw_subject": "feat(live): add full A-share support for live trading page",
       "visible": true
     },
@@ -78,8 +78,8 @@
       "date": "2026-03-21",
       "type": "修复优化",
       "title": "登录后自动刷新各页面私有数据",
-      "summary": "修复登录后仍停留在游客视图的问题：实盘交易页会自动拉取关注池，策略库会自动刷新用户策略，设置页会自动加载当前账号的 Webhook 配置与投递记录，无需再手动刷新页面。",
-      "scope": "账号体系 / 实盘交易 / 策略库 / 设置",
+      "summary": "修复登录后仍停留在游客视图的问题：行情看板页会自动拉取关注池，策略库会自动刷新用户策略，设置页会自动加载当前账号的 Webhook 配置与投递记录，无需再手动刷新页面。",
+      "scope": "账号体系 / 行情看板 / 策略库 / 设置",
       "raw_subject": "fix(auth): refresh private page data immediately after login",
       "visible": true
     },
@@ -95,9 +95,9 @@
     {
       "date": "2026-03-21",
       "type": "修复优化",
-      "title": "实盘页信号配置保存入口更清晰",
-      "summary": "股票级信号配置的保存按钮调整到更全局位置，并明确保存会同时提交开关、策略和冷却时间；实盘页移除“验证送达”入口，统一在设置页进行送达验证。",
-      "scope": "实盘交易",
+      "title": "行情看板信号配置保存入口更清晰",
+      "summary": "股票级信号配置的保存按钮调整到更全局位置，并明确保存会同时提交开关、策略和冷却时间；行情看板页移除"验证送达"入口，统一在设置页进行送达验证。",
+      "scope": "行情看板",
       "raw_subject": "fix(live): move symbol signal save action and remove duplicate test entry",
       "visible": true
     },
@@ -113,27 +113,27 @@
     {
       "date": "2026-03-21",
       "type": "修复优化",
-      "title": "精简实盘页信号配置说明文案",
+      "title": "精简行情看板信号配置说明文案",
       "summary": "移除股票级信号配置中的两段解释性提示，仅保留必要操作信息，让多标的场景下的配置区更清爽、理解更直接。",
-      "scope": "实盘交易",
+      "scope": "行情看板",
       "raw_subject": "refactor(live): trim signal config explanatory copy",
       "visible": true
     },
     {
       "date": "2026-03-21",
       "type": "修复优化",
-      "title": "未登录浏览实盘页时不再反复闪动",
-      "summary": "未登录访问实盘交易页时，现在只保留公共行情更新；关注池、激活标的、Webhook 与信号配置等账号级区域会改为登录后加载或静态引导，浏览更稳定。",
-      "scope": "实盘交易",
+      "title": "未登录浏览行情看板时不再反复闪动",
+      "summary": "未登录访问行情看板页时，现在只保留公共行情更新；关注池、激活标的、Webhook 与信号配置等账号级区域会改为登录后加载或静态引导，浏览更稳定。",
+      "scope": "行情看板",
       "raw_subject": "fix(live): gate logged-out private polling and update changelog",
       "visible": true
     },
     {
       "date": "2026-03-20",
       "type": "修复优化",
-      "title": "优化实盘交易信号配置展示",
+      "title": "优化行情看板信号配置展示",
       "summary": "增强股票级信号开关与 Webhook 配置摘要的状态表达，减少页面干扰信息，便于快速判断当前配置是否生效。",
-      "scope": "实盘交易",
+      "scope": "行情看板",
       "commit": "c6b39e4",
       "raw_subject": "feat: polish live trading signal config",
       "visible": true
@@ -142,8 +142,8 @@
       "date": "2026-03-20",
       "type": "修复优化",
       "title": "强化激活标的最新价展示",
-      "summary": "将激活标的快照中的“最新价”提升为重点信息，放大字号并按涨跌联动颜色高亮，关键价格变化更醒目。",
-      "scope": "实盘交易",
+      "summary": "将激活标的快照中的"最新价"提升为重点信息，放大字号并按涨跌联动颜色高亮，关键价格变化更醒目。",
+      "scope": "行情看板",
       "commit": "1711963",
       "raw_subject": "feat: highlight live trading latest price",
       "visible": true
@@ -161,9 +161,9 @@
     {
       "date": "2026-03-19",
       "type": "新功能",
-      "title": "实盘页新增均线看板模块",
-      "summary": "为实盘交易页面补充 MA20 与 MA200 指标接口和展示模块，帮助更快观察趋势位置与关键均线关系。",
-      "scope": "实盘交易",
+      "title": "行情看板新增均线看板模块",
+      "summary": "为行情看板页面补充 MA20 与 MA200 指标接口和展示模块，帮助更快观察趋势位置与关键均线关系。",
+      "scope": "行情看板",
       "commit": "212ed4b",
       "raw_subject": "feat(live): add MA20/MA200 api and dashboard module",
       "visible": true
@@ -172,8 +172,8 @@
       "date": "2026-03-19",
       "type": "新功能",
       "title": "上线阻力位分析模块 v1",
-      "summary": "实盘交易页面新增阻力位分析能力，便于结合价格位置更直观地判断上方压力区间。",
-      "scope": "实盘交易",
+      "summary": "行情看板页面新增阻力位分析能力，便于结合价格位置更直观地判断上方压力区间。",
+      "scope": "行情看板",
       "commit": "3550ed9",
       "raw_subject": "feat(live): add resistance levels v1",
       "visible": true
@@ -183,7 +183,7 @@
       "type": "修复优化",
       "title": "优化支撑位稳定性与说明文案",
       "summary": "增强支撑位相关逻辑的稳健性，同时简化页面表达，减少理解门槛。",
-      "scope": "实盘交易",
+      "scope": "行情看板",
       "commit": "7672fe0",
       "raw_subject": "fix(live): harden support levels and simplify wording",
       "visible": true
@@ -202,7 +202,7 @@
       "date": "2026-03-18",
       "type": "修复优化",
       "title": "修正策略更新后的误报提示",
-      "summary": "解决策略更新成功后仍可能出现“未找到”提示的问题，减少误判与重复操作。",
+      "summary": "解决策略更新成功后仍可能出现"未找到"提示的问题，减少误判与重复操作。",
       "scope": "策略库",
       "commit": "c7f3fe1",
       "raw_subject": "fix(strategy): avoid false not found after successful update",
@@ -212,7 +212,7 @@
       "date": "2026-03-18",
       "type": "修复优化",
       "title": "回测默认时间范围切换为最近一年",
-      "summary": "新建回测时默认选中“截至昨天的最近一年”时间区间，减少每次手动调整日期的操作。",
+      "summary": "新建回测时默认选中"截至昨天的最近一年"时间区间，减少每次手动调整日期的操作。",
       "scope": "回测引擎",
       "commit": "539724e",
       "raw_subject": "feat(backtest): set default date range to last year ending yesterday",
@@ -232,7 +232,7 @@
       "date": "2026-03-17",
       "type": "新功能",
       "title": "新增账号入口并打通鉴权流程",
-      "summary": "顶部导航新增登录与注册入口，并补齐实盘页、策略页等需要登录后操作的交互流程。",
+      "summary": "顶部导航新增登录与注册入口，并补齐行情看板页、策略页等需要登录后操作的交互流程。",
       "scope": "账号体系",
       "commit": "4ed0587",
       "raw_subject": "feat: add auth entrypoints and polish live/strategy auth flows",
@@ -252,8 +252,8 @@
       "date": "2026-03-16",
       "type": "修复优化",
       "title": "港股指数标题改为中文展示",
-      "summary": "实盘总览中的港股指数名称完成中文化处理，信息识别更直观，减少中英文混用带来的理解成本。",
-      "scope": "实盘交易",
+      "summary": "行情看板中的港股指数名称完成中文化处理，信息识别更直观，减少中英文混用带来的理解成本。",
+      "scope": "行情看板",
       "commit": "1f8a994",
       "raw_subject": "feat(live): localize hk index titles in overview",
       "visible": true
@@ -261,9 +261,9 @@
     {
       "date": "2026-03-16",
       "type": "新功能",
-      "title": "实盘页新增行情数据来源提示",
-      "summary": "在实盘页面补充当前行情数据来源说明，帮助更快判断页面指标的取数上下文。",
-      "scope": "实盘交易",
+      "title": "行情看板新增行情数据来源提示",
+      "summary": "在行情看板页面补充当前行情数据来源说明，帮助更快判断页面指标的取数上下文。",
+      "scope": "行情看板",
       "commit": "08455ba",
       "raw_subject": "feat(live): show market data source on live page",
       "visible": true
@@ -272,8 +272,8 @@
       "date": "2026-03-14",
       "type": "新功能",
       "title": "新增叠加图表与相对强弱分析",
-      "summary": "实盘图表新增 Beta 与相对强弱叠加分析，便于同时观察标的表现与基准对比关系。",
-      "scope": "实盘交易",
+      "summary": "行情看板图表新增 Beta 与相对强弱叠加分析，便于同时观察标的表现与基准对比关系。",
+      "scope": "行情看板",
       "commit": "ec47bb4",
       "raw_subject": "feat(live): add overlay chart with beta and relative strength",
       "visible": true
@@ -283,7 +283,7 @@
       "type": "新功能",
       "title": "上线实时监控分层看板",
       "summary": "新增 A1 到 A4 分层监控能力，并结合关注列表与异常提醒，帮助更高效地追踪重点股票动态。",
-      "scope": "实盘交易 / 监控",
+      "scope": "行情看板 / 监控",
       "commit": "be674f3",
       "raw_subject": "feat: implement live monitoring A1-A4 with watchlist and anomalies",
       "visible": true

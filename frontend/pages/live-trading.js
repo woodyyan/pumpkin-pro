@@ -164,7 +164,7 @@ export default function LiveTradingOverviewPage() {
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-border bg-card p-6">
-        <h1 className="text-2xl font-semibold tracking-tight">实盘监控</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">行情看板</h1>
         <p className="mt-2 text-sm leading-7 text-white/60">
           关注池股票概览，点击卡片可在新标签页打开独立的实时详情页。
         </p>
@@ -216,7 +216,7 @@ export default function LiveTradingOverviewPage() {
           {errorNeedsLogin ? (
             <button
               type="button"
-              onClick={() => openAuthModal('login', '实盘交易相关操作需要登录后才能继续。')}
+              onClick={() => openAuthModal('login', '行情看板相关操作需要登录后才能继续。')}
               className="mt-2 inline-flex rounded-lg border border-rose-300/40 px-2.5 py-1 text-xs text-rose-100 transition hover:bg-rose-500/15"
             >
               去登录
@@ -359,7 +359,7 @@ export default function LiveTradingOverviewPage() {
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div className="space-y-2">
               <div className="text-lg font-semibold text-white">
-                {ready ? '登录后开启实盘监控' : '正在确认账号状态'}
+                {ready ? '登录后开启行情看板' : '正在确认账号状态'}
               </div>
               <p className="max-w-2xl text-sm leading-7 text-white/65">
                 {ready
@@ -371,7 +371,7 @@ export default function LiveTradingOverviewPage() {
             <button
               type="button"
               disabled={!ready}
-              onClick={ready ? () => openAuthModal('login', '登录后即可管理关注池与实盘监控。') : undefined}
+              onClick={ready ? () => openAuthModal('login', '登录后即可管理关注池与行情看板。') : undefined}
               className="inline-flex shrink-0 items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {ready ? '登录后继续' : '请稍候'}

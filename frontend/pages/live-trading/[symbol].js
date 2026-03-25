@@ -59,7 +59,7 @@ export default function LiveTradingDetailPage() {
     return ''
   }, [snapshot, symbol])
 
-  const pageTitle = symbolName ? `${symbolName}（${symbol}）- 实盘` : symbol ? `${symbol} - 实盘` : '实盘详情'
+  const pageTitle = symbolName ? `${symbolName}（${symbol}）- 行情看板` : symbol ? `${symbol} - 行情看板` : '行情看板'
 
   const updateError = (nextError, nextNeedsLogin = false) => {
     setError(nextError)
@@ -312,7 +312,7 @@ export default function LiveTradingDetailPage() {
             {errorNeedsLogin ? (
               <button
                 type="button"
-                onClick={() => openAuthModal('login', '实盘交易相关操作需要登录后才能继续。')}
+                onClick={() => openAuthModal('login', '行情看板相关操作需要登录后才能继续。')}
                 className="mt-2 inline-flex rounded-lg border border-rose-300/40 px-2.5 py-1 text-xs text-rose-100 transition hover:bg-rose-500/15"
               >
                 去登录

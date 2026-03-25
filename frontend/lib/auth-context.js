@@ -244,7 +244,7 @@ function AuthDialog({
 
 
         <div className={`mb-5 ${theme.hintCard}`}>
-          {reason || '登录后可使用策略创建、实盘关注池等用户功能。'}
+          {reason || '登录后可使用策略创建、行情关注池等用户功能。'}
         </div>
 
         <div className={theme.modeWrap}>

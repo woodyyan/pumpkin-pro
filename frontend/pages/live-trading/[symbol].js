@@ -490,22 +490,15 @@ export default function LiveTradingDetailPage() {
                     role="switch"
                     aria-checked={Boolean(signalConfig.is_enabled)}
                     onClick={() => updateLocalSignalConfig({ is_enabled: !signalConfig.is_enabled })}
-                    className={`inline-flex min-w-[220px] items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/40 ${
+                    className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-left text-xs transition focus:outline-none focus:ring-2 focus:ring-primary/40 ${
                       signalConfig.is_enabled
-                        ? 'border-emerald-300/60 bg-emerald-500/18 text-emerald-50 shadow-[0_12px_30px_rgba(16,185,129,0.22)]'
-                        : 'border-amber-300/35 bg-amber-500/10 text-white/88 shadow-[0_10px_26px_rgba(245,158,11,0.12)] hover:border-amber-300/55'
+                        ? 'border-emerald-300/60 bg-emerald-500/18 text-emerald-50'
+                        : 'border-amber-300/35 bg-amber-500/10 text-white/88 hover:border-amber-300/55'
                     }`}
                   >
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span className="font-semibold">{signalConfig.is_enabled ? '信号已开启' : '信号未开启'}</span>
-                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] ${signalConfig.is_enabled ? 'bg-emerald-950/45 text-emerald-100' : 'bg-amber-950/45 text-amber-100'}`}>
-                          {signalConfig.is_enabled ? 'ON' : 'OFF'}
-                        </span>
-                      </span>
-                    </span>
-                    <span className={`relative inline-flex h-8 w-14 shrink-0 rounded-full border transition ${signalConfig.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-amber-200/30 bg-black/25'}`}>
-                      <span className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow-[0_4px_12px_rgba(15,23,42,0.35)] transition-all ${signalConfig.is_enabled ? 'left-7' : 'left-1'}`} />
+                    <span className="font-medium">{signalConfig.is_enabled ? '信号已开启' : '信号未开启'}</span>
+                    <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border transition ${signalConfig.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-amber-200/30 bg-black/25'}`}>
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${signalConfig.is_enabled ? 'left-[18px]' : 'left-0.5'}`} />
                     </span>
                   </button>
                 </div>
@@ -531,12 +524,12 @@ export default function LiveTradingDetailPage() {
                   />
                 </div>
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-[11px] text-white/50">冷却时间：秒（10~3600）</div>
+                  <div className="text-[11px] text-white/50">推送间隔：秒（10~3600），该间隔内重复信号不会推送。</div>
                   <button
                     type="button"
                     disabled={savingSignal}
                     onClick={handleSaveSignalConfig}
-                    className="rounded-lg border border-border px-3 py-1.5 text-xs text-white/80 transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {savingSignal ? '保存中...' : '保存配置'}
                   </button>

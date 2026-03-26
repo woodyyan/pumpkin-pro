@@ -108,11 +108,16 @@ func (s *Service) AddWatchlist(ctx context.Context, userID, symbol, name string)
 	if err != nil {
 		return nil, err
 	}
+
+	// Verify the symbol actually exists by fetching a live snapshot.
+	snapshot, fetchErr := s.marketClient.FetchSymbolSnapshot(ctx, normalized)
+	if fetchErr != nil || snapshot == nil || snapshot.LastPrice <= 0 {
+		return nil, ErrSymbolNotExist
+	}
+
 	cleanName := strings.TrimSpace(name)
 	if cleanName == "" {
-		// Auto-fetch stock name from market data when user does not provide one.
-		snapshot, fetchErr := s.marketClient.FetchSymbolSnapshot(ctx, normalized)
-		if fetchErr == nil && snapshot != nil && snapshot.Name != "" && snapshot.Name != normalized {
+		if snapshot.Name != "" && snapshot.Name != normalized {
 			cleanName = snapshot.Name
 		}
 	}

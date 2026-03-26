@@ -1136,6 +1136,10 @@ func (a *appServer) writeLiveError(w http.ResponseWriter, err error) {
 		statusCode = http.StatusBadRequest
 		code = "INVALID_SYMBOL"
 		message = "股票代码格式无效，支持港股（如 00700.HK）或 A 股（如 600519.SH、000001.SZ）"
+	case errors.Is(err, live.ErrSymbolNotExist):
+		statusCode = http.StatusBadRequest
+		code = "SYMBOL_NOT_EXIST"
+		message = "该股票代码不存在或暂无行情数据，请检查后重试"
 	case errors.Is(err, live.ErrConflict):
 		statusCode = http.StatusConflict
 		code = "SYMBOL_ALREADY_EXISTS"

@@ -10,6 +10,7 @@ const POLL_MS = 2000
 const OVERLAY_WINDOW_MINUTES = 60
 const SUPPORT_REFRESH_MS = 60 * 1000
 const SIGNAL_CENTER_REFRESH_MS = 15 * 1000
+const FUNDAMENTALS_REFRESH_MS = 24 * 60 * 60 * 1000
 const SUPPORT_LOOKBACK_DAYS = 120
 const MA_LOOKBACK_DAYS = 240
 const SIGNAL_DISPATCH_INTERVAL_SECONDS = 2
@@ -27,6 +28,9 @@ export default function LiveTradingDetailPage() {
   const [dailyRange, setDailyRange] = useState('6M')
   const [dailyLoading, setDailyLoading] = useState(false)
   const [snapshotPayload, setSnapshotPayload] = useState(null)
+  const [fundamentalsPayload, setFundamentalsPayload] = useState(null)
+  const [fundamentalsLoading, setFundamentalsLoading] = useState(false)
+  const [fundamentalsError, setFundamentalsError] = useState('')
   const [overlayPayload, setOverlayPayload] = useState(null)
   const [supportPayload, setSupportPayload] = useState(null)
   const [supportError, setSupportError] = useState('')
@@ -49,6 +53,7 @@ export default function LiveTradingDetailPage() {
   const supportRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const resistanceRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const movingAverageRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
+  const fundamentalsRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const signalCenterRefreshRef = useRef(0)
 
   const privateAccessReady = ready && isLoggedIn
@@ -148,6 +153,25 @@ export default function LiveTradingDetailPage() {
     }
   }
 
+  const loadFundamentals = async (sym, { force = false } = {}) => {
+    if (!sym) return
+    const now = Date.now()
+    const cache = fundamentalsRefreshRef.current
+    if (!force && cache.symbol === sym && now - cache.refreshedAt < FUNDAMENTALS_REFRESH_MS) return
+    setFundamentalsLoading(true)
+    try {
+      const data = await requestJson(`/api/live/symbols/${encodeURIComponent(sym)}/fundamentals`)
+      setFundamentalsPayload(data)
+      setFundamentalsError('')
+      fundamentalsRefreshRef.current = { symbol: sym, refreshedAt: now }
+    } catch (err) {
+      setFundamentalsError(err.message || '基础面数据暂不可用')
+      if (force || cache.symbol !== sym) setFundamentalsPayload(null)
+    } finally {
+      setFundamentalsLoading(false)
+    }
+  }
+
   // ── Daily bars (history chart) ──
 
   const DAILY_RANGE_MAP = {
@@ -218,7 +242,10 @@ export default function LiveTradingDetailPage() {
     if (!ready || !symbol) return
     const bootstrap = async () => {
       try {
-        await loadSymbolPanels(symbol, { forceSupport: true })
+        await Promise.all([
+          loadSymbolPanels(symbol, { forceSupport: true }),
+          loadFundamentals(symbol),
+        ])
         updateError('')
       } catch (err) {
         applyRequestError(err, '加载数据失败')
@@ -294,6 +321,13 @@ export default function LiveTradingDetailPage() {
 
   const selectedStrategy = signalConfig ? strategyByID[signalConfig.strategy_id] || null : null
   const webhookConfigured = Boolean(webhookConfig.url)
+  const fundamentalsItems = fundamentalsPayload?.items || {}
+  const fundamentalsMeta = fundamentalsPayload?.meta || null
+  const fundamentalsReportLabel = buildFundamentalsReportLabel(fundamentalsMeta)
+  const fundamentalsCurrencyCode = isAShare ? 'CNY' : 'HKD'
+  const fundamentalsCurrencySymbol = isAShare ? '¥' : 'HK$'
+  const fundamentalsMetaLine = buildFundamentalsMetaLine(fundamentalsMeta)
+  const fundamentalsSupported = fundamentalsMeta?.supported !== false
   const supportSummary = supportPayload?.summary || null
   const supportLevels = Array.isArray(supportPayload?.levels) ? supportPayload.levels : []
   const resistanceSummary = resistancePayload?.summary || null
@@ -373,6 +407,38 @@ export default function LiveTradingDetailPage() {
               <MetricMini label="成交量" value={formatCompact(snapshot.volume)} />
               <MetricMini label={`成交额(${isAShare ? 'CNY' : 'HKD'})`} value={formatCompact(snapshot.turnover)} />
               <MetricMini label="振幅" value={formatPercent(snapshot.amplitude)} />
+            </div>
+          )}
+        </section>
+
+        {/* Fundamentals */}
+        <section className="rounded-2xl border border-border bg-card p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold text-white">基础面概览</h3>
+              {fundamentalsMetaLine ? (
+                <p className="mt-1 text-xs text-white/55">{fundamentalsMetaLine}</p>
+              ) : null}
+            </div>
+            {!fundamentalsSupported && fundamentalsMeta?.warning ? (
+              <div className="rounded-full border border-amber-300/25 bg-amber-500/10 px-3 py-1 text-[11px] text-amber-200">
+                {fundamentalsMeta.warning}
+              </div>
+            ) : null}
+          </div>
+          {fundamentalsError ? (
+            <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{fundamentalsError}</div>
+          ) : null}
+          {!fundamentalsPayload && fundamentalsLoading ? (
+            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">基础面数据加载中...</div>
+          ) : (
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <MetricMini label={`市值(${fundamentalsCurrencyCode})`} value={formatYiCurrency(fundamentalsItems.market_cap, fundamentalsCurrencySymbol)} emphasis />
+              <MetricMini label="股息收益率" value={formatPercentMaybeNull(fundamentalsItems.dividend_yield)} />
+              <MetricMini label="市盈率(TTM)" value={formatMultiple(fundamentalsItems.pe_ttm)} />
+              <MetricMini label={`净利润(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.net_profit_fy, fundamentalsCurrencySymbol)} />
+              <MetricMini label={`收入(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.revenue_fy, fundamentalsCurrencySymbol)} />
+              <MetricMini label="流通股" value={formatYiShares(fundamentalsItems.float_shares)} />
             </div>
           )}
         </section>
@@ -992,6 +1058,62 @@ function formatNumberMaybeNull(value, digits = 2) {
 function formatCompact(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
   return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+}
+
+function formatYiAmount(value, currencySymbol = '') {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  const num = Number(value)
+  if (Math.abs(num) >= 1e8) return `${currencySymbol}${(num / 1e8).toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 亿`
+  return `${currencySymbol}${num.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`
+}
+
+function formatYiCurrency(value, currencySymbol = '¥') {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  const num = Number(value)
+  if (Math.abs(num) >= 1e8) return `${currencySymbol}${(num / 1e8).toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 亿`
+  return `${currencySymbol}${num.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`
+}
+
+function formatYiShares(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return `${(Number(value) / 1e8).toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 亿股`
+}
+
+function formatMultiple(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return `${Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 倍`
+}
+
+function buildFundamentalsReportLabel(meta) {
+  return isAnnualReportDate(meta?.fy_report_date) ? 'FY' : '最近披露'
+}
+
+function buildFundamentalsMetaLine(meta) {
+  if (!meta) return ''
+  const parts = []
+  if (isAnnualReportDate(meta.fy_report_date)) {
+    const fyYear = extractFiscalYear(meta.fy_report_date)
+    if (fyYear) parts.push(`FY ${fyYear}`)
+  } else if (meta.fy_report_date) {
+    parts.push(`最近披露截至 ${meta.fy_report_date}`)
+  }
+  if (meta.ttm_report_date && meta.ttm_report_date !== meta.fy_report_date) {
+    parts.push(`TTM 截至 ${meta.ttm_report_date}`)
+  }
+  if (meta.updated_at) parts.push(`更新：${formatDateTime(meta.updated_at)}`)
+  if (parts.length === 0 && meta.warning) return meta.warning
+  return parts.join(' · ')
+}
+
+function isAnnualReportDate(value) {
+  if (!value) return false
+  return /(?:-|\/)?12(?:-|\/)?31$/.test(String(value).trim())
+}
+
+function extractFiscalYear(value) {
+  if (!value) return ''
+  const match = String(value).match(/^(\d{4})/)
+  return match ? match[1] : ''
 }
 
 function formatDateTime(value) {

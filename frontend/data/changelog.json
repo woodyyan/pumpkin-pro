@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-03-25",
+  "last_updated": "2026-03-26",
   "manual_entry_template": {
     "date": "YYYY-MM-DD",
     "type": "新功能",
@@ -11,6 +11,15 @@
     "visible": true
   },
   "items": [
+    {
+      "date": "2026-03-26",
+      "type": "新功能",
+      "title": "港股详情页补齐 6 项基础面并明确港元口径",
+      "summary": "行情看板个股详情页现已补齐港股 6 项基础面指标：市值、股息收益率、市盈率TTM、净利润、收入、流通股。净利润与收入会按最新报告期动态显示「FY」或「最近披露」，金额类指标同步标注 HKD 并以 HK$ 前缀展示，避免与 A 股人民币口径混淆。",
+      "scope": "行情看板 / 量化服务 / 前端",
+      "raw_subject": "feat(live): complete HK fundamentals coverage and add HKD labels",
+      "visible": true
+    },
     {
       "date": "2026-03-25",
       "type": "新功能",

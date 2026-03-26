@@ -917,6 +917,12 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 			return
 		}
 		writeLiveJSON(w, http.StatusOK, overlay)
+	case "fundamentals":
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+			return
+		}
+		a.proxyToQuant(w, r, "/api/fundamentals/"+strings.ToUpper(symbol), nil)
 	case "support-levels":
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")

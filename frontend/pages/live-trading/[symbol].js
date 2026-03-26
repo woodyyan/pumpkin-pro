@@ -25,6 +25,7 @@ export default function LiveTradingDetailPage() {
   const { isLoggedIn, openAuthModal, ready, user } = useAuth()
 
   const [dailyBars, setDailyBars] = useState([])
+  const [allDailyBars, setAllDailyBars] = useState([])
   const [dailyRange, setDailyRange] = useState('6M')
   const [dailyLoading, setDailyLoading] = useState(false)
   const [snapshotPayload, setSnapshotPayload] = useState(null)
@@ -176,7 +177,7 @@ export default function LiveTradingDetailPage() {
 
   const DAILY_RANGE_MAP = {
     '1D': 2, '1W': 7, '1M': 25, '3M': 65, '6M': 130,
-    '1Y': 260, '2Y': 520, '5Y': 1300, '10Y': 2600, ALL: 9999,
+    '1Y': 260, '2Y': 520, '5Y': 1300, '10Y': 1500, ALL: 1500,
   }
   const DAILY_RANGE_LABELS = ['1D','1W','1M','3M','6M','1Y','2Y','5Y','10Y','ALL']
 
@@ -195,12 +196,47 @@ export default function LiveTradingDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const loadAllDailyBars = useCallback(async (sym) => {
+    if (!sym) return
+    try {
+      const data = await requestJson(`/api/live/symbols/${encodeURIComponent(sym)}/daily-bars?lookback_days=1500`)
+      setAllDailyBars(Array.isArray(data?.bars) ? data.bars : [])
+    } catch (_) {
+      setAllDailyBars([])
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const rangeReturns = useMemo(() => {
+    if (!allDailyBars || allDailyBars.length < 2) return {}
+    const last = allDailyBars[allDailyBars.length - 1]?.close
+    if (!last || last <= 0) return {}
+    const result = {}
+    for (const key of DAILY_RANGE_LABELS) {
+      const lookback = DAILY_RANGE_MAP[key] || allDailyBars.length
+      const startIdx = Math.max(0, allDailyBars.length - lookback)
+      const first = allDailyBars[startIdx]?.close
+      if (first && first > 0) {
+        result[key] = (last - first) / first
+      }
+    }
+    return result
+  }, [allDailyBars])
+
+
   // Load daily bars on mount and range change
   useEffect(() => {
     if (!ready || !symbol) return
     loadDailyBars(symbol, dailyRange)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, symbol, dailyRange])
+
+  // Load all daily bars once for range return calculation
+  useEffect(() => {
+    if (!ready || !symbol) return
+    loadAllDailyBars(symbol)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, symbol])
 
   const loadSignalCenter = async ({ force = false } = {}) => {
     const now = Date.now()
@@ -449,20 +485,29 @@ export default function LiveTradingDetailPage() {
             <h3 className="text-base font-semibold text-white">历史走势</h3>
           </div>
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {DAILY_RANGE_LABELS.map((key) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setDailyRange(key)}
-                className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-                  dailyRange === key
-                    ? 'bg-primary text-white shadow-sm'
-                    : 'bg-black/25 text-white/65 hover:bg-black/35 hover:text-white/85'
-                }`}
-              >
-                {key === 'ALL' ? '全部' : key.replace('D','天').replace('W','周').replace('M','月').replace('Y','年')}
-              </button>
-            ))}
+            {DAILY_RANGE_LABELS.map((key) => {
+              const ret = rangeReturns[key]
+              const hasReturn = ret !== undefined && ret !== null
+              const isUp = hasReturn && ret >= 0
+              const retColor = hasReturn ? (isUp ? 'text-rose-300' : 'text-emerald-300') : 'text-white/30'
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setDailyRange(key)}
+                  className={`flex flex-col items-center rounded-lg px-2.5 py-1.5 text-xs font-medium transition min-w-[48px] ${
+                    dailyRange === key
+                      ? 'bg-primary text-white shadow-sm'
+                      : 'bg-black/25 text-white/65 hover:bg-black/35 hover:text-white/85'
+                  }`}
+                >
+                  <span>{key === 'ALL' ? '全部' : key.replace('D','天').replace('W','周').replace('M','月').replace('Y','年')}</span>
+                  <span className={`mt-0.5 text-[10px] leading-tight font-semibold ${dailyRange === key ? (isUp ? 'text-white/90' : 'text-white/90') : retColor}`}>
+                    {hasReturn ? `${isUp ? '+' : ''}${(ret * 100).toFixed(1)}%` : '--'}
+                  </span>
+                </button>
+              )
+            })}
           </div>
           {dailyLoading ? (
             <div className="mt-4 flex items-center justify-center rounded-xl border border-dashed border-border py-16 text-sm text-white/50">加载中...</div>

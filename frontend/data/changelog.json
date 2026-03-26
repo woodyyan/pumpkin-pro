@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-03-26",
+  "last_updated": "2026-03-27",
   "manual_entry_template": {
     "date": "YYYY-MM-DD",
     "type": "新功能",
@@ -11,6 +11,24 @@
     "visible": true
   },
   "items": [
+    {
+      "date": "2026-03-27",
+      "type": "新功能",
+      "title": "历史走势新增各区间涨幅一览",
+      "summary": "行情看板个股详情页的历史走势模块现在会在每个时间区间按钮下方直接显示对应涨跌幅（如 1天 -1.2%、1年 +12.7%、5年 +176.3%），红涨绿跌高亮，无需逐个切换即可一览各周期表现。",
+      "scope": "行情看板 / 前端",
+      "raw_subject": "feat(live): show per-range return on daily history buttons",
+      "visible": true
+    },
+    {
+      "date": "2026-03-26",
+      "type": "修复优化",
+      "title": "添加关注股票时校验代码是否真实存在",
+      "summary": "行情看板添加关注股票时，系统会先验证该代码是否有真实行情数据，不存在的代码将被拒绝添加并提示用户检查，避免无效股票进入关注列表。",
+      "scope": "行情看板 / 后端",
+      "raw_subject": "fix(live): reject adding non-existent stock codes to watchlist",
+      "visible": true
+    },
     {
       "date": "2026-03-26",
       "type": "修复优化",

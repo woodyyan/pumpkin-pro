@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 
 import { requestJson } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
+import { getStrategyPresetByImplementation } from '../lib/strategy-presets';
 
 const DATA_SOURCE_OPTIONS = [
   { value: 'online', label: '在线下载', description: '下载 A 股 / 港股历史数据' },
@@ -580,8 +581,29 @@ export default function BacktestPage() {
               </select>
             </Field>
 
-            <div className="rounded-2xl border border-dashed border-border bg-black/20 px-4 py-5 text-sm leading-7 text-white/60">
-              策略参数已统一收敛到"策略库"维护。回测引擎仅负责选择策略并执行回测，运行时将自动使用策略库中当前版本的默认参数。
+            <div className="rounded-2xl border border-border bg-black/20 p-4">
+              <div className="mb-3 text-sm font-medium text-white">策略参数（只读）</div>
+              {selectedStrategy ? (() => {
+                const preset = getStrategyPresetByImplementation(selectedStrategy.implementation_key)
+                const paramSchema = preset?.paramSchema || selectedStrategy.param_schema || []
+                const defaultParams = selectedStrategy.default_params || {}
+                if (paramSchema.length === 0) {
+                  return <div className="text-sm text-white/50">该策略暂无可配置参数。</div>
+                }
+                return (
+                  <div className={`grid gap-3 ${paramSchema.length >= 3 ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
+                    {paramSchema.map((item) => (
+                      <div key={item.key} className="rounded-xl border border-white/5 bg-black/20 p-3">
+                        <div className="text-xs text-white/50">{item.label}</div>
+                        <div className="mt-1.5 text-lg font-semibold text-white">{formatParamDisplay(defaultParams[item.key])}</div>
+                        {item.description ? <div className="mt-1 text-[11px] leading-5 text-white/35">{item.description}</div> : null}
+                      </div>
+                    ))}
+                  </div>
+                )
+              })() : (
+                <div className="text-sm text-white/50">请先选择策略。</div>
+              )}
             </div>
 
             <div className="rounded-2xl border border-border bg-black/20 p-4 text-sm leading-7 text-white/65">
@@ -960,6 +982,15 @@ function buildChartOptions(width, height, ColorType) {
       horzLine: { color: 'rgba(230,126,34,0.35)' },
     },
   };
+}
+
+function formatParamDisplay(value) {
+  if (value === null || value === undefined || value === '') return '--';
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? String(value) : String(Number(value).toFixed(4)).replace(/0+$/, '').replace(/\.$/, '');
+  }
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  return String(value);
 }
 
 function formatCurrency(value) {

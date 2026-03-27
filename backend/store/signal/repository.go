@@ -322,6 +322,32 @@ func (r *Repository) MarkDeliveryFailed(ctx context.Context, deliveryID string, 
 	return r.db.WithContext(ctx).Model(&WebhookDeliveryRecord{}).Where("id = ?", deliveryID).Updates(updates).Error
 }
 
+func (r *Repository) ListAllEnabledConfigs(ctx context.Context) ([]SymbolSignalConfigRecord, error) {
+	var records []SymbolSignalConfigRecord
+	if err := r.db.WithContext(ctx).
+		Where("is_enabled = ?", true).
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (r *Repository) GetLastSignalEventTime(ctx context.Context, userID, symbol string) (*time.Time, error) {
+	var record SignalEventRecord
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND symbol = ? AND is_test = ?", userID, symbol, false).
+		Order("event_time DESC").
+		First(&record).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	t := record.EventTime.UTC()
+	return &t, nil
+}
+
 func trimError(errMsg string) string {
 	text := strings.TrimSpace(errMsg)
 	if len(text) <= 1000 {

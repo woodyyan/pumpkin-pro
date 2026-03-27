@@ -13,7 +13,6 @@ const SIGNAL_CENTER_REFRESH_MS = 15 * 1000
 const FUNDAMENTALS_REFRESH_MS = 24 * 60 * 60 * 1000
 const SUPPORT_LOOKBACK_DAYS = 120
 const MA_LOOKBACK_DAYS = 240
-const SIGNAL_DISPATCH_INTERVAL_SECONDS = 2
 const SIGNAL_MAX_ATTEMPTS = 4
 const SIGNAL_BACKOFF_STEPS = ['1 分钟', '5 分钟', '15 分钟']
 
@@ -255,7 +254,7 @@ export default function LiveTradingDetailPage() {
       symbol,
       strategy_id: strategies[0]?.id || '',
       is_enabled: false,
-      cooldown_seconds: 300,
+      cooldown_seconds: 3600,
       thresholds: {},
     })
 
@@ -319,7 +318,7 @@ export default function LiveTradingDetailPage() {
 
   const updateLocalSignalConfig = (patch) => {
     setSignalConfig((prev) => ({
-      ...(prev || { symbol, strategy_id: '', is_enabled: false, cooldown_seconds: 300, thresholds: {} }),
+      ...(prev || { symbol, strategy_id: '', is_enabled: false, cooldown_seconds: 3600, thresholds: {} }),
       ...patch,
     }))
   }
@@ -336,7 +335,7 @@ export default function LiveTradingDetailPage() {
         body: JSON.stringify({
           strategy_id: signalConfig.strategy_id,
           is_enabled: Boolean(signalConfig.is_enabled),
-          cooldown_seconds: Number(signalConfig.cooldown_seconds) || 300,
+          cooldown_seconds: Number(signalConfig.cooldown_seconds) || 3600,
           thresholds: signalConfig.thresholds || {},
         }),
       })
@@ -626,39 +625,22 @@ export default function LiveTradingDetailPage() {
         {privateAccessReady ? (
           <section className="rounded-2xl border border-border bg-card p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold text-white">信号推送配置</h3>
-                <p className="mt-1 text-xs text-white/60">Webhook 配置在设置页统一管理，此处仅配置该股票的策略与推送开关。</p>
-              </div>
-              <div className="text-xs text-white/55">
-                {webhookConfig.updated_at ? `Webhook 更新于 ${formatDateTime(webhookConfig.updated_at)}` : 'Webhook 未配置'}
-              </div>
+              <h3 className="text-base font-semibold text-white">信号推送配置</h3>
             </div>
 
             {signalError && <div className="mt-3 rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{signalError}</div>}
             {signalNotice && <div className="mt-3 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{signalNotice}</div>}
 
-            <div className="mt-4 space-y-3 rounded-xl border border-border bg-black/20 p-4">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className={`rounded-full px-2.5 py-1 ${webhookConfigured ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>
-                  {webhookConfigured ? '已配置 URL' : '未配置 URL'}
-                </span>
-                <span className={`rounded-full px-2.5 py-1 ${webhookConfig.is_enabled ? 'bg-emerald-500/15 text-emerald-200' : 'bg-rose-500/15 text-rose-200'}`}>
-                  {webhookConfig.is_enabled ? '已启用发送' : '已禁用发送'}
-                </span>
-              </div>
-              {(!webhookConfigured || !webhookConfig.is_enabled) && (
-                <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                  未配置或未启用时，股票信号不会发出。
-                </div>
-              )}
-              <a href="/settings" className="inline-flex rounded-lg border border-border px-3 py-1.5 text-xs text-white/85 transition hover:border-primary hover:text-primary">去设置页</a>
-            </div>
-
             {signalConfig && (
               <div className="mt-4 rounded-xl border border-border bg-black/20 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-sm font-medium text-white">{symbol} 信号配置</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-white">{symbol}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] ${webhookConfigured ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>
+                      {webhookConfigured ? 'Webhook 已配置' : 'Webhook 未配置'}
+                    </span>
+                    <a href="/settings" className="text-[11px] text-white/45 underline decoration-white/20 underline-offset-2 transition hover:text-primary hover:decoration-primary/50">设置</a>
+                  </div>
                   <button
                     type="button"
                     role="switch"
@@ -677,28 +659,23 @@ export default function LiveTradingDetailPage() {
                   </button>
                 </div>
 
-                <div className="mt-3 grid gap-2 md:grid-cols-[1.2fr_1fr]">
+                {(!webhookConfigured || !webhookConfig.is_enabled) && (
+                  <div className="mt-2.5 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                    Webhook 未配置或未启用，信号不会发出。<a href="/settings" className="ml-1 underline underline-offset-2 hover:text-amber-100">去配置</a>
+                  </div>
+                )}
+
+                <div className="mt-3 flex flex-wrap items-center gap-2">
                   <select
                     value={signalConfig.strategy_id || ''}
                     onChange={(e) => updateLocalSignalConfig({ strategy_id: e.target.value })}
-                    className="rounded-lg border border-border bg-black/30 px-2 py-1.5 text-xs text-white outline-none transition focus:border-primary"
+                    className="min-w-[140px] flex-1 rounded-lg border border-border bg-black/30 px-2.5 py-1.5 text-xs text-white outline-none transition focus:border-primary"
                   >
                     <option value="">请选择策略</option>
                     {activeStrategies.map((s) => (
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
                   </select>
-                  <input
-                    type="number"
-                    min={10}
-                    max={3600}
-                    value={signalConfig.cooldown_seconds ?? 300}
-                    onChange={(e) => updateLocalSignalConfig({ cooldown_seconds: Number(e.target.value) || 300 })}
-                    className="rounded-lg border border-border bg-black/30 px-2 py-1.5 text-xs text-white outline-none transition focus:border-primary"
-                  />
-                </div>
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-[11px] text-white/50">推送间隔：秒（10~3600），该间隔内重复信号不会推送。</div>
                   <button
                     type="button"
                     disabled={savingSignal}
@@ -709,13 +686,13 @@ export default function LiveTradingDetailPage() {
                   </button>
                 </div>
 
+                <p className="mt-2.5 text-[11px] leading-relaxed text-white/40">系统每小时自动评估一次策略，产生 BUY/SELL 信号时推送到 Webhook。</p>
+
                 <details className="mt-3 rounded-lg border border-border/80 bg-black/30 p-3">
                   <summary className="cursor-pointer text-xs font-medium text-white/85">查看触发条件与 Payload 模板</summary>
                   <div className="mt-3 space-y-3 text-xs text-white/75">
                     <div className="space-y-1">
-                      <div>启用信号后，后台约每 {SIGNAL_DISPATCH_INTERVAL_SECONDS} 秒扫描待发送队列。</div>
                       <div>失败重试：最多 {SIGNAL_MAX_ATTEMPTS} 次，退避间隔 {SIGNAL_BACKOFF_STEPS.join(' / ')}。</div>
-                      <div>冷却时间：{Number(signalConfig.cooldown_seconds) || 300} 秒。</div>
                       <div>策略参数：{formatStrategyCycleHint(selectedStrategy)}</div>
                     </div>
                     <div>

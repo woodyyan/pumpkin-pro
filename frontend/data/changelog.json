@@ -14,6 +14,24 @@
     {
       "date": "2026-03-27",
       "type": "新功能",
+      "title": "信号自动评估与推送上线",
+      "summary": "系统现在每小时自动评估所有已启用的信号配置，基于选定策略和日K线数据判断买卖信号，触发时自动推送到 Webhook，并附带策略名称和中文触发原因说明。同时支持用户自建策略的信号评估。",
+      "scope": "信号推送 / 量化服务 / 后端",
+      "raw_subject": "feat(signal): implement auto signal evaluator worker with strategy reason",
+      "visible": true
+    },
+    {
+      "date": "2026-03-27",
+      "type": "修复优化",
+      "title": "信号推送配置界面精简",
+      "summary": "信号推送配置模块合并为单一卡片，移除冗余的冷却时间设置和独立 Webhook 状态区，Webhook 状态改为行内标签展示，整体更紧凑易读。",
+      "scope": "行情看板 / 前端",
+      "raw_subject": "refactor(live): streamline signal config UI",
+      "visible": true
+    },
+    {
+      "date": "2026-03-27",
+      "type": "新功能",
       "title": "历史走势新增各区间涨幅一览",
       "summary": "行情看板个股详情页的历史走势模块现在会在每个时间区间按钮下方直接显示对应涨跌幅（如 1天 -1.2%、1年 +12.7%、5年 +176.3%），红涨绿跌高亮，无需逐个切换即可一览各周期表现。",
       "scope": "行情看板 / 前端",

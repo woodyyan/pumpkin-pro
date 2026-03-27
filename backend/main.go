@@ -1553,6 +1553,11 @@ func main() {
 	})
 	signalService.StartDispatcher(context.Background())
 
+	signalEvaluator := signal.NewEvaluator(signalService, liveService, strategyService, signal.EvaluatorConfig{
+		QuantServiceURL: cfg.QuantServiceURL,
+	})
+	signalEvaluator.Start(context.Background())
+
 	adminRepo := admin.NewRepository(storeInstance.DB)
 	adminService := admin.NewService(adminRepo, admin.ServiceConfig{
 		JWTSecret: strings.TrimSpace(cfg.Auth.JWTSecret),

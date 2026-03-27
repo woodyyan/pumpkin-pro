@@ -26,7 +26,7 @@ import (
 
 const (
 	defaultWebhookTimeoutMS   = 3000
-	defaultCooldownSeconds    = 300
+	defaultCooldownSeconds    = 3600
 	defaultDispatchBatchSize  = 30
 	defaultDispatcherInterval = 2 * time.Second
 	defaultMaxAttempts        = 4

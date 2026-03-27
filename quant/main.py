@@ -671,5 +671,181 @@ def dict_to_json_safe(data: Dict) -> Dict:
     return json.loads(json.dumps(data, ignore_nan=True))
 
 
+# ── Signal Evaluation ──
+
+class SignalEvaluateBar(BaseModel):
+    date: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+class SignalEvaluateRequest(BaseModel):
+    strategy_id: str = ""
+    implementation_key: str = ""
+    strategy_name: str = ""
+    params: Optional[Dict[str, Any]] = None
+    symbol: str = ""
+    bars: List[SignalEvaluateBar] = Field(default_factory=list)
+    snapshot_price: Optional[float] = None
+
+
+# 每种策略对应的中文触发原因模板
+SIGNAL_REASON_BUILDERS: Dict[str, Any] = {}
+
+
+def _build_trend_reason(params: Dict, enriched: pd.DataFrame, signal: str) -> Dict[str, Any]:
+    row = enriched.iloc[-1]
+    short_col = f"MA{int(params['ma_short'])}"
+    long_col = f"MA{int(params['ma_long'])}"
+    ma_short_val = round(float(row.get(short_col, 0)), 2)
+    ma_long_val = round(float(row.get(long_col, 0)), 2)
+    if signal == "buy":
+        return {
+            "kind": "golden_cross",
+            "message": f"短均线（MA{int(params['ma_short'])}）从下方向上穿越长均线（MA{int(params['ma_long'])}），形成金叉买入信号。当前 MA{int(params['ma_short'])}={ma_short_val}，MA{int(params['ma_long'])}={ma_long_val}。",
+        }
+    return {
+        "kind": "death_cross",
+        "message": f"短均线（MA{int(params['ma_short'])}）从上方向下跌破长均线（MA{int(params['ma_long'])}），形成死叉卖出信号。当前 MA{int(params['ma_short'])}={ma_short_val}，MA{int(params['ma_long'])}={ma_long_val}。",
+    }
+
+
+def _build_bollinger_reason(params: Dict, enriched: pd.DataFrame, signal: str) -> Dict[str, Any]:
+    row = enriched.iloc[-1]
+    close = round(float(row.get("close", 0)), 2)
+    upper = round(float(row.get("BB_upper", 0)), 2)
+    lower = round(float(row.get("BB_lower", 0)), 2)
+    if signal == "buy":
+        return {
+            "kind": "bollinger_lower_break",
+            "message": f"价格跌破布林带下轨，触发超卖买入信号。当前收盘价={close}，下轨={lower}。",
+        }
+    return {
+        "kind": "bollinger_upper_break",
+        "message": f"价格突破布林带上轨，触发超买卖出信号。当前收盘价={close}，上轨={upper}。",
+    }
+
+
+def _build_rsi_reason(params: Dict, enriched: pd.DataFrame, signal: str) -> Dict[str, Any]:
+    row = enriched.iloc[-1]
+    rsi_col = f"RSI_{int(params['rsi_period'])}"
+    rsi_val = round(float(row.get(rsi_col, 0)), 2)
+    if signal == "buy":
+        return {
+            "kind": "rsi_oversold_recovery",
+            "message": f"RSI 从低位阈值 {params['rsi_low']} 向上突破，确认超卖修复。当前 RSI={rsi_val}。",
+        }
+    return {
+        "kind": "rsi_overbought_pullback",
+        "message": f"RSI 从高位阈值 {params['rsi_high']} 向下跌破，确认超买回落。当前 RSI={rsi_val}。",
+    }
+
+
+def _build_grid_reason(params: Dict, enriched: pd.DataFrame, signal: str) -> Dict[str, Any]:
+    row = enriched.iloc[-1]
+    close = round(float(row.get("close", 0)), 2)
+    if signal == "buy":
+        return {
+            "kind": "grid_down_cross",
+            "message": f"价格下穿网格线，触发逐级买入。当前价格={close}，网格步长={float(params['grid_step'])*100:.1f}%。",
+        }
+    return {
+        "kind": "grid_up_cross",
+        "message": f"价格上穿网格线，触发逐级卖出。当前价格={close}，网格步长={float(params['grid_step'])*100:.1f}%。",
+    }
+
+
+SIGNAL_REASON_BUILDERS = {
+    "trend_cross": _build_trend_reason,
+    "bollinger_reversion": _build_bollinger_reason,
+    "rsi_range": _build_rsi_reason,
+    "grid": _build_grid_reason,
+}
+
+
+@app.post("/api/signal/evaluate")
+def evaluate_signal(req: SignalEvaluateRequest):
+    """根据策略 + 历史 K 线评估最新信号，返回 side + reason + 策略信息。
+
+    支持两种调用方式：
+    1. 直传 implementation_key + params（推荐，支持用户自建策略）
+    2. 传 strategy_id 从本地 JSON 解析（兼容预设策略）
+    """
+    try:
+        if not req.bars or len(req.bars) < 2:
+            raise ValueError("bars 数据不足，至少需要 2 根 K 线")
+
+        # Resolve strategy: prefer direct implementation_key + params
+        impl_key = req.implementation_key.strip() if req.implementation_key else ""
+        direct_params = req.params or {}
+        strategy_info_id = req.strategy_id or ""
+        strategy_info_name = req.strategy_name or ""
+
+        if impl_key and direct_params:
+            # Direct mode: use implementation_key + params from request body
+            adapter = strategy_registry.get_adapter(impl_key)
+            adapter.validate_params(direct_params)
+            used_params = direct_params
+        elif req.strategy_id:
+            # Fallback mode: resolve from local JSON
+            resolved = strategy_resolver.resolve(strategy_id=req.strategy_id)
+            impl_key = resolved.definition.implementation_key
+            used_params = resolved.params
+            strategy_info_id = resolved.definition.id
+            strategy_info_name = resolved.definition.name
+            adapter = resolved.adapter
+        else:
+            raise ValueError("必须提供 implementation_key + params 或 strategy_id")
+
+        records = [{"date": b.date, "open": b.open, "high": b.high, "low": b.low, "close": b.close, "volume": b.volume} for b in req.bars]
+        bars_df = pd.DataFrame(records)
+        bars_df["date"] = pd.to_datetime(bars_df["date"])
+
+        enriched = adapter.attach_indicators(bars_df, used_params)
+        strategy_instance = adapter.build_strategy(enriched, used_params)
+        data_with_signals = strategy_instance.generate_signals()
+
+        latest_signal = str(data_with_signals["signal"].iloc[-1]).strip().lower()
+        if latest_signal not in ("buy", "sell"):
+            latest_signal = "hold"
+
+        # 构建触发原因
+        reason: Dict[str, Any] = {"kind": "strategy_signal", "message": f"策略评估结果: {latest_signal.upper()}"}
+        reason_builder = SIGNAL_REASON_BUILDERS.get(impl_key)
+        if reason_builder and latest_signal in ("buy", "sell"):
+            try:
+                reason = reason_builder(used_params, data_with_signals, latest_signal)
+            except Exception:
+                pass
+
+        # 计算评分（简单：buy/sell=1.0, hold=0）
+        score = 1.0 if latest_signal in ("buy", "sell") else 0.0
+
+        return {
+            "side": latest_signal.upper(),
+            "score": score,
+            "reason": reason,
+            "strategy": {
+                "id": strategy_info_id,
+                "name": strategy_info_name,
+                "implementation_key": impl_key,
+                "params": used_params,
+            },
+            "bars_count": len(req.bars),
+            "latest_date": req.bars[-1].date if req.bars else None,
+            "latest_close": req.bars[-1].close if req.bars else None,
+        }
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("信号评估异常 strategy_id=%s symbol=%s", req.strategy_id, req.symbol)
+        raise HTTPException(status_code=500, detail=f"信号评估失败: {exc}") from exc
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

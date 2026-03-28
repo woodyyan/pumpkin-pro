@@ -225,9 +225,13 @@ type MovingAveragesPayload struct {
 	LookbackDays       int          `json:"lookback_days"`
 	AsOf               string       `json:"as_of"`
 	PriceRef           float64      `json:"price_ref"`
+	MA5                float64      `json:"ma5"`
 	MA20               float64      `json:"ma20"`
+	MA60               float64      `json:"ma60"`
 	MA200              float64      `json:"ma200"`
+	DistanceToMA5Pct   float64      `json:"distance_to_ma5_pct"`
 	DistanceToMA20Pct  float64      `json:"distance_to_ma20_pct"`
+	DistanceToMA60Pct  float64      `json:"distance_to_ma60_pct"`
 	DistanceToMA200Pct float64      `json:"distance_to_ma200_pct"`
 	Status             string       `json:"status"`
 	SessionState       SessionState `json:"session_state"`

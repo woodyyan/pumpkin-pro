@@ -146,14 +146,20 @@ func (s *Service) GetMovingAverages(ctx context.Context, userID, symbol, period 
 		return nil, ErrDataSourceDown
 	}
 
+	ma5 := movingAverageClose(bars, 5)
 	ma20 := movingAverageClose(bars, 20)
+	ma60 := movingAverageClose(bars, 60)
 	ma200 := movingAverageClose(bars, 200)
 	if ma20 <= 0 || ma200 <= 0 {
 		return nil, ErrWarmupNotReady
 	}
 
-	distanceToMA20Pct := (lastBar.Close - ma20) / ma20 * 100
-	distanceToMA200Pct := (lastBar.Close - ma200) / ma200 * 100
+	distancePct := func(price, ma float64) float64 {
+		if ma <= 0 {
+			return 0
+		}
+		return (price - ma) / ma * 100
+	}
 
 	return &MovingAveragesPayload{
 		Symbol:             normalizedSymbol,
@@ -161,10 +167,14 @@ func (s *Service) GetMovingAverages(ctx context.Context, userID, symbol, period 
 		LookbackDays:       lookbackDays,
 		AsOf:               lastBar.Date,
 		PriceRef:           roundTo(lastBar.Close, 4),
+		MA5:                roundTo(ma5, 4),
 		MA20:               roundTo(ma20, 4),
+		MA60:               roundTo(ma60, 4),
 		MA200:              roundTo(ma200, 4),
-		DistanceToMA20Pct:  roundTo(distanceToMA20Pct, 2),
-		DistanceToMA200Pct: roundTo(distanceToMA200Pct, 2),
+		DistanceToMA5Pct:   roundTo(distancePct(lastBar.Close, ma5), 2),
+		DistanceToMA20Pct:  roundTo(distancePct(lastBar.Close, ma20), 2),
+		DistanceToMA60Pct:  roundTo(distancePct(lastBar.Close, ma60), 2),
+		DistanceToMA200Pct: roundTo(distancePct(lastBar.Close, ma200), 2),
 		Status:             classifyMAStatus(lastBar.Close, ma20, ma200),
 		SessionState:       s.resolveSessionState(userID),
 		UpdatedAt:          time.Now().UTC().Format(time.RFC3339),

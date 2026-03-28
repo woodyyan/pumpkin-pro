@@ -522,8 +522,8 @@ export default function LiveTradingDetailPage() {
         <section className="rounded-2xl border border-border bg-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-base font-semibold text-white">均线指标（MA20 / MA200）</h3>
-              <p className="mt-1 text-xs text-white/60">基于最近 {MA_LOOKBACK_DAYS} 个交易日收盘价计算。</p>
+              <h3 className="text-base font-semibold text-white">均线指标</h3>
+              <p className="mt-1 text-xs text-white/60">MA5 / MA20 / MA60 / MA200，基于最近 {MA_LOOKBACK_DAYS} 个交易日收盘价。</p>
             </div>
             <div className="text-xs text-white/55">
               {movingAveragePayload?.updated_at ? `更新：${formatDateTime(movingAveragePayload.updated_at)}` : '等待数据'}
@@ -533,12 +533,20 @@ export default function LiveTradingDetailPage() {
           {!movingAveragePayload ? (
             <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">暂无均线数据。</div>
           ) : (
-            <div className="mt-4 grid gap-3 md:grid-cols-5">
-              <MetricMini label="MA20" value={formatNumber(movingAveragePayload.ma20, 3)} accent={movingAveragePayload.price_ref >= movingAveragePayload.ma20 ? 'up' : 'down'} />
-              <MetricMini label="MA200" value={formatNumber(movingAveragePayload.ma200, 3)} accent={movingAveragePayload.price_ref >= movingAveragePayload.ma200 ? 'up' : 'down'} />
-              <MetricMini label="距 MA20" value={formatDistancePct(movingAveragePayload.distance_to_ma20_pct)} accent={movingAveragePayload.distance_to_ma20_pct >= 0 ? 'up' : 'down'} />
-              <MetricMini label="距 MA200" value={formatDistancePct(movingAveragePayload.distance_to_ma200_pct)} accent={movingAveragePayload.distance_to_ma200_pct >= 0 ? 'up' : 'down'} />
-              <MetricMini label="位置状态" value={formatMAStatus(movingAveragePayload.status)} accent={movingAverageStatusAccent} emphasis />
+            <div className="mt-4 space-y-3">
+              <div className="grid gap-3 md:grid-cols-4">
+                <MetricMini label="MA5" value={formatNumber(movingAveragePayload.ma5, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma5)} />
+                <MetricMini label="MA20" value={formatNumber(movingAveragePayload.ma20, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma20)} />
+                <MetricMini label="MA60" value={formatNumber(movingAveragePayload.ma60, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma60)} />
+                <MetricMini label="MA200" value={formatNumber(movingAveragePayload.ma200, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma200)} />
+              </div>
+              <div className="grid gap-3 md:grid-cols-5">
+                <MetricMini label="距 MA5" value={formatDistancePct(movingAveragePayload.distance_to_ma5_pct)} accent={movingAveragePayload.distance_to_ma5_pct >= 0 ? 'up' : 'down'} />
+                <MetricMini label="距 MA20" value={formatDistancePct(movingAveragePayload.distance_to_ma20_pct)} accent={movingAveragePayload.distance_to_ma20_pct >= 0 ? 'up' : 'down'} />
+                <MetricMini label="距 MA60" value={formatDistancePct(movingAveragePayload.distance_to_ma60_pct)} accent={movingAveragePayload.distance_to_ma60_pct >= 0 ? 'up' : 'down'} />
+                <MetricMini label="距 MA200" value={formatDistancePct(movingAveragePayload.distance_to_ma200_pct)} accent={movingAveragePayload.distance_to_ma200_pct >= 0 ? 'up' : 'down'} />
+                <MetricMini label="位置状态" value={formatMAStatus(movingAveragePayload.status)} accent={movingAverageStatusAccent} emphasis />
+              </div>
             </div>
           )}
         </section>
@@ -1191,6 +1199,11 @@ function formatResistanceLevelLabel(level, index = 0) {
 function formatMAStatus(status) {
   const map = { 双双站上: '价格高于 MA20 / MA200', 双双跌破: '价格低于 MA20 / MA200', '站上MA20但低于MA200': '短强长弱', '跌破MA20但高于MA200': '短弱长强' }
   return map[String(status || '').trim()] || String(status || '').trim() || '--'
+}
+
+function maAccent(priceRef, maValue) {
+  if (!maValue || maValue <= 0) return 'normal'
+  return priceRef >= maValue ? 'up' : 'down'
 }
 
 function formatStrategyCycleHint(strategy) {

@@ -35,17 +35,18 @@ const (
 )
 
 type quoteData struct {
-	Code       string
-	Name       string
-	Last       float64
-	PrevClose  float64
-	High       float64
-	Low        float64
-	Volume     float64
-	Turnover   float64
-	ChangePct  float64
-	VolumeRate float64
-	TS         time.Time
+	Code         string
+	Name         string
+	Last         float64
+	PrevClose    float64
+	High         float64
+	Low          float64
+	Volume       float64
+	Turnover     float64
+	ChangePct    float64
+	VolumeRate   float64
+	TurnoverRate float64
+	TS           time.Time
 }
 
 type MarketClient struct {
@@ -125,16 +126,17 @@ func buildSymbolSnapshot(normalized string, quote *quoteData) *SymbolSnapshot {
 		name = normalized
 	}
 	return &SymbolSnapshot{
-		Symbol:      normalized,
-		Name:        name,
-		LastPrice:   quote.Last,
-		ChangeRate:  quote.ChangePct / 100,
-		Volume:      quote.Volume,
-		Turnover:    quote.Turnover,
-		Amplitude:   amplitude,
-		VolumeRatio: quote.VolumeRate,
-		TS:          quote.TS.UTC().Format(time.RFC3339),
-		Source:      "tencent-qt",
+		Symbol:       normalized,
+		Name:         name,
+		LastPrice:    quote.Last,
+		ChangeRate:   quote.ChangePct / 100,
+		Volume:       quote.Volume,
+		Turnover:     quote.Turnover,
+		Amplitude:    amplitude,
+		VolumeRatio:  quote.VolumeRate,
+		TurnoverRate: quote.TurnoverRate,
+		TS:           quote.TS.UTC().Format(time.RFC3339),
+		Source:       "tencent-qt",
 	}
 }
 
@@ -647,6 +649,10 @@ func parseHKQuote(code string, fields []string) (*quoteData, error) {
 	if err != nil {
 		volumeRate = 0
 	}
+	turnoverRate := 0.0
+	if len(fields) > 47 {
+		turnoverRate, _ = parseFloat(fields[47])
+	}
 	ts, err := time.ParseInLocation("2006/01/02 15:04:05", strings.TrimSpace(fields[30]), time.Local)
 	if err != nil {
 		ts = time.Now()
@@ -661,17 +667,18 @@ func parseHKQuote(code string, fields []string) (*quoteData, error) {
 	}
 
 	return &quoteData{
-		Code:       code,
-		Name:       name,
-		Last:       math.Max(last, 0),
-		PrevClose:  math.Max(prevClose, 0),
-		High:       math.Max(high, 0),
-		Low:        math.Max(low, 0),
-		Volume:     math.Max(volume, 0),
-		Turnover:   math.Max(turnover, 0),
-		ChangePct:  changePct,
-		VolumeRate: math.Max(volumeRate, 0),
-		TS:         ts,
+		Code:         code,
+		Name:         name,
+		Last:         math.Max(last, 0),
+		PrevClose:    math.Max(prevClose, 0),
+		High:         math.Max(high, 0),
+		Low:          math.Max(low, 0),
+		Volume:       math.Max(volume, 0),
+		Turnover:     math.Max(turnover, 0),
+		ChangePct:    changePct,
+		VolumeRate:   math.Max(volumeRate, 0),
+		TurnoverRate: math.Max(turnoverRate, 0),
+		TS:           ts,
 	}, nil
 }
 
@@ -733,18 +740,24 @@ func parseAShareQuote(code string, fields []string) (*quoteData, error) {
 		name = strings.TrimSpace(fields[2])
 	}
 
+	turnoverRate := 0.0
+	if len(fields) > 38 {
+		turnoverRate, _ = parseFloat(fields[38])
+	}
+
 	return &quoteData{
-		Code:       code,
-		Name:       name,
-		Last:       math.Max(last, 0),
-		PrevClose:  math.Max(prevClose, 0),
-		High:       math.Max(high, 0),
-		Low:        math.Max(low, 0),
-		Volume:     math.Max(volume, 0),
-		Turnover:   math.Max(turnover, 0),
-		ChangePct:  changePct,
-		VolumeRate: 0,
-		TS:         ts,
+		Code:         code,
+		Name:         name,
+		Last:         math.Max(last, 0),
+		PrevClose:    math.Max(prevClose, 0),
+		High:         math.Max(high, 0),
+		Low:          math.Max(low, 0),
+		Volume:       math.Max(volume, 0),
+		Turnover:     math.Max(turnover, 0),
+		ChangePct:    changePct,
+		VolumeRate:   0,
+		TurnoverRate: math.Max(turnoverRate, 0),
+		TS:           ts,
 	}, nil
 }
 

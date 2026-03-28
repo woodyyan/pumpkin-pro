@@ -429,7 +429,7 @@ export default function LiveTradingDetailPage() {
           {!snapshot ? (
             <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">数据加载中...</div>
           ) : (
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
               <MetricMini
                 label="最新价"
                 value={formatNumber(snapshot.last_price, 3)}
@@ -442,6 +442,7 @@ export default function LiveTradingDetailPage() {
               <MetricMini label="成交量" value={formatCompact(snapshot.volume)} />
               <MetricMini label={`成交额(${isAShare ? 'CNY' : 'HKD'})`} value={formatCompact(snapshot.turnover)} />
               <MetricMini label="振幅" value={formatPercent(snapshot.amplitude)} />
+              <MetricMini label="换手率" value={formatTurnoverRate(snapshot.turnover_rate)} />
             </div>
           )}
         </section>
@@ -1080,6 +1081,11 @@ function formatNumberMaybeNull(value, digits = 2) {
 function formatCompact(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
   return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+}
+
+function formatTurnoverRate(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value)) || Number(value) <= 0) return '--'
+  return `${Number(value).toFixed(2)}%`
 }
 
 function formatYiAmount(value, currencySymbol = '') {

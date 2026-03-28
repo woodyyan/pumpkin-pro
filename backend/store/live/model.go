@@ -59,16 +59,17 @@ type MarketOverview struct {
 }
 
 type SymbolSnapshot struct {
-	Symbol      string  `json:"symbol"`
-	Name        string  `json:"name"`
-	LastPrice   float64 `json:"last_price"`
-	ChangeRate  float64 `json:"change_rate"`
-	Volume      float64 `json:"volume"`
-	Turnover    float64 `json:"turnover"`
-	Amplitude   float64 `json:"amplitude"`
-	VolumeRatio float64 `json:"volume_ratio"`
-	TS          string  `json:"ts"`
-	Source      string  `json:"source"`
+	Symbol       string  `json:"symbol"`
+	Name         string  `json:"name"`
+	LastPrice    float64 `json:"last_price"`
+	ChangeRate   float64 `json:"change_rate"`
+	Volume       float64 `json:"volume"`
+	Turnover     float64 `json:"turnover"`
+	Amplitude    float64 `json:"amplitude"`
+	VolumeRatio  float64 `json:"volume_ratio"`
+	TurnoverRate float64 `json:"turnover_rate"`
+	TS           string  `json:"ts"`
+	Source       string  `json:"source"`
 }
 
 type PriceVolumeAnomaly struct {

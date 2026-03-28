@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-03-27",
+  "last_updated": "2026-03-28",
   "manual_entry_template": {
     "date": "YYYY-MM-DD",
     "type": "新功能",
@@ -11,6 +11,15 @@
     "visible": true
   },
   "items": [
+    {
+      "date": "2026-03-28",
+      "type": "新功能",
+      "title": "个股详情页新增换手率指标",
+      "summary": "行情看板个股详情页的实时快照区新增换手率指标，A 股和港股均已支持，与最新价、涨跌幅、量比、成交量、成交额、振幅并列展示。",
+      "scope": "行情看板 / 后端 / 前端",
+      "raw_subject": "feat(live): add turnover rate to symbol snapshot",
+      "visible": true
+    },
     {
       "date": "2026-03-27",
       "type": "新功能",

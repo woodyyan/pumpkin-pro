@@ -21,6 +21,7 @@ CODE_ALIASES = ["股票代码", "代码", "证券代码"]
 REVENUE_ALIASES = ["营业总收入-营业总收入", "营业收入-营业收入", "营业总收入", "营业收入"]
 NET_PROFIT_ALIASES = ["净利润-净利润", "归母净利润-净利润", "净利润", "归母净利润"]
 GROSS_MARGIN_ALIASES = ["销售毛利率", "毛利率"]
+PROFIT_GROWTH_ALIASES = ["净利润-同比增长", "净利润同比增长", "归母净利润-同比增长"]
 ANNOUNCEMENT_ALIASES = ["最新公告日期", "公告日期", "业绩披露日期"]
 QQ_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -134,11 +135,14 @@ def build_hk_payload(symbol: str, code: str) -> Dict[str, Any]:
         "market_cap": market_cap,
         "dividend_yield": dividend_yield,
         "pe_ttm": pe_ttm,
+        "pb_ttm": hk_metrics.get("pb_ttm"),
         "net_profit_fy": hk_metrics.get("net_profit_fy"),
         "revenue_fy": hk_metrics.get("revenue_fy"),
         "float_shares": hk_metrics.get("float_shares"),
         "gross_margin": None,
         "net_margin": hk_metrics.get("net_margin"),
+        "profit_growth_rate": hk_metrics.get("profit_growth_rate"),
+        "peg": _calculate_peg(pe_ttm, hk_metrics.get("profit_growth_rate")),
     }
 
     if all(value is None for value in items.values()):
@@ -213,15 +217,21 @@ def build_a_share_payload(symbol: str, exchange: str, code: str) -> Dict[str, An
     if market_cap and net_profit_ttm and net_profit_ttm > 0:
         pe_ttm = market_cap / net_profit_ttm
 
+    pb_ttm = to_float(info_map.get("市净率"))
+    profit_growth_rate = financials.get("profit_growth_rate") if financials else None
+
     items = {
         "market_cap": market_cap,
         "dividend_yield": dividend.get("dividend_yield") if dividend else None,
         "pe_ttm": normalize_float(pe_ttm),
+        "pb_ttm": pb_ttm,
         "net_profit_fy": financials.get("net_profit_fy") if financials else None,
         "revenue_fy": financials.get("revenue_fy") if financials else None,
         "float_shares": float_shares,
         "gross_margin": financials.get("gross_margin") if financials else None,
         "net_margin": financials.get("net_margin") if financials else None,
+        "profit_growth_rate": profit_growth_rate,
+        "peg": _calculate_peg(normalize_float(pe_ttm), profit_growth_rate),
     }
 
     if all(value is None for value in items.values()):
@@ -322,10 +332,12 @@ def fetch_hk_core_metrics(code: str) -> Dict[str, Any]:
         "market_cap": normalize_float(row.get("TOTAL_MARKET_CAP")) or normalize_float(row.get("HKSK_MARKET_CAP")),
         "dividend_yield": normalize_dividend_yield(row.get("DIVIDEND_RATE")),
         "pe_ttm": normalize_float(row.get("PE_TTM")),
+        "pb_ttm": normalize_float(row.get("PB_TTM")),
         "net_profit_fy": normalize_float(row.get("HOLDER_PROFIT")),
         "revenue_fy": normalize_float(row.get("OPERATE_INCOME")),
         "float_shares": normalize_float(row.get("HK_COMMON_SHARES")) or normalize_float(row.get("ISSUED_COMMON_SHARES")),
         "net_margin": normalize_float(row.get("NET_PROFIT_RATIO")),
+        "profit_growth_rate": normalize_float(row.get("HOLDER_PROFIT_QOQ")),
         "fy_report_date": report_date,
         "ttm_report_date": report_date,
     }
@@ -388,6 +400,9 @@ def get_financial_metrics(code: str) -> Dict[str, Any]:
     if fy_revenue and fy_net_profit and fy_revenue > 0:
         fy_net_margin = round(fy_net_profit / fy_revenue * 100, 2)
 
+    # 净利润同比增长率：直接从最近报告期取
+    profit_growth_rate = normalize_float(latest_row.get("profit_growth_rate"))
+
     return {
         "ttm_report_date": format_report_date(latest_date),
         "fy_report_date": format_report_date(fy_date) if fy_date else format_report_date(latest_date),
@@ -397,6 +412,7 @@ def get_financial_metrics(code: str) -> Dict[str, Any]:
         "net_profit_ttm": net_profit_ttm,
         "gross_margin": fy_gross_margin,
         "net_margin": fy_net_margin,
+        "profit_growth_rate": profit_growth_rate,
         "announcement_date": latest_row.get("announcement_date"),
     }
 
@@ -415,6 +431,7 @@ def get_symbol_report_row(code: str, report_date: str) -> Optional[Dict[str, Any
         "revenue": normalize_float(row.get("revenue")),
         "net_profit": normalize_float(row.get("net_profit")),
         "gross_margin": normalize_float(row.get("gross_margin")),
+        "profit_growth_rate": normalize_float(row.get("profit_growth_rate")),
         "announcement_date": normalize_date(row.get("announcement_date")),
     }
 
@@ -429,23 +446,25 @@ def get_report_frame(report_date: str) -> pd.DataFrame:
 
     raw_df = ak.stock_yjbb_em(date=report_date)
     if raw_df is None or raw_df.empty:
-        prepared = pd.DataFrame(columns=["code", "revenue", "net_profit", "gross_margin", "announcement_date"])
+        prepared = pd.DataFrame(columns=["code", "revenue", "net_profit", "gross_margin", "profit_growth_rate", "announcement_date"])
     else:
         code_column = find_column(raw_df, CODE_ALIASES)
         revenue_column = find_column(raw_df, REVENUE_ALIASES)
         profit_column = find_column(raw_df, NET_PROFIT_ALIASES)
         gross_margin_column = find_column(raw_df, GROSS_MARGIN_ALIASES)
+        profit_growth_column = find_column(raw_df, PROFIT_GROWTH_ALIASES)
         announcement_column = find_column(raw_df, ANNOUNCEMENT_ALIASES)
         if not code_column:
-            prepared = pd.DataFrame(columns=["code", "revenue", "net_profit", "gross_margin", "announcement_date"])
+            prepared = pd.DataFrame(columns=["code", "revenue", "net_profit", "gross_margin", "profit_growth_rate", "announcement_date"])
         else:
             frame = pd.DataFrame()
             frame["code"] = raw_df[code_column].astype(str).str.zfill(6)
             frame["revenue"] = pd.to_numeric(raw_df[revenue_column], errors="coerce") if revenue_column else pd.NA
             frame["net_profit"] = pd.to_numeric(raw_df[profit_column], errors="coerce") if profit_column else pd.NA
             frame["gross_margin"] = pd.to_numeric(raw_df[gross_margin_column], errors="coerce") if gross_margin_column else pd.NA
+            frame["profit_growth_rate"] = pd.to_numeric(raw_df[profit_growth_column], errors="coerce") if profit_growth_column else pd.NA
             frame["announcement_date"] = pd.to_datetime(raw_df[announcement_column], errors="coerce") if announcement_column else pd.NaT
-            prepared = frame[["code", "revenue", "net_profit", "gross_margin", "announcement_date"]].drop_duplicates(subset=["code"], keep="first")
+            prepared = frame[["code", "revenue", "net_profit", "gross_margin", "profit_growth_rate", "announcement_date"]].drop_duplicates(subset=["code"], keep="first")
 
     with _CACHE_LOCK:
         _REPORT_CACHE[report_date] = prepared
@@ -582,6 +601,16 @@ def first_non_empty(*values: Any) -> Optional[str]:
         if text:
             return text
     return None
+
+
+
+def _calculate_peg(pe_ttm: Optional[float], profit_growth_rate: Optional[float]) -> Optional[float]:
+    """PEG = PE(TTM) / 净利润同比增长率(%)。增长率 ≤ 0 时不可计算。"""
+    if pe_ttm is None or profit_growth_rate is None:
+        return None
+    if profit_growth_rate <= 0:
+        return None
+    return round(pe_ttm / profit_growth_rate, 2)
 
 
 

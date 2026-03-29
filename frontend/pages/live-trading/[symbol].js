@@ -468,10 +468,12 @@ export default function LiveTradingDetailPage() {
           {!fundamentalsPayload && fundamentalsLoading ? (
             <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">基础面数据加载中...</div>
           ) : (
-            <div className="mt-4 grid gap-3 md:grid-cols-4">
+            <div className="mt-4 grid gap-3 md:grid-cols-5">
               <MetricMini label={`市值(${fundamentalsCurrencyCode})`} value={formatYiCurrency(fundamentalsItems.market_cap, fundamentalsCurrencySymbol)} emphasis tooltip="公司所有流通股按当前价格计算的总价值。市值越大，公司规模越大。" />
               <MetricMini label="股息收益率" value={formatPercentMaybeNull(fundamentalsItems.dividend_yield)} tooltip="过去一年的每股分红金额占当前股价的比例。收益率越高，分红回报越好。" />
               <MetricMini label="市盈率(TTM)" value={formatMultiple(fundamentalsItems.pe_ttm)} tooltip="当前股价是过去 12 个月每股利润的多少倍。市盈率越低，可能越「便宜」；越高可能表示市场对未来增长的期望越大。" />
+              <MetricMini label="市净率(PB)" value={formatMultiple(fundamentalsItems.pb_ttm)} tooltip="当前股价是每股净资产的多少倍。PB 越低，说明股价相对账面价值越「便宜」；PB < 1 意味着股价低于净资产（可能被低估，也可能反映经营困难）。" />
+              <MetricMini label="PEG" value={formatPEG(fundamentalsItems.peg)} accent={pegAccent(fundamentalsItems.peg)} tooltip="市盈率与盈利增长率的比值（PEG = PE / 净利润增长率%）。PEG < 1 通常被认为低估（成长性好且估值合理），PEG > 2 可能偏贵。增长率为负时不可计算。" />
               <MetricMini label="流通股" value={formatYiShares(fundamentalsItems.float_shares)} tooltip="目前在市场上可以自由买卖的股票总数。流通股越少，股价越容易被大资金影响。" />
               <MetricMini label={`净利润(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.net_profit_fy, fundamentalsCurrencySymbol)} tooltip="公司在报告期内扣除所有成本和税费后的最终利润。这是衡量公司赚钱能力的核心指标。" />
               <MetricMini label={`收入(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.revenue_fy, fundamentalsCurrencySymbol)} tooltip="公司在报告期内的总营业收入（卖出产品或服务获得的钱）。收入增长通常意味着公司业务在扩张。" />
@@ -1303,6 +1305,18 @@ function formatYiShares(value) {
 function formatMultiple(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
   return `${Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 倍`
+}
+
+function formatPEG(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+}
+
+function pegAccent(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'normal'
+  if (value < 1) return 'up'
+  if (value > 2) return 'down'
+  return 'normal'
 }
 
 function buildFundamentalsReportLabel(meta) {

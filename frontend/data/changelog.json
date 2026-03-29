@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-03-28",
+  "last_updated": "2026-03-29",
   "manual_entry_template": {
     "date": "YYYY-MM-DD",
     "type": "新功能",
@@ -11,6 +11,15 @@
     "visible": true
   },
   "items": [
+    {
+      "date": "2026-03-29",
+      "type": "新功能",
+      "title": "基础面新增毛利率与净利率指标",
+      "summary": "个股详情页基础面概览新增毛利率和净利率两项盈利能力指标。A 股两项均已支持，港股净利率已支持、毛利率因数据源限制暂显示为 --。",
+      "scope": "行情看板 / 量化服务 / 前端",
+      "raw_subject": "feat(live): add gross margin and net margin to fundamentals",
+      "visible": true
+    },
     {
       "date": "2026-03-28",
       "type": "新功能",

@@ -468,13 +468,15 @@ export default function LiveTradingDetailPage() {
           {!fundamentalsPayload && fundamentalsLoading ? (
             <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">基础面数据加载中...</div>
           ) : (
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
               <MetricMini label={`市值(${fundamentalsCurrencyCode})`} value={formatYiCurrency(fundamentalsItems.market_cap, fundamentalsCurrencySymbol)} emphasis />
               <MetricMini label="股息收益率" value={formatPercentMaybeNull(fundamentalsItems.dividend_yield)} />
               <MetricMini label="市盈率(TTM)" value={formatMultiple(fundamentalsItems.pe_ttm)} />
+              <MetricMini label="流通股" value={formatYiShares(fundamentalsItems.float_shares)} />
               <MetricMini label={`净利润(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.net_profit_fy, fundamentalsCurrencySymbol)} />
               <MetricMini label={`收入(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.revenue_fy, fundamentalsCurrencySymbol)} />
-              <MetricMini label="流通股" value={formatYiShares(fundamentalsItems.float_shares)} />
+              <MetricMini label="毛利率" value={formatPercentDirect(fundamentalsItems.gross_margin)} />
+              <MetricMini label="净利率" value={formatPercentDirect(fundamentalsItems.net_margin)} />
             </div>
           )}
         </section>
@@ -1093,6 +1095,11 @@ function formatCompact(value) {
 
 function formatTurnoverRate(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value)) || Number(value) <= 0) return '--'
+  return `${Number(value).toFixed(2)}%`
+}
+
+function formatPercentDirect(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
   return `${Number(value).toFixed(2)}%`
 }
 

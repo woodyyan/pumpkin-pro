@@ -20,6 +20,7 @@ _CACHE_DAY = ""
 CODE_ALIASES = ["股票代码", "代码", "证券代码"]
 REVENUE_ALIASES = ["营业总收入-营业总收入", "营业收入-营业收入", "营业总收入", "营业收入"]
 NET_PROFIT_ALIASES = ["净利润-净利润", "归母净利润-净利润", "净利润", "归母净利润"]
+GROSS_MARGIN_ALIASES = ["销售毛利率", "毛利率"]
 ANNOUNCEMENT_ALIASES = ["最新公告日期", "公告日期", "业绩披露日期"]
 QQ_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -136,6 +137,8 @@ def build_hk_payload(symbol: str, code: str) -> Dict[str, Any]:
         "net_profit_fy": hk_metrics.get("net_profit_fy"),
         "revenue_fy": hk_metrics.get("revenue_fy"),
         "float_shares": hk_metrics.get("float_shares"),
+        "gross_margin": None,
+        "net_margin": hk_metrics.get("net_margin"),
     }
 
     if all(value is None for value in items.values()):
@@ -217,6 +220,8 @@ def build_a_share_payload(symbol: str, exchange: str, code: str) -> Dict[str, An
         "net_profit_fy": financials.get("net_profit_fy") if financials else None,
         "revenue_fy": financials.get("revenue_fy") if financials else None,
         "float_shares": float_shares,
+        "gross_margin": financials.get("gross_margin") if financials else None,
+        "net_margin": financials.get("net_margin") if financials else None,
     }
 
     if all(value is None for value in items.values()):
@@ -320,6 +325,7 @@ def fetch_hk_core_metrics(code: str) -> Dict[str, Any]:
         "net_profit_fy": normalize_float(row.get("HOLDER_PROFIT")),
         "revenue_fy": normalize_float(row.get("OPERATE_INCOME")),
         "float_shares": normalize_float(row.get("HK_COMMON_SHARES")) or normalize_float(row.get("ISSUED_COMMON_SHARES")),
+        "net_margin": normalize_float(row.get("NET_PROFIT_RATIO")),
         "fy_report_date": report_date,
         "ttm_report_date": report_date,
     }
@@ -372,6 +378,16 @@ def get_financial_metrics(code: str) -> Dict[str, Any]:
     revenue_ttm = calculate_ttm(rows, latest_date, "revenue")
     net_profit_ttm = calculate_ttm(rows, latest_date, "net_profit")
 
+    # 毛利率：直接从报告期取
+    fy_gross_margin = normalize_float(fy_row.get("gross_margin")) if fy_row else normalize_float(latest_row.get("gross_margin"))
+
+    # 净利率：从净利润/收入计算
+    fy_revenue = fy_row.get("revenue") if fy_row else latest_row.get("revenue")
+    fy_net_profit = fy_row.get("net_profit") if fy_row else latest_row.get("net_profit")
+    fy_net_margin = None
+    if fy_revenue and fy_net_profit and fy_revenue > 0:
+        fy_net_margin = round(fy_net_profit / fy_revenue * 100, 2)
+
     return {
         "ttm_report_date": format_report_date(latest_date),
         "fy_report_date": format_report_date(fy_date) if fy_date else format_report_date(latest_date),
@@ -379,6 +395,8 @@ def get_financial_metrics(code: str) -> Dict[str, Any]:
         "net_profit_fy": fy_row.get("net_profit") if fy_row else latest_row.get("net_profit"),
         "revenue_ttm": revenue_ttm,
         "net_profit_ttm": net_profit_ttm,
+        "gross_margin": fy_gross_margin,
+        "net_margin": fy_net_margin,
         "announcement_date": latest_row.get("announcement_date"),
     }
 
@@ -396,6 +414,7 @@ def get_symbol_report_row(code: str, report_date: str) -> Optional[Dict[str, Any
         "report_date": report_date,
         "revenue": normalize_float(row.get("revenue")),
         "net_profit": normalize_float(row.get("net_profit")),
+        "gross_margin": normalize_float(row.get("gross_margin")),
         "announcement_date": normalize_date(row.get("announcement_date")),
     }
 
@@ -410,21 +429,23 @@ def get_report_frame(report_date: str) -> pd.DataFrame:
 
     raw_df = ak.stock_yjbb_em(date=report_date)
     if raw_df is None or raw_df.empty:
-        prepared = pd.DataFrame(columns=["code", "revenue", "net_profit", "announcement_date"])
+        prepared = pd.DataFrame(columns=["code", "revenue", "net_profit", "gross_margin", "announcement_date"])
     else:
         code_column = find_column(raw_df, CODE_ALIASES)
         revenue_column = find_column(raw_df, REVENUE_ALIASES)
         profit_column = find_column(raw_df, NET_PROFIT_ALIASES)
+        gross_margin_column = find_column(raw_df, GROSS_MARGIN_ALIASES)
         announcement_column = find_column(raw_df, ANNOUNCEMENT_ALIASES)
         if not code_column:
-            prepared = pd.DataFrame(columns=["code", "revenue", "net_profit", "announcement_date"])
+            prepared = pd.DataFrame(columns=["code", "revenue", "net_profit", "gross_margin", "announcement_date"])
         else:
             frame = pd.DataFrame()
             frame["code"] = raw_df[code_column].astype(str).str.zfill(6)
             frame["revenue"] = pd.to_numeric(raw_df[revenue_column], errors="coerce") if revenue_column else pd.NA
             frame["net_profit"] = pd.to_numeric(raw_df[profit_column], errors="coerce") if profit_column else pd.NA
+            frame["gross_margin"] = pd.to_numeric(raw_df[gross_margin_column], errors="coerce") if gross_margin_column else pd.NA
             frame["announcement_date"] = pd.to_datetime(raw_df[announcement_column], errors="coerce") if announcement_column else pd.NaT
-            prepared = frame[["code", "revenue", "net_profit", "announcement_date"]].drop_duplicates(subset=["code"], keep="first")
+            prepared = frame[["code", "revenue", "net_profit", "gross_margin", "announcement_date"]].drop_duplicates(subset=["code"], keep="first")
 
     with _CACHE_LOCK:
         _REPORT_CACHE[report_date] = prepared

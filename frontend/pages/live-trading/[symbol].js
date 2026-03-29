@@ -437,12 +437,12 @@ export default function LiveTradingDetailPage() {
                 featured
                 marketAccent
               />
-              <MetricMini label="涨跌幅" value={formatPercent(snapshot.change_rate)} accent={snapshot.change_rate >= 0 ? 'up' : 'down'} />
-              <MetricMini label="量比" value={formatNumber(snapshot.volume_ratio, 2)} />
-              <MetricMini label="成交量" value={formatCompact(snapshot.volume)} />
-              <MetricMini label={`成交额(${isAShare ? 'CNY' : 'HKD'})`} value={formatCompact(snapshot.turnover)} />
-              <MetricMini label="振幅" value={formatPercent(snapshot.amplitude)} />
-              <MetricMini label="换手率" value={formatTurnoverRate(snapshot.turnover_rate)} />
+              <MetricMini label="涨跌幅" value={formatPercent(snapshot.change_rate)} accent={snapshot.change_rate >= 0 ? 'up' : 'down'} tooltip="今日价格相比昨日收盘价的变化百分比。红色表示上涨，绿色表示下跌。" />
+              <MetricMini label="量比" value={formatNumber(snapshot.volume_ratio, 2)} tooltip="当前成交量与过去 5 日同时段平均成交量的比值。大于 1 说明今天比平时活跃，越大越异常。" />
+              <MetricMini label="成交量" value={formatCompact(snapshot.volume)} tooltip="今日到目前为止的总成交股数（或手数），反映市场参与的活跃程度。" />
+              <MetricMini label={`成交额(${isAShare ? 'CNY' : 'HKD'})`} value={formatCompact(snapshot.turnover)} tooltip="今日到目前为止的总成交金额，比成交量更能反映真实的资金参与规模。" />
+              <MetricMini label="振幅" value={formatPercent(snapshot.amplitude)} tooltip="今日最高价与最低价之间的波动幅度占昨收价的百分比。振幅越大，说明今天价格波动越剧烈。" />
+              <MetricMini label="换手率" value={formatTurnoverRate(snapshot.turnover_rate)} tooltip="今日成交股数占流通股总数的百分比。换手率越高，说明交易越活跃、筹码流动越快。" />
             </div>
           )}
         </section>
@@ -469,14 +469,14 @@ export default function LiveTradingDetailPage() {
             <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">基础面数据加载中...</div>
           ) : (
             <div className="mt-4 grid gap-3 md:grid-cols-4">
-              <MetricMini label={`市值(${fundamentalsCurrencyCode})`} value={formatYiCurrency(fundamentalsItems.market_cap, fundamentalsCurrencySymbol)} emphasis />
-              <MetricMini label="股息收益率" value={formatPercentMaybeNull(fundamentalsItems.dividend_yield)} />
-              <MetricMini label="市盈率(TTM)" value={formatMultiple(fundamentalsItems.pe_ttm)} />
-              <MetricMini label="流通股" value={formatYiShares(fundamentalsItems.float_shares)} />
-              <MetricMini label={`净利润(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.net_profit_fy, fundamentalsCurrencySymbol)} />
-              <MetricMini label={`收入(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.revenue_fy, fundamentalsCurrencySymbol)} />
-              <MetricMini label="毛利率" value={formatPercentDirect(fundamentalsItems.gross_margin)} />
-              <MetricMini label="净利率" value={formatPercentDirect(fundamentalsItems.net_margin)} />
+              <MetricMini label={`市值(${fundamentalsCurrencyCode})`} value={formatYiCurrency(fundamentalsItems.market_cap, fundamentalsCurrencySymbol)} emphasis tooltip="公司所有流通股按当前价格计算的总价值。市值越大，公司规模越大。" />
+              <MetricMini label="股息收益率" value={formatPercentMaybeNull(fundamentalsItems.dividend_yield)} tooltip="过去一年的每股分红金额占当前股价的比例。收益率越高，分红回报越好。" />
+              <MetricMini label="市盈率(TTM)" value={formatMultiple(fundamentalsItems.pe_ttm)} tooltip="当前股价是过去 12 个月每股利润的多少倍。市盈率越低，可能越「便宜」；越高可能表示市场对未来增长的期望越大。" />
+              <MetricMini label="流通股" value={formatYiShares(fundamentalsItems.float_shares)} tooltip="目前在市场上可以自由买卖的股票总数。流通股越少，股价越容易被大资金影响。" />
+              <MetricMini label={`净利润(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.net_profit_fy, fundamentalsCurrencySymbol)} tooltip="公司在报告期内扣除所有成本和税费后的最终利润。这是衡量公司赚钱能力的核心指标。" />
+              <MetricMini label={`收入(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.revenue_fy, fundamentalsCurrencySymbol)} tooltip="公司在报告期内的总营业收入（卖出产品或服务获得的钱）。收入增长通常意味着公司业务在扩张。" />
+              <MetricMini label="毛利率" value={formatPercentDirect(fundamentalsItems.gross_margin)} tooltip="收入减去直接成本后剩余的利润占收入的比例。毛利率越高，说明产品或服务的附加值越大。" />
+              <MetricMini label="净利率" value={formatPercentDirect(fundamentalsItems.net_margin)} tooltip="净利润占总收入的比例。净利率越高，说明公司每赚 1 块钱中能留下的利润越多。" />
             </div>
           )}
         </section>
@@ -537,21 +537,21 @@ export default function LiveTradingDetailPage() {
           ) : (
             <div className="mt-4 space-y-3">
               <div className="grid gap-3 md:grid-cols-4">
-                <MetricMini label="MA5" value={formatNumber(movingAveragePayload.ma5, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma5)} />
-                <MetricMini label="MA20" value={formatNumber(movingAveragePayload.ma20, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma20)} />
-                <MetricMini label="MA60" value={formatNumber(movingAveragePayload.ma60, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma60)} />
-                <MetricMini label="MA200" value={formatNumber(movingAveragePayload.ma200, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma200)} />
+                <MetricMini label="MA5" value={formatNumber(movingAveragePayload.ma5, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma5)} tooltip="最近 5 个交易日收盘价的平均值，反映超短线趋势。价格在 MA5 上方通常偏强。" />
+                <MetricMini label="MA20" value={formatNumber(movingAveragePayload.ma20, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma20)} tooltip="最近 20 个交易日（约 1 个月）收盘价均值，常用来判断短线趋势方向。" />
+                <MetricMini label="MA60" value={formatNumber(movingAveragePayload.ma60, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma60)} tooltip="最近 60 个交易日（约 3 个月）收盘价均值，反映中线趋势。常被称为「生命线」。" />
+                <MetricMini label="MA200" value={formatNumber(movingAveragePayload.ma200, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma200)} tooltip="最近 200 个交易日（约 1 年）收盘价均值，反映长线趋势。价格站上 MA200 通常被视为牛市信号。" />
               </div>
               <div className="grid gap-3 md:grid-cols-5">
-                <MetricMini label="距 MA5" value={formatDistancePct(movingAveragePayload.distance_to_ma5_pct)} accent={movingAveragePayload.distance_to_ma5_pct >= 0 ? 'up' : 'down'} />
-                <MetricMini label="距 MA20" value={formatDistancePct(movingAveragePayload.distance_to_ma20_pct)} accent={movingAveragePayload.distance_to_ma20_pct >= 0 ? 'up' : 'down'} />
-                <MetricMini label="距 MA60" value={formatDistancePct(movingAveragePayload.distance_to_ma60_pct)} accent={movingAveragePayload.distance_to_ma60_pct >= 0 ? 'up' : 'down'} />
-                <MetricMini label="距 MA200" value={formatDistancePct(movingAveragePayload.distance_to_ma200_pct)} accent={movingAveragePayload.distance_to_ma200_pct >= 0 ? 'up' : 'down'} />
-                <MetricMini label="位置状态" value={formatMAStatus(movingAveragePayload.status)} accent={movingAverageStatusAccent} emphasis />
+                <MetricMini label="距 MA5" value={formatDistancePct(movingAveragePayload.distance_to_ma5_pct)} accent={movingAveragePayload.distance_to_ma5_pct >= 0 ? 'up' : 'down'} tooltip="当前价格偏离 MA5 的程度。正值说明价格在均线上方，负值说明在下方。偏离越大，回归的可能性越高。" />
+                <MetricMini label="距 MA20" value={formatDistancePct(movingAveragePayload.distance_to_ma20_pct)} accent={movingAveragePayload.distance_to_ma20_pct >= 0 ? 'up' : 'down'} tooltip="当前价格偏离 MA20 的程度。偏离过大可能意味着短期涨跌过快，有修正的可能。" />
+                <MetricMini label="距 MA60" value={formatDistancePct(movingAveragePayload.distance_to_ma60_pct)} accent={movingAveragePayload.distance_to_ma60_pct >= 0 ? 'up' : 'down'} tooltip="当前价格偏离 MA60 的程度。偏离 MA60 过远通常意味着中线超涨或超跌。" />
+                <MetricMini label="距 MA200" value={formatDistancePct(movingAveragePayload.distance_to_ma200_pct)} accent={movingAveragePayload.distance_to_ma200_pct >= 0 ? 'up' : 'down'} tooltip="当前价格偏离 MA200 的程度。正值越大说明长线涨幅越多，负值越大说明长线偏弱。" />
+                <MetricMini label="位置状态" value={formatMAStatus(movingAveragePayload.status)} accent={movingAverageStatusAccent} emphasis tooltip="当前价格相对 MA20 和 MA200 的位置组合。「双双站上」意味着短线和长线都偏强，「双双跌破」则都偏弱。" />
               </div>
               <div className="grid gap-3 md:grid-cols-2">
-                <MetricMini label="RSI(14)" value={formatNumber(movingAveragePayload.rsi14, 2)} accent={rsiAccent(movingAveragePayload.rsi14)} />
-                <MetricMini label="RSI 状态" value={movingAveragePayload.rsi14_status || '--'} accent={rsiAccent(movingAveragePayload.rsi14)} emphasis />
+                <MetricMini label="RSI(14)" value={formatNumber(movingAveragePayload.rsi14, 2)} accent={rsiAccent(movingAveragePayload.rsi14)} tooltip="衡量最近 14 个交易日涨跌动能的指标，范围 0~100。≥70 为超买（可能回调），≤30 为超卖（可能反弹），50 附近为中性。" />
+                <MetricMini label="RSI 状态" value={movingAveragePayload.rsi14_status || '--'} accent={rsiAccent(movingAveragePayload.rsi14)} emphasis tooltip="基于 RSI 数值的市场情绪判断。超买意味着短期涨太多可能要歇一歇，超卖意味着跌太多可能要反弹。" />
               </div>
             </div>
           )}
@@ -570,8 +570,8 @@ export default function LiveTradingDetailPage() {
               <OverlayIntradayChart series={overlayPayload.series} benchmark={overlayPayload.benchmark} symbol={overlayPayload.symbol} />
               <div className="grid gap-3 md:grid-cols-4">
                 <MetricMini label="基准指数" value={overlayPayload.benchmark || 'HSI'} />
-                <MetricMini label="Beta" value={formatNumberMaybeNull(overlayPayload?.metrics?.beta, 3)} accent={overlayPayload?.metrics?.beta != null && overlayPayload.metrics.beta >= 1 ? 'up' : 'normal'} />
-                <MetricMini label="Relative Strength" value={formatPercentMaybeNull(overlayPayload?.metrics?.relative_strength)} accent={overlayPayload?.metrics?.relative_strength != null && overlayPayload.metrics.relative_strength >= 0 ? 'up' : 'down'} />
+                <MetricMini label="Beta" value={formatNumberMaybeNull(overlayPayload?.metrics?.beta, 3)} accent={overlayPayload?.metrics?.beta != null && overlayPayload.metrics.beta >= 1 ? 'up' : 'normal'} tooltip="衡量该股票相对大盘的波动程度。Beta=1 表示与大盘同步；>1 表示波动比大盘大（更激进）；<1 表示波动比大盘小（更稳健）。" />
+                <MetricMini label="Relative Strength" value={formatPercentMaybeNull(overlayPayload?.metrics?.relative_strength)} accent={overlayPayload?.metrics?.relative_strength != null && overlayPayload.metrics.relative_strength >= 0 ? 'up' : 'down'} tooltip="该股票在同时段内相对大盘的强弱表现。正值说明跑赢大盘，负值说明跑输大盘。" />
                 <MetricMini label="样本状态" value={`${overlayPayload?.metrics?.sample_count || 0}/${overlayPayload?.metrics?.warmup_min_samples || 30} · ${overlayPayload?.metrics?.is_warmup ? '预热中' : '可用'}`} accent={overlayPayload?.metrics?.is_warmup ? 'normal' : 'up'} />
               </div>
             </div>
@@ -590,10 +590,10 @@ export default function LiveTradingDetailPage() {
           ) : (
             <div className="mt-4 space-y-4">
               <div className="grid gap-3 md:grid-cols-4">
-                <MetricMini label="最近支撑位" value={supportSummary.nearest_price ? formatNumber(supportSummary.nearest_price, 3) : '--'} accent={supportStatusAccent} emphasis />
-                <MetricMini label="距最近支撑位" value={formatDistancePct(supportSummary.distance_pct)} accent={supportSummary.distance_pct >= 0 ? 'normal' : 'down'} />
-                <MetricMini label="支撑强度" value={supportSummary.strength || '--'} accent={supportSummary.strength === '强' ? 'up' : supportSummary.strength === '弱' ? 'down' : 'normal'} />
-                <MetricMini label="支撑状态" value={formatSupportStatus(supportSummary.status)} accent={supportStatusAccent} emphasis />
+                <MetricMini label="最近支撑位" value={supportSummary.nearest_price ? formatNumber(supportSummary.nearest_price, 3) : '--'} accent={supportStatusAccent} emphasis tooltip="距离当前价格最近的一个支撑价位。历史上价格多次在这个位置附近止跌回升。" />
+                <MetricMini label="距最近支撑位" value={formatDistancePct(supportSummary.distance_pct)} accent={supportSummary.distance_pct >= 0 ? 'normal' : 'down'} tooltip="当前价格与最近支撑位之间的距离百分比。负值说明已经跌破支撑。" />
+                <MetricMini label="支撑强度" value={supportSummary.strength || '--'} accent={supportSummary.strength === '强' ? 'up' : supportSummary.strength === '弱' ? 'down' : 'normal'} tooltip="该支撑位的可靠程度。强度越高，价格在此位置止跌的可能性越大。" />
+                <MetricMini label="支撑状态" value={formatSupportStatus(supportSummary.status)} accent={supportStatusAccent} emphasis tooltip="当前价格与支撑位的关系。例如「接近支撑区」说明价格快要触碰支撑，「跌破支撑区」说明支撑已失效。" />
               </div>
               <div className="space-y-2">
                 {supportLevels.map((level, i) => (
@@ -616,10 +616,10 @@ export default function LiveTradingDetailPage() {
           ) : (
             <div className="mt-4 space-y-4">
               <div className="grid gap-3 md:grid-cols-4">
-                <MetricMini label="最近压力位" value={resistanceSummary.nearest_price ? formatNumber(resistanceSummary.nearest_price, 3) : '--'} accent={resistanceStatusAccent} emphasis />
-                <MetricMini label="距最近压力位" value={formatDistancePct(resistanceSummary.distance_pct)} accent={resistanceSummary.distance_pct >= 0 ? 'normal' : 'up'} />
-                <MetricMini label="压力强度" value={resistanceSummary.strength || '--'} accent={resistanceSummary.strength === '强' ? 'down' : resistanceSummary.strength === '弱' ? 'up' : 'normal'} />
-                <MetricMini label="压力状态" value={formatResistanceStatus(resistanceSummary.status)} accent={resistanceStatusAccent} emphasis />
+                <MetricMini label="最近压力位" value={resistanceSummary.nearest_price ? formatNumber(resistanceSummary.nearest_price, 3) : '--'} accent={resistanceStatusAccent} emphasis tooltip="距离当前价格最近的一个压力价位。历史上价格多次在这个位置附近遇阻回落。" />
+                <MetricMini label="距最近压力位" value={formatDistancePct(resistanceSummary.distance_pct)} accent={resistanceSummary.distance_pct >= 0 ? 'normal' : 'up'} tooltip="当前价格与最近压力位之间的距离百分比。负值说明已经突破压力。" />
+                <MetricMini label="压力强度" value={resistanceSummary.strength || '--'} accent={resistanceSummary.strength === '强' ? 'down' : resistanceSummary.strength === '弱' ? 'up' : 'normal'} tooltip="该压力位的阻力程度。强度越高，价格在此位置被压回的可能性越大。" />
+                <MetricMini label="压力状态" value={formatResistanceStatus(resistanceSummary.status)} accent={resistanceStatusAccent} emphasis tooltip="当前价格与压力位的关系。例如「接近压力区」说明价格快要碰到天花板，「突破压力区」说明阻力已被突破。" />
               </div>
               <div className="space-y-2">
                 {resistanceLevels.map((level, i) => (
@@ -1029,7 +1029,9 @@ function LevelCard({ level, index, type }) {
   )
 }
 
-function MetricMini({ label, value, accent = 'normal', emphasis = false, featured = false, marketAccent = false }) {
+function MetricMini({ label, value, accent = 'normal', emphasis = false, featured = false, marketAccent = false, tooltip = '' }) {
+  const [showTip, setShowTip] = useState(false)
+  const tipRef = useRef(null)
   const risingColor = marketAccent ? 'text-rose-300' : 'text-emerald-300'
   const fallingColor = marketAccent ? 'text-emerald-300' : 'text-rose-300'
   const color = accent === 'up' ? risingColor : accent === 'down' ? fallingColor : 'text-white'
@@ -1038,9 +1040,37 @@ function MetricMini({ label, value, accent = 'normal', emphasis = false, feature
   const containerTone = featured ? (marketAccent ? featuredTone : 'border-primary/55 bg-primary/12 ring-1 ring-primary/30 shadow-[0_10px_30px_rgba(76,106,255,0.16)]') : emphasis ? emphasisTone : 'border-border bg-black/20'
   const featuredLabelColor = marketAccent ? (accent === 'up' ? 'text-rose-200/90' : accent === 'down' ? 'text-emerald-200/90' : 'text-primary/85') : 'text-primary/85'
 
+  useEffect(() => {
+    if (!showTip) return
+    const onClick = (e) => { if (tipRef.current && !tipRef.current.contains(e.target)) setShowTip(false) }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [showTip])
+
   return (
-    <div className={`rounded-xl border px-3 py-2 ${featured ? 'px-4 py-3' : ''} ${containerTone}`}>
-      <div className={`text-xs ${featured ? featuredLabelColor : 'text-white/50'}`}>{label}</div>
+    <div className={`relative rounded-xl border px-3 py-2 ${featured ? 'px-4 py-3' : ''} ${containerTone}`}>
+      <div className={`flex items-center gap-1 text-xs ${featured ? featuredLabelColor : 'text-white/50'}`}>
+        <span>{label}</span>
+        {tooltip ? (
+          <span
+            ref={tipRef}
+            className="relative cursor-help"
+            onMouseEnter={() => setShowTip(true)}
+            onMouseLeave={() => setShowTip(false)}
+            onClick={(e) => { e.stopPropagation(); setShowTip((v) => !v) }}
+          >
+            <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 opacity-40 hover:opacity-70 transition">
+              <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm-.75 3.5a.75.75 0 0 1 1.5 0v.01a.75.75 0 0 1-1.5 0V4.5ZM7 7a1 1 0 0 1 2 0v4a1 1 0 0 1-2 0V7Z" />
+            </svg>
+            {showTip ? (
+              <div className="absolute bottom-full left-1/2 z-50 mb-2 w-56 -translate-x-1/2 rounded-xl border border-white/10 bg-[#1a1d25]/95 px-3 py-2.5 text-[11px] leading-relaxed text-white/80 shadow-xl backdrop-blur-sm">
+                {tooltip}
+                <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-[#1a1d25]/95" />
+              </div>
+            ) : null}
+          </span>
+        ) : null}
+      </div>
       <div className={`mt-1 font-semibold ${color} ${featured ? 'text-2xl leading-none tracking-tight' : 'text-sm'}`}>{value}</div>
     </div>
   )

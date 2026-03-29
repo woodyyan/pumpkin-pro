@@ -19,12 +19,14 @@ export default function LiveTradingOverviewPage() {
   const [error, setError] = useState('')
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState('')
+  const [signalConfigMap, setSignalConfigMap] = useState({})
 
   const privateAccessReady = ready && isLoggedIn
 
   const resetPrivateState = useCallback(() => {
     setWatchlist({ items: [], active_symbol: '', session_state: 'idle' })
     setSnapshots([])
+    setSignalConfigMap({})
     setError('')
     setErrorNeedsLogin(false)
     setLastUpdateAt('')
@@ -67,6 +69,20 @@ export default function LiveTradingOverviewPage() {
     return items
   }
 
+  const loadSignalConfigs = async () => {
+    try {
+      const data = await requestJson('/api/signal-configs')
+      const items = Array.isArray(data?.items) ? data.items : []
+      const map = {}
+      for (const cfg of items) {
+        if (cfg?.symbol) map[cfg.symbol] = cfg
+      }
+      setSignalConfigMap(map)
+    } catch {
+      // Signal config loading is non-critical for overview
+    }
+  }
+
   const loadMarketOverview = async () => {
     const [aRes, hkRes] = await Promise.allSettled([
       requestJson('/api/live/market/overview?exchange=SSE'),
@@ -80,6 +96,7 @@ export default function LiveTradingOverviewPage() {
     try {
       if (bootstrap) {
         await loadWatchlist()
+        loadSignalConfigs()
       }
       await loadSnapshots()
       updateError('')
@@ -295,6 +312,12 @@ export default function LiveTradingOverviewPage() {
                           {displayName ? item.symbol : ''} · {detectExchangeLabel(item.symbol)}
                         </div>
                       </div>
+                      {signalConfigMap[item.symbol]?.is_enabled && (
+                        <span className="mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          信号
+                        </span>
+                      )}
                     </div>
 
                     {/* Price section */}

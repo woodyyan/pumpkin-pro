@@ -235,6 +235,9 @@ type MovingAveragesPayload struct {
 	DistanceToMA200Pct float64      `json:"distance_to_ma200_pct"`
 	RSI14              float64      `json:"rsi14"`
 	RSI14Status        string       `json:"rsi14_status"`
+	MACD               float64      `json:"macd"`
+	MACDSignal         float64      `json:"macd_signal"`
+	MACDHistogram      float64      `json:"macd_histogram"`
 	Status             string       `json:"status"`
 	SessionState       SessionState `json:"session_state"`
 	UpdatedAt          string       `json:"updated_at"`

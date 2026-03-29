@@ -524,8 +524,8 @@ export default function LiveTradingDetailPage() {
         <section className="rounded-2xl border border-border bg-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-base font-semibold text-white">均线指标</h3>
-              <p className="mt-1 text-xs text-white/60">MA5 / MA20 / MA60 / MA200，基于最近 {MA_LOOKBACK_DAYS} 个交易日收盘价。</p>
+              <h3 className="text-base font-semibold text-white">技术指标</h3>
+              <p className="mt-1 text-xs text-white/60">均线 / RSI / MACD，基于最近 {MA_LOOKBACK_DAYS} 个交易日收盘价。</p>
             </div>
             <div className="text-xs text-white/55">
               {movingAveragePayload?.updated_at ? `更新：${formatDateTime(movingAveragePayload.updated_at)}` : '等待数据'}
@@ -552,6 +552,11 @@ export default function LiveTradingDetailPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <MetricMini label="RSI(14)" value={formatNumber(movingAveragePayload.rsi14, 2)} accent={rsiAccent(movingAveragePayload.rsi14)} tooltip="衡量最近 14 个交易日涨跌动能的指标，范围 0~100。≥70 为超买（可能回调），≤30 为超卖（可能反弹），50 附近为中性。" />
                 <MetricMini label="RSI 状态" value={movingAveragePayload.rsi14_status || '--'} accent={rsiAccent(movingAveragePayload.rsi14)} emphasis tooltip="基于 RSI 数值的市场情绪判断。超买意味着短期涨太多可能要歇一歇，超卖意味着跌太多可能要反弹。" />
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <MetricMini label="MACD" value={formatNumber(movingAveragePayload.macd, 4)} accent={movingAveragePayload.macd >= 0 ? 'up' : 'down'} tooltip="快线（12日EMA）减慢线（26日EMA）的差值。MACD 为正说明短期趋势强于长期，为负则相反。MACD 从负转正叫「金叉」，是买入信号。" />
+                <MetricMini label="信号线" value={formatNumber(movingAveragePayload.macd_signal, 4)} tooltip="MACD 线的 9 日平均值，用来平滑 MACD 的波动。当 MACD 线向上穿过信号线时为金叉（看涨），向下穿过时为死叉（看跌）。" />
+                <MetricMini label="MACD 柱" value={formatNumber(movingAveragePayload.macd_histogram, 4)} accent={movingAveragePayload.macd_histogram >= 0 ? 'up' : 'down'} emphasis tooltip="MACD 线与信号线的差值。红柱（正值）表示多头动能在增强，绿柱（负值）表示空头动能在增强。柱子由短变长说明趋势在加速。" />
               </div>
             </div>
           )}

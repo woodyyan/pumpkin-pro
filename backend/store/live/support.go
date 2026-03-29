@@ -162,6 +162,7 @@ func (s *Service) GetMovingAverages(ctx context.Context, userID, symbol, period 
 	}
 
 	rsi14 := calculateRSI(bars, 14)
+	macd := calculateMACD(bars, 12, 26, 9)
 
 	return &MovingAveragesPayload{
 		Symbol:             normalizedSymbol,
@@ -179,6 +180,9 @@ func (s *Service) GetMovingAverages(ctx context.Context, userID, symbol, period 
 		DistanceToMA200Pct: roundTo(distancePct(lastBar.Close, ma200), 2),
 		RSI14:              roundTo(math.Max(rsi14, 0), 2),
 		RSI14Status:        classifyRSIStatus(rsi14),
+		MACD:               roundTo(macd.MACD, 4),
+		MACDSignal:         roundTo(macd.Signal, 4),
+		MACDHistogram:      roundTo(macd.Histogram, 4),
 		Status:             classifyMAStatus(lastBar.Close, ma20, ma200),
 		SessionState:       s.resolveSessionState(userID),
 		UpdatedAt:          time.Now().UTC().Format(time.RFC3339),
@@ -624,6 +628,65 @@ func classifyRSIStatus(rsi float64) string {
 	default:
 		return "中性"
 	}
+}
+
+type macdResult struct {
+	MACD      float64
+	Signal    float64
+	Histogram float64
+	Valid     bool
+}
+
+func calculateMACD(bars []DailyBar, fastPeriod, slowPeriod, signalPeriod int) macdResult {
+	if len(bars) < slowPeriod+signalPeriod {
+		return macdResult{}
+	}
+	closes := make([]float64, len(bars))
+	for i, b := range bars {
+		closes[i] = b.Close
+	}
+	fastEMA := ema(closes, fastPeriod)
+	slowEMA := ema(closes, slowPeriod)
+	if len(fastEMA) == 0 || len(slowEMA) == 0 {
+		return macdResult{}
+	}
+	// DIF line = fast EMA - slow EMA (aligned to end)
+	n := len(slowEMA)
+	fastAligned := fastEMA[len(fastEMA)-n:]
+	dif := make([]float64, n)
+	for i := 0; i < n; i++ {
+		dif[i] = fastAligned[i] - slowEMA[i]
+	}
+	signalLine := ema(dif, signalPeriod)
+	if len(signalLine) == 0 {
+		return macdResult{}
+	}
+	lastDIF := dif[len(dif)-1]
+	lastSignal := signalLine[len(signalLine)-1]
+	return macdResult{
+		MACD:      lastDIF,
+		Signal:    lastSignal,
+		Histogram: lastDIF - lastSignal,
+		Valid:     true,
+	}
+}
+
+func ema(data []float64, period int) []float64 {
+	if len(data) < period || period <= 0 {
+		return nil
+	}
+	multiplier := 2.0 / float64(period+1)
+	result := make([]float64, len(data)-period+1)
+	// seed: SMA of first `period` values
+	sum := 0.0
+	for i := 0; i < period; i++ {
+		sum += data[i]
+	}
+	result[0] = sum / float64(period)
+	for i := period; i < len(data); i++ {
+		result[i-period+1] = data[i]*multiplier + result[i-period]*(1-multiplier)
+	}
+	return result
 }
 
 func parseBarDate(raw string) time.Time {

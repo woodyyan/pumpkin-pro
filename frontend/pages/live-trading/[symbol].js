@@ -549,6 +549,10 @@ export default function LiveTradingDetailPage() {
                 <MetricMini label="距 MA200" value={formatDistancePct(movingAveragePayload.distance_to_ma200_pct)} accent={movingAveragePayload.distance_to_ma200_pct >= 0 ? 'up' : 'down'} />
                 <MetricMini label="位置状态" value={formatMAStatus(movingAveragePayload.status)} accent={movingAverageStatusAccent} emphasis />
               </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <MetricMini label="RSI(14)" value={formatNumber(movingAveragePayload.rsi14, 2)} accent={rsiAccent(movingAveragePayload.rsi14)} />
+                <MetricMini label="RSI 状态" value={movingAveragePayload.rsi14_status || '--'} accent={rsiAccent(movingAveragePayload.rsi14)} emphasis />
+              </div>
             </div>
           )}
         </section>
@@ -1211,6 +1215,13 @@ function formatMAStatus(status) {
 function maAccent(priceRef, maValue) {
   if (!maValue || maValue <= 0) return 'normal'
   return priceRef >= maValue ? 'up' : 'down'
+}
+
+function rsiAccent(rsi) {
+  if (rsi === null || rsi === undefined || rsi < 0) return 'normal'
+  if (rsi >= 70) return 'down'
+  if (rsi <= 30) return 'up'
+  return 'normal'
 }
 
 function formatStrategyCycleHint(strategy) {

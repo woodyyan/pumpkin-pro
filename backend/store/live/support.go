@@ -161,6 +161,8 @@ func (s *Service) GetMovingAverages(ctx context.Context, userID, symbol, period 
 		return (price - ma) / ma * 100
 	}
 
+	rsi14 := calculateRSI(bars, 14)
+
 	return &MovingAveragesPayload{
 		Symbol:             normalizedSymbol,
 		Period:             supportPeriodDaily,
@@ -175,6 +177,8 @@ func (s *Service) GetMovingAverages(ctx context.Context, userID, symbol, period 
 		DistanceToMA20Pct:  roundTo(distancePct(lastBar.Close, ma20), 2),
 		DistanceToMA60Pct:  roundTo(distancePct(lastBar.Close, ma60), 2),
 		DistanceToMA200Pct: roundTo(distancePct(lastBar.Close, ma200), 2),
+		RSI14:              roundTo(math.Max(rsi14, 0), 2),
+		RSI14Status:        classifyRSIStatus(rsi14),
 		Status:             classifyMAStatus(lastBar.Close, ma20, ma200),
 		SessionState:       s.resolveSessionState(userID),
 		UpdatedAt:          time.Now().UTC().Format(time.RFC3339),
@@ -578,6 +582,48 @@ func movingAverageClose(bars []DailyBar, period int) float64 {
 		sum += bar.Close
 	}
 	return sum / float64(period)
+}
+
+func calculateRSI(bars []DailyBar, period int) float64 {
+	if len(bars) < period+1 || period <= 0 {
+		return -1 // not enough data
+	}
+	recent := bars[len(bars)-period-1:]
+	avgGain := 0.0
+	avgLoss := 0.0
+	for i := 1; i < len(recent); i++ {
+		delta := recent[i].Close - recent[i-1].Close
+		if delta > 0 {
+			avgGain += delta
+		} else {
+			avgLoss -= delta
+		}
+	}
+	avgGain /= float64(period)
+	avgLoss /= float64(period)
+	if avgLoss == 0 {
+		return 100
+	}
+	rs := avgGain / avgLoss
+	return 100 - 100/(1+rs)
+}
+
+func classifyRSIStatus(rsi float64) string {
+	if rsi < 0 {
+		return "数据不足"
+	}
+	switch {
+	case rsi >= 80:
+		return "极度超买"
+	case rsi >= 70:
+		return "超买"
+	case rsi <= 20:
+		return "极度超卖"
+	case rsi <= 30:
+		return "超卖"
+	default:
+		return "中性"
+	}
 }
 
 func parseBarDate(raw string) time.Time {

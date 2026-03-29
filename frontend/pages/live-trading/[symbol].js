@@ -558,6 +558,9 @@ export default function LiveTradingDetailPage() {
                 <MetricMini label="信号线" value={formatNumber(movingAveragePayload.macd_signal, 4)} tooltip="MACD 线的 9 日平均值，用来平滑 MACD 的波动。当 MACD 线向上穿过信号线时为金叉（看涨），向下穿过时为死叉（看跌）。" />
                 <MetricMini label="MACD 柱" value={formatNumber(movingAveragePayload.macd_histogram, 4)} accent={movingAveragePayload.macd_histogram >= 0 ? 'up' : 'down'} emphasis tooltip="MACD 线与信号线的差值。红柱（正值）表示多头动能在增强，绿柱（负值）表示空头动能在增强。柱子由短变长说明趋势在加速。" />
               </div>
+              {movingAveragePayload.macd_series?.length > 0 && (
+                <MACDChart series={movingAveragePayload.macd_series} />
+              )}
             </div>
           )}
         </section>
@@ -1030,6 +1033,142 @@ function LevelCard({ level, index, type }) {
         <div>强度：{level.strength || '--'}（{formatNumber(level.score, 1)}）</div>
         <div>历史触达：{level.touch_count ?? '--'}</div>
       </div>
+    </div>
+  )
+}
+
+function MACDChart({ series }) {
+  const containerRef = useRef(null)
+  const chartRef = useRef(null)
+
+  useEffect(() => {
+    let cleanup = () => {}
+    let cancelled = false
+    const render = async () => {
+      if (!containerRef.current || !Array.isArray(series) || series.length === 0) {
+        if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+        return
+      }
+      const { createChart, ColorType } = await import('lightweight-charts')
+      if (cancelled || !containerRef.current) return
+      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+
+      const chart = createChart(containerRef.current, {
+        width: containerRef.current.clientWidth || 700,
+        height: 260,
+        layout: { background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' }, textColor: '#E5E7EB' },
+        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        timeScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        grid: { vertLines: { color: 'rgba(148,163,184,0.08)' }, horzLines: { color: 'rgba(148,163,184,0.08)' } },
+        crosshair: { mode: 0 },
+      })
+
+      // Prepare data sorted by date
+      const sorted = [...series]
+        .filter((p) => p.date)
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+
+      if (sorted.length === 0) { chart.remove(); return }
+
+      // Histogram series (red/green bars)
+      const histogramSeries = chart.addHistogramSeries({
+        priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+        priceScaleId: 'right',
+      })
+      histogramSeries.setData(
+        sorted.map((p) => ({
+          time: p.date,
+          value: p.histogram,
+          color: p.histogram >= 0 ? 'rgba(239, 68, 68, 0.7)' : 'rgba(34, 197, 94, 0.7)',
+        }))
+      )
+
+      // DIF line (blue)
+      const difSeries = chart.addLineSeries({
+        color: '#60a5fa',
+        lineWidth: 2,
+        title: 'DIF',
+        priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+      })
+      difSeries.setData(sorted.map((p) => ({ time: p.date, value: p.dif })))
+
+      // Signal line (orange)
+      const signalSeries = chart.addLineSeries({
+        color: '#fb923c',
+        lineWidth: 2,
+        title: '信号线',
+        priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+      })
+      signalSeries.setData(sorted.map((p) => ({ time: p.date, value: p.signal })))
+
+      // Detect golden cross / death cross and add markers
+      const markers = []
+      for (let i = 1; i < sorted.length; i++) {
+        const prev = sorted[i - 1]
+        const curr = sorted[i]
+        if (prev.dif <= prev.signal && curr.dif > curr.signal) {
+          markers.push({
+            time: curr.date,
+            position: 'belowBar',
+            color: '#ef4444',
+            shape: 'arrowUp',
+            text: '金叉',
+          })
+        } else if (prev.dif >= prev.signal && curr.dif < curr.signal) {
+          markers.push({
+            time: curr.date,
+            position: 'aboveBar',
+            color: '#22c55e',
+            shape: 'arrowDown',
+            text: '死叉',
+          })
+        }
+      }
+      if (markers.length > 0) {
+        difSeries.setMarkers(markers)
+      }
+
+      // Zero line
+      const zeroLine = chart.addLineSeries({
+        color: 'rgba(148,163,184,0.3)',
+        lineWidth: 1,
+        lineStyle: 2,
+        priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+        crosshairMarkerVisible: false,
+        lastValueVisible: false,
+        priceLineVisible: false,
+      })
+      zeroLine.setData(sorted.map((p) => ({ time: p.date, value: 0 })))
+
+      chart.timeScale().fitContent()
+      chartRef.current = chart
+
+      const onResize = () => {
+        if (!containerRef.current || !chartRef.current) return
+        chartRef.current.applyOptions({ width: containerRef.current.clientWidth || 700 })
+        chartRef.current.timeScale().fitContent()
+      }
+      window.addEventListener('resize', onResize)
+      cleanup = () => {
+        window.removeEventListener('resize', onResize)
+        if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+      }
+    }
+    render()
+    return () => { cancelled = true; cleanup() }
+  }, [series])
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-4 text-[11px] text-white/50">
+        <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded bg-[#60a5fa]" />DIF（快线）</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded bg-[#fb923c]" />信号线</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-red-500/70" />多头柱</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-green-500/70" />空头柱</span>
+        <span className="flex items-center gap-1"><span className="text-red-400">▲</span>金叉</span>
+        <span className="flex items-center gap-1"><span className="text-green-400">▼</span>死叉</span>
+      </div>
+      <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-black/20" />
     </div>
   )
 }

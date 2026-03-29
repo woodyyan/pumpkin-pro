@@ -14,6 +14,15 @@
     {
       "date": "2026-03-29",
       "type": "新功能",
+      "title": "MACD 可视化图表：金叉/死叉一目了然",
+      "summary": "个股详情页新增 MACD 时序图表，展示近 120 个交易日的 DIF 线（蓝）、信号线（橙）和红绿柱状图，并自动标注金叉（▲）与死叉（▼）交叉点，帮助用户直观判断买卖信号与趋势强弱。",
+      "scope": "行情看板 / 后端 / 前端",
+      "raw_subject": "feat(live): add interactive MACD chart with golden/death cross markers",
+      "visible": true
+    },
+    {
+      "date": "2026-03-29",
+      "type": "新功能",
       "title": "技术指标模块新增 MACD 趋势强度指标",
       "summary": "个股详情页的技术指标模块（原均线指标）新增 MACD 线、信号线和 MACD 柱三项指标，红柱表示多头动能增强、绿柱表示空头动能增强，帮助判断趋势方向和强弱变化。",
       "scope": "行情看板 / 后端 / 前端",

@@ -238,9 +238,17 @@ type MovingAveragesPayload struct {
 	MACD               float64      `json:"macd"`
 	MACDSignal         float64      `json:"macd_signal"`
 	MACDHistogram      float64      `json:"macd_histogram"`
+	MACDSeries         []MACDPoint  `json:"macd_series,omitempty"`
 	Status             string       `json:"status"`
 	SessionState       SessionState `json:"session_state"`
 	UpdatedAt          string       `json:"updated_at"`
+}
+
+type MACDPoint struct {
+	Date      string  `json:"date"`
+	DIF       float64 `json:"dif"`
+	Signal    float64 `json:"signal"`
+	Histogram float64 `json:"histogram"`
 }
 
 type WatchlistState struct {

@@ -183,6 +183,7 @@ func (s *Service) GetMovingAverages(ctx context.Context, userID, symbol, period 
 		MACD:               roundTo(macd.MACD, 4),
 		MACDSignal:         roundTo(macd.Signal, 4),
 		MACDHistogram:      roundTo(macd.Histogram, 4),
+		MACDSeries:         macd.Series,
 		Status:             classifyMAStatus(lastBar.Close, ma20, ma200),
 		SessionState:       s.resolveSessionState(userID),
 		UpdatedAt:          time.Now().UTC().Format(time.RFC3339),
@@ -635,6 +636,7 @@ type macdResult struct {
 	Signal    float64
 	Histogram float64
 	Valid     bool
+	Series    []MACDPoint
 }
 
 func calculateMACD(bars []DailyBar, fastPeriod, slowPeriod, signalPeriod int) macdResult {
@@ -663,11 +665,43 @@ func calculateMACD(bars []DailyBar, fastPeriod, slowPeriod, signalPeriod int) ma
 	}
 	lastDIF := dif[len(dif)-1]
 	lastSignal := signalLine[len(signalLine)-1]
+
+	// Build full MACD series aligned to bars.
+	// slowEMA has length = len(bars) - slowPeriod + 1, starting at bar index slowPeriod-1.
+	// signalLine has length = len(dif) - signalPeriod + 1 = n - signalPeriod + 1.
+	// The signal line starts at dif index signalPeriod-1, which maps to
+	// bar index (slowPeriod - 1) + (signalPeriod - 1) = slowPeriod + signalPeriod - 2.
+	seriesLen := len(signalLine)
+	difOffset := len(dif) - seriesLen // offset within dif array
+	barOffset := len(bars) - n + difOffset
+	// Limit series to the most recent 120 points to keep payload reasonable.
+	maxSeriesLen := 120
+	startSeries := 0
+	if seriesLen > maxSeriesLen {
+		startSeries = seriesLen - maxSeriesLen
+	}
+	series := make([]MACDPoint, 0, seriesLen-startSeries)
+	for i := startSeries; i < seriesLen; i++ {
+		barIdx := barOffset + i
+		if barIdx < 0 || barIdx >= len(bars) {
+			continue
+		}
+		d := dif[difOffset+i]
+		s := signalLine[i]
+		series = append(series, MACDPoint{
+			Date:      bars[barIdx].Date,
+			DIF:       roundTo(d, 4),
+			Signal:    roundTo(s, 4),
+			Histogram: roundTo(d-s, 4),
+		})
+	}
+
 	return macdResult{
 		MACD:      lastDIF,
 		Signal:    lastSignal,
 		Histogram: lastDIF - lastSignal,
 		Valid:     true,
+		Series:    series,
 	}
 }
 

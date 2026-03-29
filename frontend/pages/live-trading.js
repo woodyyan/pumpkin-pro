@@ -158,7 +158,7 @@ export default function LiveTradingOverviewPage() {
   }
 
   const sortedWatchlist = useMemo(() => {
-    return [...(watchlist.items || [])].sort((a, b) => Number(b.is_active) - Number(a.is_active))
+    return [...(watchlist.items || [])]
   }, [watchlist.items])
 
   return (
@@ -295,11 +295,6 @@ export default function LiveTradingOverviewPage() {
                           {displayName ? item.symbol : ''} · {detectExchangeLabel(item.symbol)}
                         </div>
                       </div>
-                      {item.is_active && (
-                        <span className="shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] text-emerald-300">
-                          激活
-                        </span>
-                      )}
                     </div>
 
                     {/* Price section */}

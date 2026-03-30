@@ -2,6 +2,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 
+// ─── sessionStorage 缓存 ─────────────────────────────────
+const SCREENER_CACHE_KEY = 'pumpkin_screener_cache'
+const SKELETON_ROWS = 10
+
+function readScreenerCache() {
+  try {
+    const raw = sessionStorage.getItem(SCREENER_CACHE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch { return null }
+}
+
+function writeScreenerCache(data) {
+  try {
+    if (!data) return
+    sessionStorage.setItem(SCREENER_CACHE_KEY, JSON.stringify(data))
+  } catch { /* quota exceeded, ignore */ }
+}
+
 // ─── 筛选条件配置（单下拉 · 预设区间） ──────────────────────
 // 每个选项自带 min/max，选中即生效，用户只需选一次
 const FILTER_FIELDS = [
@@ -471,6 +490,10 @@ export default function StockPickerPage() {
         setIndustryOptions(result.industries)
       }
       setData(result)
+      // Cache default view (no filters, page 1) for instant next visit
+      if (Object.keys(currentFilters).length === 0 && currentPage === 1) {
+        writeScreenerCache(result)
+      }
     } catch (err) {
       setError(err.message || '查询失败')
     } finally {
@@ -478,13 +501,34 @@ export default function StockPickerPage() {
     }
   }, [buildScanPayload, pageSize])
 
-  // 初始加载
+  // 初始加载：先读缓存即时展示，再后台刷新最新数据
   useEffect(() => {
     if (!initialLoadRef.current) {
       initialLoadRef.current = true
-      fetchScreener({}, 'code', 'asc', 1)
+      const cached = readScreenerCache()
+      if (cached) {
+        setData(cached)
+        if (Array.isArray(cached?.industries)) {
+          setIndustryOptions(cached.industries)
+        }
+        // 后台静默刷新（不显示 loading）
+        ;(async () => {
+          try {
+            const result = await requestJson('/api/screener/scan', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ filters: {}, sort_by: 'code', sort_order: 'asc', page: 1, page_size: pageSize }),
+            }, '选股查询失败')
+            if (Array.isArray(result?.industries)) setIndustryOptions(result.industries)
+            setData(result)
+            writeScreenerCache(result)
+          } catch { /* 静默失败，保留缓存数据 */ }
+        })()
+      } else {
+        fetchScreener({}, 'code', 'asc', 1)
+      }
     }
-  }, [fetchScreener])
+  }, [fetchScreener, pageSize])
 
   // 筛选条件变化时自动查询（防抖后）
   useEffect(() => {
@@ -687,11 +731,15 @@ export default function StockPickerPage() {
             </thead>
             <tbody>
               {loading && items.length === 0 ? (
-                <tr>
-                  <td colSpan={TABLE_COLUMNS.length} className="py-16 text-center text-white/40">
-                    <span className="animate-pulse">加载中...</span>
-                  </td>
-                </tr>
+                Array.from({ length: SKELETON_ROWS }).map((_, rowIdx) => (
+                  <tr key={`skeleton-${rowIdx}`} className="border-b border-white/[0.04]">
+                    {TABLE_COLUMNS.map((col) => (
+                      <td key={col.key} className="px-3 py-2" style={{ minWidth: col.width }}>
+                        <div className={`h-4 rounded bg-white/[0.06] animate-pulse ${col.key === 'name' ? 'w-16' : col.key === 'code' ? 'w-14' : 'w-12'}`} />
+                      </td>
+                    ))}
+                  </tr>
+                ))
               ) : items.length === 0 ? (
                 <tr>
                   <td colSpan={TABLE_COLUMNS.length} className="py-16 text-center text-white/40">

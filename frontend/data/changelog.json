@@ -14,6 +14,15 @@
     {
       "date": "2026-03-30",
       "type": "改进",
+      "title": "选股平台秒开：缓存加速 + 骨架屏",
+      "summary": "进入选股平台时立即展示上次的股票数据（来自浏览器会话缓存），同时后台静默加载最新数据。首次加载时显示骨架屏代替空白等待，体验更流畅。",
+      "scope": "选股平台 / 前端",
+      "raw_subject": "perf(screener): add sessionStorage cache + skeleton loading for instant page render",
+      "visible": true
+    },
+    {
+      "date": "2026-03-30",
+      "type": "改进",
       "title": "信号配置融入顶部，Payload 模板移至设置页",
       "summary": "个股详情页的信号开关、策略选择和保存按钮从页面底部独立区块移至顶部标题区域，登录后第一眼即可操作。触发条件与 Payload 模板移至设置页 Webhook 配置区内，保持详情页简洁聚焦。",
       "scope": "行情看板 / 设置 / 前端",

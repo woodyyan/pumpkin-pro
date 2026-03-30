@@ -448,6 +448,22 @@ export default function SettingsPage() {
               {testing ? '送达校验中...' : '验证 Webhook 送达'}
             </button>
           </div>
+
+          <details className="mt-3 rounded-lg border border-border/80 bg-black/30 p-3">
+            <summary className="cursor-pointer text-xs font-medium text-white/85">查看触发条件与 Payload 模板</summary>
+            <div className="mt-3 space-y-3 text-xs text-white/75">
+              <div className="space-y-1">
+                <div>评估周期：系统每小时自动评估一次已开启信号的股票策略。</div>
+                <div>失败重试：最多 4 次，退避间隔 1 分钟 / 5 分钟 / 15 分钟。</div>
+              </div>
+              <div>
+                <div className="mb-1 text-white/65">Payload 模板（text 消息格式）</div>
+                <pre className="overflow-x-auto rounded-lg border border-border/80 bg-black/50 p-2 text-[11px] leading-5 text-emerald-200">
+                  {JSON.stringify({ msgtype: 'text', text: { content: '股票交易信号来啦！\n类型：正式信号\n股票：00700.HK\n方向：BUY\n时间：2026-03-30 18:00:00\n策略：均线金叉策略\n原因：策略触发原因说明' } }, null, 2)}
+                </pre>
+              </div>
+            </div>
+          </details>
         </div>
       </section>
 

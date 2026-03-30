@@ -13,6 +13,15 @@
   "items": [
     {
       "date": "2026-03-30",
+      "type": "改进",
+      "title": "信号配置融入顶部，Payload 模板移至设置页",
+      "summary": "个股详情页的信号开关、策略选择和保存按钮从页面底部独立区块移至顶部标题区域，登录后第一眼即可操作。触发条件与 Payload 模板移至设置页 Webhook 配置区内，保持详情页简洁聚焦。",
+      "scope": "行情看板 / 设置 / 前端",
+      "raw_subject": "refactor(live): merge signal config into header, move payload template to settings",
+      "visible": true
+    },
+    {
+      "date": "2026-03-30",
       "type": "新功能",
       "title": "设置页新增投资画像",
       "summary": "用户可在设置页填写投资画像（风险偏好、投资目标、投资周期、投资经验、账户资金、可承受回撤），帮助系统了解个人投资风格。所有选项均以下拉菜单提供，避免手动填写的麻烦。为未来的个性化策略推荐和风险提示做准备。",

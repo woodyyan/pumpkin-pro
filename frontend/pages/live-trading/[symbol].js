@@ -443,6 +443,57 @@ export default function LiveTradingDetailPage() {
               ← 返回概览
             </a>
           </div>
+
+          {/* Inline signal config (login required) */}
+          {privateAccessReady && signalConfig && (
+            <div className="mt-4 border-t border-border/60 pt-4">
+              {signalError && <div className="mb-3 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{signalError}</div>}
+              <div className="flex flex-wrap items-center gap-2.5">
+                <select
+                  value={signalConfig.strategy_id || ''}
+                  onChange={(e) => updateLocalSignalConfig({ strategy_id: e.target.value })}
+                  className="min-w-[140px] rounded-lg border border-border bg-black/30 px-2.5 py-1.5 text-xs text-white outline-none transition focus:border-primary"
+                >
+                  <option value="">请选择策略</option>
+                  {activeStrategies.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={savingSignal}
+                  onClick={handleSaveSignalConfig}
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {savingSignal ? '保存中...' : '保存'}
+                </button>
+                {signalNotice && <span className="text-xs text-emerald-300">{signalNotice}</span>}
+                <div className="ml-auto">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={Boolean(signalConfig.is_enabled)}
+                    onClick={() => updateLocalSignalConfig({ is_enabled: !signalConfig.is_enabled })}
+                    className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition focus:outline-none focus:ring-2 focus:ring-primary/40 ${
+                      signalConfig.is_enabled
+                        ? 'border-emerald-300/60 bg-emerald-500/18 text-emerald-50'
+                        : 'border-white/15 bg-black/25 text-white/65 hover:border-white/30'
+                    }`}
+                  >
+                    <span className="font-medium">{signalConfig.is_enabled ? '信号已开启' : '信号未开启'}</span>
+                    <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border transition ${signalConfig.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-white/20 bg-black/30'}`}>
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${signalConfig.is_enabled ? 'left-[18px]' : 'left-0.5'}`} />
+                    </span>
+                  </button>
+                </div>
+              </div>
+              {(!webhookConfigured || !webhookConfig.is_enabled) && (
+                <div className="mt-2 rounded-lg border border-amber-400/25 bg-amber-500/8 px-3 py-1.5 text-[11px] text-amber-200/90">
+                  Webhook 未配置或未启用，信号不会发出。<a href="/settings" className="ml-1 underline underline-offset-2 hover:text-amber-100">去配置</a>
+                </div>
+              )}
+            </div>
+          )}
         </section>
 
         {error ? (
@@ -884,93 +935,6 @@ export default function LiveTradingDetailPage() {
           <PriceVolumeChart events={priceVolumeEvents} />
           <BlockFlowChart events={blockFlowEvents} />
         </section>
-
-        {/* Signal config (login required) */}
-        {privateAccessReady ? (
-          <section className="rounded-2xl border border-border bg-card p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <h3 className="text-base font-semibold text-white">信号推送配置</h3>
-            </div>
-
-            {signalError && <div className="mt-3 rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{signalError}</div>}
-            {signalNotice && <div className="mt-3 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{signalNotice}</div>}
-
-            {signalConfig && (
-              <div className="mt-4 rounded-xl border border-border bg-black/20 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-medium text-white">{symbol}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-[11px] ${webhookConfigured ? 'bg-emerald-500/15 text-emerald-200' : 'bg-amber-500/15 text-amber-200'}`}>
-                      {webhookConfigured ? 'Webhook 已配置' : 'Webhook 未配置'}
-                    </span>
-                    <a href="/settings" className="text-[11px] text-white/45 underline decoration-white/20 underline-offset-2 transition hover:text-primary hover:decoration-primary/50">设置</a>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={Boolean(signalConfig.is_enabled)}
-                    onClick={() => updateLocalSignalConfig({ is_enabled: !signalConfig.is_enabled })}
-                    className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-left text-xs transition focus:outline-none focus:ring-2 focus:ring-primary/40 ${
-                      signalConfig.is_enabled
-                        ? 'border-emerald-300/60 bg-emerald-500/18 text-emerald-50'
-                        : 'border-amber-300/35 bg-amber-500/10 text-white/88 hover:border-amber-300/55'
-                    }`}
-                  >
-                    <span className="font-medium">{signalConfig.is_enabled ? '信号已开启' : '信号未开启'}</span>
-                    <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border transition ${signalConfig.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-amber-200/30 bg-black/25'}`}>
-                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${signalConfig.is_enabled ? 'left-[18px]' : 'left-0.5'}`} />
-                    </span>
-                  </button>
-                </div>
-
-                {(!webhookConfigured || !webhookConfig.is_enabled) && (
-                  <div className="mt-2.5 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                    Webhook 未配置或未启用，信号不会发出。<a href="/settings" className="ml-1 underline underline-offset-2 hover:text-amber-100">去配置</a>
-                  </div>
-                )}
-
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <select
-                    value={signalConfig.strategy_id || ''}
-                    onChange={(e) => updateLocalSignalConfig({ strategy_id: e.target.value })}
-                    className="min-w-[140px] flex-1 rounded-lg border border-border bg-black/30 px-2.5 py-1.5 text-xs text-white outline-none transition focus:border-primary"
-                  >
-                    <option value="">请选择策略</option>
-                    {activeStrategies.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    disabled={savingSignal}
-                    onClick={handleSaveSignalConfig}
-                    className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {savingSignal ? '保存中...' : '保存配置'}
-                  </button>
-                </div>
-
-                <p className="mt-2.5 text-[11px] leading-relaxed text-white/40">系统每小时自动评估一次策略，产生 BUY/SELL 信号时推送到 Webhook。</p>
-
-                <details className="mt-3 rounded-lg border border-border/80 bg-black/30 p-3">
-                  <summary className="cursor-pointer text-xs font-medium text-white/85">查看触发条件与 Payload 模板</summary>
-                  <div className="mt-3 space-y-3 text-xs text-white/75">
-                    <div className="space-y-1">
-                      <div>失败重试：最多 {SIGNAL_MAX_ATTEMPTS} 次，退避间隔 {SIGNAL_BACKOFF_STEPS.join(' / ')}。</div>
-                      <div>策略参数：{formatStrategyCycleHint(selectedStrategy)}</div>
-                    </div>
-                    <div>
-                      <div className="mb-1 text-white/65">Payload 模板</div>
-                      <pre className="overflow-x-auto rounded-lg border border-border/80 bg-black/50 p-2 text-[11px] leading-5 text-emerald-200">
-                        {JSON.stringify(buildSignalPayloadTemplate(symbol, signalConfig.strategy_id), null, 2)}
-                      </pre>
-                    </div>
-                  </div>
-                </details>
-              </div>
-            )}
-          </section>
-        ) : null}
       </div>
     </>
   )

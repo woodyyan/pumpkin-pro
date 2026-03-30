@@ -917,6 +917,23 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 			return
 		}
 		writeLiveJSON(w, http.StatusOK, overlay)
+	case "overlay-daily":
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+			return
+		}
+		lookbackDays, parseErr := parseLookbackDays(r.URL.Query().Get("lookback_days"), 60)
+		if parseErr != nil {
+			a.writeLiveError(w, fmt.Errorf("%w: lookback_days must be a positive integer", live.ErrInvalidArgument))
+			return
+		}
+		benchmark := strings.TrimSpace(r.URL.Query().Get("benchmark"))
+		dailyOverlay, err := a.liveService.GetDailyOverlay(r.Context(), symbol, lookbackDays, benchmark)
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, dailyOverlay)
 	case "fundamentals":
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")

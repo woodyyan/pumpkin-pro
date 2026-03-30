@@ -292,6 +292,64 @@ func (c *MarketClient) FetchSymbolDailyBars(ctx context.Context, symbol string, 
 	return cloneDailyBars(bars), nil
 }
 
+// FetchBenchmarkDailyBars fetches daily bars for a benchmark index (HSI, SHCI, etc.).
+func (c *MarketClient) FetchBenchmarkDailyBars(ctx context.Context, benchmark string, lookbackDays int) ([]DailyBar, error) {
+	normalizedBenchmark := normalizeBenchmark(benchmark)
+	code := quoteCodeFromBenchmark(normalizedBenchmark)
+	if code == "" {
+		return nil, fmt.Errorf("%w: unsupported benchmark %s", ErrInvalidArgument, benchmark)
+	}
+	if lookbackDays <= 0 {
+		lookbackDays = 120
+	}
+
+	cacheKey := fmt.Sprintf("bench:%s:%d", normalizedBenchmark, lookbackDays)
+	now := time.Now().UTC()
+	if bars := c.getDailyBarsCache(cacheKey, now); len(bars) > 0 {
+		return bars, nil
+	}
+
+	window := lookbackDays + 20
+	if window < 120 {
+		window = 120
+	}
+
+	isAShare := strings.HasPrefix(code, "sh") || strings.HasPrefix(code, "sz")
+	var urls []string
+	if isAShare {
+		urls = []string{
+			fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,day,,,%d,qfq", code, window),
+			fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/kline/kline?param=%s,day,,,%d", code, window),
+		}
+	} else {
+		urls = []string{
+			fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/hkfqkline/get?param=%s,day,,,%d,qfq", code, window),
+			fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/kline/kline?param=%s,day,,,%d", code, window),
+		}
+	}
+
+	var lastErr error
+	for _, targetURL := range urls {
+		bars, err := c.fetchDailyBarsByURL(ctx, targetURL, code)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if len(bars) == 0 {
+			continue
+		}
+		if len(bars) > lookbackDays {
+			bars = bars[len(bars)-lookbackDays:]
+		}
+		c.setDailyBarsCache(cacheKey, bars, now)
+		return cloneDailyBars(bars), nil
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("%w: %v", ErrDataSourceDown, lastErr)
+	}
+	return nil, ErrDataSourceDown
+}
+
 func (c *MarketClient) getDailyBarsCache(key string, now time.Time) []DailyBar {
 	c.cacheMu.Lock()
 	defer c.cacheMu.Unlock()

@@ -270,6 +270,30 @@ type WatchlistState struct {
 	Items        []WatchlistItem `json:"items"`
 }
 
+type DailyOverlayPoint struct {
+	Date          string  `json:"date"`
+	StockClose    float64 `json:"stock_close"`
+	BenchClose    float64 `json:"bench_close"`
+	StockNorm     float64 `json:"stock_norm"`
+	BenchNorm     float64 `json:"bench_norm"`
+}
+
+type DailyOverlayMetrics struct {
+	RelativeStrength *float64 `json:"relative_strength"`
+	Beta             *float64 `json:"beta"`
+	Correlation      *float64 `json:"correlation"`
+	SampleDays       int      `json:"sample_days"`
+}
+
+type DailyOverlayPayload struct {
+	Symbol       string              `json:"symbol"`
+	Benchmark    string              `json:"benchmark"`
+	LookbackDays int                 `json:"lookback_days"`
+	Series       []DailyOverlayPoint `json:"series"`
+	Metrics      DailyOverlayMetrics `json:"metrics"`
+	UpdatedAt    string              `json:"updated_at"`
+}
+
 type WatchlistSnapshotsPayload struct {
 	Items []SymbolSnapshot `json:"items"`
 }

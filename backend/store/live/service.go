@@ -747,6 +747,133 @@ func (s *Service) GetDailyBars(ctx context.Context, symbol string, lookbackDays 
 	return bars, nil
 }
 
+// GetDailyOverlay returns normalised daily close series for a stock vs its benchmark.
+func (s *Service) GetDailyOverlay(ctx context.Context, symbol string, lookbackDays int, benchmark string) (*DailyOverlayPayload, error) {
+	normalized, _, err := NormalizeSymbol(symbol)
+	if err != nil {
+		return nil, err
+	}
+	if lookbackDays <= 0 {
+		lookbackDays = 60
+	}
+	if lookbackDays > 500 {
+		lookbackDays = 500
+	}
+	if strings.TrimSpace(benchmark) == "" {
+		benchmark = defaultBenchmarkForSymbol(normalized)
+	}
+	normalizedBenchmark := normalizeBenchmark(benchmark)
+
+	stockBars, err := s.marketClient.FetchSymbolDailyBars(ctx, normalized, lookbackDays)
+	if err != nil {
+		return nil, err
+	}
+	benchBars, err := s.marketClient.FetchBenchmarkDailyBars(ctx, normalizedBenchmark, lookbackDays)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build date→close map for benchmark
+	benchByDate := make(map[string]float64, len(benchBars))
+	for _, b := range benchBars {
+		if b.Close > 0 {
+			benchByDate[b.Date] = b.Close
+		}
+	}
+
+	// Build aligned series: only dates present in both
+	type aligned struct {
+		Date       string
+		StockClose float64
+		BenchClose float64
+	}
+	pairs := make([]aligned, 0, len(stockBars))
+	for _, sb := range stockBars {
+		bc, ok := benchByDate[sb.Date]
+		if !ok || sb.Close <= 0 || bc <= 0 {
+			continue
+		}
+		pairs = append(pairs, aligned{Date: sb.Date, StockClose: sb.Close, BenchClose: bc})
+	}
+
+	if len(pairs) == 0 {
+		return &DailyOverlayPayload{
+			Symbol:       normalized,
+			Benchmark:    normalizedBenchmark,
+			LookbackDays: lookbackDays,
+			Series:       []DailyOverlayPoint{},
+			Metrics:      DailyOverlayMetrics{SampleDays: 0},
+			UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
+		}, nil
+	}
+
+	baseStock := pairs[0].StockClose
+	baseBench := pairs[0].BenchClose
+	series := make([]DailyOverlayPoint, 0, len(pairs))
+	stockReturns := make([]float64, 0, len(pairs)-1)
+	benchReturns := make([]float64, 0, len(pairs)-1)
+	for i, p := range pairs {
+		series = append(series, DailyOverlayPoint{
+			Date:      p.Date,
+			StockClose: roundTo(p.StockClose, 4),
+			BenchClose: roundTo(p.BenchClose, 4),
+			StockNorm: roundTo(p.StockClose/baseStock, 6),
+			BenchNorm: roundTo(p.BenchClose/baseBench, 6),
+		})
+		if i > 0 {
+			stockReturns = append(stockReturns, p.StockClose/pairs[i-1].StockClose-1)
+			benchReturns = append(benchReturns, p.BenchClose/pairs[i-1].BenchClose-1)
+		}
+	}
+
+	metrics := DailyOverlayMetrics{SampleDays: len(pairs)}
+
+	// Relative Strength
+	if len(pairs) >= 2 {
+		last := pairs[len(pairs)-1]
+		rs := (last.StockClose/baseStock - 1) - (last.BenchClose/baseBench - 1)
+		metrics.RelativeStrength = &rs
+	}
+
+	// Beta & Correlation
+	if len(stockReturns) >= 10 && len(stockReturns) == len(benchReturns) {
+		meanS, meanB := 0.0, 0.0
+		for i := range stockReturns {
+			meanS += stockReturns[i]
+			meanB += benchReturns[i]
+		}
+		n := float64(len(stockReturns))
+		meanS /= n
+		meanB /= n
+
+		cov, varS, varB := 0.0, 0.0, 0.0
+		for i := range stockReturns {
+			ds := stockReturns[i] - meanS
+			db := benchReturns[i] - meanB
+			cov += ds * db
+			varS += ds * ds
+			varB += db * db
+		}
+		if varB > 0 {
+			beta := cov / varB
+			metrics.Beta = &beta
+		}
+		if varS > 0 && varB > 0 {
+			corr := cov / (math.Sqrt(varS) * math.Sqrt(varB))
+			metrics.Correlation = &corr
+		}
+	}
+
+	return &DailyOverlayPayload{
+		Symbol:       normalized,
+		Benchmark:    normalizedBenchmark,
+		LookbackDays: lookbackDays,
+		Series:       series,
+		Metrics:      metrics,
+		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
+	}, nil
+}
+
 // GetWatchlistSnapshots returns a snapshot for every item in the user's
 // watchlist in a single batch call. The underlying MarketClient.fetchFields
 // already supports multiple quote codes in one HTTP round-trip, so this avoids

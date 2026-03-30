@@ -32,6 +32,8 @@ export default function LiveTradingDetailPage() {
   const [fundamentalsLoading, setFundamentalsLoading] = useState(false)
   const [fundamentalsError, setFundamentalsError] = useState('')
   const [overlayPayload, setOverlayPayload] = useState(null)
+  const [dailyOverlay, setDailyOverlay] = useState(null)
+  const [overlayRange, setOverlayRange] = useState('60')
   const [supportPayload, setSupportPayload] = useState(null)
   const [supportError, setSupportError] = useState('')
   const [resistancePayload, setResistancePayload] = useState(null)
@@ -172,6 +174,16 @@ export default function LiveTradingDetailPage() {
     }
   }
 
+  const loadDailyOverlay = async (sym, days) => {
+    if (!sym) return
+    try {
+      const data = await requestJson(`/api/live/symbols/${encodeURIComponent(sym)}/overlay-daily?lookback_days=${days}`)
+      setDailyOverlay(data)
+    } catch {
+      // non-critical
+    }
+  }
+
   // ── Daily bars (history chart) ──
 
   const DAILY_RANGE_MAP = {
@@ -237,6 +249,13 @@ export default function LiveTradingDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, symbol])
 
+  // Reload daily overlay when range changes
+  useEffect(() => {
+    if (!ready || !symbol) return
+    loadDailyOverlay(symbol, overlayRange)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, symbol, overlayRange])
+
   const loadSignalCenter = async ({ force = false } = {}) => {
     const now = Date.now()
     if (!force && now - signalCenterRefreshRef.current < SIGNAL_CENTER_REFRESH_MS) return
@@ -280,6 +299,7 @@ export default function LiveTradingDetailPage() {
         await Promise.all([
           loadSymbolPanels(symbol, { forceSupport: true }),
           loadFundamentals(symbol),
+          loadDailyOverlay(symbol, overlayRange),
         ])
         updateError('')
       } catch (err) {
@@ -576,22 +596,38 @@ export default function LiveTradingDetailPage() {
           )}
         </section>
 
-        {/* Overlay intraday chart */}
+        {/* Daily overlay: stock vs benchmark */}
         <section className="rounded-2xl border border-border bg-card p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h3 className="text-base font-semibold text-white">实时分时叠加（个股 vs 大盘）</h3>
-            <div className="text-xs text-white/60">窗口：{OVERLAY_WINDOW_MINUTES} 分钟</div>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold text-white">走势对比（个股 vs 大盘）</h3>
+              <p className="mt-1 text-xs text-white/55">
+                基于日收盘价归一化对比，基准：{dailyOverlay?.benchmark || (isAShare ? 'SHCI' : 'HSI')}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {[{ label: '30天', value: '30' }, { label: '60天', value: '60' }, { label: '120天', value: '120' }, { label: '1年', value: '260' }].map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setOverlayRange(opt.value)}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${overlayRange === opt.value ? 'bg-primary text-white' : 'bg-black/25 text-white/60 hover:bg-black/35 hover:text-white/80'}`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
-          {!overlayPayload?.series?.length ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">分时数据预热中，请稍后。</div>
+          {!dailyOverlay?.series?.length ? (
+            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">走势对比数据加载中...</div>
           ) : (
             <div className="mt-4 space-y-4">
-              <OverlayIntradayChart series={overlayPayload.series} benchmark={overlayPayload.benchmark} symbol={overlayPayload.symbol} />
+              <DailyOverlayChart series={dailyOverlay.series} benchmark={dailyOverlay.benchmark} symbol={dailyOverlay.symbol} />
               <div className="grid gap-3 md:grid-cols-4">
-                <MetricMini label="基准指数" value={overlayPayload.benchmark || 'HSI'} />
-                <MetricMini label="Beta" value={formatNumberMaybeNull(overlayPayload?.metrics?.beta, 3)} accent={overlayPayload?.metrics?.beta != null && overlayPayload.metrics.beta >= 1 ? 'up' : 'normal'} tooltip="衡量该股票相对大盘的波动程度。Beta=1 表示与大盘同步；>1 表示波动比大盘大（更激进）；<1 表示波动比大盘小（更稳健）。" />
-                <MetricMini label="Relative Strength" value={formatPercentMaybeNull(overlayPayload?.metrics?.relative_strength)} accent={overlayPayload?.metrics?.relative_strength != null && overlayPayload.metrics.relative_strength >= 0 ? 'up' : 'down'} tooltip="该股票在同时段内相对大盘的强弱表现。正值说明跑赢大盘，负值说明跑输大盘。" />
-                <MetricMini label="样本状态" value={`${overlayPayload?.metrics?.sample_count || 0}/${overlayPayload?.metrics?.warmup_min_samples || 30} · ${overlayPayload?.metrics?.is_warmup ? '预热中' : '可用'}`} accent={overlayPayload?.metrics?.is_warmup ? 'normal' : 'up'} />
+                <MetricMini label="基准指数" value={dailyOverlay.benchmark || 'HSI'} />
+                <MetricMini label="相对强度" value={formatPercentMaybeNull(dailyOverlay?.metrics?.relative_strength)} accent={dailyOverlay?.metrics?.relative_strength != null && dailyOverlay.metrics.relative_strength >= 0 ? 'up' : 'down'} emphasis tooltip="个股累计涨幅减去大盘累计涨幅。正值说明跑赢大盘，负值说明跑输大盘。" />
+                <MetricMini label="Beta" value={formatNumberMaybeNull(dailyOverlay?.metrics?.beta, 2)} accent={dailyOverlay?.metrics?.beta != null && dailyOverlay.metrics.beta >= 1 ? 'up' : 'normal'} tooltip="衡量该股票相对大盘的波动程度。Beta=1 表示与大盘同步；>1 表示波动比大盘大（更激进）；<1 表示波动比大盘小（更稳健）。" />
+                <MetricMini label="相关系数" value={formatNumberMaybeNull(dailyOverlay?.metrics?.correlation, 2)} tooltip="个股与大盘走势的同步程度。1 表示完全同步，0 表示无关，-1 表示完全相反。" />
               </div>
             </div>
           )}
@@ -821,6 +857,100 @@ function DailyHistoryChart({ bars }) {
   }, [bars])
 
   return <div ref={containerRef} className="mt-4 w-full overflow-hidden rounded-xl border border-border bg-black/20" />
+}
+
+function DailyOverlayChart({ series, benchmark, symbol }) {
+  const containerRef = useRef(null)
+  const chartRef = useRef(null)
+
+  useEffect(() => {
+    let cleanup = () => {}
+    let cancelled = false
+    const render = async () => {
+      if (!containerRef.current || !Array.isArray(series) || series.length === 0) {
+        if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+        return
+      }
+      const { createChart, ColorType } = await import('lightweight-charts')
+      if (cancelled || !containerRef.current) return
+      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+
+      const chart = createChart(containerRef.current, {
+        width: containerRef.current.clientWidth || 700,
+        height: 300,
+        layout: { background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' }, textColor: '#E5E7EB' },
+        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        timeScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        grid: { vertLines: { color: 'rgba(148,163,184,0.1)' }, horzLines: { color: 'rgba(148,163,184,0.1)' } },
+        crosshair: { mode: 0 },
+      })
+
+      const sorted = [...series]
+        .filter((p) => p.date && p.stock_norm && p.bench_norm)
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+
+      if (sorted.length === 0) { chart.remove(); return }
+
+      // Stock line
+      const lastNorm = sorted[sorted.length - 1].stock_norm
+      const firstNorm = sorted[0].stock_norm
+      const stockColor = lastNorm >= firstNorm ? 'rgba(239, 68, 68, 0.9)' : 'rgba(34, 197, 94, 0.9)'
+      const stockLine = chart.addLineSeries({
+        color: stockColor,
+        lineWidth: 2,
+        priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+      })
+      stockLine.setData(sorted.map((p) => ({ time: p.date, value: p.stock_norm })))
+
+      // Benchmark line
+      const benchLine = chart.addLineSeries({
+        color: '#38bdf8',
+        lineWidth: 2,
+        lineStyle: 0,
+        priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+      })
+      benchLine.setData(sorted.map((p) => ({ time: p.date, value: p.bench_norm })))
+
+      // 1.0 reference line
+      const refLine = chart.addLineSeries({
+        color: 'rgba(148,163,184,0.25)',
+        lineWidth: 1,
+        lineStyle: 2,
+        crosshairMarkerVisible: false,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+      })
+      refLine.setData(sorted.map((p) => ({ time: p.date, value: 1.0 })))
+
+      chart.timeScale().fitContent()
+      chartRef.current = chart
+
+      const onResize = () => {
+        if (!containerRef.current || !chartRef.current) return
+        chartRef.current.applyOptions({ width: containerRef.current.clientWidth || 700 })
+        chartRef.current.timeScale().fitContent()
+      }
+      window.addEventListener('resize', onResize)
+      cleanup = () => {
+        window.removeEventListener('resize', onResize)
+        if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+      }
+    }
+    render()
+    return () => { cancelled = true; cleanup() }
+  }, [series, benchmark, symbol])
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-4 text-[11px] text-white/50">
+        <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded bg-red-400" />个股（归一化）</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded bg-sky-400" />大盘指数（归一化）</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded border border-dashed border-white/25" />基准线 1.0</span>
+      </div>
+      <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-black/20" />
+    </div>
+  )
 }
 
 function OverlayIntradayChart({ series, benchmark, symbol }) {

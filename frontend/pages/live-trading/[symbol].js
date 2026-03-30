@@ -527,7 +527,7 @@ export default function LiveTradingDetailPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="text-base font-semibold text-white">技术指标</h3>
-              <p className="mt-1 text-xs text-white/60">均线 / RSI / MACD，基于最近 {MA_LOOKBACK_DAYS} 个交易日收盘价。</p>
+              <p className="mt-1 text-xs text-white/60">均线 / RSI / MACD / 布林带，基于最近 {MA_LOOKBACK_DAYS} 个交易日收盘价。</p>
             </div>
             <div className="text-xs text-white/55">
               {movingAveragePayload?.updated_at ? `更新：${formatDateTime(movingAveragePayload.updated_at)}` : '等待数据'}
@@ -562,6 +562,15 @@ export default function LiveTradingDetailPage() {
               </div>
               {movingAveragePayload.macd_series?.length > 0 && (
                 <MACDChart series={movingAveragePayload.macd_series} />
+              )}
+              <div className="grid gap-3 md:grid-cols-4">
+                <MetricMini label="布林上轨" value={formatNumber(movingAveragePayload.bollinger_upper, 3)} tooltip="布林带上轨 = MA20 + 2倍标准差。价格触及或突破上轨通常意味着短期涨幅较大，可能面临回调压力。" />
+                <MetricMini label="布林下轨" value={formatNumber(movingAveragePayload.bollinger_lower, 3)} tooltip="布林带下轨 = MA20 - 2倍标准差。价格触及或跌破下轨通常意味着短期跌幅较大，可能有反弹机会。" />
+                <MetricMini label="带宽" value={formatBollingerBW(movingAveragePayload.bollinger_bandwidth)} tooltip="上轨与下轨之间的宽度占中轨的百分比。带宽收窄说明波动率降低，往往预示即将出现大的方向性突破。" />
+                <MetricMini label="%B 位置" value={formatPercentB(movingAveragePayload.bollinger_percent_b)} accent={percentBAccent(movingAveragePayload.bollinger_percent_b)} emphasis tooltip="价格在布林带中的相对位置。%B > 1 表示价格在上轨之上（超买区），%B < 0 表示在下轨之下（超卖区），0.5 表示正好在中轨。" />
+              </div>
+              {movingAveragePayload.bollinger_series?.length > 0 && (
+                <BollingerChart series={movingAveragePayload.bollinger_series} />
               )}
             </div>
           )}
@@ -1175,6 +1184,136 @@ function MACDChart({ series }) {
   )
 }
 
+function BollingerChart({ series }) {
+  const containerRef = useRef(null)
+  const chartRef = useRef(null)
+
+  useEffect(() => {
+    let cleanup = () => {}
+    let cancelled = false
+    const render = async () => {
+      if (!containerRef.current || !Array.isArray(series) || series.length === 0) {
+        if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+        return
+      }
+      const { createChart, ColorType } = await import('lightweight-charts')
+      if (cancelled || !containerRef.current) return
+      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+
+      const chart = createChart(containerRef.current, {
+        width: containerRef.current.clientWidth || 700,
+        height: 300,
+        layout: { background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' }, textColor: '#E5E7EB' },
+        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        timeScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        grid: { vertLines: { color: 'rgba(148,163,184,0.08)' }, horzLines: { color: 'rgba(148,163,184,0.08)' } },
+        crosshair: { mode: 0 },
+      })
+
+      const sorted = [...series]
+        .filter((p) => p.date)
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+
+      if (sorted.length === 0) { chart.remove(); return }
+
+      // Upper band (filled area down to lower)
+      const upperArea = chart.addAreaSeries({
+        lineColor: 'rgba(139, 92, 246, 0.5)',
+        topColor: 'rgba(139, 92, 246, 0.12)',
+        bottomColor: 'rgba(139, 92, 246, 0.0)',
+        lineWidth: 1,
+        lineStyle: 2,
+        priceFormat: { type: 'price', precision: 3, minMove: 0.001 },
+        crosshairMarkerVisible: false,
+        lastValueVisible: false,
+        priceLineVisible: false,
+      })
+      upperArea.setData(sorted.map((p) => ({ time: p.date, value: p.upper })))
+
+      // Lower band (filled area)
+      const lowerArea = chart.addAreaSeries({
+        lineColor: 'rgba(139, 92, 246, 0.5)',
+        topColor: 'rgba(9, 13, 24, 0.0)',
+        bottomColor: 'rgba(9, 13, 24, 0.0)',
+        lineWidth: 1,
+        lineStyle: 2,
+        priceFormat: { type: 'price', precision: 3, minMove: 0.001 },
+        crosshairMarkerVisible: false,
+        lastValueVisible: false,
+        priceLineVisible: false,
+      })
+      lowerArea.setData(sorted.map((p) => ({ time: p.date, value: p.lower })))
+
+      // Middle band (MA20)
+      const middleLine = chart.addLineSeries({
+        color: 'rgba(251, 146, 60, 0.7)',
+        lineWidth: 1,
+        lineStyle: 2,
+        priceFormat: { type: 'price', precision: 3, minMove: 0.001 },
+        crosshairMarkerVisible: false,
+        lastValueVisible: false,
+        priceLineVisible: false,
+      })
+      middleLine.setData(sorted.map((p) => ({ time: p.date, value: p.middle })))
+
+      // Close price line (main)
+      const firstClose = sorted[0].close
+      const lastClose = sorted[sorted.length - 1].close
+      const isRising = lastClose >= firstClose
+      const priceColor = isRising ? 'rgba(239, 68, 68, 0.9)' : 'rgba(34, 197, 94, 0.9)'
+
+      const priceLine = chart.addLineSeries({
+        color: priceColor,
+        lineWidth: 2,
+        priceFormat: { type: 'price', precision: 3, minMove: 0.001 },
+      })
+      priceLine.setData(sorted.map((p) => ({ time: p.date, value: p.close })))
+
+      // Mark points where price touches upper/lower band
+      const markers = []
+      for (const pt of sorted) {
+        if (pt.close >= pt.upper) {
+          markers.push({ time: pt.date, position: 'aboveBar', color: '#ef4444', shape: 'circle', text: '' })
+        } else if (pt.close <= pt.lower) {
+          markers.push({ time: pt.date, position: 'belowBar', color: '#22c55e', shape: 'circle', text: '' })
+        }
+      }
+      if (markers.length > 0) {
+        priceLine.setMarkers(markers)
+      }
+
+      chart.timeScale().fitContent()
+      chartRef.current = chart
+
+      const onResize = () => {
+        if (!containerRef.current || !chartRef.current) return
+        chartRef.current.applyOptions({ width: containerRef.current.clientWidth || 700 })
+        chartRef.current.timeScale().fitContent()
+      }
+      window.addEventListener('resize', onResize)
+      cleanup = () => {
+        window.removeEventListener('resize', onResize)
+        if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
+      }
+    }
+    render()
+    return () => { cancelled = true; cleanup() }
+  }, [series])
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-4 text-[11px] text-white/50">
+        <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded" style={{ background: 'rgba(239,68,68,0.9)' }} />收盘价</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded border border-dashed" style={{ borderColor: 'rgba(139,92,246,0.5)' }} />上轨/下轨</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded border border-dashed" style={{ borderColor: 'rgba(251,146,60,0.7)' }} />中轨(MA20)</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-1.5 w-1.5 rounded-full bg-red-400" />触及上轨</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-1.5 w-1.5 rounded-full bg-green-400" />触及下轨</span>
+      </div>
+      <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-black/20" />
+    </div>
+  )
+}
+
 function MetricMini({ label, value, accent = 'normal', emphasis = false, featured = false, marketAccent = false, tooltip = '' }) {
   const [showTip, setShowTip] = useState(false)
   const tipRef = useRef(null)
@@ -1316,6 +1455,23 @@ function pegAccent(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'normal'
   if (value < 1) return 'up'
   if (value > 2) return 'down'
+  return 'normal'
+}
+
+function formatBollingerBW(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return `${Number(value).toFixed(2)}%`
+}
+
+function formatPercentB(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return Number(value).toFixed(2)
+}
+
+function percentBAccent(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'normal'
+  if (value > 1) return 'down'
+  if (value < 0) return 'up'
   return 'normal'
 }
 

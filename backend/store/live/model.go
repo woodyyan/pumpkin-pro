@@ -238,8 +238,13 @@ type MovingAveragesPayload struct {
 	MACD               float64      `json:"macd"`
 	MACDSignal         float64      `json:"macd_signal"`
 	MACDHistogram      float64      `json:"macd_histogram"`
-	MACDSeries         []MACDPoint  `json:"macd_series,omitempty"`
-	Status             string       `json:"status"`
+	MACDSeries         []MACDPoint      `json:"macd_series,omitempty"`
+	BollingerUpper     float64          `json:"bollinger_upper"`
+	BollingerLower     float64          `json:"bollinger_lower"`
+	BollingerBandwidth float64          `json:"bollinger_bandwidth"`
+	BollingerPercentB  float64          `json:"bollinger_percent_b"`
+	BollingerSeries    []BollingerPoint `json:"bollinger_series,omitempty"`
+	Status             string           `json:"status"`
 	SessionState       SessionState `json:"session_state"`
 	UpdatedAt          string       `json:"updated_at"`
 }
@@ -249,6 +254,14 @@ type MACDPoint struct {
 	DIF       float64 `json:"dif"`
 	Signal    float64 `json:"signal"`
 	Histogram float64 `json:"histogram"`
+}
+
+type BollingerPoint struct {
+	Date   string  `json:"date"`
+	Close  float64 `json:"close"`
+	Upper  float64 `json:"upper"`
+	Middle float64 `json:"middle"`
+	Lower  float64 `json:"lower"`
 }
 
 type WatchlistState struct {

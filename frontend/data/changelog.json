@@ -12,6 +12,15 @@
   },
   "items": [
     {
+      "date": "2026-03-30",
+      "type": "新功能",
+      "title": "布林带（Bollinger Bands）可视化图表",
+      "summary": "技术指标模块新增布林带图表，展示近 120 个交易日的上轨、中轨（MA20）、下轨通道及收盘价走势。紫色填充区域直观显示波动区间，红/绿圆点标记价格触及上/下轨的位置。同时提供布林上轨、下轨、带宽和 %B 位置四项数值指标。",
+      "scope": "行情看板 / 后端 / 前端",
+      "raw_subject": "feat(live): add Bollinger Bands chart and indicators",
+      "visible": true
+    },
+    {
       "date": "2026-03-29",
       "type": "新功能",
       "title": "基础面新增市净率（PB）和成长性指标（PEG）",

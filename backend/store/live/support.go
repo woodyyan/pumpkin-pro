@@ -163,6 +163,7 @@ func (s *Service) GetMovingAverages(ctx context.Context, userID, symbol, period 
 
 	rsi14 := calculateRSI(bars, 14)
 	macd := calculateMACD(bars, 12, 26, 9)
+	bollinger := calculateBollingerBands(bars, 20, 2.0)
 
 	return &MovingAveragesPayload{
 		Symbol:             normalizedSymbol,
@@ -184,6 +185,11 @@ func (s *Service) GetMovingAverages(ctx context.Context, userID, symbol, period 
 		MACDSignal:         roundTo(macd.Signal, 4),
 		MACDHistogram:      roundTo(macd.Histogram, 4),
 		MACDSeries:         macd.Series,
+		BollingerUpper:     roundTo(bollinger.Upper, 4),
+		BollingerLower:     roundTo(bollinger.Lower, 4),
+		BollingerBandwidth: roundTo(bollinger.Bandwidth, 2),
+		BollingerPercentB:  roundTo(bollinger.PercentB, 4),
+		BollingerSeries:    bollinger.Series,
 		Status:             classifyMAStatus(lastBar.Close, ma20, ma200),
 		SessionState:       s.resolveSessionState(userID),
 		UpdatedAt:          time.Now().UTC().Format(time.RFC3339),
@@ -721,6 +727,86 @@ func ema(data []float64, period int) []float64 {
 		result[i-period+1] = data[i]*multiplier + result[i-period]*(1-multiplier)
 	}
 	return result
+}
+
+type bollingerResult struct {
+	Upper     float64
+	Lower     float64
+	Bandwidth float64
+	PercentB  float64
+	Valid     bool
+	Series    []BollingerPoint
+}
+
+func calculateBollingerBands(bars []DailyBar, period int, multiplier float64) bollingerResult {
+	if len(bars) < period || period <= 0 {
+		return bollingerResult{}
+	}
+
+	maxSeriesLen := 120
+	startIdx := period - 1
+	totalPoints := len(bars) - startIdx
+	seriesStart := 0
+	if totalPoints > maxSeriesLen {
+		seriesStart = totalPoints - maxSeriesLen
+	}
+
+	series := make([]BollingerPoint, 0, totalPoints-seriesStart)
+	var lastUpper, lastMiddle, lastLower float64
+
+	for i := startIdx; i < len(bars); i++ {
+		// Calculate SMA and standard deviation for the window
+		window := bars[i-period+1 : i+1]
+		sum := 0.0
+		for _, b := range window {
+			sum += b.Close
+		}
+		sma := sum / float64(period)
+
+		variance := 0.0
+		for _, b := range window {
+			diff := b.Close - sma
+			variance += diff * diff
+		}
+		stddev := math.Sqrt(variance / float64(period))
+
+		upper := sma + multiplier*stddev
+		lower := sma - multiplier*stddev
+
+		lastUpper = upper
+		lastMiddle = sma
+		lastLower = lower
+
+		pointIdx := i - startIdx
+		if pointIdx >= seriesStart {
+			series = append(series, BollingerPoint{
+				Date:   bars[i].Date,
+				Close:  roundTo(bars[i].Close, 4),
+				Upper:  roundTo(upper, 4),
+				Middle: roundTo(sma, 4),
+				Lower:  roundTo(lower, 4),
+			})
+		}
+	}
+
+	bandwidth := 0.0
+	if lastMiddle > 0 {
+		bandwidth = (lastUpper - lastLower) / lastMiddle * 100
+	}
+	percentB := 0.0
+	bandRange := lastUpper - lastLower
+	if bandRange > 0 {
+		percentB = (bars[len(bars)-1].Close - lastLower) / bandRange
+	}
+
+	return bollingerResult{
+		Upper:     lastUpper,
+		Lower:     lastLower,
+		Bandwidth: bandwidth,
+		PercentB:  percentB,
+		Valid:     true,
+		Series:    series,
+	}
 }
 
 func parseBarDate(raw string) time.Time {

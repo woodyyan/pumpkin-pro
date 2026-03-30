@@ -19,6 +19,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
+	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
 	"github.com/woodyyan/pumpkin-pro/backend/store/screener"
 	"github.com/woodyyan/pumpkin-pro/backend/store/signal"
 	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
@@ -32,6 +33,7 @@ type appServer struct {
 	strategyService  *strategy.Service
 	liveService      *live.Service
 	signalService    *signal.Service
+	portfolioService *portfolio.Service
 	adminService     *admin.Service
 	backtestService  *backtest.Service
 	screenerService  *screener.Service
@@ -1541,6 +1543,73 @@ func writeJSON(w http.ResponseWriter, statusCode int, payload any) {
 	}
 }
 
+// ── Portfolio handlers ──
+
+func (a *appServer) handlePortfolioList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	items, err := a.portfolioService.ListByUser(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *appServer) handlePortfolioBySymbol(w http.ResponseWriter, r *http.Request) {
+	symbol := strings.TrimPrefix(r.URL.Path, "/api/portfolio/")
+	symbol = strings.TrimSpace(strings.ToUpper(strings.Trim(symbol, "/")))
+	if symbol == "" {
+		writeError(w, http.StatusBadRequest, "symbol is required")
+		return
+	}
+	userID := currentUserID(r)
+
+	switch r.Method {
+	case http.MethodGet:
+		item, err := a.portfolioService.GetBySymbol(r.Context(), userID, symbol)
+		if err != nil {
+			if errors.Is(err, portfolio.ErrNotFound) {
+				writeJSON(w, http.StatusOK, map[string]any{"item": nil})
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"item": item})
+
+	case http.MethodPut:
+		var input portfolio.UpsertPortfolioInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		item, err := a.portfolioService.Upsert(r.Context(), userID, symbol, input)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"item": item})
+
+	case http.MethodDelete:
+		if err := a.portfolioService.Delete(r.Context(), userID, symbol); err != nil {
+			if errors.Is(err, portfolio.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "portfolio not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Only GET, PUT, DELETE methods are allowed")
+	}
+}
+
 func main() {
 	cfg := config.Load()
 	storeInstance, err := store.New(cfg.DB)
@@ -1570,6 +1639,9 @@ func main() {
 	})
 	signalService.StartDispatcher(context.Background())
 
+	portfolioRepo := portfolio.NewRepository(storeInstance.DB)
+	portfolioService := portfolio.NewService(portfolioRepo)
+
 	signalEvaluator := signal.NewEvaluator(signalService, liveService, strategyService, signal.EvaluatorConfig{
 		QuantServiceURL: cfg.QuantServiceURL,
 	})
@@ -1596,6 +1668,7 @@ func main() {
 		strategyService:  strategyService,
 		liveService:      liveService,
 		signalService:    signalService,
+		portfolioService: portfolioService,
 		adminService:     adminService,
 		backtestService:  backtestService,
 		screenerService:  screenerService,
@@ -1625,6 +1698,8 @@ func main() {
 	mux.HandleFunc("/api/signal-configs/", server.withRequiredAuth(server.handleSignalConfigSubroutes))
 	mux.HandleFunc("/api/signal-events", server.withRequiredAuth(server.handleSignalEvents))
 	mux.HandleFunc("/api/webhook-deliveries", server.withRequiredAuth(server.handleWebhookDeliveries))
+	mux.HandleFunc("/api/portfolio", server.withRequiredAuth(server.handlePortfolioList))
+	mux.HandleFunc("/api/portfolio/", server.withRequiredAuth(server.handlePortfolioBySymbol))
 	mux.HandleFunc("/api/webhook-deliveries/latest", server.withRequiredAuth(server.handleWebhookDeliveriesLatest))
 
 	mux.HandleFunc("/api/live/watchlist", server.withRequiredAuth(server.handleLiveWatchlist))

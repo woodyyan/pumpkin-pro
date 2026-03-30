@@ -1610,6 +1610,40 @@ func (a *appServer) handlePortfolioBySymbol(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+func (a *appServer) handleInvestmentProfile(w http.ResponseWriter, r *http.Request) {
+	userID := currentUserID(r)
+
+	switch r.Method {
+	case http.MethodGet:
+		profile, err := a.portfolioService.GetInvestmentProfile(r.Context(), userID)
+		if err != nil {
+			if errors.Is(err, portfolio.ErrNotFound) {
+				writeJSON(w, http.StatusOK, map[string]any{"profile": nil})
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"profile": profile})
+
+	case http.MethodPut:
+		var input portfolio.UpsertInvestmentProfileInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		profile, err := a.portfolioService.UpsertInvestmentProfile(r.Context(), userID, input)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"profile": profile})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Only GET, PUT methods are allowed")
+	}
+}
+
 func main() {
 	cfg := config.Load()
 	storeInstance, err := store.New(cfg.DB)
@@ -1700,6 +1734,7 @@ func main() {
 	mux.HandleFunc("/api/webhook-deliveries", server.withRequiredAuth(server.handleWebhookDeliveries))
 	mux.HandleFunc("/api/portfolio", server.withRequiredAuth(server.handlePortfolioList))
 	mux.HandleFunc("/api/portfolio/", server.withRequiredAuth(server.handlePortfolioBySymbol))
+	mux.HandleFunc("/api/investment-profile", server.withRequiredAuth(server.handleInvestmentProfile))
 	mux.HandleFunc("/api/webhook-deliveries/latest", server.withRequiredAuth(server.handleWebhookDeliveriesLatest))
 
 	mux.HandleFunc("/api/live/watchlist", server.withRequiredAuth(server.handleLiveWatchlist))

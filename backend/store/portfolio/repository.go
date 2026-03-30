@@ -77,3 +77,41 @@ func (r *Repository) Delete(ctx context.Context, userID, symbol string) error {
 	}
 	return nil
 }
+
+// ── Investment Profile ──
+
+func (r *Repository) GetInvestmentProfile(ctx context.Context, userID string) (*InvestmentProfileRecord, error) {
+	var record InvestmentProfileRecord
+	err := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&record).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &record, nil
+}
+
+func (r *Repository) UpsertInvestmentProfile(ctx context.Context, record *InvestmentProfileRecord) error {
+	var existing InvestmentProfileRecord
+	err := r.db.WithContext(ctx).Where("user_id = ?", record.UserID).First(&existing).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return r.db.WithContext(ctx).Create(record).Error
+		}
+		return err
+	}
+	return r.db.WithContext(ctx).
+		Model(&InvestmentProfileRecord{}).
+		Where("user_id = ?", record.UserID).
+		Updates(map[string]any{
+			"total_capital":      record.TotalCapital,
+			"risk_preference":    record.RiskPreference,
+			"investment_goal":    record.InvestmentGoal,
+			"investment_horizon": record.InvestmentHorizon,
+			"max_drawdown_pct":   record.MaxDrawdownPct,
+			"experience_level":   record.ExperienceLevel,
+			"note":               record.Note,
+			"updated_at":         record.UpdatedAt,
+		}).Error
+}

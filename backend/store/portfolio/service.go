@@ -78,3 +78,47 @@ func (s *Service) Upsert(ctx context.Context, userID, symbol string, input Upser
 func (s *Service) Delete(ctx context.Context, userID, symbol string) error {
 	return s.repo.Delete(ctx, userID, symbol)
 }
+
+// ── Investment Profile ──
+
+func (s *Service) GetInvestmentProfile(ctx context.Context, userID string) (*InvestmentProfile, error) {
+	record, err := s.repo.GetInvestmentProfile(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	profile := record.toProfile()
+	return &profile, nil
+}
+
+func (s *Service) UpsertInvestmentProfile(ctx context.Context, userID string, input UpsertInvestmentProfileInput) (*InvestmentProfile, error) {
+	if input.TotalCapital < 0 {
+		return nil, fmt.Errorf("total_capital must be >= 0")
+	}
+	if input.MaxDrawdownPct < 0 || input.MaxDrawdownPct > 100 {
+		return nil, fmt.Errorf("max_drawdown_pct must be between 0 and 100")
+	}
+
+	now := time.Now().UTC()
+	record := &InvestmentProfileRecord{
+		UserID:            userID,
+		TotalCapital:      input.TotalCapital,
+		RiskPreference:    strings.TrimSpace(input.RiskPreference),
+		InvestmentGoal:    strings.TrimSpace(input.InvestmentGoal),
+		InvestmentHorizon: strings.TrimSpace(input.InvestmentHorizon),
+		MaxDrawdownPct:    input.MaxDrawdownPct,
+		ExperienceLevel:   strings.TrimSpace(input.ExperienceLevel),
+		Note:              strings.TrimSpace(input.Note),
+		UpdatedAt:         now,
+	}
+
+	if err := s.repo.UpsertInvestmentProfile(ctx, record); err != nil {
+		return nil, err
+	}
+
+	saved, err := s.repo.GetInvestmentProfile(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	profile := saved.toProfile()
+	return &profile, nil
+}

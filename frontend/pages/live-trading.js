@@ -187,43 +187,22 @@ export default function LiveTradingOverviewPage() {
         </p>
       </section>
 
-      {/* Market overview — A shares + HK side by side */}
-      <section className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-2xl border border-border bg-card p-5">
-          <h3 className="text-base font-semibold text-white">A 股大盘</h3>
-          <div className="mt-4 grid gap-3">
-            {(marketOverviewA?.indexes || []).length > 0 ? (
-              marketOverviewA.indexes.map((index) => (
-                <div key={index.code} className="rounded-xl border border-border bg-black/20 p-3">
-                  <div className="text-xs text-white/50">{formatMarketIndexTitle(index.name, index.code)}</div>
-                  <div className="mt-1 text-lg font-semibold text-white">{formatNumber(index.last, 2)}</div>
-                  <div className={`text-xs ${index.change_rate >= 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
-                    {formatPercent(index.change_rate)}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="text-xs text-white/40">加载中...</div>
-            )}
-          </div>
-        </div>
-        <div className="rounded-2xl border border-border bg-card p-5">
-          <h3 className="text-base font-semibold text-white">港股大盘</h3>
-          <div className="mt-4 grid gap-3">
-            {(marketOverviewHK?.indexes || []).length > 0 ? (
-              marketOverviewHK.indexes.map((index) => (
-                <div key={index.code} className="rounded-xl border border-border bg-black/20 p-3">
-                  <div className="text-xs text-white/50">{formatMarketIndexTitle(index.name, index.code)}</div>
-                  <div className="mt-1 text-lg font-semibold text-white">{formatNumber(index.last, 2)}</div>
-                  <div className={`text-xs ${index.change_rate >= 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
-                    {formatPercent(index.change_rate)}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="text-xs text-white/40">加载中...</div>
-            )}
-          </div>
+      {/* Market overview — compact index bar */}
+      <section className="rounded-2xl border border-border bg-card px-5 py-3">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <span className="text-xs font-medium text-white/40">大盘</span>
+          {[...(marketOverviewA?.indexes || []), ...(marketOverviewHK?.indexes || [])].map((index) => (
+            <div key={index.code} className="flex items-baseline gap-1.5">
+              <span className="text-xs text-white/55">{formatMarketIndexTitle(index.name, index.code)}</span>
+              <span className="text-sm font-semibold tabular-nums text-white">{formatNumber(index.last, 2)}</span>
+              <span className={`text-xs font-medium tabular-nums ${index.change_rate >= 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                {formatPercent(index.change_rate)}
+              </span>
+            </div>
+          ))}
+          {(marketOverviewA?.indexes || []).length === 0 && (marketOverviewHK?.indexes || []).length === 0 && (
+            <span className="text-xs text-white/30 animate-pulse">加载中...</span>
+          )}
         </div>
       </section>
 

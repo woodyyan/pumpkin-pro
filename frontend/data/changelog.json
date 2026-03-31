@@ -12,6 +12,15 @@
   },
   "items": [
     {
+      "date": "2026-03-31",
+      "type": "改进",
+      "title": "行情看板大盘指数合并为紧凑指数条",
+      "summary": "原来的 A 股大盘和港股大盘两个独立卡片合并为一行紧凑的指数条，所有指数（上证/深证/创业板/恒生/国企/科技）横排展示，节约纵向空间。",
+      "scope": "行情看板 / 前端",
+      "raw_subject": "refactor(live): merge market overview cards into compact index bar",
+      "visible": true
+    },
+    {
       "date": "2026-03-30",
       "type": "改进",
       "title": "选股平台秒开：缓存加速 + 骨架屏",

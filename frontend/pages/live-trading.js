@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import dynamic from 'next/dynamic'
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import { isAuthRequiredError } from '../lib/auth-storage'
+
+const QuadrantChart = dynamic(() => import('../components/QuadrantChart'), { ssr: false })
 
 const POLL_MS = 5000
 const MARKET_OVERVIEW_POLL_MS = 5000
@@ -20,6 +23,8 @@ export default function LiveTradingOverviewPage() {
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState('')
   const [signalConfigMap, setSignalConfigMap] = useState({})
+  const [quadrantData, setQuadrantData] = useState(null)
+  const [quadrantLoading, setQuadrantLoading] = useState(false)
 
   const privateAccessReady = ready && isLoggedIn
 
@@ -27,6 +32,7 @@ export default function LiveTradingOverviewPage() {
     setWatchlist({ items: [], active_symbol: '', session_state: 'idle' })
     setSnapshots([])
     setSignalConfigMap({})
+    setQuadrantData(null)
     setError('')
     setErrorNeedsLogin(false)
     setLastUpdateAt('')
@@ -83,6 +89,19 @@ export default function LiveTradingOverviewPage() {
     }
   }
 
+  const loadQuadrant = async (watchlistSymbols = []) => {
+    try {
+      setQuadrantLoading(true)
+      const symbolsParam = watchlistSymbols.join(',')
+      const data = await requestJson(`/api/quadrant${symbolsParam ? `?watchlist_symbols=${encodeURIComponent(symbolsParam)}` : ''}`)
+      setQuadrantData(data)
+    } catch {
+      // Quadrant loading is non-critical
+    } finally {
+      setQuadrantLoading(false)
+    }
+  }
+
   const loadMarketOverview = async () => {
     const [aRes, hkRes] = await Promise.allSettled([
       requestJson('/api/live/market/overview?exchange=SSE'),
@@ -95,8 +114,11 @@ export default function LiveTradingOverviewPage() {
   const loadPrivateData = async ({ bootstrap = false } = {}) => {
     try {
       if (bootstrap) {
-        await loadWatchlist()
+        const wl = await loadWatchlist()
         loadSignalConfigs()
+        // Load quadrant with watchlist symbols (non-blocking)
+        const symbols = (wl?.items || []).map((i) => i.symbol)
+        loadQuadrant(symbols)
       }
       await loadSnapshots()
       updateError('')
@@ -204,6 +226,113 @@ export default function LiveTradingOverviewPage() {
             <span className="text-xs text-white/30 animate-pulse">加载中...</span>
           )}
         </div>
+      </section>
+
+      {/* Quadrant Analysis */}
+      <section className="rounded-2xl border border-border bg-card p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-white">风险机会全景图<span className="ml-2 inline-block rounded bg-white/8 px-1.5 py-0.5 text-[11px] font-normal text-white/45">A 股</span></h3>
+            {quadrantData?.meta?.computed_at && (
+              <div className="mt-1 flex items-center gap-2 text-xs text-white/50">
+                <span>数据日期：{formatDateTime(quadrantData.meta.computed_at)}</span>
+                {quadrantData.meta.total_count > 0 && <span>· {quadrantData.meta.total_count.toLocaleString()} 只</span>}
+                {(() => {
+                  if (!quadrantData.meta.computed_at) return null
+                  const daysDiff = Math.floor((Date.now() - new Date(quadrantData.meta.computed_at).getTime()) / (1000 * 60 * 60 * 24))
+                  if (daysDiff > 3) {
+                    return <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-200">数据已过期（{daysDiff} 天前）</span>
+                  }
+                  return null
+                })()}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {quadrantLoading && !quadrantData ? (
+          <div className="mt-6 flex items-center justify-center py-12 text-sm text-white/40">
+            <span className="animate-pulse">加载四象限数据...</span>
+          </div>
+        ) : quadrantData && quadrantData.all_stocks && quadrantData.all_stocks.length > 0 ? (
+          <>
+            <div className="mt-4 flex justify-center overflow-x-auto">
+              <QuadrantChart
+                allStocks={quadrantData.all_stocks}
+                watchlist={quadrantData.watchlist_details || []}
+                width={Math.min(680, typeof window !== 'undefined' ? window.innerWidth - 80 : 680)}
+                height={460}
+                onClickStock={(code) => {
+                  // Try to find the watchlist item with matching code, open detail page
+                  const matchItem = (watchlist.items || []).find((i) => {
+                    const itemCode = i.symbol.split('.')[0].replace(/^0+/, '')
+                    const targetCode = code.replace(/^0+/, '')
+                    return itemCode === targetCode
+                  })
+                  if (matchItem) {
+                    handleOpenDetail(matchItem.symbol)
+                  }
+                }}
+              />
+            </div>
+
+            {/* Summary stats */}
+            <div className="mt-4 space-y-3">
+              <div className="flex flex-wrap gap-3 text-xs">
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-2.5 py-1 text-emerald-300">
+                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />
+                  机会区 {quadrantData.summary?.opportunity_zone || 0}
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1 text-amber-300">
+                  <span className="inline-block h-2 w-2 rounded-full bg-amber-400" />
+                  拥挤区 {quadrantData.summary?.crowded_zone || 0}
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-rose-500/10 px-2.5 py-1 text-rose-300">
+                  <span className="inline-block h-2 w-2 rounded-full bg-rose-400" />
+                  泡沫区 {quadrantData.summary?.bubble_zone || 0}
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-1 text-white/60">
+                  <span className="inline-block h-2 w-2 rounded-full bg-white/40" />
+                  防御区 {quadrantData.summary?.defensive_zone || 0}
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-blue-500/10 px-2.5 py-1 text-blue-300">
+                  <span className="inline-block h-2 w-2 rounded-full bg-blue-400" />
+                  中性区 {quadrantData.summary?.neutral_zone || 0}
+                </span>
+              </div>
+
+              {/* Watchlist details text summary */}
+              {(quadrantData.watchlist_details || []).length > 0 && (
+                <div className="rounded-xl border border-border/60 bg-black/20 p-3">
+                  <div className="text-xs font-medium text-white/50">我的关注（{quadrantData.watchlist_details.length} 只）</div>
+                  <div className="mt-2 space-y-1">
+                    {quadrantData.watchlist_details.map((w) => (
+                      <div key={w.code} className="flex items-center gap-2 text-xs">
+                        <span className={`inline-block h-2 w-2 rounded-full ${
+                          w.quadrant === '机会' ? 'bg-emerald-400' :
+                          w.quadrant === '拥挤' ? 'bg-amber-400' :
+                          w.quadrant === '泡沫' ? 'bg-rose-400' :
+                          w.quadrant === '防御' ? 'bg-white/40' :
+                          'bg-blue-400'
+                        }`} />
+                        <span className="font-medium text-white/80">{w.name}</span>
+                        <span className="text-white/40">—</span>
+                        <span className="text-white/60">{w.quadrant}区</span>
+                        <span className="text-white/40">（机会 {w.opportunity.toFixed(0)} / 风险 {w.risk.toFixed(0)}）</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-white/40">
+            {quadrantData?.all_stocks?.length === 0
+              ? '四象限数据尚未计算，请等待凌晨定时任务完成。'
+              : '加载四象限数据中...'}
+          </div>
+        )}
       </section>
 
       {error ? (

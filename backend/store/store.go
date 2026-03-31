@@ -9,6 +9,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
+	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 	"github.com/woodyyan/pumpkin-pro/backend/store/screener"
 	"github.com/woodyyan/pumpkin-pro/backend/store/signal"
 	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
@@ -38,6 +39,7 @@ func New(cfg config.DBConfig) (*Store, error) {
 		admin.NewMigrator(),
 		backtest.NewMigrator(),
 		portfolio.NewMigrator(),
+		quadrant.NewMigrator(),
 		screener.NewMigrator(),
 	}
 	for _, migrator := range migrators {

@@ -27,6 +27,7 @@ from screener.scanner import (
     get_industry_options,
     sort_and_paginate,
 )
+from screener.quadrant import compute_all_quadrant_scores, get_cached_scores
 from strategy_library.service import StrategyService
 
 logger = logging.getLogger(__name__)
@@ -669,6 +670,46 @@ def df_to_json_safe(df: pd.DataFrame) -> List[Dict]:
 
 def dict_to_json_safe(data: Dict) -> Dict:
     return json.loads(json.dumps(data, ignore_nan=True))
+
+
+# ── Quadrant (四象限) ──
+
+
+class QuadrantComputeRequest(BaseModel):
+    callback_url: str = Field(default="", description="Go 后端回调 URL，为空则不回调")
+
+
+@app.post("/api/quadrant/compute-all")
+def quadrant_compute_all(req: QuadrantComputeRequest):
+    """触发全市场四象限评分计算（异步后台执行）。
+
+    Go 后端定时调用此端点，Quant 立即返回 accepted，
+    计算完成后回调 callback_url 写入 DB。
+    """
+    import threading as _threading
+
+    callback = req.callback_url.strip() if req.callback_url else None
+
+    def _run():
+        try:
+            compute_all_quadrant_scores(callback_url=callback)
+        except Exception as exc:
+            logger.exception("[quadrant] compute-all 后台任务失败: %s", exc)
+
+    _threading.Thread(target=_run, daemon=True).start()
+    return {"status": "accepted", "message": "四象限计算已在后台启动"}
+
+
+@app.get("/api/quadrant/scores")
+def quadrant_get_scores():
+    """返回最近一次缓存的全市场四象限评分。"""
+    cached = get_cached_scores()
+    if cached is None:
+        raise HTTPException(status_code=404, detail="四象限数据尚未计算，请等待凌晨定时任务完成")
+    return {
+        "total": len(cached),
+        "items": cached,
+    }
 
 
 # ── Signal Evaluation ──

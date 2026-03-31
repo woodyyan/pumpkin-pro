@@ -20,6 +20,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
+	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 	"github.com/woodyyan/pumpkin-pro/backend/store/screener"
 	"github.com/woodyyan/pumpkin-pro/backend/store/signal"
 	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
@@ -34,6 +35,7 @@ type appServer struct {
 	liveService      *live.Service
 	signalService    *signal.Service
 	portfolioService *portfolio.Service
+	quadrantService  *quadrant.Service
 	adminService     *admin.Service
 	backtestService  *backtest.Service
 	screenerService  *screener.Service
@@ -1644,6 +1646,75 @@ func (a *appServer) handleInvestmentProfile(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// ── Quadrant handlers ──
+
+func (a *appServer) handleQuadrant(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+
+	// Parse watchlist_symbols from query
+	watchlistSymbols := splitCSV(r.URL.Query().Get("watchlist_symbols"))
+	// Convert A-share symbols (e.g. 600519.SH) to 6-digit codes (600519)
+	watchlistCodes := make([]string, 0, len(watchlistSymbols))
+	for _, sym := range watchlistSymbols {
+		code := strings.TrimSpace(sym)
+		if idx := strings.Index(code, "."); idx > 0 {
+			code = code[:idx]
+		}
+		code = strings.TrimLeft(code, "0")
+		if len(code) < 6 {
+			code = strings.Repeat("0", 6-len(code)) + code
+		}
+		if code != "" {
+			watchlistCodes = append(watchlistCodes, code)
+		}
+	}
+
+	resp, err := a.quadrantService.GetAllWithWatchlist(r.Context(), watchlistCodes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *appServer) handleQuadrantBulkSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+
+	var input quadrant.BulkSaveInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	count, err := a.quadrantService.BulkSave(r.Context(), input)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	log.Printf("[quadrant] bulk-save: wrote %d scores", count)
+	writeJSON(w, http.StatusOK, map[string]any{"saved": count})
+}
+
+func (a *appServer) handleQuadrantStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+
+	status, err := a.quadrantService.GetStatus(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
 func main() {
 	cfg := config.Load()
 	storeInstance, err := store.New(cfg.DB)
@@ -1676,6 +1747,14 @@ func main() {
 	portfolioRepo := portfolio.NewRepository(storeInstance.DB)
 	portfolioService := portfolio.NewService(portfolioRepo)
 
+	quadrantRepo := quadrant.NewRepository(storeInstance.DB)
+	quadrantService := quadrant.NewService(quadrantRepo)
+	quadrantWorker := quadrant.NewWorker(quadrantService, quadrant.WorkerConfig{
+		QuantServiceURL: cfg.QuantServiceURL,
+		BackendBaseURL:  fmt.Sprintf("http://localhost:%s", cfg.Port),
+	}, nil)
+	quadrantWorker.Start(context.Background())
+
 	signalEvaluator := signal.NewEvaluator(signalService, liveService, strategyService, signal.EvaluatorConfig{
 		QuantServiceURL: cfg.QuantServiceURL,
 	})
@@ -1703,6 +1782,7 @@ func main() {
 		liveService:      liveService,
 		signalService:    signalService,
 		portfolioService: portfolioService,
+		quadrantService:  quadrantService,
 		adminService:     adminService,
 		backtestService:  backtestService,
 		screenerService:  screenerService,
@@ -1745,6 +1825,10 @@ func main() {
 
 	mux.HandleFunc("/api/admin/login", server.handleAdminLogin)
 	mux.HandleFunc("/api/admin/stats", server.withSuperAdminAuth(server.handleAdminStats))
+
+	mux.HandleFunc("/api/quadrant", server.handleQuadrant)
+	mux.HandleFunc("/api/quadrant/bulk-save", server.handleQuadrantBulkSave)
+	mux.HandleFunc("/api/quadrant/status", server.handleQuadrantStatus)
 
 	mux.HandleFunc("/api/screener/scan", server.withOptionalAuth(server.handleScreenerScan))
 	mux.HandleFunc("/api/screener/ai-parse", server.withOptionalAuth(server.handleScreenerAIParse))

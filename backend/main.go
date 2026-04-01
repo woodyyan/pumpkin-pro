@@ -1752,7 +1752,7 @@ func main() {
 	quadrantService := quadrant.NewService(quadrantRepo)
 	quadrantWorker := quadrant.NewWorker(quadrantService, quadrant.WorkerConfig{
 		QuantServiceURL: cfg.QuantServiceURL,
-		BackendBaseURL:  fmt.Sprintf("http://localhost:%s", cfg.Port),
+		BackendBaseURL:  cfg.BackendCallbackURL,
 	}, nil)
 	quadrantWorker.Start(context.Background())
 

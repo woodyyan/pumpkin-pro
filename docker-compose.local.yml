@@ -31,6 +31,7 @@ services:
     environment:
       - GO_ENV=development
       - QUANT_SERVICE_URL=http://quant:8000
+      - BACKEND_CALLBACK_URL=http://backend:8080
       - DB_TYPE=${DB_TYPE:-sqlite}
       - DB_PATH=${DB_PATH:-/app/data/pumpkin.db}
       - DB_HOST=${DB_HOST:-postgres}

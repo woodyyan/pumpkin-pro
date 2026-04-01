@@ -82,8 +82,14 @@ func (w *Worker) Start(ctx context.Context) {
 }
 
 func nextTriggerTime(now time.Time, hour, minute int) time.Time {
-	today := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
-	if now.After(today) {
+	// Always use Asia/Shanghai timezone for scheduling
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("CST", 8*3600)
+	}
+	nowCST := now.In(loc)
+	today := time.Date(nowCST.Year(), nowCST.Month(), nowCST.Day(), hour, minute, 0, 0, loc)
+	if nowCST.After(today) {
 		// Already past today's trigger time, schedule for tomorrow
 		return today.Add(24 * time.Hour)
 	}

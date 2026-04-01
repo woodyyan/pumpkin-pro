@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 # ── Configuration ──────────────────────────────────────────────
 DAILY_LOOKBACK_DAYS = 90           # 拉取 90 天日线（覆盖 60 天回撤 + 20 天波动率）
-MAX_WORKERS = 6                    # 并发拉日线的线程数
-REQUEST_INTERVAL_MS = 50           # 每次请求后的间隔（毫秒）
+MAX_WORKERS = 3                    # 并发拉日线的线程数（云服务器需降低避免被限流）
+REQUEST_INTERVAL_MS = 200          # 每次请求后的间隔（毫秒）
+SINGLE_RETRY_DELAY_MS = 500        # 单只失败后重试前的等待（毫秒）
 MIN_SUCCESS_RATIO = 0.80           # 成功率 < 80% 视为整体失败
 BENCHMARK_CODE = "000001"          # 上证指数
 
@@ -215,6 +216,10 @@ def compute_all_quadrant_scores(callback_url: Optional[str] = None) -> List[Dict
 
     def fetch_with_interval(code: str) -> Tuple[str, Optional[pd.DataFrame]]:
         df = _fetch_daily_bars_safe(code)
+        if df is None:
+            # Retry once with longer delay
+            time.sleep(SINGLE_RETRY_DELAY_MS / 1000.0)
+            df = _fetch_daily_bars_safe(code)
         if REQUEST_INTERVAL_MS > 0:
             time.sleep(REQUEST_INTERVAL_MS / 1000.0)
         return code, df

@@ -1,19 +1,21 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
 )
 
 type Config struct {
-	Port             string
-	QuantServiceURL  string
-	DB               DBConfig
-	StrategySeedPath string
-	Auth             AuthConfig
-	AdminSeed        AdminSeedConfig
-	AI               AIConfig
+	Port               string
+	QuantServiceURL    string
+	BackendCallbackURL string
+	DB                 DBConfig
+	StrategySeedPath   string
+	Auth               AuthConfig
+	AdminSeed          AdminSeedConfig
+	AI                 AIConfig
 }
 
 type AIConfig struct {
@@ -46,8 +48,9 @@ type AuthConfig struct {
 
 func Load() Config {
 	return Config{
-		Port:             getEnv("PORT", "8080"),
-		QuantServiceURL:  trimTrailingSlash(getEnv("QUANT_SERVICE_URL", "http://localhost:8000")),
+		Port:               getEnv("PORT", "8080"),
+		QuantServiceURL:    trimTrailingSlash(getEnv("QUANT_SERVICE_URL", "http://localhost:8000")),
+		BackendCallbackURL: trimTrailingSlash(getEnv("BACKEND_CALLBACK_URL", fmt.Sprintf("http://localhost:%s", getEnv("PORT", "8080")))),
 		StrategySeedPath: getEnv("STRATEGY_SEED_PATH", "seed/strategies.json"),
 		AdminSeed: AdminSeedConfig{
 			Email:    getEnv("ADMIN_SEED_EMAIL", ""),

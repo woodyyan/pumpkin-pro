@@ -343,7 +343,7 @@ export default function StrategyLibraryPage() {
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3 max-w-3xl">
             <span className="inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-              Pumpkin Pro · 策略库
+              Wolong Pro · 策略库
             </span>
             <div>
               <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">策略库</h1>

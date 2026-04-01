@@ -32,7 +32,7 @@ from strategy_library.service import StrategyService
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Pumpkin Quant Service", description="Quantitative Backtesting Engine API")
+app = FastAPI(title="Wolong Pro Quant Service", description="Quantitative Backtesting Engine API")
 
 SUPPORTED_DATA_SOURCES = ["online", "csv", "sample"]
 
@@ -108,7 +108,7 @@ class BacktestRequest(BaseModel):
 def health_check():
     return {
         "status": "online",
-        "service": "Pumpkin Quant Engine",
+        "service": "Wolong Pro Quant Engine",
         "strategies": [strategy.name for strategy in strategy_service.list_strategies(active_only=True)],
         "data_sources": SUPPORTED_DATA_SOURCES,
     }

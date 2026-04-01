@@ -89,7 +89,7 @@ export default function ChangelogPage() {
               产品更新日志
             </h1>
             <p className="mt-5 max-w-2xl text-sm leading-7 text-white/68 md:text-base">
-              这里记录南瓜交易系统近期的功能更新，如果你有什么想要的功能都可以告诉我们。
+              这里记录卧龙AI量化交易台近期的功能更新，如果你有什么想要的功能都可以告诉我们。
             </p>
           </div>
 

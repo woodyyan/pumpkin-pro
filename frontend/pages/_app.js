@@ -21,14 +21,14 @@ function AppLayout({ Component, pageProps }) {
   return (
     <>
       <Head>
-        <title>Pumpkin Trader Pro</title>
+        <title>卧龙AI量化交易台</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
       <div className="min-h-screen bg-background text-foreground flex flex-col">
         <nav className="fixed top-0 left-0 right-0 h-16 bg-black/60 backdrop-blur-md border-b border-white/10 z-50 flex items-center justify-between px-6 gap-4">
           <div className="flex items-center space-x-2 min-w-0">
-            <span className="text-2xl">🎃</span>
-            <span className="text-lg font-bold tracking-tight truncate">Pumpkin Pro 南瓜交易系统</span>
+            <span className="text-2xl">🐉</span>
+            <span className="text-lg font-bold tracking-tight truncate">卧龙AI量化交易台</span>
           </div>
 
           <div className="flex items-center space-x-2 text-sm font-medium">

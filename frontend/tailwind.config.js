@@ -12,7 +12,7 @@ module.exports = {
         foreground: "#ededed",
         card: "#161618",
         border: "rgba(255,255,255,0.1)",
-        primary: "#e67e22", // Pumpkin orange
+        primary: "#e67e22", // Wolong primary
         positive: "#22c55e",
         negative: "#ef4444"
       },

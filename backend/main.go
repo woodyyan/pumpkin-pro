@@ -260,7 +260,7 @@ func (a *appServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":  "online",
-		"service": "Pumpkin Go Backend",
+		"service": "Wolong Pro Backend",
 		"db_type": a.cfg.DB.Type,
 	})
 }
@@ -1837,7 +1837,7 @@ func main() {
 	mux.HandleFunc("/api/screener/watchlists/", server.withRequiredAuth(server.handleScreenerWatchlistSubroutes))
 
 	handler := corsMiddleware(mux)
-	log.Printf("🚀 Pumpkin Go Backend is running on port %s (db=%s)", cfg.Port, cfg.DB.Type)
+	log.Printf("🚀 Wolong Pro Backend is running on port %s (db=%s)", cfg.Port, cfg.DB.Type)
 	if err := http.ListenAndServe(fmt.Sprintf(":%s", cfg.Port), handler); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}

@@ -1,4 +1,4 @@
-# 南瓜交易系统（Pumpkin Trader Pro）
+# 卧龙AI量化交易台（Wolong Pro）
 
 一个面向个人研究者与量化开发者的多服务交易与回测系统。项目采用 `frontend + backend + quant` 三层架构，提供统一的历史回测入口、可视化结果分析界面，以及可扩展的策略计算服务。
 

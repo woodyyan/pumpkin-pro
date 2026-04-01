@@ -705,10 +705,11 @@ func (a *appServer) handleSignalConfigSubroutes(w http.ResponseWriter, r *http.R
 			return
 		}
 		input := signal.SymbolSignalConfigInput{
-			StrategyID:      asString(payload["strategy_id"]),
-			IsEnabled:       asBoolPtr(payload["is_enabled"]),
-			CooldownSeconds: asInt(payload["cooldown_seconds"]),
-			Thresholds:      asMap(payload["thresholds"]),
+			StrategyID:          asString(payload["strategy_id"]),
+			IsEnabled:           asBoolPtr(payload["is_enabled"]),
+			CooldownSeconds:     asInt(payload["cooldown_seconds"]),
+			EvalIntervalSeconds: asInt(payload["eval_interval_seconds"]),
+			Thresholds:          asMap(payload["thresholds"]),
 		}
 
 		if strings.TrimSpace(input.StrategyID) != "" {

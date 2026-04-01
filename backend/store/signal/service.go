@@ -25,11 +25,12 @@ import (
 )
 
 const (
-	defaultWebhookTimeoutMS   = 3000
-	defaultCooldownSeconds    = 3600
-	defaultDispatchBatchSize  = 30
-	defaultDispatcherInterval = 2 * time.Second
-	defaultMaxAttempts        = 4
+	defaultWebhookTimeoutMS     = 3000
+	defaultCooldownSeconds      = 3600
+	defaultEvalIntervalSeconds  = 3600
+	defaultDispatchBatchSize    = 30
+	defaultDispatcherInterval   = 2 * time.Second
+	defaultMaxAttempts          = 4
 )
 
 type ServiceConfig struct {
@@ -244,6 +245,18 @@ func (s *Service) UpsertSymbolConfig(ctx context.Context, userID, symbol string,
 		return nil, fmt.Errorf("%w: cooldown_seconds 必须在 10~3600 之间", ErrInvalidInput)
 	}
 
+	evalInterval := input.EvalIntervalSeconds
+	if evalInterval <= 0 {
+		if existing != nil && existing.EvalIntervalSeconds > 0 {
+			evalInterval = existing.EvalIntervalSeconds
+		} else {
+			evalInterval = defaultEvalIntervalSeconds
+		}
+	}
+	if evalInterval < 900 || evalInterval > 14400 {
+		return nil, fmt.Errorf("%w: eval_interval_seconds 必须在 900~14400 之间", ErrInvalidInput)
+	}
+
 	thresholds := input.Thresholds
 	if thresholds == nil {
 		if existing != nil {
@@ -260,19 +273,21 @@ func (s *Service) UpsertSymbolConfig(ctx context.Context, userID, symbol string,
 
 	now := time.Now().UTC()
 	record := SymbolSignalConfigRecord{
-		ID:              uuid.NewString(),
-		UserID:          strings.TrimSpace(userID),
-		Symbol:          normalizedSymbol,
-		StrategyID:      strategyID,
-		IsEnabled:       isEnabled,
-		CooldownSeconds: cooldown,
-		ThresholdsJSON:  thresholdsJSON,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:                  uuid.NewString(),
+		UserID:              strings.TrimSpace(userID),
+		Symbol:              normalizedSymbol,
+		StrategyID:          strategyID,
+		IsEnabled:           isEnabled,
+		CooldownSeconds:     cooldown,
+		EvalIntervalSeconds: evalInterval,
+		ThresholdsJSON:      thresholdsJSON,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	if existing != nil {
 		record.ID = existing.ID
 		record.CreatedAt = existing.CreatedAt
+		record.LastEvaluatedAt = existing.LastEvaluatedAt
 	}
 
 	saved, err := s.repo.SaveSymbolConfig(ctx, record)

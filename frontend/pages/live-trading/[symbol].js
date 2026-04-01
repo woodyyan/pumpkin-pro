@@ -373,6 +373,7 @@ export default function LiveTradingDetailPage() {
           strategy_id: signalConfig.strategy_id,
           is_enabled: Boolean(signalConfig.is_enabled),
           cooldown_seconds: Number(signalConfig.cooldown_seconds) || 3600,
+          eval_interval_seconds: Number(signalConfig.eval_interval_seconds) || 3600,
           thresholds: signalConfig.thresholds || {},
         }),
       })
@@ -458,6 +459,17 @@ export default function LiveTradingDetailPage() {
                   {activeStrategies.map((s) => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
+                </select>
+                <select
+                  value={signalConfig.eval_interval_seconds || 3600}
+                  onChange={(e) => updateLocalSignalConfig({ eval_interval_seconds: Number(e.target.value) })}
+                  className="rounded-lg border border-border bg-black/30 px-2.5 py-1.5 text-xs text-white outline-none transition focus:border-primary"
+                >
+                  <option value={900}>每 15 分钟</option>
+                  <option value={1800}>每 30 分钟</option>
+                  <option value={3600}>每小时</option>
+                  <option value={7200}>每 2 小时</option>
+                  <option value={14400}>每 4 小时</option>
                 </select>
                 <button
                   type="button"

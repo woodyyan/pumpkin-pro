@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	defaultEvaluatorInterval = 1 * time.Hour
+	defaultEvaluatorInterval = 15 * time.Minute
 	evaluatorDailyBarsCount  = 120
 	evaluatorHTTPTimeout     = 15 * time.Second
 )
@@ -97,6 +97,15 @@ func (e *Evaluator) evaluateOne(ctx context.Context, cfg SymbolSignalConfigRecor
 		return
 	}
 
+	// Eval interval check: skip if not enough time has passed since last evaluation.
+	evalInterval := cfg.EvalIntervalSeconds
+	if evalInterval <= 0 {
+		evalInterval = defaultEvalIntervalSeconds
+	}
+	if cfg.LastEvaluatedAt != nil && now.Sub(*cfg.LastEvaluatedAt) < time.Duration(evalInterval)*time.Second {
+		return // not yet time to evaluate
+	}
+
 	// Resolve strategy definition from database (supports both preset and user-created strategies).
 	strat, err := e.strategyService.GetByID(ctx, userID, strategyID)
 	if err != nil {
@@ -106,6 +115,9 @@ func (e *Evaluator) evaluateOne(ctx context.Context, cfg SymbolSignalConfigRecor
 	if strat.Status != "active" {
 		return // strategy is not active — skip
 	}
+
+	// Mark this config as evaluated (regardless of outcome: BUY/SELL/HOLD).
+	_ = e.signalService.repo.UpdateLastEvaluatedAt(ctx, cfg.ID, now)
 
 	// Cooldown check: skip if last signal for this user+symbol is within cooldown window.
 	cooldown := cfg.CooldownSeconds

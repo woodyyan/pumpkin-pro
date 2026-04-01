@@ -22,15 +22,17 @@ func (WebhookEndpointRecord) TableName() string {
 }
 
 type SymbolSignalConfigRecord struct {
-	ID              string    `gorm:"primaryKey;size:36"`
-	UserID          string    `gorm:"size:36;not null;index;uniqueIndex:idx_signal_config_user_symbol,priority:1"`
-	Symbol          string    `gorm:"size:16;not null;index;uniqueIndex:idx_signal_config_user_symbol,priority:2"`
-	StrategyID      string    `gorm:"size:128;not null;default:'';index"`
-	IsEnabled       bool      `gorm:"not null;default:false;index"`
-	CooldownSeconds int       `gorm:"not null;default:300"`
-	ThresholdsJSON  string    `gorm:"type:text;not null;default:'{}'"`
-	CreatedAt       time.Time `gorm:"not null"`
-	UpdatedAt       time.Time `gorm:"not null"`
+	ID                  string     `gorm:"primaryKey;size:36"`
+	UserID              string     `gorm:"size:36;not null;index;uniqueIndex:idx_signal_config_user_symbol,priority:1"`
+	Symbol              string     `gorm:"size:16;not null;index;uniqueIndex:idx_signal_config_user_symbol,priority:2"`
+	StrategyID          string     `gorm:"size:128;not null;default:'';index"`
+	IsEnabled           bool       `gorm:"not null;default:false;index"`
+	CooldownSeconds     int        `gorm:"not null;default:300"`
+	EvalIntervalSeconds int        `gorm:"not null;default:3600"`
+	ThresholdsJSON      string     `gorm:"type:text;not null;default:'{}'"`
+	LastEvaluatedAt     *time.Time `gorm:"index"`
+	CreatedAt           time.Time  `gorm:"not null"`
+	UpdatedAt           time.Time  `gorm:"not null"`
 }
 
 func (SymbolSignalConfigRecord) TableName() string {
@@ -86,12 +88,13 @@ type WebhookEndpoint struct {
 }
 
 type SymbolSignalConfig struct {
-	Symbol          string         `json:"symbol"`
-	StrategyID      string         `json:"strategy_id"`
-	IsEnabled       bool           `json:"is_enabled"`
-	CooldownSeconds int            `json:"cooldown_seconds"`
-	Thresholds      map[string]any `json:"thresholds"`
-	UpdatedAt       string         `json:"updated_at"`
+	Symbol              string         `json:"symbol"`
+	StrategyID          string         `json:"strategy_id"`
+	IsEnabled           bool           `json:"is_enabled"`
+	CooldownSeconds     int            `json:"cooldown_seconds"`
+	EvalIntervalSeconds int            `json:"eval_interval_seconds"`
+	Thresholds          map[string]any `json:"thresholds"`
+	UpdatedAt           string         `json:"updated_at"`
 }
 
 type SignalEvent struct {
@@ -127,10 +130,11 @@ type WebhookConfigInput struct {
 }
 
 type SymbolSignalConfigInput struct {
-	StrategyID      string         `json:"strategy_id"`
-	IsEnabled       *bool          `json:"is_enabled"`
-	CooldownSeconds int            `json:"cooldown_seconds"`
-	Thresholds      map[string]any `json:"thresholds"`
+	StrategyID          string         `json:"strategy_id"`
+	IsEnabled           *bool          `json:"is_enabled"`
+	CooldownSeconds     int            `json:"cooldown_seconds"`
+	EvalIntervalSeconds int            `json:"eval_interval_seconds"`
+	Thresholds          map[string]any `json:"thresholds"`
 }
 
 type TestSignalInput struct {
@@ -173,12 +177,13 @@ func toSymbolSignalConfig(record SymbolSignalConfigRecord) (*SymbolSignalConfig,
 		return nil, fmt.Errorf("decode thresholds failed: %w", err)
 	}
 	return &SymbolSignalConfig{
-		Symbol:          record.Symbol,
-		StrategyID:      record.StrategyID,
-		IsEnabled:       record.IsEnabled,
-		CooldownSeconds: record.CooldownSeconds,
-		Thresholds:      thresholds,
-		UpdatedAt:       record.UpdatedAt.UTC().Format(time.RFC3339),
+		Symbol:              record.Symbol,
+		StrategyID:          record.StrategyID,
+		IsEnabled:           record.IsEnabled,
+		CooldownSeconds:     record.CooldownSeconds,
+		EvalIntervalSeconds: record.EvalIntervalSeconds,
+		Thresholds:          thresholds,
+		UpdatedAt:           record.UpdatedAt.UTC().Format(time.RFC3339),
 	}, nil
 }
 

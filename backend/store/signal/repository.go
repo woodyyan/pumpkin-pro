@@ -348,6 +348,13 @@ func (r *Repository) GetLastSignalEventTime(ctx context.Context, userID, symbol 
 	return &t, nil
 }
 
+func (r *Repository) UpdateLastEvaluatedAt(ctx context.Context, configID string, at time.Time) error {
+	return r.db.WithContext(ctx).
+		Model(&SymbolSignalConfigRecord{}).
+		Where("id = ?", configID).
+		Update("last_evaluated_at", at.UTC()).Error
+}
+
 func trimError(errMsg string) string {
 	text := strings.TrimSpace(errMsg)
 	if len(text) <= 1000 {

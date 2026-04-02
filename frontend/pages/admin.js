@@ -86,7 +86,7 @@ function AdminLoginForm({ onLogin }) {
     <div className="min-h-screen bg-[#0a0b0f] flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <span className="text-4xl">🐉</span>
+          <img src="/logo.png" alt="卧龙" width={56} height={56} className="mx-auto rounded" />
           <h1 className="mt-3 text-2xl font-bold text-white">Wolong Pro 管理后台</h1>
           <p className="mt-2 text-sm text-white/50">仅限超级管理员访问</p>
         </div>
@@ -195,7 +195,7 @@ function AdminDashboard({ session, onLogout }) {
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0a0b0f]/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
           <div className="flex items-center gap-3">
-            <span className="text-2xl">🐉</span>
+            <img src="/logo.png" alt="卧龙" width={32} height={32} className="rounded" />
             <span className="text-lg font-bold">Wolong Pro 管理后台</span>
           </div>
           <div className="flex items-center gap-4 text-sm">

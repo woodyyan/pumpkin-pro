@@ -6,7 +6,8 @@ import { requestJson } from '../../lib/api'
 import { useAuth } from '../../lib/auth-context'
 import { isAuthRequiredError } from '../../lib/auth-storage'
 
-const POLL_MS = 2000
+const POLL_MS = 10000
+const POLL_MS_NON_TRADING = 60000  // non-trading: 1 min fallback (data comes from DB cache)
 const OVERLAY_WINDOW_MINUTES = 60
 const SUPPORT_REFRESH_MS = 60 * 1000
 const SIGNAL_CENTER_REFRESH_MS = 15 * 1000
@@ -15,6 +16,22 @@ const SUPPORT_LOOKBACK_DAYS = 120
 const MA_LOOKBACK_DAYS = 240
 const SIGNAL_MAX_ATTEMPTS = 4
 const SIGNAL_BACKOFF_STEPS = ['1 分钟', '5 分钟', '15 分钟']
+
+function isAShareTradingHours(sym) {
+  const ex = detectExchange(sym)
+  const isAShare = ex === 'SSE' || ex === 'SZSE'
+  if (!isAShare) return true // HK/other: always poll normally
+  const now = new Date()
+  const day = now.getDay()
+  if (day === 0 || day === 6) return false
+  // Convert to CST (UTC+8)
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000
+  const cst = new Date(utc + 8 * 3600000)
+  const h = cst.getHours()
+  const m = cst.getMinutes()
+  const t = h * 60 + m
+  return (t >= 555 && t <= 690) || (t >= 780 && t <= 900) // 9:15-11:30 or 13:00-15:00
+}
 
 export default function LiveTradingDetailPage() {
   const router = useRouter()
@@ -336,6 +353,7 @@ export default function LiveTradingDetailPage() {
 
   useEffect(() => {
     if (!ready || !symbol) return
+    const interval = isAShareTradingHours(symbol) ? POLL_MS : POLL_MS_NON_TRADING
     const timer = setInterval(async () => {
       try {
         await loadSymbolPanels(symbol)
@@ -346,7 +364,7 @@ export default function LiveTradingDetailPage() {
       if (privateAccessReady) {
         try { await loadSignalCenter() } catch (_) {}
       }
-    }, POLL_MS)
+    }, interval)
     return () => clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, symbol, privateAccessReady, authIdentityKey])

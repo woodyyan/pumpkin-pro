@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -18,7 +19,24 @@ func openGormDB(cfg config.DBConfig) (*gorm.DB, error) {
 		if err := ensureSQLiteDir(cfg.Path); err != nil {
 			return nil, err
 		}
-		return gorm.Open(sqlite.Open(cfg.Path), &gorm.Config{Logger: logger.Default.LogMode(logger.Warn)})
+		// WAL mode for concurrent reads, busy_timeout to avoid SQLITE_BUSY,
+		// synchronous=NORMAL is safe under WAL and faster than FULL.
+		dsn := cfg.Path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"
+		db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Warn)})
+		if err != nil {
+			return nil, err
+		}
+		// SQLite is single-writer; limit pool to 1 connection to serialise writes
+		// and avoid lock contention between goroutines.
+		sqlDB, sqlErr := db.DB()
+		if sqlErr != nil {
+			return nil, sqlErr
+		}
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
+		sqlDB.SetConnMaxLifetime(0)
+		log.Printf("[store] SQLite opened: WAL mode, busy_timeout=5000ms, path=%s", cfg.Path)
+		return db, nil
 	case "postgres":
 		dsn := fmt.Sprintf(
 			"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC",

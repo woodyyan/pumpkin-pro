@@ -13,5 +13,5 @@ func (Migrator) Name() string {
 }
 
 func (Migrator) AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(&WatchlistRecord{})
+	return db.AutoMigrate(&WatchlistRecord{}, &ClosingSnapshotRecord{})
 }

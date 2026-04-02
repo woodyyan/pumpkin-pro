@@ -2,6 +2,21 @@ package live
 
 import "time"
 
+// ── Closing Snapshot Cache (for non-trading hours) ──
+
+type ClosingSnapshotRecord struct {
+	Symbol       string    `gorm:"size:32;primaryKey"`
+	TradeDate    string    `gorm:"size:10;primaryKey"` // "2026-04-02"
+	SnapshotJSON string    `gorm:"type:text;not null"`
+	UpdatedAt    time.Time `gorm:"not null"`
+}
+
+func (ClosingSnapshotRecord) TableName() string {
+	return "closing_snapshots"
+}
+
+// ── Watchlist ──
+
 type WatchlistRecord struct {
 	UserID    string    `gorm:"primaryKey;size:36"`
 	Symbol    string    `gorm:"primaryKey;size:16"`

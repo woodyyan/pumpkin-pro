@@ -141,3 +141,45 @@ func isUniqueError(errMsg string) bool {
 	text := strings.ToLower(strings.TrimSpace(errMsg))
 	return strings.Contains(text, "unique") || strings.Contains(text, "duplicate")
 }
+
+// ── Closing Snapshot Cache ──
+
+func (r *Repository) UpsertClosingSnapshot(ctx context.Context, record ClosingSnapshotRecord) error {
+	var existing ClosingSnapshotRecord
+	err := r.db.WithContext(ctx).
+		Where("symbol = ? AND trade_date = ?", record.Symbol, record.TradeDate).
+		First(&existing).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return r.db.WithContext(ctx).Create(&record).Error
+		}
+		return err
+	}
+	return r.db.WithContext(ctx).
+		Model(&ClosingSnapshotRecord{}).
+		Where("symbol = ? AND trade_date = ?", record.Symbol, record.TradeDate).
+		Updates(map[string]any{
+			"snapshot_json": record.SnapshotJSON,
+			"updated_at":    record.UpdatedAt,
+		}).Error
+}
+
+func (r *Repository) GetClosingSnapshot(ctx context.Context, symbol, tradeDate string) (*ClosingSnapshotRecord, error) {
+	var record ClosingSnapshotRecord
+	err := r.db.WithContext(ctx).
+		Where("symbol = ? AND trade_date = ?", symbol, tradeDate).
+		First(&record).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &record, nil
+}
+
+func (r *Repository) DeleteOldClosingSnapshots(ctx context.Context, beforeDate string) error {
+	return r.db.WithContext(ctx).
+		Where("trade_date < ?", beforeDate).
+		Delete(&ClosingSnapshotRecord{}).Error
+}

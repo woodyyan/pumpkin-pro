@@ -75,12 +75,12 @@ NUMERIC_COLUMNS = [
 _cache_lock = threading.Lock()
 _cache_data: Optional[pd.DataFrame] = None
 _cache_ts: float = 0.0
-_CACHE_TTL = 300  # 5 分钟
+_CACHE_TTL = 900  # 15 分钟（选股场景不需要秒级实时性）
 
 _fundamentals_cache_data: Optional[pd.DataFrame] = None
 _fundamentals_cache_ts: float = 0.0
 _fundamentals_cache_report_date: Optional[str] = None
-_FUNDAMENTALS_CACHE_TTL = 21600  # 6 小时
+_FUNDAMENTALS_CACHE_TTL = 86400  # 24 小时（业绩报表为季度级更新）
 _MIN_COMPLETE_FUNDAMENTALS_ROWS = 4500
 
 

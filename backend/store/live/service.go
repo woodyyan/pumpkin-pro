@@ -2,6 +2,7 @@ package live
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -223,6 +224,22 @@ func (s *Service) GetSymbolSnapshot(ctx context.Context, userID, symbol string) 
 		return nil, false, SessionIdle, err
 	}
 
+	isTrading := IsAShareTradingHours()
+	isAShare := IsAShare(normalized)
+
+	// ── Non-trading hours: try closing snapshot cache first ──
+	if isAShare && !isTrading {
+		cached, cacheErr := s.loadClosingSnapshot(ctx, normalized)
+		if cacheErr == nil && cached != nil {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			state := s.ensureUserState(userID)
+			isActive := normalized == state.activeSymbol
+			return cached, isActive, state.sessionState, nil
+		}
+		// Cache miss → fall through to live fetch (first-time or no data yet)
+	}
+
 	snapshot, err := s.marketClient.FetchSymbolSnapshot(ctx, normalized)
 	if err != nil {
 		s.setDegradedIfRunning(userID)
@@ -243,6 +260,12 @@ func (s *Service) GetSymbolSnapshot(ctx context.Context, userID, symbol string) 
 			state.sessionState = SessionWarming
 		}
 	}
+
+	// ── Passive write: save snapshot for non-trading-hours cache ──
+	if isAShare {
+		go s.saveClosingSnapshotAsync(normalized, snapshot)
+	}
+
 	return snapshot, isActive, state.sessionState, nil
 }
 
@@ -989,4 +1012,38 @@ func buildOverlayMetrics(samples []overlaySample) OverlayMetrics {
 	}
 
 	return metrics
+}
+
+// ── Closing Snapshot Cache helpers ──
+
+func (s *Service) loadClosingSnapshot(ctx context.Context, symbol string) (*SymbolSnapshot, error) {
+	tradeDate := TodayTradeDate()
+	record, err := s.repo.GetClosingSnapshot(ctx, symbol, tradeDate)
+	if err != nil || record == nil {
+		return nil, err
+	}
+	var snapshot SymbolSnapshot
+	if err := json.Unmarshal([]byte(record.SnapshotJSON), &snapshot); err != nil {
+		return nil, err
+	}
+	return &snapshot, nil
+}
+
+func (s *Service) saveClosingSnapshotAsync(symbol string, snapshot *SymbolSnapshot) {
+	if snapshot == nil || snapshot.LastPrice <= 0 {
+		return
+	}
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		return
+	}
+	tradeDate := TodayTradeDate()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = s.repo.UpsertClosingSnapshot(ctx, ClosingSnapshotRecord{
+		Symbol:       symbol,
+		TradeDate:    tradeDate,
+		SnapshotJSON: string(data),
+		UpdatedAt:    time.Now().UTC(),
+	})
 }

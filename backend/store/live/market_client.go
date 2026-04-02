@@ -31,7 +31,8 @@ var (
 )
 
 const (
-	dailyBarsCacheTTL = 5 * time.Minute
+	dailyBarsCacheTTL    = 5 * time.Minute
+	realtimeCacheTTL     = 10 * time.Second // short-lived cache aligned with frontend poll interval
 )
 
 type quoteData struct {
@@ -54,10 +55,18 @@ type MarketClient struct {
 
 	cacheMu        sync.Mutex
 	dailyBarsCache map[string]dailyBarsCacheEntry
+
+	realtimeMu    sync.Mutex
+	realtimeCache map[string]realtimeCacheEntry
 }
 
 type dailyBarsCacheEntry struct {
 	bars     []DailyBar
+	expireAt time.Time
+}
+
+type realtimeCacheEntry struct {
+	fields   map[string][]string
 	expireAt time.Time
 }
 
@@ -71,6 +80,7 @@ func NewMarketClient() *MarketClient {
 	return &MarketClient{
 		httpClient:     &http.Client{Timeout: 4 * time.Second},
 		dailyBarsCache: map[string]dailyBarsCacheEntry{},
+		realtimeCache:  map[string]realtimeCacheEntry{},
 	}
 }
 
@@ -616,6 +626,44 @@ func (c *MarketClient) fetchFields(ctx context.Context, codes []string) (map[str
 	if len(codes) == 0 {
 		return map[string][]string{}, nil
 	}
+
+	// Build a deterministic cache key from sorted codes.
+	sorted := make([]string, len(codes))
+	copy(sorted, codes)
+	sort.Strings(sorted)
+	cacheKey := strings.Join(sorted, ",")
+
+	now := time.Now()
+	c.realtimeMu.Lock()
+	if entry, ok := c.realtimeCache[cacheKey]; ok && now.Before(entry.expireAt) {
+		c.realtimeMu.Unlock()
+		return entry.fields, nil
+	}
+	c.realtimeMu.Unlock()
+
+	// Cache miss — fetch from Tencent API.
+	fields, err := c.fetchFieldsRemote(ctx, codes)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store individual code results as well so that subset queries also hit cache.
+	c.realtimeMu.Lock()
+	c.realtimeCache[cacheKey] = realtimeCacheEntry{fields: fields, expireAt: now.Add(realtimeCacheTTL)}
+	// Also cache each individual code for single-code lookups.
+	for code, f := range fields {
+		c.realtimeCache[code] = realtimeCacheEntry{
+			fields:   map[string][]string{code: f},
+			expireAt: now.Add(realtimeCacheTTL),
+		}
+	}
+	c.realtimeMu.Unlock()
+
+	return fields, nil
+}
+
+// fetchFieldsRemote performs the actual HTTP call to Tencent qt.gtimg.cn.
+func (c *MarketClient) fetchFieldsRemote(ctx context.Context, codes []string) (map[string][]string, error) {
 	url := "https://qt.gtimg.cn/q=" + strings.Join(codes, ",")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

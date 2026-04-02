@@ -241,8 +241,8 @@ func (s *Service) UpsertSymbolConfig(ctx context.Context, userID, symbol string,
 			cooldown = defaultCooldownSeconds
 		}
 	}
-	if cooldown < 10 || cooldown > 3600 {
-		return nil, fmt.Errorf("%w: cooldown_seconds 必须在 10~3600 之间", ErrInvalidInput)
+	if cooldown < 10 || cooldown > 86400 {
+		return nil, fmt.Errorf("%w: cooldown_seconds 必须在 10~86400 之间", ErrInvalidInput)
 	}
 
 	evalInterval := input.EvalIntervalSeconds
@@ -930,7 +930,10 @@ func normalizeSide(side string) (string, error) {
 }
 
 func buildFingerprint(userID, symbol, strategyID, side string, eventTime time.Time, isTest bool, eventID string) string {
-	bucket := eventTime.UTC().Truncate(time.Minute).Format("200601021504")
+	// De-duplicate by trade date (CST): same user + symbol + strategy + side
+	// can only produce ONE signal per calendar day. This prevents repeated
+	// signals when daily bars don't change after market close.
+	bucket := live.TradeDateAt(eventTime) // "2026-04-02" in CST
 	seed := strings.Join([]string{userID, symbol, strategyID, side, bucket}, "|")
 	if isTest {
 		seed = seed + "|test|" + eventID

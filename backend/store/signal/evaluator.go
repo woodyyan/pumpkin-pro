@@ -97,6 +97,11 @@ func (e *Evaluator) evaluateOne(ctx context.Context, cfg SymbolSignalConfigRecor
 		return
 	}
 
+	// Skip evaluation outside trading hours — no point evaluating unchanged daily bars.
+	if !live.IsTradingHoursAt(symbol, now) {
+		return
+	}
+
 	// Eval interval check: skip if not enough time has passed since last evaluation.
 	evalInterval := cfg.EvalIntervalSeconds
 	if evalInterval <= 0 {

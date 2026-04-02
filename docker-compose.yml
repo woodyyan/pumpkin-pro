@@ -52,3 +52,5 @@ services:
     image: ${IMAGE_REGISTRY:-ccr.ccs.tencentyun.com}/${IMAGE_NAMESPACE:-pumpkin-pro}/pumpkin-pro-quant:${IMAGE_TAG:-latest}
     ports:
       - "8000:8000"
+    volumes:
+      - ./data/quant:/app/data

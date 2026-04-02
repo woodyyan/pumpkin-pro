@@ -5,9 +5,14 @@ Opportunity Score = 0.5 * Trend + 0.3 * Flow + 0.2 * Revision
 Risk Score        = 0.4 * Volatility + 0.3 * Drawdown + 0.3 * Crowding
 
 所有子指标先做 percentile rank (0~100)，加权组合后最终分数也在 0~100。
+
+数据源策略：腾讯财经优先，东财 AKShare 降级。
+缓存策略：本地 JSON 文件缓存日线数据，每日增量更新。
 """
 
+import json as _json
 import logging
+import os
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,12 +27,13 @@ from screener.scanner import get_a_share_snapshot
 logger = logging.getLogger(__name__)
 
 # ── Configuration ──────────────────────────────────────────────
-DAILY_LOOKBACK_DAYS = 90           # 拉取 90 天日线（覆盖 60 天回撤 + 20 天波动率）
-MAX_WORKERS = 3                    # 并发拉日线的线程数（云服务器需降低避免被限流）
+DAILY_LOOKBACK_DAYS = 90           # 需要的历史日线天数
+MAX_WORKERS = 3                    # 并发线程数
 REQUEST_INTERVAL_MS = 200          # 每次请求后的间隔（毫秒）
 SINGLE_RETRY_DELAY_MS = 500        # 单只失败后重试前的等待（毫秒）
 MIN_SUCCESS_RATIO = 0.80           # 成功率 < 80% 视为整体失败
-BENCHMARK_CODE = "000001"          # 上证指数
+FULL_REFRESH_INTERVAL_DAYS = 7     # 每 7 天强制全量刷新一次缓存
+CACHE_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "quadrant_daily_cache.json")
 
 # Quadrant thresholds
 OPPORTUNITY_HIGH = 70
@@ -35,18 +41,125 @@ OPPORTUNITY_LOW = 40
 RISK_HIGH = 70
 RISK_LOW = 40
 
-# ── Cache ──────────────────────────────────────────────────────
+# ── Result cache (in-memory, for /api/quadrant/scores) ─────────
 _quadrant_cache_lock = threading.Lock()
 _quadrant_cache_data: Optional[List[Dict[str, Any]]] = None
 _quadrant_cache_ts: float = 0.0
 _QUADRANT_CACHE_TTL = 6 * 3600  # 6 hours
 
 
-def _code_to_qq_daily(code: str) -> str:
-    """将 6 位 A 股代码转为腾讯日线格式 shXXXXXX / szXXXXXX"""
-    c = str(code).zfill(6)
-    return f"sh{c}" if c.startswith(("6", "9")) else f"sz{c}"
+# ── Daily bar cache (file-based) ──────────────────────────────
 
+class DailyBarCache:
+    """管理本地日线缓存文件。"""
+
+    def __init__(self, file_path: str = CACHE_FILE_PATH):
+        self.file_path = file_path
+        self._data: Optional[Dict] = None
+
+    def load(self) -> Dict:
+        """从文件加载缓存，不存在则返回空结构。"""
+        if self._data is not None:
+            return self._data
+        if not os.path.exists(self.file_path):
+            self._data = {"version": 2, "last_full_refresh": "", "last_incremental": "", "stocks": {}}
+            return self._data
+        try:
+            with open(self.file_path, "r", encoding="utf-8") as f:
+                self._data = _json.load(f)
+            logger.info("[quadrant-cache] 加载缓存: %d 只股票", len(self._data.get("stocks", {})))
+            return self._data
+        except Exception as exc:
+            logger.warning("[quadrant-cache] 加载缓存失败: %s, 将重新创建", exc)
+            self._data = {"version": 2, "last_full_refresh": "", "last_incremental": "", "stocks": {}}
+            return self._data
+
+    def save(self):
+        """将缓存写回文件。"""
+        if self._data is None:
+            return
+        try:
+            os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
+            with open(self.file_path, "w", encoding="utf-8") as f:
+                _json.dump(self._data, f, ensure_ascii=False)
+            stock_count = len(self._data.get("stocks", {}))
+            logger.info("[quadrant-cache] 缓存已保存: %d 只股票", stock_count)
+        except Exception as exc:
+            logger.error("[quadrant-cache] 保存缓存失败: %s", exc)
+
+    def needs_full_refresh(self, force_full: bool = False) -> bool:
+        """判断是否需要全量刷新。"""
+        if force_full:
+            return True
+        data = self.load()
+        if not data.get("stocks"):
+            return True
+        last_full = data.get("last_full_refresh", "")
+        if not last_full:
+            return True
+        try:
+            last_date = pd.Timestamp(last_full)
+            days_since = (pd.Timestamp.today() - last_date).days
+            return days_since >= FULL_REFRESH_INTERVAL_DAYS
+        except Exception:
+            return True
+
+    def get_stock_bars(self, code: str) -> Optional[List[Dict]]:
+        """获取某只股票的缓存日线。"""
+        data = self.load()
+        stock = data.get("stocks", {}).get(code)
+        if stock is None:
+            return None
+        return stock.get("bars")
+
+    def set_stock_bars(self, code: str, bars: List[Dict]):
+        """更新某只股票的缓存日线。"""
+        data = self.load()
+        if "stocks" not in data:
+            data["stocks"] = {}
+        data["stocks"][code] = {
+            "bars": bars,
+            "updated_at": pd.Timestamp.today().strftime("%Y-%m-%d"),
+        }
+
+    def merge_incremental(self, code: str, new_bars: List[Dict]):
+        """将增量日线追加到缓存，去重 + 裁剪。"""
+        existing = self.get_stock_bars(code) or []
+        existing_dates = {b["date"] for b in existing}
+        for bar in new_bars:
+            if bar["date"] not in existing_dates:
+                existing.append(bar)
+                existing_dates.add(bar["date"])
+        # Sort by date and keep only last DAILY_LOOKBACK_DAYS
+        existing.sort(key=lambda b: b["date"])
+        if len(existing) > DAILY_LOOKBACK_DAYS:
+            existing = existing[-DAILY_LOOKBACK_DAYS:]
+        self.set_stock_bars(code, existing)
+
+    def mark_full_refresh(self):
+        data = self.load()
+        data["last_full_refresh"] = pd.Timestamp.today().strftime("%Y-%m-%d")
+        data["last_incremental"] = pd.Timestamp.today().strftime("%Y-%m-%d")
+
+    def mark_incremental(self):
+        data = self.load()
+        data["last_incremental"] = pd.Timestamp.today().strftime("%Y-%m-%d")
+
+    def bars_to_dataframe(self, code: str) -> Optional[pd.DataFrame]:
+        """将缓存日线转为 DataFrame。"""
+        bars = self.get_stock_bars(code)
+        if not bars:
+            return None
+        df = pd.DataFrame(bars)
+        df["date"] = pd.to_datetime(df["date"])
+        for col in ["open", "close", "high", "low", "volume"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        df = df.sort_values("date").reset_index(drop=True)
+        return df
+
+
+# ── Data source: Tencent Finance (primary) ─────────────────────
 
 _QQ_DAILY_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -55,8 +168,13 @@ _QQ_DAILY_HEADERS = {
 }
 
 
-def _fetch_daily_bars_safe(symbol: str, days: int = DAILY_LOOKBACK_DAYS) -> Optional[pd.DataFrame]:
-    """通过腾讯财经日线接口拉取单只股票前复权日线，失败返回 None"""
+def _code_to_qq_daily(code: str) -> str:
+    c = str(code).zfill(6)
+    return f"sh{c}" if c.startswith(("6", "9")) else f"sz{c}"
+
+
+def _fetch_bars_tencent(symbol: str, days: int) -> Optional[List[Dict]]:
+    """通过腾讯财经日线接口拉取前复权日线。"""
     try:
         qq_code = _code_to_qq_daily(symbol)
         end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
@@ -75,8 +193,6 @@ def _fetch_daily_bars_safe(symbol: str, days: int = DAILY_LOOKBACK_DAYS) -> Opti
         if not klines:
             return None
 
-        # Each kline: [date, open, close, high, low, volume, ...]
-        # Volume is in 手 (lots of 100 shares)
         rows = []
         for k in klines:
             if len(k) < 6:
@@ -89,30 +205,71 @@ def _fetch_daily_bars_safe(symbol: str, days: int = DAILY_LOOKBACK_DAYS) -> Opti
                 "low": float(k[4]),
                 "volume": float(k[5]),
             })
-
-        if not rows:
-            return None
-
-        df = pd.DataFrame(rows)
-        df["date"] = pd.to_datetime(df["date"])
-        df = df.sort_values("date").reset_index(drop=True)
-
-        # Keep only last N trading days
-        if len(df) > days:
-            df = df.tail(days).reset_index(drop=True)
-
-        return df
+        return rows if rows else None
     except Exception as exc:
-        logger.debug("Failed to fetch daily bars for %s: %s", symbol, exc)
+        logger.debug("[tencent] fetch failed for %s: %s", symbol, exc)
         return None
 
 
+# ── Data source: AKShare / Eastmoney (fallback) ────────────────
+
+def _fetch_bars_akshare(symbol: str, days: int) -> Optional[List[Dict]]:
+    """通过 AKShare 东财接口拉取日线（降级数据源）。"""
+    try:
+        import akshare as ak
+        end_date = pd.Timestamp.today().strftime("%Y%m%d")
+        start_date = (pd.Timestamp.today() - pd.Timedelta(days=days + 30)).strftime("%Y%m%d")
+        df = ak.stock_zh_a_hist(
+            symbol=symbol, period="daily",
+            start_date=start_date, end_date=end_date, adjust="qfq",
+        )
+        if df is None or df.empty:
+            return None
+
+        col_map = {
+            "日期": "date", "开盘": "open", "收盘": "close",
+            "最高": "high", "最低": "low", "成交量": "volume",
+        }
+        available = {k: v for k, v in col_map.items() if k in df.columns}
+        df = df.rename(columns=available)
+
+        rows = []
+        for _, row in df.iterrows():
+            try:
+                rows.append({
+                    "date": str(row["date"])[:10],
+                    "open": float(row["open"]),
+                    "close": float(row["close"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "volume": float(row["volume"]),
+                })
+            except (ValueError, KeyError):
+                continue
+        return rows if rows else None
+    except Exception as exc:
+        logger.debug("[akshare] fetch failed for %s: %s", symbol, exc)
+        return None
+
+
+# ── Dual-source fetch with fallback ────────────────────────────
+
+def _fetch_daily_bars(symbol: str, days: int = DAILY_LOOKBACK_DAYS) -> Optional[List[Dict]]:
+    """腾讯优先，东财降级。"""
+    bars = _fetch_bars_tencent(symbol, days)
+    if bars:
+        return bars
+    # Fallback to AKShare
+    time.sleep(SINGLE_RETRY_DELAY_MS / 1000.0)
+    bars = _fetch_bars_akshare(symbol, days)
+    return bars
+
+
 def _fetch_benchmark_60d_return() -> float:
-    """通过腾讯财经获取上证指数近 60 个交易日的收益率"""
+    """通过腾讯财经获取上证指数近 60 个交易日的收益率。"""
     try:
         end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
         start_date = (pd.Timestamp.today() - pd.Timedelta(days=120)).strftime("%Y-%m-%d")
-
         url = (
             f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
             f"?param=sh000001,day,{start_date},{end_date},90,"
@@ -120,62 +277,50 @@ def _fetch_benchmark_60d_return() -> float:
         resp = requests.get(url, headers=_QQ_DAILY_HEADERS, timeout=15)
         resp.raise_for_status()
         data = resp.json()
-
         stock_data = data.get("data", {}).get("sh000001", {})
         klines = stock_data.get("day") or stock_data.get("qfqday") or []
         if len(klines) < 2:
             return 0.0
-
         closes = [float(k[2]) for k in klines if len(k) >= 3 and float(k[2]) > 0]
         if len(closes) < 2:
             return 0.0
-
         lookback = min(60, len(closes))
-        first_close = closes[-lookback]
-        last_close = closes[-1]
-        if first_close <= 0:
-            return 0.0
-        return (last_close / first_close - 1) * 100
+        return (closes[-1] / closes[-lookback] - 1) * 100
     except Exception as exc:
         logger.warning("Failed to fetch benchmark 60d return: %s", exc)
         return 0.0
 
 
+# ── Metrics computation ────────────────────────────────────────
+
 def _percentile_rank(series: pd.Series) -> pd.Series:
-    """Rank as percentile 0~100. NaN stays NaN."""
     return series.rank(pct=True, na_option="keep") * 100
 
 
 def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
-    """从日线 DataFrame 计算波动率、最大回撤、20日均成交额、累计换手率"""
     result: Dict[str, float] = {
         "std_20d": np.nan,
         "max_drawdown_60d": np.nan,
         "turnover_20d_avg": np.nan,
         "cumulative_turnover_20d": np.nan,
     }
-
     if daily_df is None or daily_df.empty or "close" not in daily_df.columns:
         return result
-
     closes = daily_df["close"].dropna()
     if len(closes) < 5:
         return result
 
-    # 20-day return volatility (std of daily returns)
     returns = closes.pct_change().dropna()
     if len(returns) >= 20:
         result["std_20d"] = float(returns.tail(20).std())
     elif len(returns) >= 5:
         result["std_20d"] = float(returns.std())
 
-    # 60-day max drawdown
     lookback_closes = closes.tail(60) if len(closes) >= 60 else closes
     rolling_max = lookback_closes.cummax()
     drawdown = (lookback_closes - rolling_max) / rolling_max
     result["max_drawdown_60d"] = abs(float(drawdown.min())) if len(drawdown) > 0 else 0.0
 
-    # 20-day average turnover (成交额), fallback to volume if turnover unavailable
     turnover_col = "turnover" if "turnover" in daily_df.columns else ("volume" if "volume" in daily_df.columns else None)
     if turnover_col:
         turnovers = daily_df[turnover_col].dropna()
@@ -184,7 +329,6 @@ def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
         elif len(turnovers) >= 5:
             result["turnover_20d_avg"] = float(turnovers.mean())
 
-    # 20-day cumulative turnover_rate (换手率)
     if "turnover_rate" in daily_df.columns:
         tr = daily_df["turnover_rate"].dropna()
         if len(tr) >= 20:
@@ -195,29 +339,31 @@ def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
     return result
 
 
-def compute_all_quadrant_scores(callback_url: Optional[str] = None) -> List[Dict[str, Any]]:
+# ── Main computation ───────────────────────────────────────────
+
+def compute_all_quadrant_scores(
+    callback_url: Optional[str] = None,
+    force_full: bool = False,
+) -> List[Dict[str, Any]]:
     """
     全市场 A 股四象限评分。
 
-    1. 拉全市场快照
-    2. 并发拉每只股票 90 天日线（6线程 + 50ms 间隔）
-    3. 拉上证指数 60 日收益
-    4. 计算所有子指标 → percentile rank → 加权组合
-    5. 返回评分列表
+    支持两种模式：
+    - 全量刷新：首次运行 / 缓存过期 / force_full=True
+    - 增量更新：有缓存时只拉最新 2 天日线，追加到缓存
 
     Returns:
         List of dicts with code, name, opportunity, risk, quadrant, sub-scores
     """
     start_time = time.time()
+    cache = DailyBarCache()
 
     # ── Step 1: 全市场快照 ──
     logger.info("[quadrant] Step 1: 拉取全市场快照...")
     snapshot_df = get_a_share_snapshot()
     if snapshot_df is None or snapshot_df.empty:
         raise RuntimeError("全市场快照数据为空")
-    logger.info("[quadrant] 快照: %d 只股票", len(snapshot_df))
 
-    # Filter: only stocks with valid code and price > 0
     snapshot_df = snapshot_df[
         snapshot_df["code"].notna()
         & (snapshot_df["price"].notna())
@@ -227,21 +373,26 @@ def compute_all_quadrant_scores(callback_url: Optional[str] = None) -> List[Dict
     total_stocks = len(all_codes)
     logger.info("[quadrant] 有效股票: %d 只", total_stocks)
 
-    # ── Step 2: 并发拉日线 ──
-    logger.info("[quadrant] Step 2: 并发拉取 %d 只股票日线 (workers=%d, interval=%dms)...",
+    # ── Step 2: 决定全量 vs 增量 ──
+    is_full = cache.needs_full_refresh(force_full=force_full)
+    if is_full:
+        fetch_days = DAILY_LOOKBACK_DAYS
+        logger.info("[quadrant] Step 2: 全量刷新模式 (拉取 %d 天日线)...", fetch_days)
+    else:
+        fetch_days = 3  # 只拉最近 3 天（覆盖周末 + 当天）
+        logger.info("[quadrant] Step 2: 增量更新模式 (拉取 %d 天日线)...", fetch_days)
+
+    # ── Step 3: 并发拉日线 ──
+    logger.info("[quadrant] 并发拉取 %d 只股票 (workers=%d, interval=%dms)...",
                 total_stocks, MAX_WORKERS, REQUEST_INTERVAL_MS)
-    daily_data: Dict[str, pd.DataFrame] = {}
+    success_count = 0
     failed_codes: List[str] = []
 
-    def fetch_with_interval(code: str) -> Tuple[str, Optional[pd.DataFrame]]:
-        df = _fetch_daily_bars_safe(code)
-        if df is None:
-            # Retry once with longer delay
-            time.sleep(SINGLE_RETRY_DELAY_MS / 1000.0)
-            df = _fetch_daily_bars_safe(code)
+    def fetch_with_interval(code: str) -> Tuple[str, Optional[List[Dict]]]:
+        bars = _fetch_daily_bars(code, fetch_days)
         if REQUEST_INTERVAL_MS > 0:
             time.sleep(REQUEST_INTERVAL_MS / 1000.0)
-        return code, df
+        return code, bars
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(fetch_with_interval, code): code for code in all_codes}
@@ -249,9 +400,13 @@ def compute_all_quadrant_scores(callback_url: Optional[str] = None) -> List[Dict
         for future in as_completed(futures):
             code = futures[future]
             try:
-                result_code, result_df = future.result()
-                if result_df is not None and not result_df.empty:
-                    daily_data[result_code] = result_df
+                result_code, result_bars = future.result()
+                if result_bars:
+                    if is_full:
+                        cache.set_stock_bars(result_code, result_bars)
+                    else:
+                        cache.merge_incremental(result_code, result_bars)
+                    success_count += 1
                 else:
                     failed_codes.append(result_code)
             except Exception:
@@ -259,31 +414,48 @@ def compute_all_quadrant_scores(callback_url: Optional[str] = None) -> List[Dict
 
             done_count += 1
             if done_count % 500 == 0:
-                logger.info("[quadrant] 日线进度: %d/%d", done_count, total_stocks)
+                logger.info("[quadrant] 日线进度: %d/%d (成功 %d)", done_count, total_stocks, success_count)
 
-    success_count = len(daily_data)
-    success_ratio = success_count / total_stocks if total_stocks > 0 else 0
-    logger.info("[quadrant] 日线完成: 成功 %d / 总 %d (%.1f%%), 失败 %d",
-                success_count, total_stocks, success_ratio * 100, len(failed_codes))
+    fetch_ratio = success_count / total_stocks if total_stocks > 0 else 0
+    logger.info("[quadrant] 日线完成: 成功 %d / 总 %d (%.1f%%)",
+                success_count, total_stocks, fetch_ratio * 100)
 
-    if success_ratio < MIN_SUCCESS_RATIO:
+    # For full mode, check success ratio strictly
+    if is_full and fetch_ratio < MIN_SUCCESS_RATIO:
         raise RuntimeError(
-            f"日线拉取成功率过低: {success_count}/{total_stocks} ({success_ratio:.1%})，"
+            f"日线拉取成功率过低: {success_count}/{total_stocks} ({fetch_ratio:.1%})，"
             f"阈值 {MIN_SUCCESS_RATIO:.0%}"
         )
 
-    # ── Step 3: 上证指数 60 日收益 ──
-    logger.info("[quadrant] Step 3: 拉取上证指数 60 日收益...")
+    # For incremental mode, even if many fail, we still have cached data
+    # Count how many stocks have usable cached data
+    if not is_full:
+        cached_count = sum(1 for code in all_codes if cache.get_stock_bars(code))
+        cached_ratio = cached_count / total_stocks if total_stocks > 0 else 0
+        logger.info("[quadrant] 缓存覆盖: %d / %d (%.1f%%)", cached_count, total_stocks, cached_ratio * 100)
+        if cached_ratio < MIN_SUCCESS_RATIO:
+            logger.warning("[quadrant] 缓存覆盖率不足，尝试全量刷新...")
+            # Fallback: trigger full refresh
+            return compute_all_quadrant_scores(callback_url=callback_url, force_full=True)
+
+    # Update cache metadata
+    if is_full:
+        cache.mark_full_refresh()
+    else:
+        cache.mark_incremental()
+    cache.save()
+
+    # ── Step 4: 上证指数 60 日收益 ──
+    logger.info("[quadrant] Step 4: 拉取上证指数 60 日收益...")
     bench_60d = _fetch_benchmark_60d_return()
     logger.info("[quadrant] 上证 60 日收益: %.2f%%", bench_60d)
 
-    # ── Step 4: 计算子指标 ──
-    logger.info("[quadrant] Step 4: 计算子指标...")
+    # ── Step 5: 计算子指标 ──
+    logger.info("[quadrant] Step 5: 计算子指标...")
 
-    # Merge daily metrics into snapshot
     daily_metrics_rows = []
     for code in all_codes:
-        daily_df = daily_data.get(code)
+        daily_df = cache.bars_to_dataframe(code)
         metrics = _compute_daily_metrics(daily_df)
         metrics["code"] = code
         daily_metrics_rows.append(metrics)
@@ -291,7 +463,6 @@ def compute_all_quadrant_scores(callback_url: Optional[str] = None) -> List[Dict
     daily_metrics_df = pd.DataFrame(daily_metrics_rows)
     merged = snapshot_df.merge(daily_metrics_df, on="code", how="left")
 
-    # Compute sub-scores
     # ── Trend ──
     change_60d_rank = _percentile_rank(merged["change_pct_60d"])
     excess_return = merged["change_pct_60d"] - bench_60d
@@ -301,7 +472,6 @@ def compute_all_quadrant_scores(callback_url: Optional[str] = None) -> List[Dict
     # ── Flow ──
     volume_ratio_rank = _percentile_rank(merged["volume_ratio"])
     turnover_rate_rank = _percentile_rank(merged["turnover_rate"])
-    # 成交额比 = 今日成交额 / 20日均成交额
     turnover_ratio = merged["turnover"] / merged["turnover_20d_avg"]
     turnover_ratio_rank = _percentile_rank(turnover_ratio)
     merged["flow"] = 0.4 * volume_ratio_rank + 0.3 * turnover_rate_rank + 0.3 * turnover_ratio_rank
@@ -327,19 +497,14 @@ def compute_all_quadrant_scores(callback_url: Optional[str] = None) -> List[Dict
     merged["risk"] = (
         0.4 * merged["volatility_raw"] + 0.3 * merged["drawdown_raw"] + 0.3 * merged["crowding_raw"]
     )
-
-    # Fill NaN with 50 (neutral) for final scores
     merged["opportunity"] = merged["opportunity"].fillna(50).clip(0, 100).round(2)
     merged["risk"] = merged["risk"].fillna(50).clip(0, 100).round(2)
-
-    # Fill NaN sub-scores with 50
     for col in ["trend", "flow", "revision", "volatility_raw", "drawdown_raw", "crowding_raw"]:
         merged[col] = merged[col].fillna(50).clip(0, 100).round(2)
 
-    # ── Step 5: 分配象限 ──
+    # ── Step 6: 分配象限 ──
     def assign_quadrant(row):
-        opp = row["opportunity"]
-        rsk = row["risk"]
+        opp, rsk = row["opportunity"], row["risk"]
         if opp > OPPORTUNITY_HIGH and rsk < RISK_LOW:
             return "机会"
         if opp > OPPORTUNITY_HIGH and rsk > RISK_HIGH:
@@ -352,7 +517,6 @@ def compute_all_quadrant_scores(callback_url: Optional[str] = None) -> List[Dict
 
     merged["quadrant"] = merged.apply(assign_quadrant, axis=1)
 
-    # Build result
     result_items = []
     for _, row in merged.iterrows():
         code = str(row.get("code", ""))
@@ -372,15 +536,16 @@ def compute_all_quadrant_scores(callback_url: Optional[str] = None) -> List[Dict
         })
 
     elapsed = time.time() - start_time
-    logger.info("[quadrant] ✅ 计算完成: %d 只股票, 耗时 %.1f 秒", len(result_items), elapsed)
+    mode_label = "全量" if is_full else "增量"
+    logger.info("[quadrant] ✅ 计算完成 (%s): %d 只股票, 耗时 %.1f 秒", mode_label, len(result_items), elapsed)
 
-    # Update cache
+    # Update in-memory cache
     with _quadrant_cache_lock:
         global _quadrant_cache_data, _quadrant_cache_ts
         _quadrant_cache_data = result_items
         _quadrant_cache_ts = time.time()
 
-    # Callback to Go backend if URL provided
+    # Callback to Go backend
     if callback_url:
         _send_callback(callback_url, result_items)
 
@@ -388,7 +553,6 @@ def compute_all_quadrant_scores(callback_url: Optional[str] = None) -> List[Dict
 
 
 def get_cached_scores() -> Optional[List[Dict[str, Any]]]:
-    """返回缓存的四象限评分，如果缓存过期或为空则返回 None"""
     with _quadrant_cache_lock:
         if _quadrant_cache_data is not None and (time.time() - _quadrant_cache_ts) < _QUADRANT_CACHE_TTL:
             return _quadrant_cache_data
@@ -396,15 +560,10 @@ def get_cached_scores() -> Optional[List[Dict[str, Any]]]:
 
 
 def _send_callback(callback_url: str, items: List[Dict[str, Any]]):
-    """将计算结果回调给 Go 后端"""
-    import requests
-
     try:
         payload = {"items": items, "computed_at": pd.Timestamp.now(tz="UTC").isoformat()}
         resp = requests.post(
-            callback_url,
-            json=payload,
-            timeout=30,
+            callback_url, json=payload, timeout=30,
             headers={"Content-Type": "application/json"},
         )
         if resp.status_code < 200 or resp.status_code >= 300:

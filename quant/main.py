@@ -677,6 +677,7 @@ def dict_to_json_safe(data: Dict) -> Dict:
 
 class QuadrantComputeRequest(BaseModel):
     callback_url: str = Field(default="", description="Go 后端回调 URL，为空则不回调")
+    force_full: bool = Field(default=False, description="是否强制全量刷新（忽略缓存）")
 
 
 @app.post("/api/quadrant/compute-all")
@@ -689,10 +690,11 @@ def quadrant_compute_all(req: QuadrantComputeRequest):
     import threading as _threading
 
     callback = req.callback_url.strip() if req.callback_url else None
+    force_full = req.force_full
 
     def _run():
         try:
-            compute_all_quadrant_scores(callback_url=callback)
+            compute_all_quadrant_scores(callback_url=callback, force_full=force_full)
         except Exception as exc:
             logger.exception("[quadrant] compute-all 后台任务失败: %s", exc)
 

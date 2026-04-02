@@ -8,15 +8,14 @@ Risk Score        = 0.4 * Volatility + 0.3 * Drawdown + 0.3 * Crowding
 """
 
 import logging
-import math
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
 
-import akshare as ak
 import numpy as np
 import pandas as pd
+import requests
 
 from screener.scanner import get_a_share_snapshot
 
@@ -43,37 +42,60 @@ _quadrant_cache_ts: float = 0.0
 _QUADRANT_CACHE_TTL = 6 * 3600  # 6 hours
 
 
+def _code_to_qq_daily(code: str) -> str:
+    """将 6 位 A 股代码转为腾讯日线格式 shXXXXXX / szXXXXXX"""
+    c = str(code).zfill(6)
+    return f"sh{c}" if c.startswith(("6", "9")) else f"sz{c}"
+
+
+_QQ_DAILY_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Referer": "https://stockapp.finance.qq.com/",
+}
+
+
 def _fetch_daily_bars_safe(symbol: str, days: int = DAILY_LOOKBACK_DAYS) -> Optional[pd.DataFrame]:
-    """拉单只股票日线，失败返回 None"""
+    """通过腾讯财经日线接口拉取单只股票前复权日线，失败返回 None"""
     try:
-        end_date = pd.Timestamp.today().strftime("%Y%m%d")
-        start_date = (pd.Timestamp.today() - pd.Timedelta(days=days + 30)).strftime("%Y%m%d")
-        df = ak.stock_zh_a_hist(
-            symbol=symbol,
-            period="daily",
-            start_date=start_date,
-            end_date=end_date,
-            adjust="qfq",
+        qq_code = _code_to_qq_daily(symbol)
+        end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
+        start_date = (pd.Timestamp.today() - pd.Timedelta(days=days + 30)).strftime("%Y-%m-%d")
+
+        url = (
+            f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+            f"?param={qq_code},day,{start_date},{end_date},{days + 30},qfq"
         )
-        if df is None or df.empty:
+        resp = requests.get(url, headers=_QQ_DAILY_HEADERS, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+
+        stock_data = data.get("data", {}).get(qq_code, {})
+        klines = stock_data.get("qfqday") or stock_data.get("day") or []
+        if not klines:
             return None
 
-        # Rename columns
-        col_map = {
-            "日期": "date", "开盘": "open", "收盘": "close",
-            "最高": "high", "最低": "low", "成交量": "volume",
-            "成交额": "turnover", "换手率": "turnover_rate",
-        }
-        available = {k: v for k, v in col_map.items() if k in df.columns}
-        df = df.rename(columns=available)
+        # Each kline: [date, open, close, high, low, volume, ...]
+        # Volume is in 手 (lots of 100 shares)
+        rows = []
+        for k in klines:
+            if len(k) < 6:
+                continue
+            rows.append({
+                "date": k[0],
+                "open": float(k[1]),
+                "close": float(k[2]),
+                "high": float(k[3]),
+                "low": float(k[4]),
+                "volume": float(k[5]),
+            })
 
-        for col in ["open", "close", "high", "low", "volume", "turnover", "turnover_rate"]:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
+        if not rows:
+            return None
 
-        if "date" in df.columns:
-            df["date"] = pd.to_datetime(df["date"])
-            df = df.sort_values("date").reset_index(drop=True)
+        df = pd.DataFrame(rows)
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date").reset_index(drop=True)
 
         # Keep only last N trading days
         if len(df) > days:
@@ -86,35 +108,31 @@ def _fetch_daily_bars_safe(symbol: str, days: int = DAILY_LOOKBACK_DAYS) -> Opti
 
 
 def _fetch_benchmark_60d_return() -> float:
-    """获取上证指数近 60 个交易日的收益率"""
+    """通过腾讯财经获取上证指数近 60 个交易日的收益率"""
     try:
-        end_date = pd.Timestamp.today().strftime("%Y%m%d")
-        start_date = (pd.Timestamp.today() - pd.Timedelta(days=120)).strftime("%Y%m%d")
-        df = ak.stock_zh_index_daily_em(
-            symbol="sh000001",
-            start_date=start_date,
-            end_date=end_date,
+        end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
+        start_date = (pd.Timestamp.today() - pd.Timedelta(days=120)).strftime("%Y-%m-%d")
+
+        url = (
+            f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+            f"?param=sh000001,day,{start_date},{end_date},90,"
         )
-        if df is None or df.empty or len(df) < 2:
+        resp = requests.get(url, headers=_QQ_DAILY_HEADERS, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+
+        stock_data = data.get("data", {}).get("sh000001", {})
+        klines = stock_data.get("day") or stock_data.get("qfqday") or []
+        if len(klines) < 2:
             return 0.0
 
-        col_map = {"date": "date", "close": "close"}
-        for cn_col, en_col in [("日期", "date"), ("收盘", "close")]:
-            if cn_col in df.columns:
-                col_map[cn_col] = en_col
+        closes = [float(k[2]) for k in klines if len(k) >= 3 and float(k[2]) > 0]
+        if len(closes) < 2:
+            return 0.0
 
-        if "收盘" in df.columns:
-            df = df.rename(columns={"日期": "date", "收盘": "close"})
-        df["close"] = pd.to_numeric(df["close"], errors="coerce")
-        df = df.dropna(subset=["close"]).sort_values("date").reset_index(drop=True)
-
-        if len(df) < 60:
-            lookback = len(df)
-        else:
-            lookback = 60
-
-        first_close = float(df.iloc[-lookback]["close"])
-        last_close = float(df.iloc[-1]["close"])
+        lookback = min(60, len(closes))
+        first_close = closes[-lookback]
+        last_close = closes[-1]
         if first_close <= 0:
             return 0.0
         return (last_close / first_close - 1) * 100
@@ -157,9 +175,10 @@ def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
     drawdown = (lookback_closes - rolling_max) / rolling_max
     result["max_drawdown_60d"] = abs(float(drawdown.min())) if len(drawdown) > 0 else 0.0
 
-    # 20-day average turnover (成交额)
-    if "turnover" in daily_df.columns:
-        turnovers = daily_df["turnover"].dropna()
+    # 20-day average turnover (成交额), fallback to volume if turnover unavailable
+    turnover_col = "turnover" if "turnover" in daily_df.columns else ("volume" if "volume" in daily_df.columns else None)
+    if turnover_col:
+        turnovers = daily_df[turnover_col].dropna()
         if len(turnovers) >= 20:
             result["turnover_20d_avg"] = float(turnovers.tail(20).mean())
         elif len(turnovers) >= 5:

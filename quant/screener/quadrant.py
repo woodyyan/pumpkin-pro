@@ -33,7 +33,7 @@ REQUEST_INTERVAL_MS = 200          # 每次请求后的间隔（毫秒）
 SINGLE_RETRY_DELAY_MS = 500        # 单只失败后重试前的等待（毫秒）
 MIN_SUCCESS_RATIO = 0.80           # 成功率 < 80% 视为整体失败
 FULL_REFRESH_INTERVAL_DAYS = 7     # 每 7 天强制全量刷新一次缓存
-CACHE_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "quadrant_daily_cache.json")
+CACHE_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "cache", "quadrant_daily_cache.json")
 
 # Quadrant thresholds
 OPPORTUNITY_HIGH = 70

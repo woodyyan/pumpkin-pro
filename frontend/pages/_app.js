@@ -58,6 +58,17 @@ function AppLayout({ Component, pageProps }) {
         <main className="flex-1 mt-16 p-6">
           <Component {...pageProps} />
         </main>
+
+        <footer className="border-t border-white/8 py-6 px-6 text-center text-xs text-white/30 space-y-2">
+          <div className="flex items-center justify-center gap-3">
+            <Link href="/privacy" className="hover:text-white/60 transition">隐私政策</Link>
+            <span>·</span>
+            <Link href="/terms" className="hover:text-white/60 transition">用户协议</Link>
+            <span>·</span>
+            <Link href="/disclaimer" className="hover:text-white/60 transition">免责声明</Link>
+          </div>
+          <p>© {new Date().getFullYear()} Easy Studio Inc. All rights reserved.</p>
+        </footer>
       </div>
     </>
   )

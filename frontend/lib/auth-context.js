@@ -305,6 +305,13 @@ function AuthDialog({
               {submitting ? '提交中...' : mode === 'register' ? '注册并登录' : '登录'}
             </button>
           </div>
+
+          <p className="mt-3 text-center text-xs text-white/30">
+            {mode === 'register' ? '注册即表示您同意' : '登录即表示您同意'}
+            <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-white/50 hover:text-white/70 underline underline-offset-2 mx-0.5">用户协议</a>
+            和
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-white/50 hover:text-white/70 underline underline-offset-2 mx-0.5">隐私政策</a>
+          </p>
         </form>
       </div>
     </div>

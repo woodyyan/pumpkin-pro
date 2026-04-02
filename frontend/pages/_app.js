@@ -33,7 +33,7 @@ function AppLayout({ Component, pageProps }) {
             <span className="text-xl font-bold tracking-tight truncate">卧龙AI量化交易台</span>
           </div>
 
-          <div className="flex items-center space-x-2 text-sm font-medium">
+          <div className="flex items-center space-x-2 text-base font-medium">
             {NAV_ITEMS.map((item) => {
               const isActive = router.pathname === item.href
               return (
@@ -42,8 +42,8 @@ function AppLayout({ Component, pageProps }) {
                   href={item.href}
                   className={`inline-flex items-center rounded-lg border px-3 py-1.5 transition ${
                     isActive
-                      ? 'border-white/25 bg-white/12 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.08)]'
-                      : 'border-transparent text-white/70 hover:border-white/10 hover:bg-white/5 hover:text-white'
+                      ? 'border-primary/50 bg-primary/15 text-white font-semibold shadow-[0_0_8px_rgba(230,126,34,0.15)]'
+                      : 'border-transparent text-white/60 hover:border-white/10 hover:bg-white/5 hover:text-white'
                   }`}
                 >
                   {item.label}

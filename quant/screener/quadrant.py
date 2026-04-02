@@ -229,6 +229,7 @@ def _fetch_bars_akshare(symbol: str, days: int) -> Optional[List[Dict]]:
         col_map = {
             "日期": "date", "开盘": "open", "收盘": "close",
             "最高": "high", "最低": "low", "成交量": "volume",
+            "换手率": "turnover_rate",
         }
         available = {k: v for k, v in col_map.items() if k in df.columns}
         df = df.rename(columns=available)
@@ -236,14 +237,17 @@ def _fetch_bars_akshare(symbol: str, days: int) -> Optional[List[Dict]]:
         rows = []
         for _, row in df.iterrows():
             try:
-                rows.append({
+                item = {
                     "date": str(row["date"])[:10],
                     "open": float(row["open"]),
                     "close": float(row["close"]),
                     "high": float(row["high"]),
                     "low": float(row["low"]),
                     "volume": float(row["volume"]),
-                })
+                }
+                if "turnover_rate" in row.index and pd.notna(row["turnover_rate"]):
+                    item["turnover_rate"] = float(row["turnover_rate"])
+                rows.append(item)
             except (ValueError, KeyError):
                 continue
         return rows if rows else None
@@ -303,6 +307,8 @@ def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
         "max_drawdown_60d": np.nan,
         "turnover_20d_avg": np.nan,
         "cumulative_turnover_20d": np.nan,
+        "change_pct_60d_calc": np.nan,
+        "volume_ratio_calc": np.nan,
     }
     if daily_df is None or daily_df.empty or "close" not in daily_df.columns:
         return result
@@ -320,6 +326,22 @@ def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
     rolling_max = lookback_closes.cummax()
     drawdown = (lookback_closes - rolling_max) / rolling_max
     result["max_drawdown_60d"] = abs(float(drawdown.min())) if len(drawdown) > 0 else 0.0
+
+    # 60 日涨跌幅（从日线自算，不依赖快照源）
+    if len(closes) >= 60:
+        result["change_pct_60d_calc"] = (closes.iloc[-1] / closes.iloc[-60] - 1) * 100
+    elif len(closes) >= 10:
+        result["change_pct_60d_calc"] = (closes.iloc[-1] / closes.iloc[0] - 1) * 100
+
+    # 简化量比 = 今日成交量 / 近 5 日平均成交量
+    vol_col = "volume" if "volume" in daily_df.columns else None
+    if vol_col:
+        volumes = daily_df[vol_col].dropna()
+        if len(volumes) >= 6:
+            today_vol = volumes.iloc[-1]
+            avg_5d = volumes.iloc[-6:-1].mean()
+            if avg_5d > 0:
+                result["volume_ratio_calc"] = float(today_vol / avg_5d)
 
     turnover_col = "turnover" if "turnover" in daily_df.columns else ("volume" if "volume" in daily_df.columns else None)
     if turnover_col:
@@ -450,6 +472,20 @@ def compute_all_quadrant_scores(
     bench_60d = _fetch_benchmark_60d_return()
     logger.info("[quadrant] 上证 60 日收益: %.2f%%", bench_60d)
 
+    # ── Step 4.5: 将快照 turnover_rate 注入日线缓存 ──
+    # 快照（东财/腾讯）都包含当天换手率，但日线缓存（腾讯源）缺少该字段。
+    # 注入后 _compute_daily_metrics 能计算 cumulative_turnover_20d。
+    injected_count = 0
+    for _, row in snapshot_df.iterrows():
+        code = row.get("code")
+        tr = row.get("turnover_rate")
+        if code and pd.notna(tr) and tr > 0:
+            bars = cache.get_stock_bars(code)
+            if bars and len(bars) > 0:
+                bars[-1]["turnover_rate"] = float(tr)
+                injected_count += 1
+    logger.info("[quadrant] 快照换手率注入日线缓存: %d 只股票", injected_count)
+
     # ── Step 5: 计算子指标 ──
     logger.info("[quadrant] Step 5: 计算子指标...")
 
@@ -462,6 +498,23 @@ def compute_all_quadrant_scores(
 
     daily_metrics_df = pd.DataFrame(daily_metrics_rows)
     merged = snapshot_df.merge(daily_metrics_df, on="code", how="left")
+
+    # ── Backfill missing snapshot fields from daily-bar calculations ──
+    # change_pct_60d: prefer snapshot (东财), fallback to daily-bar calc
+    if "change_pct_60d" in merged.columns:
+        merged["change_pct_60d"] = merged["change_pct_60d"].fillna(merged["change_pct_60d_calc"])
+    else:
+        merged["change_pct_60d"] = merged["change_pct_60d_calc"]
+    # volume_ratio: prefer snapshot (东财), fallback to daily-bar simplified calc
+    if "volume_ratio" in merged.columns:
+        merged["volume_ratio"] = merged["volume_ratio"].fillna(merged["volume_ratio_calc"])
+    else:
+        merged["volume_ratio"] = merged["volume_ratio_calc"]
+
+    backfill_60d = int(merged["change_pct_60d"].notna().sum())
+    backfill_vr = int(merged["volume_ratio"].notna().sum())
+    logger.info("[quadrant] 数据补齐: change_pct_60d 有效 %d/%d, volume_ratio 有效 %d/%d",
+                backfill_60d, len(merged), backfill_vr, len(merged))
 
     # ── Trend ──
     change_60d_rank = _percentile_rank(merged["change_pct_60d"])
@@ -497,6 +550,12 @@ def compute_all_quadrant_scores(
     merged["risk"] = (
         0.4 * merged["volatility_raw"] + 0.3 * merged["drawdown_raw"] + 0.3 * merged["crowding_raw"]
     )
+
+    # ── Re-normalize: percentile rank the final scores to counteract
+    #    variance collapse from multi-layer weighted averaging ──
+    merged["opportunity"] = _percentile_rank(merged["opportunity"].fillna(50))
+    merged["risk"] = _percentile_rank(merged["risk"].fillna(50))
+
     merged["opportunity"] = merged["opportunity"].fillna(50).clip(0, 100).round(2)
     merged["risk"] = merged["risk"].fillna(50).clip(0, 100).round(2)
     for col in ["trend", "flow", "revision", "volatility_raw", "drawdown_raw", "crowding_raw"]:

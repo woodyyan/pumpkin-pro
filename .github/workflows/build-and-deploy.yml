@@ -289,6 +289,26 @@ jobs:
               return 0
             }
 
+            retry_pull() {
+              local max_attempts=3
+              local attempt=1
+              while [ "$attempt" -le "$max_attempts" ]; do
+                echo "📦 docker compose pull (attempt $attempt/$max_attempts)..."
+                if docker compose -f "$COMPOSE_FILE" pull; then
+                  echo "✅ Pull succeeded on attempt $attempt"
+                  return 0
+                fi
+                if [ "$attempt" -lt "$max_attempts" ]; then
+                  local wait=$((attempt * 15))
+                  echo "⚠️ Pull failed, retrying in ${wait}s..."
+                  sleep "$wait"
+                fi
+                attempt=$((attempt + 1))
+              done
+              echo "❌ Pull failed after $max_attempts attempts"
+              return 1
+            }
+
             echo "running" > "$STATUS_FILE"
             cd "$APP_DIR"
 
@@ -298,7 +318,7 @@ jobs:
 
             export IMAGE_REGISTRY IMAGE_NAMESPACE IMAGE_TAG
 
-            if docker compose -f "$COMPOSE_FILE" pull && docker compose -f "$COMPOSE_FILE" up -d --remove-orphans; then
+            if retry_pull && docker compose -f "$COMPOSE_FILE" up -d --remove-orphans; then
               ATTEMPT=0
               until probe_health; do
                 ATTEMPT=$((ATTEMPT + 1))
@@ -478,6 +498,26 @@ jobs:
               return 0
             }
 
+            retry_pull() {
+              local max_attempts=3
+              local attempt=1
+              while [ "$attempt" -le "$max_attempts" ]; do
+                echo "📦 docker compose pull (attempt $attempt/$max_attempts)..."
+                if docker compose -f "$COMPOSE_FILE" pull; then
+                  echo "✅ Pull succeeded on attempt $attempt"
+                  return 0
+                fi
+                if [ "$attempt" -lt "$max_attempts" ]; then
+                  local wait=$((attempt * 15))
+                  echo "⚠️ Pull failed, retrying in ${wait}s..."
+                  sleep "$wait"
+                fi
+                attempt=$((attempt + 1))
+              done
+              echo "❌ Pull failed after $max_attempts attempts"
+              return 1
+            }
+
             echo "running" > "$STATUS_FILE"
             cd "$APP_DIR"
 
@@ -487,7 +527,7 @@ jobs:
 
             export IMAGE_REGISTRY IMAGE_NAMESPACE IMAGE_TAG
 
-            if docker compose -f "$COMPOSE_FILE" pull && docker compose -f "$COMPOSE_FILE" up -d --remove-orphans; then
+            if retry_pull && docker compose -f "$COMPOSE_FILE" up -d --remove-orphans; then
               ATTEMPT=0
               until probe_health; do
                 ATTEMPT=$((ATTEMPT + 1))

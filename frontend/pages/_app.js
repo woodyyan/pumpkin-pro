@@ -17,6 +17,25 @@ const NAV_ITEMS = [
 
 function AppLayout({ Component, pageProps }) {
   const router = useRouter()
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const mobileMenuRef = useRef(null)
+
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileMenuOpen(false)
+  }, [router.pathname])
+
+  // Close mobile menu on outside click
+  useEffect(() => {
+    if (!mobileMenuOpen) return
+    const handler = (e) => {
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target)) {
+        setMobileMenuOpen(false)
+      }
+    }
+    window.addEventListener('mousedown', handler)
+    return () => window.removeEventListener('mousedown', handler)
+  }, [mobileMenuOpen])
 
   return (
     <>
@@ -27,35 +46,79 @@ function AppLayout({ Component, pageProps }) {
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       </Head>
       <div className="min-h-screen bg-background text-foreground flex flex-col">
-        <nav className="fixed top-0 left-0 right-0 h-16 bg-black/60 backdrop-blur-md border-b border-white/10 z-50 flex items-center justify-between px-6 gap-4">
-          <div className="flex items-center space-x-2.5 min-w-0">
-            <img src="/logo.png" alt="卧龙" width={40} height={40} className="rounded" />
-            <span className="text-xl font-bold tracking-tight truncate">卧龙AI量化交易台</span>
+        <nav ref={mobileMenuRef} className="fixed top-0 left-0 right-0 bg-black/60 backdrop-blur-md border-b border-white/10 z-50">
+          {/* ── Top bar ── */}
+          <div className="h-16 flex items-center justify-between px-4 md:px-6 gap-3">
+            {/* Logo + title */}
+            <Link href="/" className="flex items-center space-x-2 min-w-0 shrink-0">
+              <img src="/logo.png" alt="卧龙" width={36} height={36} className="rounded shrink-0" />
+              <span className="text-lg font-bold tracking-tight truncate hidden sm:inline">卧龙AI量化交易台</span>
+              <span className="text-lg font-bold tracking-tight sm:hidden">卧龙</span>
+            </Link>
+
+            {/* Desktop nav items */}
+            <div className="hidden md:flex items-center space-x-2 text-base font-medium">
+              {NAV_ITEMS.map((item) => {
+                const isActive = router.pathname === item.href
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`inline-flex items-center rounded-lg border px-3 py-1.5 transition ${
+                      isActive
+                        ? 'border-primary/50 bg-primary/15 text-white font-semibold shadow-[0_0_8px_rgba(230,126,34,0.15)]'
+                        : 'border-transparent text-white/60 hover:border-white/10 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+
+            {/* Right side: hamburger (mobile) + account */}
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Hamburger button — mobile only */}
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen((v) => !v)}
+                className="md:hidden inline-flex items-center justify-center w-9 h-9 rounded-lg border border-white/15 text-white/70 transition hover:bg-white/10 hover:text-white"
+                aria-label="菜单"
+              >
+                {mobileMenuOpen ? (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 12h18M3 6h18M3 18h18" /></svg>
+                )}
+              </button>
+              <AccountEntry />
+            </div>
           </div>
 
-          <div className="flex items-center space-x-2 text-base font-medium">
-            {NAV_ITEMS.map((item) => {
-              const isActive = router.pathname === item.href
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`inline-flex items-center rounded-lg border px-3 py-1.5 transition ${
-                    isActive
-                      ? 'border-primary/50 bg-primary/15 text-white font-semibold shadow-[0_0_8px_rgba(230,126,34,0.15)]'
-                      : 'border-transparent text-white/60 hover:border-white/10 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              )
-            })}
-          </div>
-
-          <AccountEntry />
+          {/* ── Mobile dropdown menu ── */}
+          {mobileMenuOpen && (
+            <div className="md:hidden border-t border-white/10 bg-black/80 backdrop-blur-md px-4 py-3 space-y-1">
+              {NAV_ITEMS.map((item) => {
+                const isActive = router.pathname === item.href
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`block rounded-lg px-3 py-2.5 text-sm font-medium transition ${
+                      isActive
+                        ? 'bg-primary/15 text-white border-l-2 border-primary'
+                        : 'text-white/60 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
         </nav>
 
-        <main className="flex-1 mt-16 p-6">
+        <main className="flex-1 mt-16 p-4 md:p-6">
           <Component {...pageProps} />
         </main>
 

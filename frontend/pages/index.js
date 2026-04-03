@@ -1,1205 +1,391 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import Link from 'next/link'
+import { useState } from 'react'
+import { useAuth } from '../lib/auth-context'
 
-import { requestJson } from '../lib/api';
-import { useAuth } from '../lib/auth-context';
-import { getStrategyPresetByImplementation } from '../lib/strategy-presets';
+// ── Data ──
 
-const DATA_SOURCE_OPTIONS = [
-  { value: 'online', label: '在线下载', description: '下载 A 股 / 港股历史数据' },
-  { value: 'csv', label: '本地 CSV', description: '上传本地股票 CSV 文件回测' },
-  { value: 'sample', label: '示例行情', description: '自动生成示例历史行情数据' },
-];
+const HIGHLIGHTS = [
+  { value: 'A 股 + 港股', desc: '双市场支持' },
+  { value: 'AI 辅助决策', desc: '智能分析选股' },
+  { value: '100+', desc: '技术指标' },
+]
 
-function formatDateInputValue(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function buildDefaultDateRange() {
-  const endDate = new Date();
-  endDate.setHours(0, 0, 0, 0);
-  endDate.setDate(endDate.getDate() - 1);
-
-  const startDate = new Date(endDate);
-  startDate.setFullYear(startDate.getFullYear() - 1);
-
-  return {
-    startDate: formatDateInputValue(startDate),
-    endDate: formatDateInputValue(endDate),
-  };
-}
-
-const defaultDateRange = buildDefaultDateRange();
-
-const DEFAULT_FORM = {
-  dataSource: 'online',
-  ticker: '600519',
-  startDate: defaultDateRange.startDate,
-  endDate: defaultDateRange.endDate,
-  capital: 100000,
-  feePct: 0.001,
-  strategyId: '',
-  csvContent: '',
-  csvFilename: '',
-  sampleConfig: {
-    start_price: 100,
-    drift: 0.0005,
-    volatility: 0.02,
-    seed: 42,
+const FEATURES = [
+  {
+    icon: '📊', title: '行情看板', href: '/live-trading',
+    points: ['实时 / 延迟行情数据展示', '均线 / MACD / 布林带等技术指标', '支撑位与阻力位分析', '基本面数据（PE / PB / PEG 等）', '走势对比与异动检测'],
+    cta: '进入看板',
   },
-};
-
-const ERROR_FIELD_LABELS = {
-  ticker: '股票代码',
-  capital: '初始资金',
-  fee_pct: '手续费率',
-  strategy_params: '策略参数',
-};
-
-export default function BacktestPage() {
-  const { isLoggedIn, openAuthModal } = useAuth();
-  const [form, setForm] = useState(DEFAULT_FORM);
-  const [strategies, setStrategies] = useState([]);
-  const [strategiesLoading, setStrategiesLoading] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [result, setResult] = useState(null);
-
-  // ── History runs ──
-  const [historyRuns, setHistoryRuns] = useState([]);
-  const [historyTotal, setHistoryTotal] = useState(0);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [activeRunId, setActiveRunId] = useState(null);
-  const [historyExpanded, setHistoryExpanded] = useState(true);
-  const [priceChartLegend, setPriceChartLegend] = useState([]);
-
-  const priceChartContainerRef = useRef(null);
-  const equityChartContainerRef = useRef(null);
-  const auxChartContainerRef = useRef(null);
-  const priceChartRef = useRef(null);
-  const equityChartRef = useRef(null);
-  const auxChartRef = useRef(null);
-
-  const selectedStrategy = useMemo(
-    () => strategies.find((item) => item.id === form.strategyId) || null,
-    [form.strategyId, strategies],
-  );
-
-  const fetchHistory = useCallback(async () => {
-    if (!isLoggedIn) return;
-    setHistoryLoading(true);
-    try {
-      const data = await requestJson('/api/backtest/runs?limit=20', undefined, '加载回测历史失败');
-      setHistoryRuns(data?.items || []);
-      setHistoryTotal(data?.total || 0);
-    } catch {
-      // silently fail - history is not critical
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, [isLoggedIn]);
-
-  useEffect(() => {
-    fetchHistory();
-  }, [fetchHistory]);
-
-  const resultStrategyParams = result?.strategy?.params || {};
-
-  const metricCards = useMemo(() => {
-    if (!result?.metrics) return [];
-
-    return [
-      { title: '总收益率', value: result.metrics.total_return_pct, type: 'percent' },
-      { title: '买入并持有收益', value: result.metrics.buy_and_hold_return_pct, type: 'percent' },
-      { title: '超额收益（策略-买入持有）', value: result.metrics.excess_return_pct, type: 'percent' },
-      { title: '年化收益率', value: result.metrics.annual_return_pct, type: 'percent' },
-      { title: '最大回撤', value: -Math.abs(result.metrics.max_drawdown_pct || 0), type: 'percent' },
-      { title: '夏普比率', value: result.metrics.sharpe_ratio, type: 'number' },
-      { title: '胜率', value: result.metrics.win_rate_pct, type: 'percent' },
-      { title: '交易次数', value: result.metrics.total_trades, type: 'integer' },
-      { title: '最终资产', value: result.metrics.final_capital, type: 'currency' },
-      { title: '总手续费', value: result.metrics.total_fee, type: 'currency' },
-    ];
-  }, [result]);
-
-  useEffect(() => {
-    const loadStrategies = async () => {
-      setStrategiesLoading(true);
-      try {
-        const data = await requestJson('/api/strategies/active', undefined, '加载可用策略失败');
-        const items = data?.items || [];
-        setStrategies(items);
-        setForm((prev) => {
-          const currentStrategy = items.find((item) => item.id === prev.strategyId) || items[0] || null;
-          if (!currentStrategy) {
-            return { ...prev, strategyId: '' };
-          }
-
-          return {
-            ...prev,
-            strategyId: currentStrategy.id,
-          };
-        });
-      } catch (err) {
-        setError(err.message || '加载策略失败');
-      } finally {
-        setStrategiesLoading(false);
-      }
-    };
-
-    loadStrategies();
-  }, []);
-
-  useEffect(() => {
-    let cleanup = () => {};
-
-    const renderCharts = async () => {
-      if (!result?.kline_data?.length) {
-        destroyCharts();
-        setPriceChartLegend([]);
-        return;
-      }
-
-      const { createChart, ColorType } = await import('lightweight-charts');
-      destroyCharts();
-      setPriceChartLegend([]);
-
-      const resizeHandlers = [];
-      const registerResize = (chart, container) => {
-        const resize = () => {
-          if (!container || !chart) return;
-          chart.applyOptions({ width: container.clientWidth || 400 });
-          chart.timeScale().fitContent();
-        };
-        window.addEventListener('resize', resize);
-        resizeHandlers.push(resize);
-      };
-
-      if (priceChartContainerRef.current) {
-        const priceChart = createChart(priceChartContainerRef.current, buildChartOptions(priceChartContainerRef.current.clientWidth, 430, ColorType));
-        const candleSeries = priceChart.addCandlestickSeries({
-          upColor: '#22c55e',
-          downColor: '#ef4444',
-          borderVisible: false,
-          wickUpColor: '#22c55e',
-          wickDownColor: '#ef4444',
-        });
-
-        candleSeries.setData(
-          result.kline_data.map((item) => ({
-            time: item.date,
-            open: item.open,
-            high: item.high,
-            low: item.low,
-            close: item.close,
-          })),
-        );
-
-        const markers = (result.trades || [])
-          .filter((trade) => trade?.date)
-          .map((trade) => ({
-            time: trade.date,
-            position: trade.type === 'buy' ? 'belowBar' : 'aboveBar',
-            color: trade.type === 'buy' ? '#22c55e' : '#ef4444',
-            shape: trade.type === 'buy' ? 'arrowUp' : 'arrowDown',
-            text: trade.type === 'buy' ? 'BUY' : 'SELL',
-          }))
-          .sort((a, b) => a.time.localeCompare(b.time));
-        candleSeries.setMarkers(markers);
-
-        const seriesSample = result.kline_data[0] || {};
-        const maKeys = Object.keys(seriesSample).filter((key) => /^MA\d+$/.test(key)).sort((a, b) => Number(a.slice(2)) - Number(b.slice(2)));
-        const maColors = ['#f59e0b', '#8b5cf6', '#38bdf8'];
-        const legendItems = [];
-        maKeys.forEach((key, index) => {
-          const color = maColors[index % maColors.length];
-          const lineSeries = priceChart.addLineSeries({
-            color,
-            lineWidth: 2,
-            title: '',
-          });
-          lineSeries.setData(
-            result.kline_data
-              .filter((item) => item[key] !== null && item[key] !== undefined)
-              .map((item) => ({ time: item.date, value: item[key] })),
-          );
-          legendItems.push({ label: key, color });
-        });
-
-        const bollingerKeys = ['BB_upper', 'BB_mid', 'BB_lower'].filter((key) => Object.prototype.hasOwnProperty.call(seriesSample, key));
-        const bollingerStyles = {
-          BB_upper: { color: '#38bdf8', lineWidth: 1 },
-          BB_mid: { color: '#f59e0b', lineWidth: 1 },
-          BB_lower: { color: '#38bdf8', lineWidth: 1 },
-        };
-        const bollingerLabels = { BB_upper: '布林上轨', BB_mid: '布林中轨', BB_lower: '布林下轨' };
-        bollingerKeys.forEach((key) => {
-          const style = bollingerStyles[key];
-          const lineSeries = priceChart.addLineSeries({ title: '', ...style });
-          lineSeries.setData(
-            result.kline_data
-              .filter((item) => item[key] !== null && item[key] !== undefined)
-              .map((item) => ({ time: item.date, value: item[key] })),
-          );
-          legendItems.push({ label: bollingerLabels[key] || key, color: style.color });
-        });
-        setPriceChartLegend(legendItems);
-
-        priceChart.timeScale().fitContent();
-        priceChartRef.current = priceChart;
-        registerResize(priceChart, priceChartContainerRef.current);
-      }
-
-      if (equityChartContainerRef.current && result.analysis?.equity_curve?.length) {
-        const equityChart = createChart(equityChartContainerRef.current, buildChartOptions(equityChartContainerRef.current.clientWidth, 240, ColorType));
-        const strategyEquitySeries = equityChart.addAreaSeries({
-          lineColor: '#e67e22',
-          topColor: 'rgba(230, 126, 34, 0.35)',
-          bottomColor: 'rgba(230, 126, 34, 0.03)',
-          lineWidth: 2,
-        });
-        strategyEquitySeries.setData(
-          result.analysis.equity_curve.map((item) => ({
-            time: item.date,
-            value: item.portfolio_value,
-          })),
-        );
-
-        if (result.analysis?.buy_and_hold_curve?.length) {
-          const buyHoldSeries = equityChart.addLineSeries({
-            color: '#38bdf8',
-            lineWidth: 2,
-            title: '买入并持有',
-          });
-          buyHoldSeries.setData(
-            result.analysis.buy_and_hold_curve.map((item) => ({
-              time: item.date,
-              value: item.portfolio_value,
-            })),
-          );
-        }
-
-        equityChart.timeScale().fitContent();
-        equityChartRef.current = equityChart;
-        registerResize(equityChart, equityChartContainerRef.current);
-      }
-
-      if (auxChartContainerRef.current) {
-        const auxChart = createChart(auxChartContainerRef.current, buildChartOptions(auxChartContainerRef.current.clientWidth, 240, ColorType));
-        const seriesSample = result.kline_data[0] || {};
-        const rsiKey = Object.keys(seriesSample).find((key) => /^RSI_\d+$/.test(key));
-
-        if (rsiKey) {
-          const rsiSeries = auxChart.addLineSeries({ color: '#8b5cf6', lineWidth: 2, title: rsiKey });
-          rsiSeries.setData(
-            result.kline_data
-              .filter((item) => item[rsiKey] !== null && item[rsiKey] !== undefined)
-              .map((item) => ({ time: item.date, value: item[rsiKey] })),
-          );
-          rsiSeries.createPriceLine({ price: Number(resultStrategyParams.rsi_low), color: '#22c55e', lineStyle: 2, axisLabelVisible: true, title: '低位线' });
-          rsiSeries.createPriceLine({ price: Number(resultStrategyParams.rsi_high), color: '#ef4444', lineStyle: 2, axisLabelVisible: true, title: '高位线' });
-        } else if (result.analysis?.drawdown_curve?.length) {
-          const drawdownSeries = auxChart.addAreaSeries({
-            lineColor: '#ef4444',
-            topColor: 'rgba(239, 68, 68, 0.15)',
-            bottomColor: 'rgba(239, 68, 68, 0.02)',
-            lineWidth: 2,
-          });
-          drawdownSeries.setData(
-            result.analysis.drawdown_curve.map((item) => ({
-              time: item.date,
-              value: item.drawdown_pct,
-            })),
-          );
-        }
-
-        auxChart.timeScale().fitContent();
-        auxChartRef.current = auxChart;
-        registerResize(auxChart, auxChartContainerRef.current);
-      }
-
-      cleanup = () => {
-        resizeHandlers.forEach((handler) => window.removeEventListener('resize', handler));
-        destroyCharts();
-      };
-    };
-
-    renderCharts();
-
-    return () => cleanup();
-  }, [result, resultStrategyParams.rsi_high, resultStrategyParams.rsi_low]);
-
-  const destroyCharts = () => {
-    [priceChartRef, equityChartRef, auxChartRef].forEach((chartRef) => {
-      if (chartRef.current) {
-        chartRef.current.remove();
-        chartRef.current = null;
-      }
-    });
-  };
-
-  const updateField = (key, value) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const selectStrategy = (strategyId) => {
-    const strategy = strategies.find((item) => item.id === strategyId);
-    if (!strategy) return;
-
-    setForm((prev) => ({
-      ...prev,
-      strategyId: strategy.id,
-    }));
-  };
-
-  const updateSampleConfig = (key, value) => {
-    setForm((prev) => ({
-      ...prev,
-      sampleConfig: {
-        ...prev.sampleConfig,
-        [key]: value,
-      },
-    }));
-  };
-
-  const handleFileUpload = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const content = await file.text();
-    setForm((prev) => ({
-      ...prev,
-      csvFilename: file.name,
-      csvContent: content,
-    }));
-    setError('');
-  };
-
-  const runBacktest = async () => {
-    setError('');
-
-    if (strategiesLoading) {
-      setError('策略列表仍在加载，请稍后再试。');
-      return;
-    }
-
-    if (!selectedStrategy) {
-      setError('当前没有可用策略，请先到策略库创建并启用策略。');
-      return;
-    }
-
-    if (form.dataSource === 'online' && !form.ticker.trim()) {
-      setError('在线下载模式需要填写股票代码，A 股为 6 位数字，港股为 5 位数字。');
-      return;
-    }
-
-    if (form.dataSource === 'csv' && !form.csvContent) {
-      setError('请先上传本地 CSV 文件。');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const payload = buildPayload(form, selectedStrategy);
-      const responseData = await requestJson(
-        '/api/backtest',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        },
-        '回测失败，请稍后重试。',
-      );
-
-      setResult(responseData);
-      setActiveRunId(null);
-      // Refresh history list after a short delay (give backend async save time)
-      if (isLoggedIn) {
-        setTimeout(() => fetchHistory(), 800);
-      }
-    } catch (err) {
-      setResult(null);
-      setError(err.message || '回测失败，请稍后重试。');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const rsiKey = useMemo(() => {
-    const sample = result?.kline_data?.[0];
-    if (!sample) return null;
-    return Object.keys(sample).find((key) => /^RSI_\d+$/.test(key)) || null;
-  }, [result]);
-
-  return (
-    <div className="max-w-7xl mx-auto space-y-6 pb-12">
-      <section className="bg-card border border-border rounded-2xl p-6 md:p-8">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-3 max-w-3xl">
-            <span className="inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-              Wolong Pro · 历史回测
-            </span>
-            <div>
-              <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">历史回测工作台</h1>
-              <p className="mt-3 text-sm md:text-base text-white/65 leading-7">
-                历史回测已接入策略库。你可以直接选择已启用的策略模板，参数由策略库统一维护。
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3 text-sm text-white/70 md:min-w-[320px]">
-            <MiniStat label="数据源" value="CSV / 示例 / 在线下载" />
-            <MiniStat label="策略来源" value={strategiesLoading ? '加载中...' : `${strategies.length} 条启用策略`} />
-            <MiniStat label="指标分析" value="收益 / 回撤 / 夏普" />
-            <MiniStat label="图表输出" value="K 线 / 资产 / 回撤" />
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <SectionCard title="回测配置" description="先选择数据来源，再配置回测区间与资金参数。">
-          <div className="space-y-6">
-            <div className="grid gap-3 md:grid-cols-3">
-              {DATA_SOURCE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => updateField('dataSource', option.value)}
-                  className={`rounded-2xl border p-4 text-left transition ${
-                    form.dataSource === option.value
-                      ? 'border-primary bg-primary/10 shadow-[0_0_0_1px_rgba(230,126,34,0.25)]'
-                      : 'border-border bg-black/20 hover:border-white/20'
-                  }`}
-                >
-                  <div className="text-sm font-medium text-white">{option.label}</div>
-                  <div className="mt-2 text-xs leading-6 text-white/60">{option.description}</div>
-                </button>
-              ))}
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <Field label="开始日期">
-                <Input type="date" value={form.startDate} onChange={(event) => updateField('startDate', event.target.value)} />
-              </Field>
-              <Field label="结束日期">
-                <Input type="date" value={form.endDate} onChange={(event) => updateField('endDate', event.target.value)} />
-              </Field>
-              <Field label="初始资金（元）">
-                <Input type="number" min="1000" step="1000" value={form.capital} onChange={(event) => updateField('capital', Number(event.target.value))} />
-              </Field>
-              <Field label="手续费率">
-                <Input type="number" min="0" max="0.05" step="0.0001" value={form.feePct} onChange={(event) => updateField('feePct', Number(event.target.value))} />
-              </Field>
-            </div>
-
-            {form.dataSource === 'online' && (
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="股票代码">
-                  <Input
-                    type="text"
-                    placeholder="A 股如 600519，港股如 00700"
-                    value={form.ticker}
-                    onChange={(event) => updateField('ticker', event.target.value)}
-                  />
-                </Field>
-                <Field label="说明">
-                  <div className="rounded-xl border border-dashed border-border bg-black/20 px-4 py-3 text-sm leading-6 text-white/60">
-                    自动识别市场：6 位数字按 A 股处理，5 位数字按港股处理。
-                  </div>
-                </Field>
-              </div>
-            )}
-
-            {form.dataSource === 'csv' && (
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="上传本地 CSV">
-                  <label className="flex min-h-[108px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-black/20 px-4 text-center transition hover:border-primary/40">
-                    <span className="text-sm font-medium text-white">点击选择 CSV 文件</span>
-                    <span className="mt-2 text-xs leading-6 text-white/50">需要包含 date / open / high / low / close / volume 列，支持中英文列名。</span>
-                    <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleFileUpload} />
-                  </label>
-                </Field>
-                <Field label="文件状态">
-                  <div className="rounded-2xl border border-border bg-black/20 px-4 py-4 text-sm leading-7 text-white/70">
-                    <div>
-                      <span className="text-white/50">当前文件：</span>
-                      <span className="text-white">{form.csvFilename || '未上传'}</span>
-                    </div>
-                    <div>
-                      <span className="text-white/50">解析模式：</span>
-                      <span>按所选日期区间截取后回测</span>
-                    </div>
-                    <div>
-                      <span className="text-white/50">兼容列：</span>
-                      <span>日期/Date、开盘/Open、收盘/Close 等</span>
-                    </div>
-                  </div>
-                </Field>
-              </div>
-            )}
-
-            {form.dataSource === 'sample' && (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <Field label="起始价格">
-                  <Input type="number" min="1" step="1" value={form.sampleConfig.start_price} onChange={(event) => updateSampleConfig('start_price', Number(event.target.value))} />
-                </Field>
-                <Field label="日漂移率">
-                  <Input type="number" step="0.0001" value={form.sampleConfig.drift} onChange={(event) => updateSampleConfig('drift', Number(event.target.value))} />
-                </Field>
-                <Field label="波动率">
-                  <Input type="number" min="0.001" step="0.001" value={form.sampleConfig.volatility} onChange={(event) => updateSampleConfig('volatility', Number(event.target.value))} />
-                </Field>
-                <Field label="随机种子">
-                  <Input type="number" min="0" step="1" value={form.sampleConfig.seed} onChange={(event) => updateSampleConfig('seed', Number(event.target.value))} />
-                </Field>
-              </div>
-            )}
-          </div>
-        </SectionCard>
-
-        <SectionCard title="策略设置">
-          <div className="space-y-6">
-            <Field label="回测策略">
-              <select
-                value={form.strategyId}
-                onChange={(event) => selectStrategy(event.target.value)}
-                className="w-full rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition focus:border-primary"
-                disabled={strategiesLoading || strategies.length === 0}
-              >
-                {strategiesLoading ? (
-                  <option value="">策略加载中...</option>
-                ) : strategies.length === 0 ? (
-                  <option value="">暂无启用策略</option>
-                ) : (
-                  strategies.map((strategy) => (
-                    <option key={strategy.id} value={strategy.id}>
-                      {strategy.name}
-                    </option>
-                  ))
-                )}
-              </select>
-            </Field>
-
-            <div className="rounded-2xl border border-border bg-black/20 p-4">
-              <div className="mb-3 text-sm font-medium text-white">策略参数（只读）</div>
-              {selectedStrategy ? (() => {
-                const preset = getStrategyPresetByImplementation(selectedStrategy.implementation_key)
-                const paramSchema = preset?.paramSchema || selectedStrategy.param_schema || []
-                const defaultParams = selectedStrategy.default_params || {}
-                if (paramSchema.length === 0) {
-                  return <div className="text-sm text-white/50">该策略暂无可配置参数。</div>
-                }
-                return (
-                  <div className={`grid gap-3 ${paramSchema.length >= 3 ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
-                    {paramSchema.map((item) => (
-                      <div key={item.key} className="rounded-xl border border-white/5 bg-black/20 p-3">
-                        <div className="text-xs text-white/50">{item.label}</div>
-                        <div className="mt-1.5 text-lg font-semibold text-white">{formatParamDisplay(defaultParams[item.key])}</div>
-                        {item.description ? <div className="mt-1 text-[11px] leading-5 text-white/35">{item.description}</div> : null}
-                      </div>
-                    ))}
-                  </div>
-                )
-              })() : (
-                <div className="text-sm text-white/50">请先选择策略。</div>
-              )}
-            </div>
-
-            <div className="rounded-2xl border border-border bg-black/20 p-4 text-sm leading-7 text-white/65">
-              <div className="font-medium text-white">已选策略说明</div>
-              <div className="mt-2">{selectedStrategy?.description || '请先到策略库创建并启用策略。'}</div>
-            </div>
-
-            <button
-              type="button"
-              onClick={runBacktest}
-              disabled={loading || strategiesLoading || !selectedStrategy}
-              className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading ? '回测运行中...' : '运行历史回测'}
-            </button>
-
-            {error && <div className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-red-200">{error}</div>}
-          </div>
-        </SectionCard>
-      </section>
-
-      {/* ── 历史运行面板 ── */}
-      {isLoggedIn && (
-        <section className="rounded-2xl border border-border bg-card p-6">
-          <div className="mb-4 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => setHistoryExpanded((prev) => !prev)}
-              className="flex items-center gap-2 text-lg font-semibold text-white hover:text-primary transition"
-            >
-              <span className={`inline-block transition-transform ${historyExpanded ? 'rotate-90' : ''}`}>▸</span>
-              历史运行
-              {historyTotal > 0 && <span className="text-sm font-normal text-white/40">({historyTotal})</span>}
-            </button>
-            {historyRuns.length > 0 && (
-              <button
-                type="button"
-                onClick={fetchHistory}
-                disabled={historyLoading}
-                className="text-xs text-white/40 hover:text-white/70 transition disabled:opacity-50"
-              >
-                {historyLoading ? '刷新中...' : '刷新'}
-              </button>
-            )}
-          </div>
-          {historyExpanded && (
-            <>
-              {historyLoading && historyRuns.length === 0 ? (
-                <div className="py-8 text-center text-sm text-white/40">加载中...</div>
-              ) : historyRuns.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border bg-black/20 px-4 py-8 text-center text-sm text-white/40">
-                  运行回测后，结果会自动保存在这里。
-                </div>
-              ) : (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {historyRuns.map((run) => (
-                    <HistoryRunCard
-                      key={run.id}
-                      run={run}
-                      isActive={activeRunId === run.id}
-                      onSelect={async () => {
-                        if (activeRunId === run.id) return;
-                        setActiveRunId(run.id);
-                        setLoading(true);
-                        setError('');
-                        try {
-                          const detail = await requestJson(`/api/backtest/runs/${run.id}`, undefined, '加载回测结果失败');
-                          setResult(detail?.result || null);
-                        } catch (err) {
-                          setError(err.message || '加载回测结果失败');
-                        } finally {
-                          setLoading(false);
-                        }
-                      }}
-                      onDelete={async () => {
-                        if (!confirm('确定删除这条回测记录？')) return;
-                        try {
-                          await requestJson(`/api/backtest/runs/${run.id}`, { method: 'DELETE' }, '删除失败');
-                          if (activeRunId === run.id) {
-                            setActiveRunId(null);
-                            setResult(null);
-                          }
-                          fetchHistory();
-                        } catch (err) {
-                          setError(err.message || '删除失败');
-                        }
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </section>
-      )}
-
-      {!isLoggedIn && (
-        <div className="rounded-2xl border border-dashed border-border bg-card/60 px-6 py-6 text-center">
-          <span className="text-sm text-white/45">
-            <button type="button" onClick={() => openAuthModal('login', '登录后可保存和查看回测历史记录。')} className="text-primary hover:underline">登录</button>
-            {' '}后可保存和查看回测历史记录
-          </span>
-        </div>
-      )}
-
-      {!result && !loading && (
-        <div className="rounded-2xl border border-dashed border-border bg-card/60 px-6 py-16 text-center text-white/45">
-          选择数据源与策略后，点击"运行历史回测"，这里会展示 K 线、资产曲线、回撤分析和交易结果。
-        </div>
-      )}
-
-      {result && (
-        <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <SummaryPill label="回测标的" value={result.data_summary?.ticker_display || result.data_summary?.ticker || '示例/CSV'} />
-            <SummaryPill label="数据来源" value={result.source_used} />
-            <SummaryPill label="回测区间" value={`${result.data_summary?.start_date} ~ ${result.data_summary?.end_date}`} />
-            <SummaryPill label="样本数量" value={`${result.data_summary?.total_records || 0} 条`} />
-            <SummaryPill label="当前策略" value={result.strategy?.name || selectedStrategy?.name || '--'} />
-          </section>
-
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {metricCards.map((metric) => (
-              <MetricCard key={metric.title} title={metric.title} value={metric.value} type={metric.type} />
-            ))}
-          </section>
-
-          <SectionCard title="价格走势与交易信号" description="展示 K 线、策略指标叠加以及买卖点位。">
-            <div ref={priceChartContainerRef} className="h-[430px] w-full" />
-            {priceChartLegend.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/55">
-                {priceChartLegend.map((item) => (
-                  <span key={item.label} className="inline-flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />{item.label}
-                  </span>
-                ))}
-              </div>
-            )}
-          </SectionCard>
-
-          <section className="grid gap-6 xl:grid-cols-2">
-            <SectionCard title="资产曲线" description="橙色为策略收益曲线，蓝色为买入并持有（全仓不动）基准。">
-              <div ref={equityChartContainerRef} className="h-[240px] w-full" />
-              <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/55">
-                <span className="inline-flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-[#e67e22]" />策略收益
-                </span>
-                <span className="inline-flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-[#38bdf8]" />买入并持有
-                </span>
-              </div>
-            </SectionCard>
-            <SectionCard title={rsiKey ? 'RSI 指标' : '回撤曲线'} description={rsiKey ? 'RSI 策略下展示区间强弱指标。' : '观察回测期间的净值回撤过程。'}>
-              <div ref={auxChartContainerRef} className="h-[240px] w-full" />
-            </SectionCard>
-          </section>
-
-          <section className="grid gap-6 xl:grid-cols-2">
-            <SectionCard title="回测摘要" description="汇总当前回测的核心信息。">
-              <div className="grid gap-3">
-                <StatRow label="回测标的" value={result.data_summary?.ticker_display || result.data_summary?.ticker || '示例/CSV'} />
-                <StatRow label="股票名称" value={result.data_summary?.ticker_name || (result.data_source === 'online' ? '未识别' : '不适用')} />
-                <StatRow label="交易日数量" value={`${result.data_summary?.total_records || 0} 天`} />
-                <StatRow label="买入并持有收益" value={formatPercent(result.metrics?.buy_and_hold_return_pct)} />
-                <StatRow label="超额收益（策略-买入并持有）" value={formatPercent(result.metrics?.excess_return_pct)} />
-                <StatRow label="日收益胜率" value={formatPercent(result.metrics?.daily_win_rate_pct)} />
-                <StatRow label="波动率" value={formatPercent(result.metrics?.volatility_pct)} />
-                <StatRow label="最佳单日" value={formatPercent(result.metrics?.best_day_pct)} />
-                <StatRow label="最差单日" value={formatPercent(result.metrics?.worst_day_pct)} />
-              </div>
-
-            </SectionCard>
-
-            <SectionCard title="信号统计" description="查看策略发出的买卖信号数量。">
-              <div className="grid grid-cols-3 gap-4">
-                <SignalCard label="买入" value={result.signal_summary?.buy || 0} color="text-positive" />
-                <SignalCard label="卖出" value={result.signal_summary?.sell || 0} color="text-negative" />
-                <SignalCard label="持有" value={result.signal_summary?.hold || 0} color="text-white" />
-              </div>
-            </SectionCard>
-          </section>
-
-          <section className="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
-            <TableCard title="月度收益" description="按月聚合的回测收益表现。">
-              <div className="max-h-[420px] overflow-auto rounded-xl border border-border">
-                <table className="min-w-full divide-y divide-white/5 text-sm">
-                  <thead className="bg-black/30 text-left text-white/50">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">月份</th>
-                      <th className="px-4 py-3 font-medium">月收益率</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5">
-                    {(result.analysis?.monthly_returns || []).length === 0 ? (
-                      <tr>
-                        <td colSpan={2} className="px-4 py-10 text-center text-white/40">
-                          暂无月度收益数据
-                        </td>
-                      </tr>
-                    ) : (
-                      result.analysis.monthly_returns.map((item) => (
-                        <tr key={item.month}>
-                          <td className="px-4 py-3 text-white/75">{item.month}</td>
-                          <td className={`px-4 py-3 font-medium ${item.return_pct >= 0 ? 'text-positive' : 'text-negative'}`}>
-                            {formatPercent(item.return_pct)}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </TableCard>
-
-            <TableCard title="交易记录" description="展示策略产生的逐笔交易明细。">
-              <div className="max-h-[420px] overflow-auto rounded-xl border border-border">
-                <table className="min-w-full divide-y divide-white/5 text-sm">
-                  <thead className="bg-black/30 text-left text-white/50">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">日期</th>
-                      <th className="px-4 py-3 font-medium">方向</th>
-                      <th className="px-4 py-3 font-medium">价格</th>
-                      <th className="px-4 py-3 font-medium">数量</th>
-                      <th className="px-4 py-3 font-medium">金额</th>
-                      <th className="px-4 py-3 font-medium">手续费</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5">
-                    {(result.trades || []).length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="px-4 py-10 text-center text-white/40">
-                          当前回测没有成交记录
-                        </td>
-                      </tr>
-                    ) : (
-                      result.trades.map((trade, index) => (
-                        <tr key={`${trade.date}-${trade.type}-${index}`}>
-                          <td className="px-4 py-3 text-white/75">{trade.date}</td>
-                          <td className={`px-4 py-3 font-medium ${trade.type === 'buy' ? 'text-positive' : 'text-negative'}`}>
-                            {trade.type === 'buy' ? '买入' : '卖出'}
-                          </td>
-                          <td className="px-4 py-3 text-white/75">{formatNumber(trade.price, 2)}</td>
-                          <td className="px-4 py-3 text-white/75">{formatInteger(trade.shares)}</td>
-                          <td className="px-4 py-3 text-white/75">{formatCurrency(trade.amount)}</td>
-                          <td className="px-4 py-3 text-white/75">{formatCurrency(trade.fee)}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </TableCard>
-          </section>
-        </>
-      )}
-    </div>
-  );
-}
-
-function parseApiResponse(responseText) {
-  if (!responseText) return null;
-
-  try {
-    return JSON.parse(responseText);
-  } catch {
-    return responseText;
-  }
-}
-
-function extractErrorMessage(responseData, fallbackText) {
-  if (responseData && typeof responseData === 'object' && !Array.isArray(responseData) && 'detail' in responseData) {
-    return formatApiDetail(responseData.detail) || fallbackText || '回测请求失败';
-  }
-
-  return formatApiDetail(responseData) || fallbackText || '回测请求失败';
-}
-
-function formatApiDetail(detail) {
-  if (!detail) return '';
-  if (typeof detail === 'string') return detail;
-
-  if (Array.isArray(detail)) {
-    return detail.map((item) => formatApiValidationItem(item)).filter(Boolean).join('；');
-  }
-
-  if (typeof detail === 'object') {
-    if (typeof detail.message === 'string') return detail.message;
-    if (typeof detail.detail === 'string') return detail.detail;
-  }
-
-  return String(detail);
-}
-
-function formatApiValidationItem(item) {
-  if (!item || typeof item !== 'object') {
-    return typeof item === 'string' ? item : String(item || '');
-  }
-
-  const fieldPath = formatErrorFieldPath(item.loc);
-
-  if (item.type === 'greater_than_equal' && item.ctx?.ge !== undefined) {
-    return `${fieldPath || '该字段'}不能小于 ${item.ctx.ge}。`;
-  }
-
-  if (item.type === 'less_than_equal' && item.ctx?.le !== undefined) {
-    return `${fieldPath || '该字段'}不能大于 ${item.ctx.le}。`;
-  }
-
-  if (item.type === 'greater_than' && item.ctx?.gt !== undefined) {
-    return `${fieldPath || '该字段'}必须大于 ${item.ctx.gt}。`;
-  }
-
-  if (item.type === 'less_than' && item.ctx?.lt !== undefined) {
-    return `${fieldPath || '该字段'}必须小于 ${item.ctx.lt}。`;
-  }
-
-  if (item.msg) {
-    return fieldPath ? `${fieldPath}：${item.msg}` : item.msg;
-  }
-
-  return fieldPath || '请求参数校验失败';
-}
-
-function formatErrorFieldPath(loc) {
-  if (!Array.isArray(loc)) return '';
-
-  return loc
-    .filter((segment) => segment !== 'body')
-    .map((segment) => ERROR_FIELD_LABELS[segment] || String(segment))
-    .join(' / ');
-}
-
-function buildPayload(form, selectedStrategy) {
-  return {
-    data_source: form.dataSource,
-    ticker: form.dataSource === 'online' ? form.ticker.trim() : null,
-    start_date: form.startDate,
-    end_date: form.endDate,
-    capital: Number(form.capital),
-    fee_pct: Number(form.feePct),
-    strategy_id: selectedStrategy.id,
-    strategy_name: selectedStrategy.name,
-    csv_content: form.dataSource === 'csv' ? form.csvContent : null,
-    csv_filename: form.dataSource === 'csv' ? form.csvFilename : null,
-    sample_config: {
-      start_price: Number(form.sampleConfig.start_price),
-      drift: Number(form.sampleConfig.drift),
-      volatility: Number(form.sampleConfig.volatility),
-      seed: Number(form.sampleConfig.seed),
-    },
-  };
-}
-
-function buildChartOptions(width, height, ColorType) {
-  return {
-    width: width || 400,
-    height,
-    layout: {
-      background: { type: ColorType.Solid, color: 'transparent' },
-      textColor: 'rgba(255,255,255,0.72)',
-    },
-    grid: {
-      vertLines: { color: 'rgba(255,255,255,0.05)' },
-      horzLines: { color: 'rgba(255,255,255,0.05)' },
-    },
-    rightPriceScale: {
-      borderColor: 'rgba(255,255,255,0.1)',
-    },
-    timeScale: {
-      borderColor: 'rgba(255,255,255,0.1)',
-      timeVisible: true,
-      secondsVisible: false,
-    },
-    crosshair: {
-      vertLine: { color: 'rgba(230,126,34,0.35)' },
-      horzLine: { color: 'rgba(230,126,34,0.35)' },
-    },
-  };
-}
-
-function formatParamDisplay(value) {
-  if (value === null || value === undefined || value === '') return '--';
-  if (typeof value === 'number') {
-    return Number.isInteger(value) ? String(value) : String(Number(value).toFixed(4)).replace(/0+$/, '').replace(/\.$/, '');
-  }
-  if (typeof value === 'boolean') return value ? '是' : '否';
-  return String(value);
-}
-
-function formatCurrency(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
-  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', maximumFractionDigits: 2 }).format(Number(value));
-}
-
-function formatPercent(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
-  return `${Number(value).toFixed(2)}%`;
-}
-
-function formatNumber(value, digits = 2) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
-  return Number(value).toFixed(digits);
-}
-
-function formatInteger(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
-  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(Number(value));
-}
-
-function Field({ label, children }) {
+  {
+    icon: '🔬', title: '策略回测', href: '/backtest',
+    points: ['基于历史数据验证策略表现', '收益率 / 最大回撤 / 胜率等指标', '可视化收益曲线与交易记录', '支持自定义策略参数', '历史运行记录自动保存'],
+    cta: '开始回测',
+  },
+  {
+    icon: '🔍', title: '选股平台', href: '/stock-picker',
+    points: ['AI 自然语言智能选股', '多维条件筛选（行业 + 财务 + 技术面）', '全市场 A 股扫描', '支持排序与分页', '自选表保存与加载'],
+    cta: '去选股',
+  },
+  {
+    icon: '🔔', title: '信号推送', href: '/settings',
+    points: ['策略自动评估（每 15 分钟）', 'Webhook 推送至企微 / 钉钉 / 飞书', '冷却时间 + 按交易日去重', '非交易时段自动暂停', '支持多只股票独立配置'],
+    cta: '配置信号',
+  },
+  {
+    icon: '🗺️', title: '风险全景', href: '/live-trading',
+    points: ['四象限模型（机会 / 拥挤 / 泡沫 / 防御）', '全市场 A 股覆盖', '关注池股票高亮标注', '每日凌晨自动更新', '鼠标悬停查看个股详情'],
+    cta: '查看全景',
+  },
+  {
+    icon: '📋', title: '持仓管理', href: '/live-trading',
+    points: ['记录买入价格与数量', '实时盈亏计算（红盈绿亏）', '投资画像配置', '风险偏好与目标管理', '持仓市值动态更新'],
+    cta: '管理持仓',
+  },
+]
+
+const STEPS = [
+  { icon: '👤', title: '注册账号', desc: '免费注册即可开始使用全部功能' },
+  { icon: '📐', title: '配置策略', desc: '在策略库中选择预设或自建策略' },
+  { icon: '📊', title: '进行回测', desc: '用历史数据验证策略是否有效' },
+  { icon: '⭐', title: '添加关注股票', desc: '把感兴趣的股票加入关注池' },
+  { icon: '🔔', title: '配置交易信号', desc: '配置 Webhook 接收买卖信号通知' },
+]
+
+const SCREENSHOTS = [
+  { id: 'live', label: '行情看板', desc: '实时行情数据 + 技术指标 + 基本面分析' },
+  { id: 'backtest', label: '策略回测', desc: '历史数据回测 + 收益曲线 + 交易记录' },
+  { id: 'picker', label: '选股平台', desc: 'AI 智能选股 + 多维条件筛选' },
+  { id: 'quadrant', label: '四象限', desc: '全市场风险机会全景散点图' },
+]
+
+const TUTORIALS = [
+  {
+    q: '如何添加股票到关注池？',
+    steps: [
+      '进入「行情看板」页面',
+      '点击页面上方的「添加股票」按钮',
+      '输入股票代码（如 600519）或名称关键字',
+      '可选填自定义名称（如「茅台」）',
+      '点击确认，股票会出现在关注池卡片列表中',
+      '点击任意卡片可进入个股详情页，查看完整分析',
+    ],
+    tip: '支持 A 股（沪深）和港股代码（如 00700.HK）。',
+  },
+  {
+    q: '如何创建自定义策略？',
+    steps: [
+      '进入「策略库」页面',
+      '点击右上角「新建策略」按钮',
+      '填写策略名称和说明',
+      '选择策略类型（如趋势策略、均线交叉等）',
+      '配置策略参数（每个参数都有单位标注）',
+      '点击「保存」，策略会出现在你的策略列表中',
+    ],
+    tip: '系统也提供了多条预设策略模板，可以直接使用或基于它们修改。',
+  },
+  {
+    q: '如何配置 Webhook 接收信号？',
+    steps: [
+      '进入「设置」页面',
+      '找到「Webhook 配置」区域',
+      '填入你的推送地址（支持企业微信、钉钉、飞书等）',
+      '可选填签名密钥（用于验证消息来源）',
+      '点击「保存」，然后点击「验证送达」测试是否连通',
+      '返回行情看板个股详情页，开启信号开关并选择策略',
+    ],
+    tip: '信号会以文本消息格式推送，包含股票代码、方向（买/卖）、策略名称和触发时间。',
+  },
+  {
+    q: '如何使用 AI 智能选股？',
+    steps: [
+      '进入「选股平台」页面',
+      '在顶部搜索框中用自然语言描述你的选股条件',
+      '例如：「市盈率低于 20，净利润增长率大于 30% 的医药行业股票」',
+      'AI 会自动解析条件并执行筛选',
+      '结果以表格形式展示，支持排序和翻页',
+    ],
+    tip: '也可以使用手动筛选：选择行业 + 设置各指标范围。',
+  },
+  {
+    q: '如何查看历史回测结果？',
+    steps: [
+      '进入「回测引擎」页面',
+      '选择一只股票和一条策略',
+      '设置回测时间范围和初始资金',
+      '点击「开始回测」',
+      '等待计算完成后，页面会展示收益曲线、交易记录、关键指标',
+      '历史运行记录保存在页面下方「历史运行」面板中，可随时查看',
+    ],
+    tip: '单用户最多保存 100 条回测记录。',
+  },
+  {
+    q: '如何查看个股技术指标？',
+    steps: [
+      '进入「行情看板」，点击任意关注股票卡片进入详情页',
+      '页面中部「技术指标」区域展示了均线（MA5/MA10/MA20/MA60）数值和趋势',
+      '向下滚动可看到 MACD 图表（DIF 线、信号线、红绿柱状图，自动标注金叉/死叉）',
+      '继续向下是布林带图表（上轨/中轨/下轨通道 + 收盘价 + 触轨标记）',
+      '支撑位和阻力位区域展示了近期的关键价格位',
+    ],
+    tip: '技术指标数据每 60 秒自动刷新（交易时段），基于最近 120-240 个交易日的日线计算。',
+  },
+  {
+    q: '如何记录和跟踪持仓？',
+    steps: [
+      '进入行情看板中任意个股的详情页',
+      '找到「我的持仓」区域（需登录）',
+      '填写持仓数量、买入均价、买入日期',
+      '系统会自动计算持仓市值和浮动盈亏',
+      '盈亏会根据实时价格动态更新（红色为盈利，绿色为亏损）',
+    ],
+    tip: '你也可以在「设置」页面配置投资画像（风险偏好、投资目标等）。',
+  },
+  {
+    q: '交易信号是怎么触发的？',
+    steps: [
+      '系统每 15 分钟自动扫描所有已开启信号的股票',
+      '根据你选择的策略和参数，评估当前行情是否触发买入/卖出条件',
+      '触发后，信号会通过你配置的 Webhook 推送到你的消息工具',
+      '同一只股票同一方向，每个交易日最多触发一次（防重复）',
+      '非交易时段（收盘后、周末）不会触发信号',
+    ],
+    tip: '冷却时间可在信号配置中自定义（10 秒 ~ 24 小时）。',
+  },
+]
+
+// ── Components ──
+
+function Accordion({ items }) {
+  const [openIdx, setOpenIdx] = useState(-1)
   return (
     <div className="space-y-2">
-      <div className="text-sm font-medium text-white/70">{label}</div>
-      {children}
+      {items.map((item, i) => {
+        const isOpen = openIdx === i
+        return (
+          <div key={i} className="rounded-xl border border-border bg-card overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setOpenIdx(isOpen ? -1 : i)}
+              className="w-full flex items-center justify-between px-5 py-4 text-left text-sm font-medium text-white/90 hover:bg-white/3 transition"
+            >
+              <span>{item.q}</span>
+              <span className={`text-white/40 transition-transform ${isOpen ? 'rotate-90' : ''}`}>▸</span>
+            </button>
+            <div className={`grid transition-all duration-300 ease-in-out ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+              <div className="overflow-hidden">
+                <div className="px-5 pb-4 space-y-3">
+                  <ol className="list-decimal pl-5 space-y-1.5 text-sm text-white/65 leading-6">
+                    {item.steps.map((s, j) => <li key={j}>{s}</li>)}
+                  </ol>
+                  {item.tip && (
+                    <div className="rounded-lg bg-primary/8 border border-primary/15 px-3 py-2 text-xs text-primary/90">
+                      💡 {item.tip}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })}
     </div>
-  );
+  )
 }
 
-function Input(props) {
-  return <input {...props} className="w-full rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary" />;
-}
+// ── Page ──
 
-function SectionCard({ title, description, children }) {
-  return (
-    <section className="rounded-2xl border border-border bg-card p-6">
-      <div className="mb-5">
-        <h2 className="text-lg font-semibold text-white">{title}</h2>
-        {description && <p className="mt-2 text-sm leading-6 text-white/55">{description}</p>}
-      </div>
-      {children}
-    </section>
-  );
-}
+export default function HomePage() {
+  const { isLoggedIn, openAuthModal } = useAuth()
+  const [screenshotTab, setScreenshotTab] = useState(0)
 
-function TableCard({ title, description, children }) {
-  return (
-    <section className="rounded-2xl border border-border bg-card p-6">
-      <div className="mb-5">
-        <h2 className="text-lg font-semibold text-white">{title}</h2>
-        {description && <p className="mt-2 text-sm leading-6 text-white/55">{description}</p>}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function SummaryPill({ label, value }) {
-  return (
-    <div className="rounded-2xl border border-border bg-card px-5 py-4">
-      <div className="text-xs uppercase tracking-[0.18em] text-white/35">{label}</div>
-      <div className="mt-2 text-sm font-medium text-white/80">{value || '--'}</div>
-    </div>
-  );
-}
-
-function MiniStat({ label, value }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-      <div className="text-xs uppercase tracking-[0.16em] text-white/35">{label}</div>
-      <div className="mt-2 text-sm font-medium text-white/85">{value}</div>
-    </div>
-  );
-}
-
-function MetricCard({ title, value, type }) {
-  const numeric = Number(value);
-  const isNegative = !Number.isNaN(numeric) && numeric < 0;
-  const colorClass = isNegative ? 'text-negative' : 'text-white';
-
-  let displayValue = '--';
-  if (type === 'currency') displayValue = formatCurrency(value);
-  if (type === 'percent') displayValue = formatPercent(value);
-  if (type === 'integer') displayValue = formatInteger(value);
-  if (type === 'number') displayValue = formatNumber(value, 3);
-
-  return (
-    <div className="rounded-2xl border border-border bg-card p-5">
-      <div className="text-sm text-white/45">{title}</div>
-      <div className={`mt-3 text-2xl font-semibold ${colorClass}`}>{displayValue}</div>
-    </div>
-  );
-}
-
-function StatRow({ label, value }) {
-  return (
-    <div className="flex items-center justify-between rounded-xl border border-white/5 bg-black/20 px-4 py-3 text-sm">
-      <span className="text-white/50">{label}</span>
-      <span className="font-medium text-white/80">{value || '--'}</span>
-    </div>
-  );
-}
-
-function SignalCard({ label, value, color }) {
-  return (
-    <div className="rounded-2xl border border-border bg-black/20 px-4 py-5 text-center">
-      <div className="text-sm text-white/45">{label}</div>
-      <div className={`mt-3 text-3xl font-semibold ${color}`}>{formatInteger(value)}</div>
-    </div>
-  );
-}
-
-function HistoryRunCard({ run, isActive, onSelect, onDelete }) {
-  const metrics = run.metrics_summary || {};
-  const totalReturn = metrics.total_return_pct;
-  const maxDrawdown = metrics.max_drawdown_pct;
-  const sharpe = metrics.sharpe_ratio;
-  const trades = metrics.total_trades;
-
-  const returnColor = totalReturn != null && totalReturn >= 0 ? 'text-positive' : 'text-negative';
-
-  const createdAt = run.created_at ? formatRelativeTime(run.created_at) : '';
-
-  return (
-    <div
-      className={`group relative cursor-pointer rounded-2xl border p-4 transition ${
-        isActive
-          ? 'border-primary bg-primary/10 shadow-[0_0_0_1px_rgba(230,126,34,0.25)]'
-          : 'border-border bg-black/20 hover:border-white/20'
-      }`}
-      onClick={onSelect}
-    >
-      <button
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          onDelete();
-        }}
-        className="absolute right-3 top-3 hidden rounded-full p-1 text-white/25 transition hover:bg-white/10 hover:text-red-400 group-hover:block"
-        title="删除"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18" />
-          <line x1="6" y1="6" x2="18" y2="18" />
-        </svg>
-      </button>
-
-      <div className="mb-2 pr-6 text-sm font-medium text-white leading-tight truncate" title={run.title}>
-        {run.title || '回测记录'}
-      </div>
-
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-white/55">
-        {totalReturn != null && (
-          <span>
-            收益{' '}
-            <span className={`font-medium ${returnColor}`}>
-              {totalReturn >= 0 ? '+' : ''}{Number(totalReturn).toFixed(2)}%
-            </span>
-          </span>
-        )}
-        {maxDrawdown != null && (
-          <span>
-            回撤{' '}
-            <span className="font-medium text-white/70">
-              -{Math.abs(Number(maxDrawdown)).toFixed(2)}%
-            </span>
-          </span>
-        )}
-        {sharpe != null && (
-          <span>
-            夏普{' '}
-            <span className="font-medium text-white/70">{Number(sharpe).toFixed(2)}</span>
-          </span>
-        )}
-        {trades != null && (
-          <span>
-            交易{' '}
-            <span className="font-medium text-white/70">{trades}笔</span>
-          </span>
-        )}
-      </div>
-
-      <div className="mt-2 flex items-center gap-3 text-[11px] text-white/30">
-        <span>{run.start_date} ~ {run.end_date}</span>
-        {createdAt && <span>{createdAt}</span>}
-        {run.status === 'failed' && (
-          <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] text-red-300">失败</span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function formatRelativeTime(isoString) {
-  try {
-    const date = new Date(isoString);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffMinutes = Math.floor(diffMs / 60000);
-    if (diffMinutes < 1) return '刚刚';
-    if (diffMinutes < 60) return `${diffMinutes}分钟前`;
-    const diffHours = Math.floor(diffMinutes / 60);
-    if (diffHours < 24) return `${diffHours}小时前`;
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffDays < 30) return `${diffDays}天前`;
-    return date.toLocaleDateString('zh-CN');
-  } catch {
-    return '';
+  const handleCTA = () => {
+    if (isLoggedIn) {
+      window.location.href = '/live-trading'
+    } else {
+      openAuthModal('register')
+    }
   }
+
+  return (
+    <div className="space-y-0">
+
+      {/* ── Section 1: Hero ── */}
+      <section className="relative flex flex-col items-center text-center px-4 pt-8 pb-16 md:pt-16 md:pb-24">
+        {/* Subtle radial gradient */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(230,126,34,0.06)_0%,transparent_70%)] pointer-events-none" />
+
+        <img src="/logo.png" alt="卧龙" width={100} height={100} className="rounded-xl mb-6 relative md:w-[120px] md:h-[120px]" />
+
+        <h1 className="relative text-3xl md:text-5xl font-bold tracking-tight bg-gradient-to-r from-amber-200 via-primary to-amber-500 bg-clip-text text-transparent">
+          卧龙 AI 量化交易台
+        </h1>
+        <p className="relative mt-3 text-base md:text-lg text-white/50 font-medium">
+          智能分析 · 策略回测 · 信号推送
+        </p>
+        <p className="relative mt-4 max-w-xl text-sm md:text-base text-white/40 leading-7">
+          面向个人投资者的 AI 量化分析平台，帮你用数据和策略看清市场，做出更理性的投资决策。
+        </p>
+
+        <div className="relative flex flex-col sm:flex-row items-center gap-3 mt-8">
+          <button
+            type="button"
+            onClick={handleCTA}
+            className="rounded-xl bg-gradient-to-r from-amber-500 to-primary px-7 py-3 text-sm font-semibold text-black shadow-lg shadow-primary/20 transition hover:opacity-90"
+          >
+            免费开始使用
+          </button>
+          <a
+            href="#features"
+            className="rounded-xl border border-white/15 px-6 py-3 text-sm text-white/60 transition hover:border-white/30 hover:text-white"
+          >
+            查看功能介绍 ↓
+          </a>
+        </div>
+
+        <div className="relative grid grid-cols-1 sm:grid-cols-3 gap-4 mt-12 w-full max-w-2xl">
+          {HIGHLIGHTS.map((h, i) => (
+            <div key={i} className="rounded-xl border border-white/8 bg-white/[0.03] backdrop-blur-sm px-5 py-4 text-center">
+              <div className="text-xl md:text-2xl font-bold bg-gradient-to-r from-amber-300 to-primary bg-clip-text text-transparent">
+                {h.value}
+              </div>
+              <div className="mt-1 text-xs text-white/40">{h.desc}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Section 2: Features ── */}
+      <section id="features" className="px-4 py-16 md:py-24 max-w-6xl mx-auto">
+        <div className="text-center mb-12">
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight">我们提供什么</h2>
+          <p className="mt-3 text-sm text-white/40">一站式量化分析工具，覆盖投研全流程</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {FEATURES.map((f, i) => (
+            <Link
+              key={i}
+              href={f.href}
+              className="group rounded-2xl border border-border bg-card p-6 transition hover:-translate-y-1 hover:border-white/15 hover:shadow-lg"
+            >
+              <div className="text-4xl mb-4">{f.icon}</div>
+              <h3 className="text-lg font-semibold text-white mb-3">{f.title}</h3>
+              <ul className="space-y-1.5 text-sm text-white/50 leading-6 mb-4">
+                {f.points.map((p, j) => <li key={j} className="flex items-start gap-2"><span className="text-primary/60 mt-0.5">•</span>{p}</li>)}
+              </ul>
+              <span className="inline-flex items-center text-sm text-primary/80 font-medium group-hover:text-primary transition">
+                {f.cta} <span className="ml-1 transition-transform group-hover:translate-x-1">→</span>
+              </span>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Section 3: Screenshots ── */}
+      <section className="px-4 py-16 md:py-24 max-w-5xl mx-auto">
+        <div className="text-center mb-10">
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight">产品一览</h2>
+        </div>
+
+        <div className="flex items-center justify-center gap-2 mb-6 flex-wrap">
+          {SCREENSHOTS.map((s, i) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setScreenshotTab(i)}
+              className={`rounded-lg px-4 py-2 text-sm transition ${
+                screenshotTab === i
+                  ? 'bg-primary/15 text-white border border-primary/40 font-medium'
+                  : 'text-white/45 border border-transparent hover:text-white/70'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Placeholder */}
+        <div className="rounded-2xl border border-border bg-gradient-to-br from-[#12141a] to-[#0d0f14] flex items-center justify-center aspect-video max-h-[450px] w-full">
+          <div className="text-center space-y-2">
+            <div className="text-4xl opacity-20">📸</div>
+            <p className="text-sm text-white/25">{SCREENSHOTS[screenshotTab].label}截图</p>
+            <p className="text-xs text-white/15">即将更新</p>
+          </div>
+        </div>
+        <p className="mt-4 text-center text-sm text-white/35">{SCREENSHOTS[screenshotTab].desc}</p>
+      </section>
+
+      {/* ── Section 4: Getting Started ── */}
+      <section className="px-4 py-16 md:py-24 max-w-5xl mx-auto">
+        <div className="text-center mb-12">
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight">快速上手</h2>
+          <p className="mt-3 text-sm text-white/40">5 步开始你的量化分析之旅</p>
+        </div>
+
+        {/* Desktop: horizontal */}
+        <div className="hidden md:flex items-start justify-between gap-2">
+          {STEPS.map((s, i) => (
+            <div key={i} className="flex-1 flex flex-col items-center text-center relative">
+              {/* Connector line */}
+              {i < STEPS.length - 1 && (
+                <div className="absolute top-6 left-[calc(50%+24px)] right-[calc(-50%+24px)] h-px bg-gradient-to-r from-primary/30 to-primary/10" />
+              )}
+              <div className="relative w-12 h-12 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center text-xl mb-3">
+                {s.icon}
+              </div>
+              <div className="text-xs font-bold text-primary/70 mb-1">Step {i + 1}</div>
+              <h4 className="text-sm font-semibold text-white mb-1">{s.title}</h4>
+              <p className="text-xs text-white/40 leading-5 max-w-[140px]">{s.desc}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Mobile: vertical timeline */}
+        <div className="md:hidden space-y-0">
+          {STEPS.map((s, i) => (
+            <div key={i} className="flex gap-4">
+              <div className="flex flex-col items-center">
+                <div className="w-10 h-10 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center text-lg shrink-0">
+                  {s.icon}
+                </div>
+                {i < STEPS.length - 1 && <div className="w-px flex-1 bg-primary/15 my-1" />}
+              </div>
+              <div className="pb-6">
+                <div className="text-xs font-bold text-primary/70">Step {i + 1}</div>
+                <h4 className="text-sm font-semibold text-white">{s.title}</h4>
+                <p className="text-xs text-white/40 leading-5 mt-0.5">{s.desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Section 5: Tutorials ── */}
+      <section className="px-4 py-16 md:py-24 max-w-3xl mx-auto">
+        <div className="text-center mb-10">
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight">使用教程</h2>
+          <p className="mt-3 text-sm text-white/40">点击展开查看详细操作步骤</p>
+        </div>
+        <Accordion items={TUTORIALS} />
+      </section>
+
+      {/* ── Section 6: Risk Disclaimer + CTA ── */}
+      <section className="px-4 py-16 md:py-20 max-w-3xl mx-auto text-center">
+        <div className="rounded-2xl border border-amber-400/15 bg-amber-500/[0.04] px-6 py-5 mb-10">
+          <p className="text-sm text-amber-200/70 leading-6">
+            <strong className="text-amber-200/90">⚠️ 风险提示：</strong>本平台仅提供数据分析和策略回测工具，不构成任何投资建议。股票市场有风险，投资需谨慎。详见
+            <Link href="/disclaimer" className="underline underline-offset-2 hover:text-amber-100 mx-0.5">《免责声明》</Link>
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleCTA}
+          className="rounded-xl bg-gradient-to-r from-amber-500 to-primary px-8 py-3.5 text-base font-semibold text-black shadow-lg shadow-primary/20 transition hover:opacity-90"
+        >
+          免费开始使用
+        </button>
+      </section>
+    </div>
+  )
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/config"
 	"github.com/woodyyan/pumpkin-pro/backend/store"
 	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
+	"github.com/woodyyan/pumpkin-pro/backend/store/analytics"
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
@@ -39,6 +40,7 @@ type appServer struct {
 	adminService     *admin.Service
 	backtestService  *backtest.Service
 	screenerService  *screener.Service
+	analyticsRepo    *analytics.Repository
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -1420,6 +1422,82 @@ func (a *appServer) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
+func (a *appServer) handlePageView(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	var input analytics.PageViewInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	pagePath := strings.TrimSpace(input.PagePath)
+	if pagePath == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	userID := currentUserID(r)
+	record := analytics.PageViewRecord{
+		ID:          fmt.Sprintf("pv-%d", time.Now().UnixNano()),
+		VisitorID:   strings.TrimSpace(input.VisitorID),
+		UserID:      userID,
+		PagePath:    pagePath,
+		UserAgent:   r.UserAgent(),
+		ScreenWidth: input.ScreenWidth,
+		CreatedAt:   time.Now().UTC(),
+	}
+	go func() {
+		_ = a.analyticsRepo.Insert(context.Background(), record)
+	}()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *appServer) handleAdminAnalytics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	ctx := r.Context()
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	sevenDaysAgo := now.AddDate(0, 0, -7)
+	thirtyDaysAgo := now.AddDate(0, 0, -30)
+
+	todayPV, _ := a.analyticsRepo.CountPVSince(ctx, today)
+	todayUV, _ := a.analyticsRepo.CountUVSince(ctx, today)
+	weekPV, _ := a.analyticsRepo.CountPVSince(ctx, sevenDaysAgo)
+	weekUV, _ := a.analyticsRepo.CountUVSince(ctx, sevenDaysAgo)
+	monthPV, _ := a.analyticsRepo.CountPVSince(ctx, thirtyDaysAgo)
+	monthUV, _ := a.analyticsRepo.CountUVSince(ctx, thirtyDaysAgo)
+
+	dailyPV, _ := a.analyticsRepo.DailyPV(ctx, 30)
+	dailyUV, _ := a.analyticsRepo.DailyUV(ctx, 30)
+	topPages, _ := a.analyticsRepo.TopPages(ctx, thirtyDaysAgo, 10)
+	devices, _ := a.analyticsRepo.DeviceBreakdown(ctx, thirtyDaysAgo)
+
+	if dailyPV == nil {
+		dailyPV = []analytics.DailyCount{}
+	}
+	if dailyUV == nil {
+		dailyUV = []analytics.DailyCount{}
+	}
+	if topPages == nil {
+		topPages = []analytics.PageRank{}
+	}
+	if devices == nil {
+		devices = &analytics.DeviceStats{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"today_pv": todayPV, "today_uv": todayUV,
+		"week_pv": weekPV, "week_uv": weekUV,
+		"month_pv": monthPV, "month_uv": monthUV,
+		"daily_pv": dailyPV, "daily_uv": dailyUV,
+		"top_pages": topPages, "devices": devices,
+	})
+}
+
 func (a *appServer) handleScreenerAIParse(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
@@ -1776,6 +1854,8 @@ func main() {
 	screenerRepo := screener.NewRepository(storeInstance.DB)
 	screenerService := screener.NewService(screenerRepo)
 
+	analyticsRepo := analytics.NewRepository(storeInstance.DB)
+
 	server := &appServer{
 		cfg:              cfg,
 		authService:      authService,
@@ -1787,6 +1867,7 @@ func main() {
 		adminService:     adminService,
 		backtestService:  backtestService,
 		screenerService:  screenerService,
+		analyticsRepo:    analyticsRepo,
 	}
 
 	mux := http.NewServeMux()
@@ -1826,6 +1907,9 @@ func main() {
 
 	mux.HandleFunc("/api/admin/login", server.handleAdminLogin)
 	mux.HandleFunc("/api/admin/stats", server.withSuperAdminAuth(server.handleAdminStats))
+	mux.HandleFunc("/api/admin/analytics", server.withSuperAdminAuth(server.handleAdminAnalytics))
+
+	mux.HandleFunc("/api/analytics/pageview", server.withOptionalAuth(server.handlePageView))
 
 	mux.HandleFunc("/api/quadrant", server.handleQuadrant)
 	mux.HandleFunc("/api/quadrant/bulk-save", server.handleQuadrantBulkSave)

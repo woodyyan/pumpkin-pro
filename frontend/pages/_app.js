@@ -16,10 +16,42 @@ const NAV_ITEMS = [
   { href: '/changelog', label: '更新日志' },
 ]
 
+function getVisitorId() {
+  if (typeof window === 'undefined') return ''
+  const key = 'wolong_visitor_id'
+  let id = localStorage.getItem(key)
+  if (!id) {
+    id = 'v_' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+    localStorage.setItem(key, id)
+  }
+  return id
+}
+
+function reportPageView(path) {
+  if (typeof window === 'undefined') return
+  fetch('/api/analytics/pageview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      page_path: path,
+      visitor_id: getVisitorId(),
+      screen_width: window.innerWidth,
+    }),
+  }).catch(() => {})
+}
+
 function AppLayout({ Component, pageProps }) {
   const router = useRouter()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const mobileMenuRef = useRef(null)
+
+  // Page view tracking
+  useEffect(() => {
+    reportPageView(router.pathname)
+    const onRouteChange = (url) => reportPageView(url)
+    router.events.on('routeChangeComplete', onRouteChange)
+    return () => router.events.off('routeChangeComplete', onRouteChange)
+  }, [router])
 
   // Close mobile menu on route change
   useEffect(() => {

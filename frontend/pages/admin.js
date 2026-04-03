@@ -1,5 +1,6 @@
 import Head from 'next/head'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import MiniChart from '../components/MiniChart'
 
 const ADMIN_SESSION_KEY = 'pumpkin_pro_admin_session'
 const REFRESH_INTERVAL = 60_000
@@ -158,16 +159,21 @@ function RateCard({ label, value }) {
 
 function AdminDashboard({ session, onLogout }) {
   const [stats, setStats] = useState(null)
+  const [analytics, setAnalytics] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(null)
   const timerRef = useRef(null)
 
-  const loadStats = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     try {
       setError('')
-      const data = await adminFetch('/api/admin/stats')
-      setStats(data)
+      const [statsData, analyticsData] = await Promise.all([
+        adminFetch('/api/admin/stats'),
+        adminFetch('/api/admin/analytics').catch(() => null),
+      ])
+      setStats(statsData)
+      setAnalytics(analyticsData)
       setLastRefresh(new Date())
     } catch (err) {
       if (err.status === 401) {
@@ -182,10 +188,10 @@ function AdminDashboard({ session, onLogout }) {
   }, [onLogout])
 
   useEffect(() => {
-    loadStats()
-    timerRef.current = setInterval(loadStats, REFRESH_INTERVAL)
+    loadAll()
+    timerRef.current = setInterval(loadAll, REFRESH_INTERVAL)
     return () => clearInterval(timerRef.current)
-  }, [loadStats])
+  }, [loadAll])
 
   const adminEmail = session?.admin?.email || '管理员'
 
@@ -241,9 +247,39 @@ function AdminDashboard({ session, onLogout }) {
                 <StatCard label="7天活跃用户" value={stats.users.active_7d} />
                 <StatCard label="当前有效会话" value={stats.users.active_sessions} />
               </div>
+              {/* Trend charts */}
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="rounded-xl border border-white/8 bg-[#15171e] p-3">
+                  <MiniChart data={stats.trends?.daily_registrations} label="每日注册" width={380} height={130} color="#22c55e" />
+                </div>
+                <div className="rounded-xl border border-white/8 bg-[#15171e] p-3">
+                  <MiniChart data={stats.trends?.daily_active_users} label="DAU（日活跃）" width={380} height={130} color="#60a5fa" />
+                </div>
+              </div>
+              {/* Retention */}
+              {stats.retention && (
+                <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <RateCard label="7天留存率" value={stats.retention.day_7_rate} />
+                  <RateCard label="30天留存率" value={stats.retention.day_30_rate} />
+                </div>
+              )}
             </section>
 
-            {/* Panel 2: Strategies */}
+            {/* Panel 2: Feature Usage */}
+            <section>
+              <h2 className="text-base font-semibold text-white/80 mb-3">🧩 功能使用</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                <StatCard label="回测总次数" value={stats.features?.backtest_total} />
+                <StatCard label="今日回测" value={stats.features?.backtest_today} />
+                <StatCard label="回测用户" value={stats.features?.backtest_users} />
+                <StatCard label="持仓记录" value={stats.features?.portfolio_records} />
+                <StatCard label="有持仓的用户" value={stats.features?.portfolio_users} />
+                <StatCard label="自选表" value={stats.features?.screener_lists} />
+                <StatCard label="选股用户" value={stats.features?.screener_users} />
+              </div>
+            </section>
+
+            {/* Panel 3: Strategies */}
             <section>
               <h2 className="text-base font-semibold text-white/80 mb-3">📊 策略使用</h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -255,7 +291,7 @@ function AdminDashboard({ session, onLogout }) {
               </div>
             </section>
 
-            {/* Panel 3: Live */}
+            {/* Panel 4: Live */}
             <section>
               <h2 className="text-base font-semibold text-white/80 mb-3">📈 行情看板</h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -265,7 +301,7 @@ function AdminDashboard({ session, onLogout }) {
               </div>
             </section>
 
-            {/* Panel 4: Signals & Webhook */}
+            {/* Panel 5: Signals & Webhook */}
             <section>
               <h2 className="text-base font-semibold text-white/80 mb-3">🔔 信号与 Webhook</h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -278,9 +314,66 @@ function AdminDashboard({ session, onLogout }) {
                 <RateCard label="投递成功率" value={stats.signals.delivery_success_rate} />
                 <StatCard label="今日投递" value={stats.signals.today_deliveries} />
               </div>
+              {stats.trends?.daily_signal_events && stats.trends.daily_signal_events.length > 0 && (
+                <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-3">
+                  <MiniChart data={stats.trends.daily_signal_events} label="每日信号事件" width={780} height={130} type="bar" color="#eab308" />
+                </div>
+              )}
             </section>
 
-            {/* Panel 5: Audit */}
+            {/* Panel 6: Analytics (PV/UV) */}
+            {analytics && (
+              <section>
+                <h2 className="text-base font-semibold text-white/80 mb-3">🌐 访问统计</h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  <StatCard label="今日 PV" value={analytics.today_pv} />
+                  <StatCard label="今日 UV" value={analytics.today_uv} />
+                  <StatCard label="7天 PV" value={analytics.week_pv} />
+                  <StatCard label="7天 UV" value={analytics.week_uv} />
+                  <StatCard label="30天 PV" value={analytics.month_pv} />
+                  <StatCard label="30天 UV" value={analytics.month_uv} />
+                </div>
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-white/8 bg-[#15171e] p-3">
+                    <MiniChart data={analytics.daily_pv} label="每日 PV" width={380} height={130} color="#a78bfa" />
+                  </div>
+                  <div className="rounded-xl border border-white/8 bg-[#15171e] p-3">
+                    <MiniChart data={analytics.daily_uv} label="每日 UV" width={380} height={130} color="#34d399" />
+                  </div>
+                </div>
+                {/* Top pages */}
+                {analytics.top_pages && analytics.top_pages.length > 0 && (
+                  <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-4">
+                    <div className="text-xs text-white/40 mb-3">页面访问排行（30天）</div>
+                    <div className="space-y-2">
+                      {analytics.top_pages.map((p, i) => {
+                        const maxCount = analytics.top_pages[0]?.count || 1
+                        const pct = (p.count / maxCount) * 100
+                        return (
+                          <div key={i} className="flex items-center gap-3 text-sm">
+                            <span className="w-28 truncate text-white/60 text-xs">{p.page_path}</span>
+                            <div className="flex-1 h-4 rounded bg-white/5 overflow-hidden">
+                              <div className="h-full rounded bg-primary/30" style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className="text-xs text-white/50 tabular-nums w-10 text-right">{p.count}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+                {/* Device breakdown */}
+                {analytics.devices && (analytics.devices.desktop + analytics.devices.mobile + analytics.devices.tablet > 0) && (
+                  <div className="mt-3 grid grid-cols-3 gap-3">
+                    <StatCard label="桌面端" value={analytics.devices.desktop} />
+                    <StatCard label="移动端" value={analytics.devices.mobile} />
+                    <StatCard label="平板" value={analytics.devices.tablet} />
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Panel 7: Audit */}
             <section>
               <h2 className="text-base font-semibold text-white/80 mb-3">🛡️ 审计日志</h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">

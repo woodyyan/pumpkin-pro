@@ -186,3 +186,120 @@ func (r *Repository) CountFailedLogins(ctx context.Context, since time.Time) (in
 		Where("action = ? AND success = ? AND created_at >= ?", "login", false, since).Count(&count).Error
 	return count, err
 }
+
+// ── Trend queries (daily series for charts) ──
+
+type DailyCount struct {
+	Date  string `json:"date"`
+	Count int64  `json:"count"`
+}
+
+func (r *Repository) DailyRegistrations(ctx context.Context, days int) ([]DailyCount, error) {
+	since := time.Now().UTC().AddDate(0, 0, -days)
+	var results []DailyCount
+	err := r.db.WithContext(ctx).Table("users").
+		Select("DATE(created_at) as date, COUNT(*) as count").
+		Where("created_at >= ?", since).
+		Group("DATE(created_at)").Order("date ASC").
+		Scan(&results).Error
+	return results, err
+}
+
+func (r *Repository) DailyActiveUsers(ctx context.Context, days int) ([]DailyCount, error) {
+	since := time.Now().UTC().AddDate(0, 0, -days)
+	var results []DailyCount
+	err := r.db.WithContext(ctx).Table("auth_audit_logs").
+		Select("DATE(created_at) as date, COUNT(DISTINCT user_id) as count").
+		Where("action = ? AND success = ? AND created_at >= ?", "login", true, since).
+		Group("DATE(created_at)").Order("date ASC").
+		Scan(&results).Error
+	return results, err
+}
+
+func (r *Repository) DailySignalEvents(ctx context.Context, days int) ([]DailyCount, error) {
+	since := time.Now().UTC().AddDate(0, 0, -days)
+	var results []DailyCount
+	err := r.db.WithContext(ctx).Table("signal_events").
+		Select("DATE(event_time) as date, COUNT(*) as count").
+		Where("event_time >= ?", since).
+		Group("DATE(event_time)").Order("date ASC").
+		Scan(&results).Error
+	return results, err
+}
+
+func (r *Repository) DailyDeliveryRate(ctx context.Context, days int) ([]DailyCount, error) {
+	since := time.Now().UTC().AddDate(0, 0, -days)
+	// Returns delivery success rate * 100 (as integer percentage) per day
+	var results []DailyCount
+	err := r.db.WithContext(ctx).Table("webhook_deliveries").
+		Select("DATE(created_at) as date, CAST(SUM(CASE WHEN status='delivered' THEN 1 ELSE 0 END)*100.0/MAX(COUNT(*),1) AS INTEGER) as count").
+		Where("created_at >= ?", since).
+		Group("DATE(created_at)").Order("date ASC").
+		Scan(&results).Error
+	// Fallback: if the complex query fails, return empty
+	if err != nil {
+		return []DailyCount{}, nil
+	}
+	return results, nil
+}
+
+// ── Retention (simplified) ──
+
+func (r *Repository) RetentionRate(ctx context.Context, registeredBefore time.Time, loginWithinDays int) (registered int64, retained int64, err error) {
+	// Count users who registered before the given date
+	err = r.db.WithContext(ctx).Table("users").Where("created_at < ?", registeredBefore).Count(&registered).Error
+	if err != nil || registered == 0 {
+		return
+	}
+	// Count how many of them logged in within the last N days
+	since := time.Now().UTC().AddDate(0, 0, -loginWithinDays)
+	err = r.db.WithContext(ctx).Table("auth_audit_logs").
+		Where("action = ? AND success = ? AND created_at >= ?", "login", true, since).
+		Where("user_id IN (SELECT id FROM users WHERE created_at < ?)", registeredBefore).
+		Distinct("user_id").Count(&retained).Error
+	return
+}
+
+// ── Additional module counts ──
+
+func (r *Repository) CountBacktestRuns(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("backtest_runs").Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) CountBacktestRunsSince(ctx context.Context, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("backtest_runs").Where("created_at >= ?", since).Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) CountBacktestUsers(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("backtest_runs").Distinct("user_id").Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) CountPortfolioRecords(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("user_portfolios").Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) CountPortfolioUsers(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("user_portfolios").Distinct("user_id").Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) CountScreenerWatchlists(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("screener_watchlists").Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) CountScreenerUsers(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("screener_watchlists").Distinct("user_id").Count(&count).Error
+	return count, err
+}

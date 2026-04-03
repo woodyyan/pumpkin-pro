@@ -249,8 +249,60 @@ func (s *Service) GetStats(ctx context.Context) (*StatsResult, error) {
 			TodayRegistrations: todayRegistrations,
 			FailedLogins7D:     failedLogins7D,
 		},
+		Features:    s.collectFeatureStats(ctx, today),
+		Trends:      s.collectTrendStats(ctx),
+		Retention:   s.collectRetentionStats(ctx),
 		GeneratedAt: now.Format(time.RFC3339),
 	}, nil
+}
+
+func (s *Service) collectFeatureStats(ctx context.Context, today time.Time) FeatureStats {
+	btTotal, _ := s.repo.CountBacktestRuns(ctx)
+	btToday, _ := s.repo.CountBacktestRunsSince(ctx, today)
+	btUsers, _ := s.repo.CountBacktestUsers(ctx)
+	pfRecords, _ := s.repo.CountPortfolioRecords(ctx)
+	pfUsers, _ := s.repo.CountPortfolioUsers(ctx)
+	scLists, _ := s.repo.CountScreenerWatchlists(ctx)
+	scUsers, _ := s.repo.CountScreenerUsers(ctx)
+	return FeatureStats{
+		BacktestTotal:    btTotal,
+		BacktestToday:    btToday,
+		BacktestUsers:    btUsers,
+		PortfolioRecords: pfRecords,
+		PortfolioUsers:   pfUsers,
+		ScreenerLists:    scLists,
+		ScreenerUsers:    scUsers,
+	}
+}
+
+func (s *Service) collectTrendStats(ctx context.Context) TrendStats {
+	regTrend, _ := s.repo.DailyRegistrations(ctx, 30)
+	dauTrend, _ := s.repo.DailyActiveUsers(ctx, 30)
+	sigTrend, _ := s.repo.DailySignalEvents(ctx, 30)
+	if regTrend == nil { regTrend = []DailyCount{} }
+	if dauTrend == nil { dauTrend = []DailyCount{} }
+	if sigTrend == nil { sigTrend = []DailyCount{} }
+	return TrendStats{
+		DailyRegistrations: regTrend,
+		DailyActiveUsers:   dauTrend,
+		DailySignalEvents:  sigTrend,
+	}
+}
+
+func (s *Service) collectRetentionStats(ctx context.Context) RetentionStats {
+	now := time.Now().UTC()
+	sevenDaysAgo := now.AddDate(0, 0, -7)
+	thirtyDaysAgo := now.AddDate(0, 0, -30)
+
+	reg7, ret7, _ := s.repo.RetentionRate(ctx, sevenDaysAgo, 7)
+	reg30, ret30, _ := s.repo.RetentionRate(ctx, thirtyDaysAgo, 30)
+
+	rate7 := float64(0)
+	if reg7 > 0 { rate7 = float64(ret7) / float64(reg7) }
+	rate30 := float64(0)
+	if reg30 > 0 { rate30 = float64(ret30) / float64(reg30) }
+
+	return RetentionStats{Day7Rate: rate7, Day30Rate: rate30}
 }
 
 // ── Helpers ──

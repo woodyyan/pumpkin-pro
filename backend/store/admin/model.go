@@ -49,12 +49,15 @@ type AdminAccessClaims struct {
 // ── Stats response types ──
 
 type StatsResult struct {
-	Users      UserStats      `json:"users"`
-	Strategies StrategyStats  `json:"strategies"`
-	Live       LiveStats      `json:"live"`
-	Signals    SignalStats    `json:"signals"`
-	Audit      AuditStats     `json:"audit"`
-	GeneratedAt string        `json:"generated_at"`
+	Users       UserStats       `json:"users"`
+	Strategies  StrategyStats   `json:"strategies"`
+	Live        LiveStats       `json:"live"`
+	Signals     SignalStats     `json:"signals"`
+	Audit       AuditStats      `json:"audit"`
+	Features    FeatureStats    `json:"features"`
+	Trends      TrendStats      `json:"trends"`
+	Retention   RetentionStats  `json:"retention"`
+	GeneratedAt string          `json:"generated_at"`
 }
 
 type UserStats struct {
@@ -95,4 +98,25 @@ type AuditStats struct {
 	TodayLogins        int64 `json:"today_logins"`
 	TodayRegistrations int64 `json:"today_registrations"`
 	FailedLogins7D     int64 `json:"failed_logins_7d"`
+}
+
+type FeatureStats struct {
+	BacktestTotal    int64 `json:"backtest_total"`
+	BacktestToday    int64 `json:"backtest_today"`
+	BacktestUsers    int64 `json:"backtest_users"`
+	PortfolioRecords int64 `json:"portfolio_records"`
+	PortfolioUsers   int64 `json:"portfolio_users"`
+	ScreenerLists    int64 `json:"screener_lists"`
+	ScreenerUsers    int64 `json:"screener_users"`
+}
+
+type TrendStats struct {
+	DailyRegistrations []DailyCount `json:"daily_registrations"`
+	DailyActiveUsers   []DailyCount `json:"daily_active_users"`
+	DailySignalEvents  []DailyCount `json:"daily_signal_events"`
+}
+
+type RetentionStats struct {
+	Day7Rate  float64 `json:"day_7_rate"`
+	Day30Rate float64 `json:"day_30_rate"`
 }

@@ -93,7 +93,7 @@ const TUTORIALS = [
       '点击「保存」，然后点击「验证送达」测试是否连通',
       '返回行情看板个股详情页，开启信号开关并选择策略',
     ],
-    tip: '信号会以文本消息格式推送，包含股票代码、方向（买/卖）、策略名称和触发时间。',
+    tip: <>信号会以文本消息格式推送，包含股票代码、方向（买/卖）、策略名称和触发时间。不知道如何获取 Webhook 地址？可参考<a href="https://open.work.weixin.qq.com/help2/pc/14931" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 font-medium hover:text-primary">企业微信 Webhook 配置教程</a>。</>,
   },
   {
     q: '如何使用 AI 智能选股？',

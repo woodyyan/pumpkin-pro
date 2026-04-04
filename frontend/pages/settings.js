@@ -362,7 +362,11 @@ export default function SettingsPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-white">Webhook 推送配置</h2>
-            <p className="mt-1 text-xs text-white/60">用于接收所有股票的交易信号。仅支持 HTTPS URL；Secret 为可选，配置后会附带签名头。测试按钮仅在真实送达后才会提示成功。</p>
+            <p className="mt-1 text-xs text-white/60">
+              用于接收所有股票的交易信号。仅支持 HTTPS URL；Secret 为可选，配置后会附带签名头。测试按钮仅在真实送达后才会提示成功。
+              不知道如何获取 Webhook 地址？可参考
+              <a href="https://open.work.weixin.qq.com/help2/pc/14931" target="_blank" rel="noopener noreferrer" className="text-primary/80 underline underline-offset-2 hover:text-primary ml-0.5">企业微信 Webhook 配置教程</a>。
+            </p>
           </div>
           <div className="text-xs text-white/55">
             {webhookConfig.updated_at ? `配置更新时间：${formatDateTime(webhookConfig.updated_at)}` : '未配置'}

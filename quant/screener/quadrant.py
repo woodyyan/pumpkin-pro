@@ -499,6 +499,25 @@ def compute_all_quadrant_scores(
     daily_metrics_df = pd.DataFrame(daily_metrics_rows)
     merged = snapshot_df.merge(daily_metrics_df, on="code", how="left")
 
+    # ── Diagnostic: log non-null rates for all key columns ──
+    total = len(merged)
+    diag_cols = ["std_20d", "max_drawdown_60d", "turnover_20d_avg", "cumulative_turnover_20d",
+                 "change_pct_60d_calc", "volume_ratio_calc", "change_pct_60d", "volume_ratio",
+                 "turnover_rate", "turnover", "pe", "profit_growth_rate"]
+    for col in diag_cols:
+        if col in merged.columns:
+            valid = int(merged[col].notna().sum())
+            logger.info("[quadrant-diag] %s: %d/%d (%.1f%%)", col, valid, total, valid/total*100 if total else 0)
+        else:
+            logger.info("[quadrant-diag] %s: COLUMN MISSING", col)
+
+    # Also check daily_metrics_df independently
+    dm_total = len(daily_metrics_df)
+    for col in ["std_20d", "max_drawdown_60d", "change_pct_60d_calc", "volume_ratio_calc"]:
+        if col in daily_metrics_df.columns:
+            valid = int(daily_metrics_df[col].notna().sum())
+            logger.info("[quadrant-diag] daily_metrics_df.%s: %d/%d (%.1f%%)", col, valid, dm_total, valid/dm_total*100 if dm_total else 0)
+
     # ── Backfill missing snapshot fields from daily-bar calculations ──
     # change_pct_60d: prefer snapshot (东财), fallback to daily-bar calc
     if "change_pct_60d" in merged.columns:
@@ -550,6 +569,16 @@ def compute_all_quadrant_scores(
     merged["risk"] = (
         0.4 * merged["volatility_raw"] + 0.3 * merged["drawdown_raw"] + 0.3 * merged["crowding_raw"]
     )
+
+    # ── Diagnostic: sub-score and final score stats ──
+    for col in ["trend", "flow", "revision", "volatility_raw", "drawdown_raw", "crowding_raw", "opportunity", "risk"]:
+        s = merged[col]
+        valid = int(s.notna().sum())
+        if valid > 0:
+            logger.info("[quadrant-diag] %s: valid=%d/%d, min=%.2f, max=%.2f, mean=%.2f, std=%.2f",
+                        col, valid, len(merged), s.min(), s.max(), s.mean(), s.std())
+        else:
+            logger.info("[quadrant-diag] %s: ALL NaN (%d rows)", col, len(merged))
 
     # ── Re-normalize: percentile rank the final scores to counteract
     #    variance collapse from multi-layer weighted averaging ──

@@ -535,40 +535,52 @@ def compute_all_quadrant_scores(
     logger.info("[quadrant] 数据补齐: change_pct_60d 有效 %d/%d, volume_ratio 有效 %d/%d",
                 backfill_60d, len(merged), backfill_vr, len(merged))
 
-    # ── Trend ──
-    change_60d_rank = _percentile_rank(merged["change_pct_60d"])
+    # ── Trend (NaN-tolerant) ──
+    change_60d_rank = _percentile_rank(merged["change_pct_60d"]).fillna(50)
     excess_return = merged["change_pct_60d"] - bench_60d
-    excess_rank = _percentile_rank(excess_return)
+    excess_rank = _percentile_rank(excess_return).fillna(50)
     merged["trend"] = 0.5 * change_60d_rank + 0.5 * excess_rank
 
-    # ── Flow ──
-    volume_ratio_rank = _percentile_rank(merged["volume_ratio"])
-    turnover_rate_rank = _percentile_rank(merged["turnover_rate"])
+    # ── Flow (NaN-tolerant) ──
+    volume_ratio_rank = _percentile_rank(merged["volume_ratio"]).fillna(50)
+    turnover_rate_rank = _percentile_rank(merged["turnover_rate"]).fillna(50)
     turnover_ratio = merged["turnover"] / merged["turnover_20d_avg"]
-    turnover_ratio_rank = _percentile_rank(turnover_ratio)
+    turnover_ratio_rank = _percentile_rank(turnover_ratio).fillna(50)
     merged["flow"] = 0.4 * volume_ratio_rank + 0.3 * turnover_rate_rank + 0.3 * turnover_ratio_rank
 
-    # ── Revision ──
-    merged["revision"] = _percentile_rank(merged["profit_growth_rate"])
+    # ── Revision (NaN-tolerant) ──
+    merged["revision"] = _percentile_rank(merged["profit_growth_rate"]).fillna(50)
 
-    # ── Volatility ──
-    merged["volatility_raw"] = _percentile_rank(merged["std_20d"])
+    # ── Volatility (NaN-tolerant) ──
+    merged["volatility_raw"] = _percentile_rank(merged["std_20d"]).fillna(50)
 
-    # ── Drawdown ──
-    merged["drawdown_raw"] = _percentile_rank(merged["max_drawdown_60d"])
+    # ── Drawdown (NaN-tolerant) ──
+    merged["drawdown_raw"] = _percentile_rank(merged["max_drawdown_60d"]).fillna(50)
 
     # ── Crowding ──
+    # cumulative_turnover_20d requires 5+ days of turnover_rate in daily bars,
+    # which Tencent source doesn't provide. Use pe_rank alone as fallback.
     pe_rank = _percentile_rank(merged["pe"])
     cum_turnover_rank = _percentile_rank(merged["cumulative_turnover_20d"])
-    merged["crowding_raw"] = 0.5 * pe_rank + 0.5 * cum_turnover_rank
+    has_cum_turnover = merged["cumulative_turnover_20d"].notna()
+    merged["crowding_raw"] = pd.Series(np.where(
+        has_cum_turnover,
+        0.5 * pe_rank + 0.5 * cum_turnover_rank,
+        pe_rank,  # fallback: crowding = PE rank only
+    ), index=merged.index)
+    logger.info("[quadrant] Crowding: %d 只用 PE+换手率, %d 只仅用 PE",
+                int(has_cum_turnover.sum()), int((~has_cum_turnover).sum()))
 
-    # ── Final scores ──
-    merged["opportunity"] = (
-        0.5 * merged["trend"] + 0.3 * merged["flow"] + 0.2 * merged["revision"]
-    )
-    merged["risk"] = (
-        0.4 * merged["volatility_raw"] + 0.3 * merged["drawdown_raw"] + 0.3 * merged["crowding_raw"]
-    )
+    # ── Final scores (NaN-tolerant: fillna sub-scores with 50 before combining) ──
+    v_raw = merged["volatility_raw"].fillna(50)
+    d_raw = merged["drawdown_raw"].fillna(50)
+    c_raw = merged["crowding_raw"].fillna(50)
+    t_score = merged["trend"].fillna(50)
+    f_score = merged["flow"].fillna(50)
+    r_score = merged["revision"].fillna(50)
+
+    merged["opportunity"] = 0.5 * t_score + 0.3 * f_score + 0.2 * r_score
+    merged["risk"] = 0.4 * v_raw + 0.3 * d_raw + 0.3 * c_raw
 
     # ── Diagnostic: sub-score and final score stats ──
     for col in ["trend", "flow", "revision", "volatility_raw", "drawdown_raw", "crowding_raw", "opportunity", "risk"]:

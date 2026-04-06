@@ -68,6 +68,10 @@ export default function LiveTradingDetailPage() {
   const [error, setError] = useState('')
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState('')
+
+  // 关注状态
+  const [isWatched, setIsWatched] = useState(null) // null=未知, true/false
+  const [addingWatch, setAddingWatch] = useState(false)
   const [portfolioData, setPortfolioData] = useState(null)
   const [portfolioEditing, setPortfolioEditing] = useState(false)
   const [portfolioForm, setPortfolioForm] = useState({ shares: '', avg_cost_price: '', buy_date: '', note: '' })
@@ -345,6 +349,15 @@ export default function LiveTradingDetailPage() {
         } catch (err) {
           setSignalError(err.message || '信号配置加载失败')
         }
+        // 检查是否已关注
+        try {
+          const wl = await requestJson('/api/live/watchlist')
+          const items = wl?.items || []
+          const found = items.some((i) => i.symbol.toUpperCase() === symbol.toUpperCase())
+          setIsWatched(found)
+        } catch { setIsWatched(false) }
+      } else {
+        setIsWatched(null)
       }
     }
     bootstrap()
@@ -446,9 +459,48 @@ export default function LiveTradingDetailPage() {
         <section className="rounded-2xl border border-border bg-card p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-white">
-                {symbolName ? `${symbolName}（${symbol}）` : symbol}
-              </h1>
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-semibold tracking-tight text-white">
+                  {symbolName ? `${symbolName}（${symbol}）` : symbol}
+                </h1>
+                {isWatched === true ? (
+                  <span className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-white/40">
+                    ✓ 已关注
+                  </span>
+                ) : isWatched === false ? (
+                  <button
+                    type="button"
+                    disabled={addingWatch}
+                    onClick={async () => {
+                      if (!isLoggedIn) {
+                        openAuthModal('login', '登录后可关注股票')
+                        return
+                      }
+                      setAddingWatch(true)
+                      try {
+                        await requestJson('/api/live/watchlist', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ symbol, name: symbolName || '' }),
+                        })
+                        setIsWatched(true)
+                      } catch { /* 可能已存在 */ }
+                      setAddingWatch(false)
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary/20 disabled:opacity-40"
+                  >
+                    {addingWatch ? '关注中...' : '+ 关注'}
+                  </button>
+                ) : !isLoggedIn ? (
+                  <button
+                    type="button"
+                    onClick={() => openAuthModal('login', '登录后可关注股票')}
+                    className="inline-flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary/20"
+                  >
+                    + 关注
+                  </button>
+                ) : null}
+              </div>
               <div className="mt-1 flex items-center gap-3 text-xs text-white/55">
                 <span>{detectExchangeLabel(symbol)}</span>
                 {lastUpdateAt && <span>更新：{formatDateTime(lastUpdateAt)}</span>}

@@ -801,11 +801,47 @@ def _build_grid_reason(params: Dict, enriched: pd.DataFrame, signal: str) -> Dic
     }
 
 
+def _build_macd_reason(params: Dict, enriched: pd.DataFrame, signal: str) -> Dict[str, Any]:
+    row = enriched.iloc[-1]
+    dif = round(float(row.get("MACD_DIF", 0)), 4)
+    dea = round(float(row.get("MACD_DEA", 0)), 4)
+    if signal == "buy":
+        return {
+            "kind": "macd_golden_cross",
+            "message": f"MACD DIF 从下方上穿 DEA（信号线），形成金叉买入信号。当前 DIF={dif}，DEA={dea}。",
+        }
+    return {
+        "kind": "macd_death_cross",
+        "message": f"MACD DIF 从上方下穿 DEA（信号线），形成死叉卖出信号。当前 DIF={dif}，DEA={dea}。",
+    }
+
+
+def _build_volume_breakout_reason(params: Dict, enriched: pd.DataFrame, signal: str) -> Dict[str, Any]:
+    row = enriched.iloc[-1]
+    close = round(float(row.get("close", 0)), 2)
+    volume = int(row.get("volume", 0))
+    lookback = int(params.get("lookback", 20))
+    vol_ma_col = f"VOL_MA{lookback}"
+    vol_ma = round(float(row.get(vol_ma_col, 0)), 0) if vol_ma_col in enriched.columns else 0
+    if signal == "buy":
+        multiple = round(volume / vol_ma, 1) if vol_ma > 0 else 0
+        return {
+            "kind": "volume_breakout_buy",
+            "message": f"放量突破：当日成交量是 {lookback} 日均量的 {multiple} 倍，且收盘价创 {lookback} 日新高。当前价格={close}。",
+        }
+    return {
+        "kind": "volume_breakout_exit",
+        "message": f"价格跌破 MA{int(params.get('exit_ma_period', 20))} 均线，触发离场卖出。当前价格={close}。",
+    }
+
+
 SIGNAL_REASON_BUILDERS = {
     "trend_cross": _build_trend_reason,
     "bollinger_reversion": _build_bollinger_reason,
     "rsi_range": _build_rsi_reason,
     "grid": _build_grid_reason,
+    "macd_cross": _build_macd_reason,
+    "volume_breakout": _build_volume_breakout_reason,
 }
 
 

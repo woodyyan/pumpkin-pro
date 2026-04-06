@@ -5,9 +5,11 @@ import pandas as pd
 
 from indicators.technical_indicators import TechnicalIndicators
 from strategy.grid_strategy import GridStrategy
+from strategy.macd_strategy import MACDStrategy
 from strategy.mean_reversion_strategy import MeanReversionStrategy
 from strategy.range_trading_strategy import RangeTradingStrategy
 from strategy.trend_strategy import TrendStrategy
+from strategy.volume_breakout_strategy import VolumeBreakoutStrategy
 
 
 @dataclass
@@ -49,6 +51,20 @@ class StrategyRegistry:
                 attach_indicators=_attach_rsi_indicators,
                 build_strategy=_build_rsi_strategy,
                 get_overlay_columns=_rsi_overlay_columns,
+            ),
+            "macd_cross": StrategyExecutionAdapter(
+                implementation_key="macd_cross",
+                validate_params=_validate_macd_params,
+                attach_indicators=_attach_macd_indicators,
+                build_strategy=_build_macd_strategy,
+                get_overlay_columns=_macd_overlay_columns,
+            ),
+            "volume_breakout": StrategyExecutionAdapter(
+                implementation_key="volume_breakout",
+                validate_params=_validate_volume_breakout_params,
+                attach_indicators=_attach_volume_breakout_indicators,
+                build_strategy=_build_volume_breakout_strategy,
+                get_overlay_columns=_volume_breakout_overlay_columns,
             ),
         }
 
@@ -155,3 +171,77 @@ def _build_rsi_strategy(data: pd.DataFrame, params: Dict[str, Any]) -> RangeTrad
 
 def _rsi_overlay_columns(params: Dict[str, Any]) -> List[str]:
     return [f"RSI_{int(params['rsi_period'])}"]
+
+
+# ── MACD 趋势策略 ──
+
+
+def _validate_macd_params(params: Dict[str, Any]) -> None:
+    if int(params["fast_period"]) >= int(params["slow_period"]):
+        raise ValueError("MACD 快线周期必须小于慢线周期")
+    if int(params["signal_period"]) < 2:
+        raise ValueError("MACD 信号线周期最小为 2")
+
+
+def _attach_macd_indicators(data: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
+    indicator_calc = TechnicalIndicators(data)
+    enriched = indicator_calc.data.copy()
+    dif, dea, histogram = indicator_calc.calculate_macd(
+        fast_period=int(params["fast_period"]),
+        slow_period=int(params["slow_period"]),
+        signal_period=int(params["signal_period"]),
+    )
+    enriched["MACD_DIF"] = dif
+    enriched["MACD_DEA"] = dea
+    enriched["MACD_HIST"] = histogram
+    return enriched
+
+
+def _build_macd_strategy(data: pd.DataFrame, params: Dict[str, Any]) -> MACDStrategy:
+    return MACDStrategy(
+        data,
+        fast_period=int(params["fast_period"]),
+        slow_period=int(params["slow_period"]),
+        signal_period=int(params["signal_period"]),
+    )
+
+
+def _macd_overlay_columns(params: Dict[str, Any]) -> List[str]:
+    return ["MACD_DIF", "MACD_DEA", "MACD_HIST"]
+
+
+# ── 放量突破策略 ──
+
+
+def _validate_volume_breakout_params(params: Dict[str, Any]) -> None:
+    if int(params["lookback"]) < 5:
+        raise ValueError("回看周期最小为 5")
+    if float(params["volume_multiple"]) < 1.0:
+        raise ValueError("放量倍数必须 >= 1.0")
+    if int(params["exit_ma_period"]) < 5:
+        raise ValueError("离场均线周期最小为 5")
+
+
+def _attach_volume_breakout_indicators(data: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
+    indicator_calc = TechnicalIndicators(data)
+    enriched = indicator_calc.data.copy()
+    lookback = int(params["lookback"])
+    exit_ma = int(params["exit_ma_period"])
+    enriched[f"VOL_MA{lookback}"] = enriched["volume"].rolling(window=lookback, min_periods=lookback).mean()
+    enriched[f"HIGH_{lookback}"] = enriched["high"].rolling(window=lookback, min_periods=lookback).max()
+    enriched[f"MA{exit_ma}"] = indicator_calc.calculate_ma(exit_ma)
+    return enriched
+
+
+def _build_volume_breakout_strategy(data: pd.DataFrame, params: Dict[str, Any]) -> VolumeBreakoutStrategy:
+    return VolumeBreakoutStrategy(
+        data,
+        lookback=int(params["lookback"]),
+        volume_multiple=float(params["volume_multiple"]),
+        exit_ma_period=int(params["exit_ma_period"]),
+    )
+
+
+def _volume_breakout_overlay_columns(params: Dict[str, Any]) -> List[str]:
+    exit_ma = int(params["exit_ma_period"])
+    return [f"MA{exit_ma}"]

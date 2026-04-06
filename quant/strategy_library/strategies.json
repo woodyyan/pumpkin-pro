@@ -364,6 +364,147 @@
           "均值回归（布林带）"
         ]
       }
+    },
+    {
+      "id": "macd-trend-cross",
+      "key": "macd_trend_cross",
+      "name": "MACD 趋势策略",
+      "description": "策略逻辑：当 MACD 指标的 DIF 线（快线）从下方向上穿越 DEA 线（信号线）时形成金叉买入；DIF 从上方向下跌破 DEA 时形成死叉卖出。MACD 对趋势加速与减速更敏感，信号比双均线更平滑。示例：快线=12、慢线=26、信号线=9（经典参数），当 DIF 上穿 DEA 触发买入。",
+      "category": "趋势",
+      "implementation_key": "macd_cross",
+      "status": "active",
+      "version": 1,
+      "created_at": "2026-04-06T00:00:00Z",
+      "updated_at": "2026-04-06T00:00:00Z",
+      "param_schema": [
+        {
+          "key": "fast_period",
+          "label": "快线周期（天）",
+          "type": "integer",
+          "required": true,
+          "default": 12,
+          "min": 2.0,
+          "max": 50.0,
+          "step": 1.0,
+          "description": "EMA 快线周期，用于计算 DIF，单位：天。",
+          "options": []
+        },
+        {
+          "key": "slow_period",
+          "label": "慢线周期（天）",
+          "type": "integer",
+          "required": true,
+          "default": 26,
+          "min": 5.0,
+          "max": 100.0,
+          "step": 1.0,
+          "description": "EMA 慢线周期，用于计算 DIF，单位：天。",
+          "options": []
+        },
+        {
+          "key": "signal_period",
+          "label": "信号线周期（天）",
+          "type": "integer",
+          "required": true,
+          "default": 9,
+          "min": 2.0,
+          "max": 30.0,
+          "step": 1.0,
+          "description": "DEA（信号线）的 EMA 平滑周期，单位：天。",
+          "options": []
+        }
+      ],
+      "default_params": {
+        "fast_period": 12,
+        "slow_period": 26,
+        "signal_period": 9
+      },
+      "required_indicators": [
+        {
+          "type": "macd",
+          "params": ["fast_period", "slow_period", "signal_period"]
+        }
+      ],
+      "chart_overlays": [
+        { "type": "line", "template": "MACD_DIF" },
+        { "type": "line", "template": "MACD_DEA" }
+      ],
+      "ui_schema": {
+        "param_order": ["fast_period", "slow_period", "signal_period"]
+      },
+      "execution_options": {},
+      "metadata": {
+        "aliases": ["MACD趋势策略"]
+      }
+    },
+    {
+      "id": "volume-breakout",
+      "key": "volume_breakout",
+      "name": "放量突破",
+      "description": "策略逻辑：当日成交量超过 N 日均量的 M 倍，且收盘价突破 N 日最高价（放量创新高）时买入；收盘价跌破离场均线时卖出。量价齐升是 A 股最经典的启动信号之一。示例：回看=20天、放量倍数=2.0、离场均线=20天，当日量为 20 日均量的 2 倍以上且创 20 日新高触发买入。",
+      "category": "量价",
+      "implementation_key": "volume_breakout",
+      "status": "active",
+      "version": 1,
+      "created_at": "2026-04-06T00:00:00Z",
+      "updated_at": "2026-04-06T00:00:00Z",
+      "param_schema": [
+        {
+          "key": "lookback",
+          "label": "回看周期（天）",
+          "type": "integer",
+          "required": true,
+          "default": 20,
+          "min": 5.0,
+          "max": 120.0,
+          "step": 1.0,
+          "description": "计算均量和区间最高价的回看窗口，单位：天。",
+          "options": []
+        },
+        {
+          "key": "volume_multiple",
+          "label": "放量倍数（倍）",
+          "type": "number",
+          "required": true,
+          "default": 2.0,
+          "min": 1.2,
+          "max": 5.0,
+          "step": 0.1,
+          "description": "当日成交量 > 均量 × 该倍数时视为放量，单位：倍。",
+          "options": []
+        },
+        {
+          "key": "exit_ma_period",
+          "label": "离场均线（天）",
+          "type": "integer",
+          "required": true,
+          "default": 20,
+          "min": 5.0,
+          "max": 120.0,
+          "step": 1.0,
+          "description": "收盘价跌破该均线时触发卖出离场，单位：天。",
+          "options": []
+        }
+      ],
+      "default_params": {
+        "lookback": 20,
+        "volume_multiple": 2.0,
+        "exit_ma_period": 20
+      },
+      "required_indicators": [
+        { "type": "volume_ma", "params": ["lookback"] },
+        { "type": "ma", "params": ["exit_ma_period"] }
+      ],
+      "chart_overlays": [
+        { "type": "line", "template": "MA{exit_ma_period}" }
+      ],
+      "ui_schema": {
+        "param_order": ["lookback", "volume_multiple", "exit_ma_period"]
+      },
+      "execution_options": {},
+      "metadata": {
+        "aliases": ["放量突破策略"]
+      }
     }
   ]
 }

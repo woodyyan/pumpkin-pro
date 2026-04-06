@@ -136,6 +136,30 @@ class TechnicalIndicators:
         
         return upper_band, mid_band, lower_band
 
+    def calculate_macd(
+        self,
+        fast_period: int = 12,
+        slow_period: int = 26,
+        signal_period: int = 9,
+        price_col: Optional[str] = None,
+    ):
+        """
+        计算 MACD (Moving Average Convergence Divergence)
+
+        Returns:
+        --------
+        Tuple[pd.Series, pd.Series, pd.Series]
+            (DIF, DEA, histogram)
+        """
+        col_name = price_col or self.price_col
+        prices = self.data[col_name]
+        ema_fast = prices.ewm(span=fast_period, adjust=False).mean()
+        ema_slow = prices.ewm(span=slow_period, adjust=False).mean()
+        dif = ema_fast - ema_slow
+        dea = dif.ewm(span=signal_period, adjust=False).mean()
+        histogram = (dif - dea) * 2
+        return dif, dea, histogram
+
     def calculate_all_indicators(self) -> pd.DataFrame:
         """
         计算所有指标

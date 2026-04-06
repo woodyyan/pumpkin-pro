@@ -30,6 +30,8 @@ var allowedImplementationKeys = map[string]struct{}{
 	"grid":                {},
 	"bollinger_reversion": {},
 	"rsi_range":           {},
+	"macd_cross":          {},
+	"volume_breakout":     {},
 }
 
 type Service struct {
@@ -188,13 +190,6 @@ func (s *Service) BuildRuntimeStrategy(ctx context.Context, userID string, strat
 }
 
 func (s *Service) SeedFromFileIfEmpty(ctx context.Context, seedPath string) error {
-	count, err := s.repo.CountSystem(ctx)
-	if err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil
-	}
 	if strings.TrimSpace(seedPath) == "" {
 		return nil
 	}
@@ -208,9 +203,19 @@ func (s *Service) SeedFromFileIfEmpty(ctx context.Context, seedPath string) erro
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return fmt.Errorf("decode seed file failed: %w", err)
 	}
+
+	// Incremental upsert: only insert items that don't already exist in DB.
 	for _, item := range doc.Items {
-		if _, err := s.repo.Create(ctx, "", item); err != nil {
-			return fmt.Errorf("seed strategy %s failed: %w", item.ID, err)
+		_, lookupErr := s.repo.getRecordByID(ctx, item.ID)
+		if lookupErr == nil {
+			// Already exists — skip.
+			continue
+		}
+		if !errors.Is(lookupErr, ErrNotFound) {
+			return fmt.Errorf("seed lookup %s failed: %w", item.ID, lookupErr)
+		}
+		if _, createErr := s.repo.Create(ctx, "", item); createErr != nil {
+			return fmt.Errorf("seed strategy %s failed: %w", item.ID, createErr)
 		}
 	}
 	return nil

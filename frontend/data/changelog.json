@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-04-02",
+  "last_updated": "2026-04-06",
   "manual_entry_template": {
     "date": "YYYY-MM-DD",
     "type": "新功能",
@@ -11,6 +11,22 @@
     "visible": true
   },
   "items": [
+    {
+      "date": "2026-04-06",
+      "type": "新功能",
+      "title": "策略库新增「MACD 趋势策略」",
+      "summary": "基于 MACD 指标的经典交叉策略：DIF 线从下方上穿 DEA 线形成金叉买入，从上方下穿形成死叉卖出。支持自定义快线、慢线和信号线周期，默认参数 12/26/9。",
+      "scope": "策略库",
+      "visible": true
+    },
+    {
+      "date": "2026-04-06",
+      "type": "新功能",
+      "title": "策略库新增「放量突破」策略",
+      "summary": "量价齐升策略：当日成交量超过 N 日均量的 M 倍且收盘价突破 N 日最高价时买入，跌破离场均线时卖出。可自定义回看周期、放量倍数和离场均线。",
+      "scope": "策略库",
+      "visible": true
+    },
     {
       "date": "2026-04-06",
       "type": "改进",

@@ -2,6 +2,7 @@ package quadrant
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -54,7 +55,44 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 	if err := s.repo.BulkUpsert(ctx, records); err != nil {
 		return 0, err
 	}
+
+	// Save compute log if report is present
+	if input.Report != nil {
+		s.saveComputeLog(ctx, computedAt, input.Report, len(records))
+	}
+
 	return len(records), nil
+}
+
+func (s *Service) saveComputeLog(ctx context.Context, computedAt time.Time, report map[string]any, stockCount int) {
+	reportBytes, _ := json.Marshal(report)
+	mode := "unknown"
+	if m, ok := report["mode"].(string); ok {
+		mode = m
+	}
+	durationSec := float64(0)
+	if d, ok := report["duration_seconds"].(float64); ok {
+		durationSec = d
+	}
+	status := "success"
+	if st, ok := report["status"].(string); ok {
+		status = st
+	}
+	errorMsg := ""
+	if e, ok := report["error"].(string); ok {
+		errorMsg = e
+	}
+	logID := fmt.Sprintf("qcl-%d", computedAt.UnixMilli())
+	_ = s.repo.InsertComputeLog(ctx, ComputeLogRecord{
+		ID:          logID,
+		ComputedAt:  computedAt,
+		Mode:        mode,
+		DurationSec: durationSec,
+		StockCount:  stockCount,
+		ReportJSON:  string(reportBytes),
+		Status:      status,
+		ErrorMsg:    errorMsg,
+	})
 }
 
 // GetAllWithWatchlist returns all scores (compact) + watchlist details.
@@ -134,9 +172,28 @@ func (s *Service) GetStatus(ctx context.Context) (*QuadrantStatusResponse, error
 		computedAtStr = latestAt.UTC().Format(time.RFC3339)
 	}
 
-	return &QuadrantStatusResponse{
+	resp := &QuadrantStatusResponse{
 		LastComputedAt: computedAtStr,
 		StockCount:     int(count),
 		LastError:      "",
-	}, nil
+	}
+
+	// Attach last compute report if available
+	lastLog, _ := s.repo.GetLatestComputeLog(ctx)
+	if lastLog != nil {
+		var report map[string]any
+		if err := json.Unmarshal([]byte(lastLog.ReportJSON), &report); err == nil {
+			resp.LastReport = report
+		}
+	}
+
+	return resp, nil
+}
+
+// ListComputeLogs returns recent compute history for admin dashboard.
+func (s *Service) ListComputeLogs(ctx context.Context, limit int) ([]ComputeLogRecord, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	return s.repo.ListComputeLogs(ctx, limit)
 }

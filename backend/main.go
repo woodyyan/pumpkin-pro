@@ -1794,6 +1794,22 @@ func (a *appServer) handleQuadrantStatus(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, status)
 }
 
+func (a *appServer) handleAdminQuadrantLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	logs, err := a.quadrantService.ListComputeLogs(r.Context(), 30)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if logs == nil {
+		logs = []quadrant.ComputeLogRecord{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": logs})
+}
+
 func main() {
 	cfg := config.Load()
 	storeInstance, err := store.New(cfg.DB)
@@ -1914,6 +1930,8 @@ func main() {
 	mux.HandleFunc("/api/quadrant", server.handleQuadrant)
 	mux.HandleFunc("/api/quadrant/bulk-save", server.handleQuadrantBulkSave)
 	mux.HandleFunc("/api/quadrant/status", server.handleQuadrantStatus)
+
+	mux.HandleFunc("/api/admin/quadrant-logs", server.withSuperAdminAuth(server.handleAdminQuadrantLogs))
 
 	mux.HandleFunc("/api/screener/scan", server.withOptionalAuth(server.handleScreenerScan))
 	mux.HandleFunc("/api/screener/ai-parse", server.withOptionalAuth(server.handleScreenerAIParse))

@@ -90,3 +90,28 @@ func (r *Repository) GetLatestComputedAt(ctx context.Context) (*time.Time, error
 	t := record.ComputedAt.UTC()
 	return &t, nil
 }
+
+// ── Compute logs ──
+
+func (r *Repository) InsertComputeLog(ctx context.Context, log ComputeLogRecord) error {
+	return r.db.WithContext(ctx).Create(&log).Error
+}
+
+func (r *Repository) ListComputeLogs(ctx context.Context, limit int) ([]ComputeLogRecord, error) {
+	var logs []ComputeLogRecord
+	if err := r.db.WithContext(ctx).Order("computed_at DESC").Limit(limit).Find(&logs).Error; err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
+func (r *Repository) GetLatestComputeLog(ctx context.Context) (*ComputeLogRecord, error) {
+	var log ComputeLogRecord
+	if err := r.db.WithContext(ctx).Order("computed_at DESC").First(&log).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &log, nil
+}

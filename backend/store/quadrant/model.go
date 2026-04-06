@@ -73,8 +73,9 @@ type QuadrantResponse struct {
 
 // BulkSaveInput is the input from Quant callback.
 type BulkSaveInput struct {
-	Items      []BulkSaveItem `json:"items"`
-	ComputedAt string         `json:"computed_at"`
+	Items      []BulkSaveItem         `json:"items"`
+	ComputedAt string                 `json:"computed_at"`
+	Report     map[string]any         `json:"report,omitempty"`
 }
 
 type BulkSaveItem struct {
@@ -91,11 +92,28 @@ type BulkSaveItem struct {
 	Crowding    float64 `json:"crowding"`
 }
 
+// ComputeLogRecord stores quadrant compute history for observability.
+type ComputeLogRecord struct {
+	ID             string    `gorm:"primaryKey;size:36"`
+	ComputedAt     time.Time `gorm:"not null;index"`
+	Mode           string    `gorm:"size:16;not null"`
+	DurationSec    float64   `gorm:"not null;default:0"`
+	StockCount     int       `gorm:"not null;default:0"`
+	ReportJSON     string    `gorm:"type:text;not null;default:'{}'"`
+	Status         string    `gorm:"size:16;not null;default:'success'"`
+	ErrorMsg       string    `gorm:"type:text;default:''"`
+}
+
+func (ComputeLogRecord) TableName() string {
+	return "quadrant_compute_logs"
+}
+
 // QuadrantStatusResponse for GET /api/quadrant/status.
 type QuadrantStatusResponse struct {
-	LastComputedAt string `json:"last_computed_at"`
-	StockCount     int    `json:"stock_count"`
-	LastError      string `json:"last_error"`
+	LastComputedAt string         `json:"last_computed_at"`
+	StockCount     int            `json:"stock_count"`
+	LastError      string         `json:"last_error"`
+	LastReport     map[string]any `json:"last_report,omitempty"`
 }
 
 func (r QuadrantScoreRecord) ToCompact() QuadrantScoreCompact {

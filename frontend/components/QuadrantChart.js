@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, useState } from 'react'
 
 /**
  * QuadrantChart — Canvas-based cross quadrant scatter plot.
@@ -35,15 +35,38 @@ function getQuadrantColor(q) {
 export default function QuadrantChart({
   allStocks = [],
   watchlist = [],
-  width = 600,
-  height = 500,
+  width: propWidth,
+  height: propHeight,
   onClickStock,
 }) {
+  const containerRef = useRef(null)
   const canvasRef = useRef(null)
   const tooltipRef = useRef(null)
   // Spatial index for hover detection
   const gridRef = useRef(null)
   const hoveredRef = useRef(null)
+
+  // Responsive sizing: fill parent container, fallback to props
+  const [size, setSize] = useState({ w: propWidth || 600, h: propHeight || 500 })
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const measure = () => {
+      const rect = el.getBoundingClientRect()
+      const w = Math.floor(rect.width) || propWidth || 600
+      // Maintain roughly 4:3 aspect ratio, min height 360, max 700
+      const h = propHeight || Math.min(700, Math.max(360, Math.floor(w * 0.65)))
+      setSize({ w, h })
+    }
+    measure()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
+    if (ro) ro.observe(el)
+    return () => { if (ro) ro.disconnect() }
+  }, [propWidth, propHeight])
+
+  const width = size.w
+  const height = size.h
 
   const plotW = width - PADDING.left - PADDING.right
   const plotH = height - PADDING.top - PADDING.bottom
@@ -277,7 +300,7 @@ export default function QuadrantChart({
   }, [])
 
   return (
-    <div className="relative" style={{ width, height }}>
+    <div ref={containerRef} className="relative w-full">
       <canvas
         ref={canvasRef}
         style={{ width, height }}

@@ -373,7 +373,10 @@ function AdminDashboard({ session, onLogout }) {
               </section>
             )}
 
-            {/* Panel 7: Audit */}
+            {/* Panel 7: Quadrant Compute History */}
+            <QuadrantLogsPanel />
+
+            {/* Panel 8: Audit */}
             <section>
               <h2 className="text-base font-semibold text-white/80 mb-3">🛡️ 审计日志</h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -386,6 +389,64 @@ function AdminDashboard({ session, onLogout }) {
         ) : null}
       </main>
     </div>
+  )
+}
+
+// ── Quadrant Compute Logs ──
+
+function QuadrantLogsPanel() {
+  const [logs, setLogs] = useState(null)
+  const [expanded, setExpanded] = useState(null)
+
+  useEffect(() => {
+    adminFetch('/api/admin/quadrant-logs')
+      .then((data) => setLogs(data.items || []))
+      .catch(() => setLogs([]))
+  }, [])
+
+  if (!logs) return null
+
+  return (
+    <section>
+      <h2 className="text-base font-semibold text-white/80 mb-3">🔲 四象限计算历史</h2>
+      {logs.length === 0 ? (
+        <p className="text-xs text-white/40">暂无计算记录</p>
+      ) : (
+        <div className="space-y-2">
+          {logs.slice(0, 15).map((log) => {
+            const report = (() => { try { return JSON.parse(log.ReportJSON || '{}') } catch { return {} } })()
+            const isExpanded = expanded === log.ID
+            const statusColor = log.Status === 'success' ? 'text-emerald-400' : log.Status === 'failed' ? 'text-rose-400' : 'text-amber-400'
+            const qc = report.quadrant_counts || {}
+            return (
+              <div key={log.ID} className="rounded-lg border border-white/8 bg-[#15171e] px-3 py-2">
+                <div
+                  className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs cursor-pointer"
+                  onClick={() => setExpanded(isExpanded ? null : log.ID)}
+                >
+                  <span className="text-white/50">{new Date(log.ComputedAt).toLocaleString('zh-CN')}</span>
+                  <span className={`font-medium ${statusColor}`}>{log.Status}</span>
+                  <span className="text-white/40">{log.Mode}</span>
+                  <span className="text-white/40">{log.StockCount} 只</span>
+                  <span className="text-white/40">{log.DurationSec.toFixed(0)}s</span>
+                  {Object.keys(qc).length > 0 && (
+                    <span className="text-white/30">
+                      机会{qc['机会']||0} / 拥挤{qc['拥挤']||0} / 泡沫{qc['泡沫']||0} / 防御{qc['防御']||0} / 中性{qc['中性']||0}
+                    </span>
+                  )}
+                  <span className="ml-auto text-white/30">{isExpanded ? '▼' : '▶'}</span>
+                </div>
+                {isExpanded && (
+                  <pre className="mt-2 max-h-60 overflow-auto rounded bg-black/30 p-2 text-[10px] text-white/50">
+                    {JSON.stringify(report, null, 2)}
+                  </pre>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
   )
 }
 

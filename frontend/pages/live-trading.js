@@ -256,14 +256,11 @@ export default function LiveTradingOverviewPage() {
           </div>
         ) : quadrantData && quadrantData.all_stocks && quadrantData.all_stocks.length > 0 ? (
           <>
-            <div className="mt-4 flex justify-center overflow-x-auto">
+            <div className="mt-4 w-full">
               <QuadrantChart
                 allStocks={quadrantData.all_stocks}
                 watchlist={quadrantData.watchlist_details || []}
-                width={Math.min(680, typeof window !== 'undefined' ? window.innerWidth - 80 : 680)}
-                height={460}
                 onClickStock={(code) => {
-                  // Try to find the watchlist item with matching code, open detail page
                   const matchItem = (watchlist.items || []).find((i) => {
                     const itemCode = i.symbol.split('.')[0].replace(/^0+/, '')
                     const targetCode = code.replace(/^0+/, '')

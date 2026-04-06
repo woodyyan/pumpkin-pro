@@ -639,15 +639,56 @@ def compute_all_quadrant_scores(
     mode_label = "全量" if is_full else "增量"
     logger.info("[quadrant] ✅ 计算完成 (%s): %d 只股票, 耗时 %.1f 秒", mode_label, len(result_items), elapsed)
 
+    # ── Build structured compute report ──
+    quadrant_counts = {}
+    for item in result_items:
+        q = item["quadrant"]
+        quadrant_counts[q] = quadrant_counts.get(q, 0) + 1
+
+    data_quality = {}
+    for col in diag_cols:
+        if col in merged.columns:
+            valid = int(merged[col].notna().sum())
+            data_quality[col] = round(valid / total * 100, 1) if total else 0
+
+    score_stats = {}
+    for col in ["opportunity", "risk"]:
+        s = merged[col]
+        if s.notna().sum() > 0:
+            score_stats[col] = {
+                "min": round(float(s.min()), 2),
+                "max": round(float(s.max()), 2),
+                "mean": round(float(s.mean()), 2),
+                "std": round(float(s.std()), 2),
+            }
+
+    compute_report = {
+        "computed_at": pd.Timestamp.now(tz="UTC").isoformat(),
+        "mode": mode_label,
+        "duration_seconds": round(elapsed, 1),
+        "stock_count": len(result_items),
+        "daily_bars": {
+            "success": success_count,
+            "failed": len(failed_codes),
+            "total": total_stocks,
+        },
+        "data_quality": data_quality,
+        "score_distribution": score_stats,
+        "quadrant_counts": quadrant_counts,
+        "status": "success",
+        "error": "",
+    }
+    logger.info("[quadrant] 计算报告: %s", _json.dumps(compute_report, ensure_ascii=False))
+
     # Update in-memory cache
     with _quadrant_cache_lock:
         global _quadrant_cache_data, _quadrant_cache_ts
         _quadrant_cache_data = result_items
         _quadrant_cache_ts = time.time()
 
-    # Callback to Go backend
+    # Callback to Go backend (include report)
     if callback_url:
-        _send_callback(callback_url, result_items)
+        _send_callback(callback_url, result_items, compute_report)
 
     return result_items
 
@@ -659,11 +700,16 @@ def get_cached_scores() -> Optional[List[Dict[str, Any]]]:
     return None
 
 
-def _send_callback(callback_url: str, items: List[Dict[str, Any]]):
+def _send_callback(callback_url: str, items: List[Dict[str, Any]], report: Optional[Dict] = None):
     try:
-        payload = {"items": items, "computed_at": pd.Timestamp.now(tz="UTC").isoformat()}
+        payload = {
+            "items": items,
+            "computed_at": pd.Timestamp.now(tz="UTC").isoformat(),
+        }
+        if report:
+            payload["report"] = report
         resp = requests.post(
-            callback_url, json=payload, timeout=30,
+            callback_url, json=payload, timeout=60,
             headers={"Content-Type": "application/json"},
         )
         if resp.status_code < 200 or resp.status_code >= 300:

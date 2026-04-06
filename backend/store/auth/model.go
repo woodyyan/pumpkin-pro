@@ -7,6 +7,10 @@ type UserRecord struct {
 	Email        string    `gorm:"size:128;not null;uniqueIndex"`
 	PasswordHash string    `gorm:"size:255;not null"`
 	Status       string    `gorm:"size:20;not null;default:'active'"`
+	UTMSource    string    `gorm:"size:64;not null;default:''"`
+	UTMMedium    string    `gorm:"size:64;not null;default:''"`
+	UTMCampaign  string    `gorm:"size:64;not null;default:''"`
+	Referrer     string    `gorm:"size:512;not null;default:''"`
 	CreatedAt    time.Time `gorm:"not null"`
 	UpdatedAt    time.Time `gorm:"not null"`
 }
@@ -77,8 +81,12 @@ type AuthSessionResult struct {
 }
 
 type RegisterInput struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	UTMSource   string `json:"utm_source"`
+	UTMMedium   string `json:"utm_medium"`
+	UTMCampaign string `json:"utm_campaign"`
+	Referrer    string `json:"referrer"`
 }
 
 type LoginInput struct {

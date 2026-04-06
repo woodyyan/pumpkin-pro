@@ -303,3 +303,31 @@ func (r *Repository) CountScreenerUsers(ctx context.Context) (int64, error) {
 	err := r.db.WithContext(ctx).Table("screener_watchlists").Distinct("user_id").Count(&count).Error
 	return count, err
 }
+
+// ── Traffic source queries ──
+
+type SourceCount struct {
+	Source string `json:"source"`
+	Count  int64  `json:"count"`
+}
+
+func (r *Repository) UTMSourceBreakdown(ctx context.Context) ([]SourceCount, error) {
+	var results []SourceCount
+	err := r.db.WithContext(ctx).Table("users").
+		Select("CASE WHEN utm_source = '' THEN '直接访问' ELSE utm_source END as source, COUNT(*) as count").
+		Group("utm_source").Order("count DESC").
+		Scan(&results).Error
+	return results, err
+}
+
+func (r *Repository) ReferrerBreakdown(ctx context.Context, since time.Time) ([]SourceCount, error) {
+	var results []SourceCount
+	// Extract domain from referrer for grouping
+	err := r.db.WithContext(ctx).Table("page_views").
+		Select("CASE WHEN referrer = '' THEN '直接访问' ELSE referrer END as source, COUNT(*) as count").
+		Where("created_at >= ?", since).
+		Where("referrer != '' OR referrer = ''").
+		Group("source").Order("count DESC").Limit(20).
+		Scan(&results).Error
+	return results, err
+}

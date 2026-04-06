@@ -252,6 +252,7 @@ func (s *Service) GetStats(ctx context.Context) (*StatsResult, error) {
 		Features:    s.collectFeatureStats(ctx, today),
 		Trends:      s.collectTrendStats(ctx),
 		Retention:   s.collectRetentionStats(ctx),
+		Traffic:     s.collectTrafficStats(ctx),
 		GeneratedAt: now.Format(time.RFC3339),
 	}, nil
 }
@@ -303,6 +304,20 @@ func (s *Service) collectRetentionStats(ctx context.Context) RetentionStats {
 	if reg30 > 0 { rate30 = float64(ret30) / float64(reg30) }
 
 	return RetentionStats{Day7Rate: rate7, Day30Rate: rate30}
+}
+
+func (s *Service) collectTrafficStats(ctx context.Context) TrafficStats {
+	utmSources, _ := s.repo.UTMSourceBreakdown(ctx)
+	if utmSources == nil { utmSources = []SourceCount{} }
+
+	thirtyDaysAgo := time.Now().UTC().AddDate(0, 0, -30)
+	referrers, _ := s.repo.ReferrerBreakdown(ctx, thirtyDaysAgo)
+	if referrers == nil { referrers = []SourceCount{} }
+
+	return TrafficStats{
+		UTMSources: utmSources,
+		Referrers:  referrers,
+	}
 }
 
 // ── Helpers ──

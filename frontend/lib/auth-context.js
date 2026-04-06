@@ -90,12 +90,15 @@ export function AuthProvider({ children }) {
   }, [syncSession])
 
   const register = useCallback(async ({ email, password }) => {
+    // Attach UTM params captured on first visit
+    let utm = {}
+    try { utm = JSON.parse(localStorage.getItem('wolong_utm') || '{}') } catch {}
     const result = await requestJson(
       '/api/auth/register',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, ...utm }),
       },
       '注册失败',
     )

@@ -57,6 +57,7 @@ type StatsResult struct {
 	Features    FeatureStats    `json:"features"`
 	Trends      TrendStats      `json:"trends"`
 	Retention   RetentionStats  `json:"retention"`
+	Traffic     TrafficStats    `json:"traffic"`
 	GeneratedAt string          `json:"generated_at"`
 }
 
@@ -119,4 +120,9 @@ type TrendStats struct {
 type RetentionStats struct {
 	Day7Rate  float64 `json:"day_7_rate"`
 	Day30Rate float64 `json:"day_30_rate"`
+}
+
+type TrafficStats struct {
+	UTMSources []SourceCount `json:"utm_sources"`
+	Referrers  []SourceCount `json:"referrers"`
 }

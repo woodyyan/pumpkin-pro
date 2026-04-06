@@ -26,8 +26,32 @@ function getVisitorId() {
   return id
 }
 
+// Capture UTM parameters from URL on first visit and persist them
+function captureUtmParams() {
+  if (typeof window === 'undefined') return
+  const UTM_KEY = 'wolong_utm'
+  if (localStorage.getItem(UTM_KEY)) return // already captured
+  const params = new URLSearchParams(window.location.search)
+  const utm = {}
+  for (const key of ['utm_source', 'utm_medium', 'utm_campaign']) {
+    const val = (params.get(key) || '').trim()
+    if (val) utm[key] = val
+  }
+  // Also capture raw referrer from the very first page load
+  if (document.referrer) utm.referrer = document.referrer
+  if (Object.keys(utm).length > 0) {
+    localStorage.setItem(UTM_KEY, JSON.stringify(utm))
+  }
+}
+
+function getStoredUtm() {
+  if (typeof window === 'undefined') return {}
+  try { return JSON.parse(localStorage.getItem('wolong_utm') || '{}') } catch { return {} }
+}
+
 function reportPageView(path) {
   if (typeof window === 'undefined') return
+  captureUtmParams()
   fetch('/api/analytics/pageview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -35,6 +59,7 @@ function reportPageView(path) {
       page_path: path,
       visitor_id: getVisitorId(),
       screen_width: window.innerWidth,
+      referrer: document.referrer || '',
     }),
   }).catch(() => {})
 }
@@ -76,6 +101,16 @@ function AppLayout({ Component, pageProps }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" type="image/png" href="/favicon.png" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        {/* 百度统计 — 替换 BAIDU_TONGJI_ID 为你的站点 ID */}
+        <script dangerouslySetInnerHTML={{ __html: `
+          var _hmt = _hmt || [];
+          (function() {
+            var hm = document.createElement("script");
+            hm.src = "https://hm.baidu.com/hm.js?BAIDU_TONGJI_ID";
+            var s = document.getElementsByTagName("script")[0];
+            s.parentNode.insertBefore(hm, s);
+          })();
+        `}} />
       </Head>
       <div className="min-h-screen bg-background text-foreground flex flex-col">
         <nav ref={mobileMenuRef} className="fixed top-0 left-0 right-0 bg-black/60 backdrop-blur-md border-b border-white/10 z-50">

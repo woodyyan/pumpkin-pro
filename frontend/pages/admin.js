@@ -373,7 +373,65 @@ function AdminDashboard({ session, onLogout }) {
               </section>
             )}
 
-            {/* Panel 7: Quadrant Compute History */}
+            {/* Panel 7: Traffic Sources */}
+            {stats.traffic && (
+              <section>
+                <h2 className="text-base font-semibold text-white/80 mb-3">🌍 流量来源</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* UTM Source breakdown (user registration source) */}
+                  <div className="rounded-xl border border-white/8 bg-[#15171e] p-4">
+                    <div className="text-xs text-white/40 mb-3">注册来源（UTM Source）</div>
+                    {(stats.traffic.utm_sources || []).length === 0 ? (
+                      <p className="text-xs text-white/25">暂无数据（推广链接加 ?utm_source=xxx 即可追踪）</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {stats.traffic.utm_sources.map((s, i) => {
+                          const maxCount = stats.traffic.utm_sources[0]?.count || 1
+                          const pct = (s.count / maxCount) * 100
+                          return (
+                            <div key={i} className="flex items-center gap-3 text-sm">
+                              <span className="w-24 truncate text-white/60 text-xs">{s.source}</span>
+                              <div className="flex-1 h-4 rounded bg-white/5 overflow-hidden">
+                                <div className="h-full rounded bg-emerald-500/30" style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className="text-xs text-white/50 tabular-nums w-8 text-right">{s.count}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  {/* Referrer breakdown (pageview referrer) */}
+                  <div className="rounded-xl border border-white/8 bg-[#15171e] p-4">
+                    <div className="text-xs text-white/40 mb-3">访问来源（Referrer · 30天）</div>
+                    {(stats.traffic.referrers || []).length === 0 ? (
+                      <p className="text-xs text-white/25">暂无数据</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {stats.traffic.referrers.slice(0, 10).map((s, i) => {
+                          const maxCount = stats.traffic.referrers[0]?.count || 1
+                          const pct = (s.count / maxCount) * 100
+                          // Try to extract domain from referrer URL
+                          let label = s.source
+                          try { label = new URL(s.source).hostname } catch {}
+                          return (
+                            <div key={i} className="flex items-center gap-3 text-sm">
+                              <span className="w-32 truncate text-white/60 text-xs" title={s.source}>{label}</span>
+                              <div className="flex-1 h-4 rounded bg-white/5 overflow-hidden">
+                                <div className="h-full rounded bg-blue-500/30" style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className="text-xs text-white/50 tabular-nums w-8 text-right">{s.count}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* Panel 8: Quadrant Compute History */}
             <QuadrantLogsPanel />
 
             {/* Panel 8: Audit */}

@@ -1443,6 +1443,7 @@ func (a *appServer) handlePageView(w http.ResponseWriter, r *http.Request) {
 		VisitorID:   strings.TrimSpace(input.VisitorID),
 		UserID:      userID,
 		PagePath:    pagePath,
+		Referrer:    strings.TrimSpace(input.Referrer),
 		UserAgent:   r.UserAgent(),
 		ScreenWidth: input.ScreenWidth,
 		CreatedAt:   time.Now().UTC(),

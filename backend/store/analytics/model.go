@@ -21,6 +21,7 @@ type PageViewInput struct {
 	PagePath    string `json:"page_path"`
 	VisitorID   string `json:"visitor_id"`
 	ScreenWidth int    `json:"screen_width"`
+	Referrer    string `json:"referrer"`
 }
 
 // ── Stats types for admin dashboard ──

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/router'
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 
@@ -270,6 +271,12 @@ function getColorClass(value) {
   return 'text-white/50'
 }
 
+// 6 位纯数字 code → 带交易所后缀的 symbol（用于跳转详情页）
+function codeToSymbol(code) {
+  const c = String(code).padStart(6, '0')
+  return c.startsWith('6') || c.startsWith('9') ? `${c}.SH` : `${c}.SZ`
+}
+
 // ─── 防抖 Hook ───────────────────────────────────────────────
 function useDebounce(value, delay) {
   const [debounced, setDebounced] = useState(value)
@@ -283,6 +290,7 @@ function useDebounce(value, delay) {
 // ─── 主页面组件 ──────────────────────────────────────────────
 export default function StockPickerPage() {
   const { isLoggedIn, openAuthModal } = useAuth()
+  const router = useRouter()
 
   const [filters, setFilters] = useState({})
   const [sortBy, setSortBy] = useState('code')
@@ -294,6 +302,46 @@ export default function StockPickerPage() {
   const [error, setError] = useState('')
   const [filtersExpanded, setFiltersExpanded] = useState(true)
   const [industryOptions, setIndustryOptions] = useState([])
+
+  // ── 关注池（用于判断是否已关注）──
+  const [watchedSymbols, setWatchedSymbols] = useState(new Set())
+  const [addingCode, setAddingCode] = useState(null) // 正在关注中的 code
+
+  // 获取用户关注池
+  const fetchWatchedSymbols = useCallback(async () => {
+    if (!isLoggedIn) { setWatchedSymbols(new Set()); return }
+    try {
+      const res = await requestJson('/api/live/watchlist')
+      const codes = new Set((res?.items || []).map((i) => i.symbol.split('.')[0].padStart(6, '0')))
+      setWatchedSymbols(codes)
+    } catch { /* non-critical */ }
+  }, [isLoggedIn])
+
+  useEffect(() => { fetchWatchedSymbols() }, [fetchWatchedSymbols])
+
+  // 一键关注
+  const handleAddWatch = async (code, name) => {
+    if (!isLoggedIn) {
+      openAuthModal('login', '登录后可关注股票')
+      return
+    }
+    const symbol = codeToSymbol(code)
+    setAddingCode(code)
+    try {
+      await requestJson('/api/live/watchlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol, name: name || '' }),
+      })
+      setWatchedSymbols((prev) => new Set([...prev, String(code).padStart(6, '0')]))
+    } catch { /* 静默：可能已存在 */ }
+    setAddingCode(null)
+  }
+
+  // 跳转详情页
+  const handleOpenDetail = (code) => {
+    router.push(`/live-trading/${codeToSymbol(code)}`)
+  }
 
   // ── 自选表状态 ──
   const [watchlists, setWatchlists] = useState([])
@@ -727,6 +775,9 @@ export default function StockPickerPage() {
                     </span>
                   </th>
                 ))}
+                <th className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-medium text-white/50" style={{ minWidth: 70 }}>
+                  操作
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -738,34 +789,80 @@ export default function StockPickerPage() {
                         <div className={`h-4 rounded bg-white/[0.06] animate-pulse ${col.key === 'name' ? 'w-16' : col.key === 'code' ? 'w-14' : 'w-12'}`} />
                       </td>
                     ))}
+                    <td className="px-3 py-2" style={{ minWidth: 70 }}>
+                      <div className="h-4 w-10 rounded bg-white/[0.06] animate-pulse mx-auto" />
+                    </td>
                   </tr>
                 ))
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={TABLE_COLUMNS.length} className="py-16 text-center text-white/40">
+                  <td colSpan={TABLE_COLUMNS.length + 1} className="py-16 text-center text-white/40">
                     {error ? '查询失败' : '无匹配结果'}
                   </td>
                 </tr>
               ) : (
-                items.map((row, idx) => (
-                  <tr
-                    key={row.code || idx}
-                    className="border-b border-white/[0.04] transition hover:bg-white/[0.03]"
-                  >
-                    {TABLE_COLUMNS.map((col) => {
-                      const colorClass = col.colorize ? getColorClass(row[col.key]) : ''
-                      return (
-                        <td
-                          key={col.key}
-                          className={`whitespace-nowrap px-3 py-2 ${colorClass}`}
-                          style={{ minWidth: col.width }}
-                        >
-                          {formatValue(row[col.key], col.format)}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                ))
+                items.map((row, idx) => {
+                  const code6 = String(row.code || '').padStart(6, '0')
+                  const isWatched = watchedSymbols.has(code6)
+                  const isAdding = addingCode === row.code
+                  return (
+                    <tr
+                      key={row.code || idx}
+                      className="border-b border-white/[0.04] transition hover:bg-white/[0.03]"
+                    >
+                      {TABLE_COLUMNS.map((col) => {
+                        const colorClass = col.colorize ? getColorClass(row[col.key]) : ''
+                        // 代码和名称列可点击跳转详情页
+                        if (col.key === 'code' || col.key === 'name') {
+                          return (
+                            <td
+                              key={col.key}
+                              className={`whitespace-nowrap px-3 py-2 ${colorClass}`}
+                              style={{ minWidth: col.width }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => handleOpenDetail(row.code)}
+                                className={`text-left transition ${
+                                  col.key === 'code'
+                                    ? 'font-mono text-primary/80 hover:text-primary hover:underline underline-offset-2'
+                                    : 'text-white/90 hover:text-primary hover:underline underline-offset-2'
+                                }`}
+                              >
+                                {formatValue(row[col.key], col.format)}
+                              </button>
+                            </td>
+                          )
+                        }
+                        return (
+                          <td
+                            key={col.key}
+                            className={`whitespace-nowrap px-3 py-2 ${colorClass}`}
+                            style={{ minWidth: col.width }}
+                          >
+                            {formatValue(row[col.key], col.format)}
+                          </td>
+                        )
+                      })}
+                      <td className="whitespace-nowrap px-3 py-2 text-center" style={{ minWidth: 70 }}>
+                        {isWatched ? (
+                          <span className="inline-flex items-center gap-0.5 text-[11px] text-white/30">
+                            <span>✓</span> 已关注
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={isAdding}
+                            onClick={() => handleAddWatch(row.code, row.name)}
+                            className="inline-flex items-center gap-0.5 rounded-md border border-primary/30 bg-primary/8 px-2 py-0.5 text-[11px] font-medium text-primary transition hover:bg-primary/15 disabled:opacity-40"
+                          >
+                            {isAdding ? '...' : '+ 关注'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>

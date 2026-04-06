@@ -12,7 +12,6 @@ const NAV_ITEMS = [
   { href: '/backtest', label: '回测引擎' },
   { href: '/live-trading', label: '行情看板' },
   { href: '/stock-picker', label: '选股器' },
-  { href: '/settings', label: '设置' },
   { href: '/changelog', label: '更新日志' },
 ]
 
@@ -233,6 +232,14 @@ function AccountEntry() {
             <div className="text-xs text-white/45">当前账号</div>
             <div className="mt-1 truncate text-sm text-white/90">{user?.email || '--'}</div>
           </div>
+
+          <Link
+            href="/settings"
+            onClick={() => setMenuOpen(false)}
+            className="mt-2 block w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-white/75 transition hover:bg-white/10 hover:text-white"
+          >
+            ⚙️ 设置
+          </Link>
 
           <button
             type="button"

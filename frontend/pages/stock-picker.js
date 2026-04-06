@@ -652,6 +652,7 @@ export default function StockPickerPage() {
 
       {/* ─── AI 自然语言选股 ─── */}
       <section className="rounded-2xl border border-border bg-card px-5 py-3">
+        <div className="mb-2 text-xs font-medium text-white/50">AI 一句话选股</div>
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
             <input

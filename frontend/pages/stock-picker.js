@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useRouter } from 'next/router'
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 
@@ -290,7 +289,6 @@ function useDebounce(value, delay) {
 // ─── 主页面组件 ──────────────────────────────────────────────
 export default function StockPickerPage() {
   const { isLoggedIn, openAuthModal } = useAuth()
-  const router = useRouter()
 
   const [filters, setFilters] = useState({})
   const [sortBy, setSortBy] = useState('code')
@@ -338,9 +336,9 @@ export default function StockPickerPage() {
     setAddingCode(null)
   }
 
-  // 跳转详情页
+  // 跳转详情页（新标签页）
   const handleOpenDetail = (code) => {
-    router.push(`/live-trading/${codeToSymbol(code)}`)
+    window.open(`/live-trading/${codeToSymbol(code)}`, '_blank')
   }
 
   // ── 自选表状态 ──

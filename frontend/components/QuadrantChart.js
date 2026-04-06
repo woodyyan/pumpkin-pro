@@ -161,21 +161,32 @@ export default function QuadrantChart({
     ctx.fillText('Risk →', 0, 0)
     ctx.restore()
 
-    // Quadrant labels
-    ctx.font = '12px system-ui, sans-serif'
-    ctx.globalAlpha = 0.35
-    ctx.fillStyle = QUADRANT_COLOURS['泡沫'].label
-    ctx.textAlign = 'left'
-    ctx.fillText('泡沫区', PADDING.left + 8, PADDING.top + 20)
-    ctx.fillStyle = QUADRANT_COLOURS['拥挤'].label
-    ctx.textAlign = 'right'
-    ctx.fillText('拥挤区', PADDING.left + plotW - 8, PADDING.top + 20)
-    ctx.fillStyle = QUADRANT_COLOURS['防御'].label
-    ctx.textAlign = 'left'
-    ctx.fillText('防御区', PADDING.left + 8, PADDING.top + plotH - 8)
-    ctx.fillStyle = QUADRANT_COLOURS['机会'].label
-    ctx.textAlign = 'right'
-    ctx.fillText('机会区', PADDING.left + plotW - 8, PADDING.top + plotH - 8)
+    // Quadrant labels (with dark background pill for readability)
+    const quadrantLabels = [
+      { text: '泡沫区', color: QUADRANT_COLOURS['泡沫'].label, x: PADDING.left + 10, y: PADDING.top + 22, align: 'left' },
+      { text: '拥挤区', color: QUADRANT_COLOURS['拥挤'].label, x: PADDING.left + plotW - 10, y: PADDING.top + 22, align: 'right' },
+      { text: '防御区', color: QUADRANT_COLOURS['防御'].label, x: PADDING.left + 10, y: PADDING.top + plotH - 10, align: 'left' },
+      { text: '机会区', color: QUADRANT_COLOURS['机会'].label, x: PADDING.left + plotW - 10, y: PADDING.top + plotH - 10, align: 'right' },
+    ]
+    ctx.font = 'bold 13px system-ui, sans-serif'
+    for (const lbl of quadrantLabels) {
+      const metrics = ctx.measureText(lbl.text)
+      const pw = metrics.width + 12
+      const ph = 20
+      const px = lbl.align === 'right' ? lbl.x - pw : lbl.x
+      const py = lbl.y - 14
+      // Dark pill background
+      ctx.globalAlpha = 0.55
+      ctx.fillStyle = '#0d0f14'
+      ctx.beginPath()
+      ctx.roundRect(px, py, pw, ph, 4)
+      ctx.fill()
+      // Colored text
+      ctx.globalAlpha = 0.85
+      ctx.fillStyle = lbl.color
+      ctx.textAlign = lbl.align
+      ctx.fillText(lbl.text, lbl.align === 'right' ? lbl.x - 6 : lbl.x + 6, lbl.y)
+    }
     ctx.globalAlpha = 1.0
 
     // Tick marks on axes

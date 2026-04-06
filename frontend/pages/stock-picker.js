@@ -631,7 +631,7 @@ export default function StockPickerPage() {
       {/* ─── Hero Section ─── */}
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">选股平台</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">选股器</h1>
           <p className="mt-1 text-sm text-white/50">A 股全市场多维指标筛选，实时行情数据</p>
         </div>
         <div className="flex items-center gap-3 text-sm">

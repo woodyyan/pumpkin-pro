@@ -22,7 +22,7 @@ const FEATURES = [
     cta: '开始回测',
   },
   {
-    icon: '🔍', title: '选股平台', href: '/stock-picker',
+    icon: '🔍', title: '选股器', href: '/stock-picker',
     points: ['AI 自然语言智能选股', '多维条件筛选（行业 + 财务 + 技术面）', '全市场 A 股扫描', '支持排序与分页', '自选表保存与加载'],
     cta: '去选股',
   },
@@ -54,7 +54,7 @@ const STEPS = [
 const SCREENSHOTS = [
   { id: 'live', label: '行情看板', desc: '实时行情数据 + 技术指标 + 基本面分析' },
   { id: 'backtest', label: '策略回测', desc: '历史数据回测 + 收益曲线 + 交易记录' },
-  { id: 'picker', label: '选股平台', desc: 'AI 智能选股 + 多维条件筛选' },
+  { id: 'picker', label: '选股器', desc: 'AI 智能选股 + 多维条件筛选' },
   { id: 'quadrant', label: '四象限', desc: '全市场风险机会全景散点图' },
 ]
 
@@ -98,7 +98,7 @@ const TUTORIALS = [
   {
     q: '如何使用 AI 智能选股？',
     steps: [
-      '进入「选股平台」页面',
+      '进入「选股器」页面',
       '在顶部搜索框中用自然语言描述你的选股条件',
       '例如：「市盈率低于 20，净利润增长率大于 30% 的医药行业股票」',
       'AI 会自动解析条件并执行筛选',

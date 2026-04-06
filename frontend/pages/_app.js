@@ -11,7 +11,7 @@ const NAV_ITEMS = [
   { href: '/strategies', label: '策略库' },
   { href: '/backtest', label: '回测引擎' },
   { href: '/live-trading', label: '行情看板' },
-  { href: '/stock-picker', label: '选股平台' },
+  { href: '/stock-picker', label: '选股器' },
   { href: '/settings', label: '设置' },
   { href: '/changelog', label: '更新日志' },
 ]

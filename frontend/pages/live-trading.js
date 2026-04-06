@@ -262,16 +262,6 @@ export default function LiveTradingOverviewPage() {
               <QuadrantChart
                 allStocks={quadrantData.all_stocks}
                 watchlist={quadrantData.watchlist_details || []}
-                onClickStock={(code) => {
-                  const matchItem = (watchlist.items || []).find((i) => {
-                    const itemCode = i.symbol.split('.')[0].replace(/^0+/, '')
-                    const targetCode = code.replace(/^0+/, '')
-                    return itemCode === targetCode
-                  })
-                  if (matchItem) {
-                    handleOpenDetail(matchItem.symbol)
-                  }
-                }}
               />
             </div>
 

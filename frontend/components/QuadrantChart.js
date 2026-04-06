@@ -37,11 +37,9 @@ export default function QuadrantChart({
   watchlist = [],
   width: propWidth,
   height: propHeight,
-  onClickStock,
 }) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
-  const tooltipRef = useRef(null)
   // Spatial index for hover detection
   const gridRef = useRef(null)
   const hoveredRef = useRef(null)
@@ -248,11 +246,13 @@ export default function QuadrantChart({
     buildGrid()
   }, [draw, buildGrid])
 
+  // Tooltip state (interactive card instead of pointer-events-none text)
+  const [activeTooltip, setActiveTooltip] = useState(null) // { name, code, opportunity, risk, quadrant, x, y }
+
   // Hover handling
   const handleMouseMove = useCallback((e) => {
     const canvas = canvasRef.current
-    const tooltip = tooltipRef.current
-    if (!canvas || !tooltip || !gridRef.current) return
+    if (!canvas || !gridRef.current) return
 
     const rect = canvas.getBoundingClientRect()
     const mx = e.clientX - rect.left
@@ -263,9 +263,8 @@ export default function QuadrantChart({
     const gy = Math.min(GRID_SIZE - 1, Math.max(0, Math.floor((my - PADDING.top) / cellH)))
 
     let closest = null
-    let closestDist = 15 // max hover distance in px
+    let closestDist = 15
 
-    // Check current cell and neighbors
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
         const ny = gy + dy
@@ -281,37 +280,50 @@ export default function QuadrantChart({
       }
     }
 
-    if (closest) {
-      hoveredRef.current = closest
-      const label = closest.isWatchlist
-        ? `${closest.name} (${closest.code})\n机会: ${closest.opportunity.toFixed(1)} | 风险: ${closest.risk.toFixed(1)}\n象限: ${closest.quadrant}`
-        : `${closest.name} (${closest.code})\n机会: ${closest.opportunity.toFixed(1)} | 风险: ${closest.risk.toFixed(1)}`
-      tooltip.textContent = label
-      tooltip.style.display = 'block'
-      tooltip.style.left = `${mx + 12}px`
-      tooltip.style.top = `${my - 10}px`
-      canvas.style.cursor = 'pointer'
-    } else {
-      hoveredRef.current = null
-      tooltip.style.display = 'none'
-      canvas.style.cursor = 'default'
-    }
+    hoveredRef.current = closest
+    canvas.style.cursor = closest ? 'pointer' : 'default'
   }, [])
 
-  const handleClick = useCallback(() => {
-    if (hoveredRef.current && onClickStock) {
-      onClickStock(hoveredRef.current.code)
+  const handleClick = useCallback((e) => {
+    const item = hoveredRef.current
+    if (!item) {
+      setActiveTooltip(null)
+      return
     }
-  }, [onClickStock])
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    setActiveTooltip({
+      name: item.name,
+      code: item.code,
+      opportunity: item.opportunity,
+      risk: item.risk,
+      quadrant: item.quadrant || '',
+      isWatchlist: item.isWatchlist,
+      x: mx,
+      y: my,
+    })
+  }, [])
 
   const handleMouseLeave = useCallback(() => {
-    if (tooltipRef.current) {
-      tooltipRef.current.style.display = 'none'
-    }
+    // Don't clear tooltip on mouse leave — user may want to click the button
   }, [])
 
+  // Code → symbol helper
+  const codeToSymbol = (code) => {
+    const c = String(code).padStart(6, '0')
+    return c.startsWith('6') || c.startsWith('9') ? `${c}.SH` : `${c}.SZ`
+  }
+
   return (
-    <div ref={containerRef} className="relative w-full">
+    <div ref={containerRef} className="relative w-full" onClick={(e) => {
+      // Close tooltip when clicking outside it
+      if (e.target === canvasRef.current) return // canvas click handled by handleClick
+      if (e.target.closest('[data-quadrant-tooltip]')) return
+      setActiveTooltip(null)
+    }}>
       <canvas
         ref={canvasRef}
         style={{ width, height }}
@@ -319,11 +331,33 @@ export default function QuadrantChart({
         onClick={handleClick}
         onMouseLeave={handleMouseLeave}
       />
-      <div
-        ref={tooltipRef}
-        className="pointer-events-none absolute z-10 hidden whitespace-pre rounded-lg border border-border bg-card/95 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-sm"
-        style={{ display: 'none' }}
-      />
+      {activeTooltip && (
+        <div
+          data-quadrant-tooltip
+          className="absolute z-10 rounded-lg border border-border bg-card/95 px-3 py-2.5 text-xs text-white shadow-xl backdrop-blur-sm"
+          style={{
+            left: Math.min(activeTooltip.x + 12, width - 180),
+            top: Math.max(activeTooltip.y - 10, 0),
+          }}
+        >
+          <div className="font-medium">{activeTooltip.name} ({String(activeTooltip.code).padStart(6, '0')})</div>
+          <div className="mt-1 text-white/60">
+            机会: {activeTooltip.opportunity.toFixed(1)} | 风险: {activeTooltip.risk.toFixed(1)}
+            {activeTooltip.quadrant && <span> | {activeTooltip.quadrant}</span>}
+          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              window.open(`/live-trading/${codeToSymbol(activeTooltip.code)}`, '_blank')
+              setActiveTooltip(null)
+            }}
+            className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary transition hover:bg-primary/20"
+          >
+            查看详情 →
+          </button>
+        </div>
+      )}
     </div>
   )
 }

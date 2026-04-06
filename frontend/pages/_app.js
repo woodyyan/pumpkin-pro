@@ -163,6 +163,11 @@ function AppLayout({ Component, pageProps }) {
             <span>·</span>
             <Link href="/disclaimer" className="hover:text-white/60 transition">免责声明</Link>
           </div>
+          <div className="flex items-center justify-center gap-3">
+            <a href="mailto:easystudio@outlook.com" className="hover:text-white/60 transition">📧 easystudio@outlook.com</a>
+            <span>·</span>
+            <a href="https://weibo.com/u/5613355795" target="_blank" rel="noopener noreferrer" className="hover:text-white/60 transition">微博</a>
+          </div>
           <p>© {new Date().getFullYear()} Easy Studio Inc. All rights reserved.</p>
         </footer>
       </div>

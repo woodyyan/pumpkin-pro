@@ -13,6 +13,7 @@ Risk Score        = 0.4 * Volatility + 0.3 * Drawdown + 0.3 * Crowding
 import json as _json
 import logging
 import os
+import sqlite3
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -33,7 +34,9 @@ REQUEST_INTERVAL_MS = 200          # 每次请求后的间隔（毫秒）
 SINGLE_RETRY_DELAY_MS = 500        # 单只失败后重试前的等待（毫秒）
 MIN_SUCCESS_RATIO = 0.80           # 成功率 < 80% 视为整体失败
 FULL_REFRESH_INTERVAL_DAYS = 7     # 每 7 天强制全量刷新一次缓存
-CACHE_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "cache", "quadrant_daily_cache.json")
+_CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "cache")
+CACHE_DB_PATH = os.path.join(_CACHE_DIR, "quadrant_cache.db")
+LEGACY_JSON_PATH = os.path.join(_CACHE_DIR, "quadrant_daily_cache.json")
 
 # Quadrant thresholds
 OPPORTUNITY_HIGH = 70
@@ -48,53 +51,104 @@ _quadrant_cache_ts: float = 0.0
 _QUADRANT_CACHE_TTL = 6 * 3600  # 6 hours
 
 
-# ── Daily bar cache (file-based) ──────────────────────────────
+# ── Daily bar cache (SQLite-based) ────────────────────────────
 
 class DailyBarCache:
-    """管理本地日线缓存文件。"""
+    """管理本地日线缓存，存储在 SQLite 中。"""
 
-    def __init__(self, file_path: str = CACHE_FILE_PATH):
-        self.file_path = file_path
-        self._data: Optional[Dict] = None
+    def __init__(self, db_path: str = CACHE_DB_PATH):
+        self.db_path = db_path
+        self._conn: Optional[sqlite3.Connection] = None
+        self._ensure_db()
+        self._maybe_migrate_from_json()
 
-    def load(self) -> Dict:
-        """从文件加载缓存，不存在则返回空结构。"""
-        if self._data is not None:
-            return self._data
-        if not os.path.exists(self.file_path):
-            self._data = {"version": 2, "last_full_refresh": "", "last_incremental": "", "stocks": {}}
-            return self._data
+    def _ensure_db(self):
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        self._conn = sqlite3.connect(self.db_path, timeout=30)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS daily_bars (
+                code TEXT NOT NULL,
+                date TEXT NOT NULL,
+                open REAL NOT NULL,
+                close REAL NOT NULL,
+                high REAL NOT NULL,
+                low REAL NOT NULL,
+                volume REAL NOT NULL DEFAULT 0,
+                turnover_rate REAL,
+                PRIMARY KEY (code, date)
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS cache_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+        self._conn.commit()
+
+    def _maybe_migrate_from_json(self):
+        """首次启动时，如果旧 JSON 缓存存在且 SQLite 为空，自动迁移。"""
+        if not os.path.exists(LEGACY_JSON_PATH):
+            return
+        count = self._conn.execute("SELECT COUNT(*) FROM daily_bars").fetchone()[0]
+        if count > 0:
+            return  # SQLite already has data, skip migration
         try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
-                self._data = _json.load(f)
-            logger.info("[quadrant-cache] 加载缓存: %d 只股票", len(self._data.get("stocks", {})))
-            return self._data
+            logger.info("[quadrant-cache] 检测到旧 JSON 缓存，开始迁移到 SQLite...")
+            with open(LEGACY_JSON_PATH, "r", encoding="utf-8") as f:
+                data = _json.load(f)
+            stocks = data.get("stocks", {})
+            if not stocks:
+                logger.info("[quadrant-cache] 旧缓存为空，跳过迁移")
+                return
+            rows = []
+            for code, info in stocks.items():
+                for bar in info.get("bars", []):
+                    rows.append((
+                        code, bar.get("date", ""),
+                        float(bar.get("open", 0)), float(bar.get("close", 0)),
+                        float(bar.get("high", 0)), float(bar.get("low", 0)),
+                        float(bar.get("volume", 0)),
+                        float(bar["turnover_rate"]) if bar.get("turnover_rate") is not None else None,
+                    ))
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO daily_bars (code, date, open, close, high, low, volume, turnover_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+            # Migrate meta
+            for key in ("last_full_refresh", "last_incremental"):
+                val = data.get(key, "")
+                if val:
+                    self._conn.execute("INSERT OR REPLACE INTO cache_meta (key, value) VALUES (?, ?)", (key, val))
+            self._conn.commit()
+            logger.info("[quadrant-cache] ✅ 迁移完成: %d 只股票, %d 条日线", len(stocks), len(rows))
         except Exception as exc:
-            logger.warning("[quadrant-cache] 加载缓存失败: %s, 将重新创建", exc)
-            self._data = {"version": 2, "last_full_refresh": "", "last_incremental": "", "stocks": {}}
-            return self._data
+            logger.error("[quadrant-cache] 迁移失败: %s", exc)
+
+    def _get_meta(self, key: str) -> str:
+        row = self._conn.execute("SELECT value FROM cache_meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else ""
+
+    def _set_meta(self, key: str, value: str):
+        self._conn.execute("INSERT OR REPLACE INTO cache_meta (key, value) VALUES (?, ?)", (key, value))
+        self._conn.commit()
 
     def save(self):
-        """将缓存写回文件。"""
-        if self._data is None:
-            return
-        try:
-            os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
-            with open(self.file_path, "w", encoding="utf-8") as f:
-                _json.dump(self._data, f, ensure_ascii=False)
-            stock_count = len(self._data.get("stocks", {}))
-            logger.info("[quadrant-cache] 缓存已保存: %d 只股票", stock_count)
-        except Exception as exc:
-            logger.error("[quadrant-cache] 保存缓存失败: %s", exc)
+        """提交所有待写入的数据。"""
+        if self._conn:
+            self._conn.commit()
+            count = self._conn.execute("SELECT COUNT(DISTINCT code) FROM daily_bars").fetchone()[0]
+            logger.info("[quadrant-cache] 缓存已保存: %d 只股票", count)
 
     def needs_full_refresh(self, force_full: bool = False) -> bool:
-        """判断是否需要全量刷新。"""
         if force_full:
             return True
-        data = self.load()
-        if not data.get("stocks"):
+        count = self._conn.execute("SELECT COUNT(*) FROM daily_bars").fetchone()[0]
+        if count == 0:
             return True
-        last_full = data.get("last_full_refresh", "")
+        last_full = self._get_meta("last_full_refresh")
         if not last_full:
             return True
         try:
@@ -105,48 +159,57 @@ class DailyBarCache:
             return True
 
     def get_stock_bars(self, code: str) -> Optional[List[Dict]]:
-        """获取某只股票的缓存日线。"""
-        data = self.load()
-        stock = data.get("stocks", {}).get(code)
-        if stock is None:
+        rows = self._conn.execute(
+            "SELECT date, open, close, high, low, volume, turnover_rate FROM daily_bars WHERE code = ? ORDER BY date",
+            (code,),
+        ).fetchall()
+        if not rows:
             return None
-        return stock.get("bars")
+        bars = []
+        for r in rows:
+            bar = {"date": r[0], "open": r[1], "close": r[2], "high": r[3], "low": r[4], "volume": r[5]}
+            if r[6] is not None:
+                bar["turnover_rate"] = r[6]
+            bars.append(bar)
+        return bars
 
     def set_stock_bars(self, code: str, bars: List[Dict]):
-        """更新某只股票的缓存日线。"""
-        data = self.load()
-        if "stocks" not in data:
-            data["stocks"] = {}
-        data["stocks"][code] = {
-            "bars": bars,
-            "updated_at": pd.Timestamp.today().strftime("%Y-%m-%d"),
-        }
+        self._conn.execute("DELETE FROM daily_bars WHERE code = ?", (code,))
+        rows = []
+        for bar in bars:
+            rows.append((
+                code, bar.get("date", ""),
+                float(bar.get("open", 0)), float(bar.get("close", 0)),
+                float(bar.get("high", 0)), float(bar.get("low", 0)),
+                float(bar.get("volume", 0)),
+                float(bar["turnover_rate"]) if bar.get("turnover_rate") is not None else None,
+            ))
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO daily_bars (code, date, open, close, high, low, volume, turnover_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
 
     def merge_incremental(self, code: str, new_bars: List[Dict]):
-        """将增量日线追加到缓存，去重 + 裁剪。"""
         existing = self.get_stock_bars(code) or []
         existing_dates = {b["date"] for b in existing}
         for bar in new_bars:
             if bar["date"] not in existing_dates:
                 existing.append(bar)
                 existing_dates.add(bar["date"])
-        # Sort by date and keep only last DAILY_LOOKBACK_DAYS
         existing.sort(key=lambda b: b["date"])
         if len(existing) > DAILY_LOOKBACK_DAYS:
             existing = existing[-DAILY_LOOKBACK_DAYS:]
         self.set_stock_bars(code, existing)
 
     def mark_full_refresh(self):
-        data = self.load()
-        data["last_full_refresh"] = pd.Timestamp.today().strftime("%Y-%m-%d")
-        data["last_incremental"] = pd.Timestamp.today().strftime("%Y-%m-%d")
+        today = pd.Timestamp.today().strftime("%Y-%m-%d")
+        self._set_meta("last_full_refresh", today)
+        self._set_meta("last_incremental", today)
 
     def mark_incremental(self):
-        data = self.load()
-        data["last_incremental"] = pd.Timestamp.today().strftime("%Y-%m-%d")
+        self._set_meta("last_incremental", pd.Timestamp.today().strftime("%Y-%m-%d"))
 
     def bars_to_dataframe(self, code: str) -> Optional[pd.DataFrame]:
-        """将缓存日线转为 DataFrame。"""
         bars = self.get_stock_bars(code)
         if not bars:
             return None
@@ -155,8 +218,13 @@ class DailyBarCache:
         for col in ["open", "close", "high", "low", "volume"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
+        if "turnover_rate" in df.columns:
+            df["turnover_rate"] = pd.to_numeric(df["turnover_rate"], errors="coerce")
         df = df.sort_values("date").reset_index(drop=True)
         return df
+
+    def stock_count(self) -> int:
+        return self._conn.execute("SELECT COUNT(DISTINCT code) FROM daily_bars").fetchone()[0]
 
 
 # ── Data source: Tencent Finance (primary) ─────────────────────
@@ -450,9 +518,8 @@ def compute_all_quadrant_scores(
         )
 
     # For incremental mode, even if many fail, we still have cached data
-    # Count how many stocks have usable cached data
     if not is_full:
-        cached_count = sum(1 for code in all_codes if cache.get_stock_bars(code))
+        cached_count = cache.stock_count()
         cached_ratio = cached_count / total_stocks if total_stocks > 0 else 0
         logger.info("[quadrant] 缓存覆盖: %d / %d (%.1f%%)", cached_count, total_stocks, cached_ratio * 100)
         if cached_ratio < MIN_SUCCESS_RATIO:

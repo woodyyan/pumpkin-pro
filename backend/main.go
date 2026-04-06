@@ -1736,9 +1736,19 @@ func (a *appServer) handleQuadrant(w http.ResponseWriter, r *http.Request) {
 	// Parse watchlist_symbols from query
 	watchlistSymbols := splitCSV(r.URL.Query().Get("watchlist_symbols"))
 	// Convert A-share symbols (e.g. 600519.SH) to 6-digit codes (600519)
+	// Skip HK stocks to avoid code collision (e.g. 00700.HK → 000700 ≠ A-share 000700)
 	watchlistCodes := make([]string, 0, len(watchlistSymbols))
 	for _, sym := range watchlistSymbols {
-		code := strings.TrimSpace(sym)
+		sym = strings.TrimSpace(sym)
+		if sym == "" {
+			continue
+		}
+		// Skip Hong Kong stocks
+		upper := strings.ToUpper(sym)
+		if strings.HasSuffix(upper, ".HK") {
+			continue
+		}
+		code := sym
 		if idx := strings.Index(code, "."); idx > 0 {
 			code = code[:idx]
 		}

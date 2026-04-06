@@ -118,7 +118,9 @@ export default function LiveTradingOverviewPage() {
         loadSignalConfigs()
         // Load quadrant with watchlist symbols (non-blocking)
         const symbols = (wl?.items || []).map((i) => i.symbol)
-        loadQuadrant(symbols)
+        // 四象限只覆盖 A 股，过滤掉港股（.HK）
+        const aShareSymbols = symbols.filter((s) => !s.endsWith('.HK'))
+        loadQuadrant(aShareSymbols)
       }
       await loadSnapshots()
       updateError('')

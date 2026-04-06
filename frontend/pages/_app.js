@@ -101,12 +101,12 @@ function AppLayout({ Component, pageProps }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" type="image/png" href="/favicon.png" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-        {/* 百度统计 — 替换 BAIDU_TONGJI_ID 为你的站点 ID */}
+        {/* 百度统计 */}
         <script dangerouslySetInnerHTML={{ __html: `
           var _hmt = _hmt || [];
           (function() {
             var hm = document.createElement("script");
-            hm.src = "https://hm.baidu.com/hm.js?BAIDU_TONGJI_ID";
+            hm.src = "https://hm.baidu.com/hm.js?2dbedd62cd5d38840b696b0dfb4ea2d1";
             var s = document.getElementsByTagName("script")[0];
             s.parentNode.insertBefore(hm, s);
           })();

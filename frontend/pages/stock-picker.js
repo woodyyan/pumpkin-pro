@@ -21,6 +21,16 @@ function writeScreenerCache(data) {
   } catch { /* quota exceeded, ignore */ }
 }
 
+// ─── AI 选股示例标签 ─────────────────────────────────────────
+const AI_EXAMPLE_QUERIES = [
+  '挣钱的蓝筹股',
+  '低估值绩优股',
+  '高增长小盘股',
+  '最近跌多了的好公司',
+  '科技行业龙头',
+  '今天涨停的',
+]
+
 // ─── 筛选条件配置（单下拉 · 预设区间） ──────────────────────
 // 每个选项自带 min/max，选中即生效，用户只需选一次
 const FILTER_FIELDS = [
@@ -648,7 +658,7 @@ export default function StockPickerPage() {
               value={aiQuery}
               onChange={(e) => setAiQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !aiParsing && handleAIParse()}
-              placeholder={'用自然语言描述选股条件，如"游戏行业，市值 50 到 200 亿，利润增长率大于 30%，PE 小于 20"'}
+              placeholder={'随便说，如"挣钱的蓝筹股""最近涨得好的科技股""帮我找便宜的小盘股"'}
               className="w-full rounded-xl border border-white/15 bg-white/5 py-2 pl-3 pr-20 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary/50 focus:ring-1 focus:ring-primary/30"
             />
             <button
@@ -660,6 +670,20 @@ export default function StockPickerPage() {
               {aiParsing ? '解析中...' : 'AI 选股'}
             </button>
           </div>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-white/30">试试：</span>
+          {AI_EXAMPLE_QUERIES.map((example) => (
+            <button
+              key={example}
+              type="button"
+              disabled={aiParsing}
+              onClick={() => { setAiQuery(example); }}
+              className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-white/45 transition hover:border-primary/30 hover:bg-primary/10 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {example}
+            </button>
+          ))}
         </div>
         {aiSummary && (
           <p className="mt-2 text-xs text-primary/70">

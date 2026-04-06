@@ -4,6 +4,8 @@ from typing import Any, Callable, Dict, List
 import pandas as pd
 
 from indicators.technical_indicators import TechnicalIndicators
+from strategy.bollinger_macd_strategy import BollingerMACDStrategy
+from strategy.dual_confirm_strategy import DualConfirmStrategy
 from strategy.grid_strategy import GridStrategy
 from strategy.macd_strategy import MACDStrategy
 from strategy.mean_reversion_strategy import MeanReversionStrategy
@@ -65,6 +67,20 @@ class StrategyRegistry:
                 attach_indicators=_attach_volume_breakout_indicators,
                 build_strategy=_build_volume_breakout_strategy,
                 get_overlay_columns=_volume_breakout_overlay_columns,
+            ),
+            "dual_confirm": StrategyExecutionAdapter(
+                implementation_key="dual_confirm",
+                validate_params=_validate_dual_confirm_params,
+                attach_indicators=_attach_dual_confirm_indicators,
+                build_strategy=_build_dual_confirm_strategy,
+                get_overlay_columns=_dual_confirm_overlay_columns,
+            ),
+            "bollinger_macd": StrategyExecutionAdapter(
+                implementation_key="bollinger_macd",
+                validate_params=_validate_bollinger_macd_params,
+                attach_indicators=_attach_bollinger_macd_indicators,
+                build_strategy=_build_bollinger_macd_strategy,
+                get_overlay_columns=_bollinger_macd_overlay_columns,
             ),
         }
 
@@ -245,3 +261,106 @@ def _build_volume_breakout_strategy(data: pd.DataFrame, params: Dict[str, Any]) 
 def _volume_breakout_overlay_columns(params: Dict[str, Any]) -> List[str]:
     exit_ma = int(params["exit_ma_period"])
     return [f"MA{exit_ma}"]
+
+
+# ── 双重确认策略（趋势+动量组合） ──
+
+ALLOWED_LOGIC_MODES = {"and", "or"}
+
+
+def _validate_dual_confirm_params(params: Dict[str, Any]) -> None:
+    if int(params["ma_short"]) >= int(params["ma_long"]):
+        raise ValueError("短均线周期必须小于长均线周期")
+    if float(params["rsi_low"]) >= float(params["rsi_high"]):
+        raise ValueError("RSI 低阈值必须小于高阈值")
+    if int(params["confirm_window"]) < 1:
+        raise ValueError("确认窗口最小为 1 天")
+    mode = str(params.get("logic_mode", "and")).strip().lower()
+    if mode not in ALLOWED_LOGIC_MODES:
+        raise ValueError(f"逻辑模式必须为 and 或 or，当前值: {mode}")
+
+
+def _attach_dual_confirm_indicators(data: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
+    indicator_calc = TechnicalIndicators(data)
+    enriched = indicator_calc.data.copy()
+    short_p = int(params["ma_short"])
+    long_p = int(params["ma_long"])
+    rsi_p = int(params["rsi_period"])
+    enriched[f"MA{short_p}"] = indicator_calc.calculate_ma(short_p)
+    enriched[f"MA{long_p}"] = indicator_calc.calculate_ma(long_p)
+    enriched[f"RSI_{rsi_p}"] = indicator_calc.calculate_rsi(period=rsi_p)
+    return enriched
+
+
+def _build_dual_confirm_strategy(data: pd.DataFrame, params: Dict[str, Any]) -> DualConfirmStrategy:
+    return DualConfirmStrategy(
+        data,
+        ma_short=int(params["ma_short"]),
+        ma_long=int(params["ma_long"]),
+        rsi_period=int(params["rsi_period"]),
+        rsi_low=float(params["rsi_low"]),
+        rsi_high=float(params["rsi_high"]),
+        confirm_window=int(params["confirm_window"]),
+        logic_mode=str(params.get("logic_mode", "and")),
+    )
+
+
+def _dual_confirm_overlay_columns(params: Dict[str, Any]) -> List[str]:
+    return [
+        f"MA{int(params['ma_short'])}",
+        f"MA{int(params['ma_long'])}",
+        f"RSI_{int(params['rsi_period'])}",
+    ]
+
+
+# ── 布林带 + MACD 组合策略 ──
+
+
+def _validate_bollinger_macd_params(params: Dict[str, Any]) -> None:
+    if int(params["bb_period"]) < 5:
+        raise ValueError("布林带周期最小为 5")
+    if float(params["bb_std"]) <= 0:
+        raise ValueError("布林带标准差倍数必须大于 0")
+    if int(params["fast_period"]) >= int(params["slow_period"]):
+        raise ValueError("MACD 快线周期必须小于慢线周期")
+    if int(params["signal_period"]) < 2:
+        raise ValueError("MACD 信号线周期最小为 2")
+    mode = str(params.get("logic_mode", "and")).strip().lower()
+    if mode not in ALLOWED_LOGIC_MODES:
+        raise ValueError(f"逻辑模式必须为 and 或 or，当前值: {mode}")
+
+
+def _attach_bollinger_macd_indicators(data: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
+    indicator_calc = TechnicalIndicators(data)
+    enriched = indicator_calc.data.copy()
+    upper, mid, lower = indicator_calc.calculate_bollinger_bands(
+        period=int(params["bb_period"]), std_dev=float(params["bb_std"])
+    )
+    enriched["BB_upper"] = upper
+    enriched["BB_mid"] = mid
+    enriched["BB_lower"] = lower
+    dif, dea, histogram = indicator_calc.calculate_macd(
+        fast_period=int(params["fast_period"]),
+        slow_period=int(params["slow_period"]),
+        signal_period=int(params["signal_period"]),
+    )
+    enriched["MACD_DIF"] = dif
+    enriched["MACD_DEA"] = dea
+    enriched["MACD_HIST"] = histogram
+    return enriched
+
+
+def _build_bollinger_macd_strategy(data: pd.DataFrame, params: Dict[str, Any]) -> BollingerMACDStrategy:
+    return BollingerMACDStrategy(
+        data,
+        bb_period=int(params["bb_period"]),
+        bb_std=float(params["bb_std"]),
+        fast_period=int(params["fast_period"]),
+        slow_period=int(params["slow_period"]),
+        signal_period=int(params["signal_period"]),
+        logic_mode=str(params.get("logic_mode", "and")),
+    )
+
+
+def _bollinger_macd_overlay_columns(params: Dict[str, Any]) -> List[str]:
+    return ["BB_upper", "BB_mid", "BB_lower", "MACD_DIF", "MACD_DEA"]

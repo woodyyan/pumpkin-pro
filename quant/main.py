@@ -835,6 +835,41 @@ def _build_volume_breakout_reason(params: Dict, enriched: pd.DataFrame, signal: 
     }
 
 
+def _build_dual_confirm_reason(params: Dict, enriched: pd.DataFrame, signal: str) -> Dict[str, Any]:
+    row = enriched.iloc[-1]
+    mode = str(params.get("logic_mode", "and")).upper()
+    ma_short = int(params.get("ma_short", 10))
+    ma_long = int(params.get("ma_long", 30))
+    rsi_period = int(params.get("rsi_period", 14))
+    rsi_col = f"RSI_{rsi_period}"
+    rsi_val = round(float(row.get(rsi_col, 0)), 2) if rsi_col in enriched.columns else 0
+    if signal == "buy":
+        return {
+            "kind": "dual_confirm_buy",
+            "message": f"双重确认买入（{mode} 模式）：MA{ma_short}/MA{ma_long} 金叉 + RSI 超卖修复。当前 RSI={rsi_val}。",
+        }
+    return {
+        "kind": "dual_confirm_sell",
+        "message": f"双重确认卖出（{mode} 模式）：MA{ma_short}/MA{ma_long} 死叉或 RSI 超买回落。当前 RSI={rsi_val}。",
+    }
+
+
+def _build_bollinger_macd_reason(params: Dict, enriched: pd.DataFrame, signal: str) -> Dict[str, Any]:
+    row = enriched.iloc[-1]
+    mode = str(params.get("logic_mode", "and")).upper()
+    close = round(float(row.get("close", 0)), 2)
+    hist = round(float(row.get("MACD_HIST", 0)), 4)
+    if signal == "buy":
+        return {
+            "kind": "bollinger_macd_buy",
+            "message": f"布林带+MACD 底部共振买入（{mode} 模式）：价格触及布林带下轨 + MACD 柱状图翻正。收盘价={close}，MACD柱={hist}。",
+        }
+    return {
+        "kind": "bollinger_macd_sell",
+        "message": f"布林带+MACD 顶部共振卖出（{mode} 模式）：价格触及布林带上轨 + MACD 柱状图翻负。收盘价={close}，MACD柱={hist}。",
+    }
+
+
 SIGNAL_REASON_BUILDERS = {
     "trend_cross": _build_trend_reason,
     "bollinger_reversion": _build_bollinger_reason,
@@ -842,6 +877,8 @@ SIGNAL_REASON_BUILDERS = {
     "grid": _build_grid_reason,
     "macd_cross": _build_macd_reason,
     "volume_breakout": _build_volume_breakout_reason,
+    "dual_confirm": _build_dual_confirm_reason,
+    "bollinger_macd": _build_bollinger_macd_reason,
 }
 
 

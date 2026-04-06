@@ -676,7 +676,7 @@ def dict_to_json_safe(data: Dict) -> Dict:
 
 
 class QuadrantComputeRequest(BaseModel):
-    callback_url: str = Field(default="", description="Go 后端回调 URL，为空则不回调")
+    callback_url: str = Field(default="http://backend:8080/api/quadrant/bulk-save", description="Go 后端回调 URL")
     force_full: bool = Field(default=False, description="是否强制全量刷新（忽略缓存）")
 
 

@@ -781,7 +781,7 @@ func buildWebhookTextContent(event SignalEventRecord, reason map[string]any) str
 	lines = append(lines,
 		fmt.Sprintf("股票：%s", symbol),
 		fmt.Sprintf("方向：%s", strings.ToUpper(strings.TrimSpace(event.Side))),
-		fmt.Sprintf("时间：%s", event.EventTime.Local().Format("2006-01-02 15:04:05")),
+		fmt.Sprintf("时间：%s", event.EventTime.In(cstLocation()).Format("2006-01-02 15:04:05")),
 	)
 
 	if strategyID := strings.TrimSpace(event.StrategyID); strategyID != "" {
@@ -956,4 +956,13 @@ func readResponseSnippet(reader io.Reader) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// cstLocation returns Asia/Shanghai timezone for formatting signal times in CST.
+func cstLocation() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*3600)
+	}
+	return loc
 }

@@ -67,6 +67,11 @@ export default function BacktestPage() {
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
 
+  // ── AI 优化建议 ──
+  const [aiOptLoading, setAiOptLoading] = useState(false);
+  const [aiOptResult, setAiOptResult] = useState(null);
+  const [aiOptError, setAiOptError] = useState('');
+
   // ── 关注池状态 ──
   const [watchedSymbols, setWatchedSymbols] = useState(new Set());
   const [addingWatch, setAddingWatch] = useState(false);
@@ -430,6 +435,8 @@ export default function BacktestPage() {
 
       setResult(responseData);
       setActiveRunId(null);
+      setAiOptResult(null);
+      setAiOptError('');
       // Refresh history list after a short delay (give backend async save time)
       if (isLoggedIn) {
         setTimeout(() => fetchHistory(), 800);
@@ -439,6 +446,103 @@ export default function BacktestPage() {
       setError(err.message || '回测失败，请稍后重试。');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAIOptimize = async () => {
+    if (!isLoggedIn) {
+      openAuthModal('login', '登录后可使用 AI 优化建议。');
+      return;
+    }
+    if (!result?.metrics || !selectedStrategy) return;
+
+    setAiOptLoading(true);
+    setAiOptError('');
+    setAiOptResult(null);
+    try {
+      const data = await requestJson('/api/backtest/ai-optimize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy_name: result.strategy?.name || selectedStrategy.name,
+          implementation_key: selectedStrategy.implementation_key,
+          current_params: result.strategy?.params || selectedStrategy.default_params,
+          ticker: result.data_summary?.ticker || form.ticker,
+          start_date: result.data_summary?.start_date || form.startDate,
+          end_date: result.data_summary?.end_date || form.endDate,
+          metrics: result.metrics,
+        }),
+      });
+      setAiOptResult(data);
+    } catch (err) {
+      setAiOptError(err.message || 'AI 分析失败');
+    } finally {
+      setAiOptLoading(false);
+    }
+  };
+
+  const handleApplyAISuggestion = async () => {
+    if (!aiOptResult?.suggested_params || !selectedStrategy) return;
+    // 创建新策略并用建议参数跑回测
+    // 这里通过策略库 API 创建一条新策略，然后自动选择它跑回测
+    const preset = getStrategyPresetByImplementation(selectedStrategy.implementation_key);
+    if (!preset) return;
+
+    try {
+      const newStrategyPayload = {
+        id: `ai-opt-${selectedStrategy.implementation_key}-${Date.now()}`,
+        key: `ai_opt_${selectedStrategy.implementation_key}_${Date.now()}`,
+        name: `${selectedStrategy.name}（AI 优化版）`,
+        description: `基于 AI 优化建议自动生成。诊断：${aiOptResult.diagnosis || ''} 建议：${aiOptResult.suggestion || ''}`,
+        category: selectedStrategy.category || '通用',
+        implementation_key: selectedStrategy.implementation_key,
+        status: 'active',
+        version: 1,
+        param_schema: selectedStrategy.param_schema || preset.paramSchema,
+        default_params: aiOptResult.suggested_params,
+        required_indicators: selectedStrategy.required_indicators || preset.requiredIndicators || [],
+        chart_overlays: selectedStrategy.chart_overlays || preset.chartOverlays || [],
+        ui_schema: selectedStrategy.ui_schema || preset.uiSchema || {},
+        execution_options: selectedStrategy.execution_options || preset.executionOptions || {},
+        metadata: selectedStrategy.metadata || preset.metadata || {},
+      };
+
+      const created = await requestJson('/api/strategies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newStrategyPayload),
+      });
+
+      if (created?.item?.id) {
+        // 刷新策略列表
+        const strategiesData = await requestJson('/api/strategies/active', undefined, '刷新策略列表失败');
+        const items = strategiesData?.items || [];
+        setStrategies(items);
+        setForm((prev) => ({ ...prev, strategyId: created.item.id }));
+        setAiOptResult(null);
+
+        // 自动运行回测
+        setLoading(true);
+        setError('');
+        try {
+          const btPayload = buildPayload({ ...form, strategyId: created.item.id }, created.item);
+          const responseData = await requestJson('/api/backtest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(btPayload),
+          }, '回测失败');
+          setResult(responseData);
+          setActiveRunId(null);
+          setAiOptResult(null);
+          if (isLoggedIn) setTimeout(() => fetchHistory(), 800);
+        } catch (btErr) {
+          setError(btErr.message || '应用建议后回测失败');
+        } finally {
+          setLoading(false);
+        }
+      }
+    } catch (err) {
+      setAiOptError(err.message || '应用 AI 建议失败');
     }
   };
 
@@ -787,6 +891,72 @@ export default function BacktestPage() {
             {metricCards.map((metric) => (
               <MetricCard key={metric.title} title={metric.title} value={metric.value} type={metric.type} />
             ))}
+          </section>
+
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <div className="text-sm font-semibold text-white">✨ AI 优化建议</div>
+                <div className="text-xs text-white/45">AI 分析当前回测指标，给出调参建议并可一键应用重新回测。</div>
+              </div>
+              <button
+                type="button"
+                onClick={handleAIOptimize}
+                disabled={aiOptLoading || !result?.metrics}
+                className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-xs font-medium text-amber-200 transition hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {aiOptLoading ? '分析中...' : '获取 AI 建议'}
+              </button>
+            </div>
+            {aiOptLoading ? (
+              <div className="mt-4 flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                <span className="text-xs text-white/55">AI 正在分析回测结果...</span>
+              </div>
+            ) : null}
+            {aiOptError ? (
+              <div className="mt-4 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{aiOptError}</div>
+            ) : null}
+            {aiOptResult ? (
+              <div className="mt-4 space-y-3">
+                <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-white">🔍 诊断</span>
+                    <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                      aiOptResult.confidence === 'high' ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-300'
+                      : aiOptResult.confidence === 'low' ? 'border-rose-400/40 bg-rose-500/10 text-rose-300'
+                      : 'border-amber-400/40 bg-amber-500/10 text-amber-300'
+                    }`}>
+                      置信度：{aiOptResult.confidence === 'high' ? '高' : aiOptResult.confidence === 'low' ? '低' : '中'}
+                    </span>
+                  </div>
+                  <p className="text-sm leading-7 text-white/70">{aiOptResult.diagnosis}</p>
+                </div>
+                <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-4">
+                  <div className="text-sm font-medium text-white">💡 优化建议</div>
+                  <p className="text-sm leading-7 text-white/70">{aiOptResult.suggestion}</p>
+                  {aiOptResult.suggested_params ? (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {Object.entries(aiOptResult.suggested_params).map(([key, value]) => (
+                        <span key={key} className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+                          {key}={String(value)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                {aiOptResult.suggested_params ? (
+                  <button
+                    type="button"
+                    onClick={handleApplyAISuggestion}
+                    disabled={loading}
+                    className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loading ? '回测中...' : '应用建议并重新回测'}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </section>
 
           <SectionCard title="价格走势与交易信号" description="展示 K 线、策略指标叠加以及买卖点位。">

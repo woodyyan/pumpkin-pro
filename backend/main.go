@@ -730,6 +730,59 @@ func (a *appServer) handleStrategyAIBacktest(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+func (a *appServer) handleBacktestAIOptimize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+
+	userID := currentUserID(r)
+	if strings.TrimSpace(userID) == "" {
+		writeError(w, http.StatusUnauthorized, "请先登录")
+		return
+	}
+
+	if !a.aiRateLimiter.Allow(userID) {
+		writeError(w, http.StatusTooManyRequests, "本小时 AI 分析次数已达上限（20 次/小时），请稍后再试")
+		return
+	}
+
+	payload, err := decodeBodyAsMap(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+
+	input := strategy.AnalyzeBacktestInput{
+		StrategyName:      asString(payload["strategy_name"]),
+		ImplementationKey: asString(payload["implementation_key"]),
+		CurrentParams:     asMap(payload["current_params"]),
+		Ticker:            asString(payload["ticker"]),
+		StartDate:         asString(payload["start_date"]),
+		EndDate:           asString(payload["end_date"]),
+		Metrics:           asMap(payload["metrics"]),
+	}
+
+	if input.ImplementationKey == "" {
+		writeError(w, http.StatusBadRequest, "缺少策略类型信息")
+		return
+	}
+
+	aiCfg := strategy.AIConfig{
+		APIKey:  a.cfg.AI.APIKey,
+		BaseURL: a.cfg.AI.BaseURL,
+		Model:   a.cfg.AI.Model,
+	}
+
+	analysis, err := strategy.AnalyzeBacktest(r.Context(), aiCfg, input)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("AI 分析失败：%v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, analysis)
+}
+
 func (a *appServer) handleStrategySubroutes(w http.ResponseWriter, r *http.Request) {
 	suffix := strings.TrimPrefix(r.URL.Path, "/api/strategies/")
 	suffix = strings.TrimSpace(suffix)
@@ -2123,6 +2176,7 @@ func main() {
 
 	mux.HandleFunc("/api/backtest", server.withOptionalAuth(server.handleBacktest))
 	mux.HandleFunc("/api/backtest/options", server.withOptionalAuth(server.handleBacktestOptions))
+	mux.HandleFunc("/api/backtest/ai-optimize", server.withRequiredAuth(server.handleBacktestAIOptimize))
 	mux.HandleFunc("/api/backtest/runs", server.withRequiredAuth(server.handleBacktestRuns))
 	mux.HandleFunc("/api/backtest/runs/", server.withRequiredAuth(server.handleBacktestRunSubroutes))
 	mux.HandleFunc("/api/strategies", server.withOptionalAuth(server.handleStrategies))

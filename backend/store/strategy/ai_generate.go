@@ -679,3 +679,145 @@ func asIntValue(v any) int {
 		return 0
 	}
 }
+
+// ── 回测引擎 AI 优化建议 ──
+
+const aiAnalyzeBacktestPrompt = `你是一个量化回测分析顾问。用户已经完成了一次历史回测，请分析回测结果并给出具体的优化建议。
+
+## 当前策略信息
+
+策略名称：{strategy_name}
+策略类型：{implementation_key}
+当前参数：{current_params}
+
+## 回测配置
+
+股票代码：{ticker}
+回测区间：{start_date} ~ {end_date}
+
+## 回测结果指标
+
+{backtest_metrics}
+
+## 参数约束
+
+{param_constraints}
+
+## 你的任务
+
+1. 先诊断当前回测表现的优缺点（2-3 句话）
+2. 给出具体的调参建议（必须在参数约束范围内）
+3. 解释为什么这样调整能改善表现
+
+## 输出要求
+
+严格按 JSON 格式输出，不要输出任何其他内容：
+
+{
+  "diagnosis": "中文诊断：当前策略的优势和问题分析（2-3 句话）",
+  "suggestion": "中文建议：应该如何调整参数，为什么（2-3 句话）",
+  "suggested_params": { 调整后的完整参数，键值对 },
+  "confidence": "high/medium/low"
+}`
+
+type BacktestAnalysis struct {
+	Diagnosis      string         `json:"diagnosis"`
+	Suggestion     string         `json:"suggestion"`
+	SuggestedParams map[string]any `json:"suggested_params"`
+	Confidence     string         `json:"confidence"`
+}
+
+type AnalyzeBacktestInput struct {
+	StrategyName      string         `json:"strategy_name"`
+	ImplementationKey string         `json:"implementation_key"`
+	CurrentParams     map[string]any `json:"current_params"`
+	Ticker            string         `json:"ticker"`
+	StartDate         string         `json:"start_date"`
+	EndDate           string         `json:"end_date"`
+	Metrics           map[string]any `json:"metrics"`
+}
+
+func AnalyzeBacktest(ctx context.Context, cfg AIConfig, input AnalyzeBacktestInput) (*BacktestAnalysis, error) {
+	if !cfg.Enabled() {
+		return nil, fmt.Errorf("AI 功能未启用")
+	}
+
+	paramsJSON, _ := json.Marshal(input.CurrentParams)
+	metricsJSON, _ := json.Marshal(input.Metrics)
+	constraints := getParamConstraints(input.ImplementationKey)
+
+	prompt := aiAnalyzeBacktestPrompt
+	prompt = strings.Replace(prompt, "{strategy_name}", input.StrategyName, 1)
+	prompt = strings.Replace(prompt, "{implementation_key}", input.ImplementationKey, 1)
+	prompt = strings.Replace(prompt, "{current_params}", string(paramsJSON), 1)
+	prompt = strings.Replace(prompt, "{ticker}", input.Ticker, 1)
+	prompt = strings.Replace(prompt, "{start_date}", input.StartDate, 1)
+	prompt = strings.Replace(prompt, "{end_date}", input.EndDate, 1)
+	prompt = strings.Replace(prompt, "{backtest_metrics}", string(metricsJSON), 1)
+	prompt = strings.Replace(prompt, "{param_constraints}", constraints, 1)
+
+	body := aiChatRequest{
+		Model: cfg.Model,
+		Messages: []aiChatMessage{
+			{Role: "system", Content: prompt},
+			{Role: "user", Content: "请分析这次回测结果并给出优化建议。"},
+		},
+		Temperature: 0.3,
+		MaxTokens:   1024,
+	}
+
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	endpoint := cfg.BaseURL + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("AI 调用失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("AI 服务返回错误 (HTTP %d): %s", resp.StatusCode, truncateStr(string(respBody), 200))
+	}
+
+	var chatResp aiChatResponse
+	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if len(chatResp.Choices) == 0 {
+		return nil, fmt.Errorf("AI 未返回有效结果")
+	}
+
+	content := stripAICodeFence(strings.TrimSpace(chatResp.Choices[0].Message.Content))
+
+	var analysis BacktestAnalysis
+	if err := json.Unmarshal([]byte(content), &analysis); err != nil {
+		return &BacktestAnalysis{
+			Diagnosis:  "AI 返回格式异常，无法解析优化建议。",
+			Suggestion: "建议手动调整参数后重新回测。",
+			Confidence: "low",
+		}, nil
+	}
+
+	if analysis.Confidence != "high" && analysis.Confidence != "medium" && analysis.Confidence != "low" {
+		analysis.Confidence = "medium"
+	}
+
+	return &analysis, nil
+}

@@ -996,8 +996,8 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, error, onGe
   const confidenceMeta = CONFIDENCE_META[result?.confidence] || CONFIDENCE_META.medium;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-md">
-      <div className="w-full max-w-lg rounded-2xl border border-white/20 bg-[#0f1219] p-6 shadow-[0_0_60px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.06)] ring-1 ring-white/[0.08]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 backdrop-blur-md">
+      <div className="w-full max-w-lg rounded-2xl border border-white/25 bg-[#121620]/95 p-6 shadow-[0_8px_48px_rgba(0,0,0,0.6)] ring-1 ring-white/10">
         {!result ? (
           <>
             <div className="space-y-3">

@@ -67,6 +67,21 @@ export default function BacktestPage() {
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
 
+  // ── 关注池状态 ──
+  const [watchedSymbols, setWatchedSymbols] = useState(new Set());
+  const [addingWatch, setAddingWatch] = useState(false);
+
+  const fetchWatchedSymbols = useCallback(async () => {
+    if (!isLoggedIn) { setWatchedSymbols(new Set()); return; }
+    try {
+      const res = await requestJson('/api/live/watchlist');
+      const symbols = new Set((res?.items || []).map((i) => i.symbol));
+      setWatchedSymbols(symbols);
+    } catch { /* non-critical */ }
+  }, [isLoggedIn]);
+
+  useEffect(() => { fetchWatchedSymbols(); }, [fetchWatchedSymbols]);
+
   // ── History runs ──
   const [historyRuns, setHistoryRuns] = useState([]);
   const [historyTotal, setHistoryTotal] = useState(0);
@@ -715,10 +730,53 @@ export default function BacktestPage() {
         </div>
       )}
 
-      {result && (
+      {result && (() => {
+        const resultTicker = result.data_summary?.ticker || '';
+        const resultSymbol = tickerToSymbol(resultTicker);
+        const isOnline = result.data_source === 'online';
+        const showWatch = isOnline && resultSymbol;
+        const isWatched = showWatch && watchedSymbols.has(resultSymbol);
+
+        const handleAddWatch = async () => {
+          if (!isLoggedIn) {
+            openAuthModal('login', '登录后可关注股票到行情看板。');
+            return;
+          }
+          setAddingWatch(true);
+          try {
+            await requestJson('/api/live/watchlist', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ symbol: resultSymbol, name: result.data_summary?.ticker_name || '' }),
+            });
+            setWatchedSymbols((prev) => new Set([...prev, resultSymbol]));
+          } catch { /* 静默：可能已存在 */ }
+          setAddingWatch(false);
+        };
+
+        return (
         <>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <SummaryPill label="回测标的" value={result.data_summary?.ticker_display || result.data_summary?.ticker || '示例/CSV'} />
+            <div className="rounded-2xl border border-border bg-card px-5 py-4">
+              <div className="text-xs uppercase tracking-[0.18em] text-white/35">回测标的</div>
+              <div className="mt-2 flex items-center gap-2">
+                <span className="text-sm font-medium text-white/80">{result.data_summary?.ticker_display || result.data_summary?.ticker || '示例/CSV'}</span>
+                {showWatch && (
+                  isWatched ? (
+                    <span className="inline-flex items-center gap-0.5 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-white/35">✓ 已关注</span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={addingWatch}
+                      onClick={handleAddWatch}
+                      className="inline-flex items-center gap-0.5 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary transition hover:bg-primary/20 disabled:opacity-40"
+                    >
+                      {addingWatch ? '...' : '+ 关注'}
+                    </button>
+                  )
+                )}
+              </div>
+            </div>
             <SummaryPill label="数据来源" value={result.source_used} />
             <SummaryPill label="回测区间" value={`${result.data_summary?.start_date} ~ ${result.data_summary?.end_date}`} />
             <SummaryPill label="样本数量" value={`${result.data_summary?.total_records || 0} 条`} />
@@ -858,7 +916,8 @@ export default function BacktestPage() {
             </TableCard>
           </section>
         </>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -955,6 +1014,16 @@ function buildPayload(form, selectedStrategy) {
       seed: Number(form.sampleConfig.seed),
     },
   };
+}
+
+// 将原始 ticker（如 600519 或 00700）转换为带交易所后缀的 symbol
+function tickerToSymbol(ticker) {
+  const t = String(ticker || '').trim();
+  if (!t) return '';
+  if (t.includes('.')) return t.toUpperCase(); // 已带后缀
+  if (t.length === 5) return `${t}.HK`;
+  const padded = t.padStart(6, '0');
+  return padded.startsWith('6') || padded.startsWith('9') ? `${padded}.SH` : `${padded}.SZ`;
 }
 
 function buildChartOptions(width, height, ColorType) {

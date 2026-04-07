@@ -259,6 +259,9 @@ type MovingAveragesPayload struct {
 	BollingerBandwidth float64          `json:"bollinger_bandwidth"`
 	BollingerPercentB  float64          `json:"bollinger_percent_b"`
 	BollingerSeries    []BollingerPoint `json:"bollinger_series,omitempty"`
+	ChangePct60D       float64          `json:"change_pct_60d"`
+	Volatility20D      float64          `json:"volatility_20d"`
+	VolumeMA5toMA20    float64          `json:"volume_ma5_to_ma20"`
 	Status             string           `json:"status"`
 	SessionState       SessionState `json:"session_state"`
 	UpdatedAt          string       `json:"updated_at"`

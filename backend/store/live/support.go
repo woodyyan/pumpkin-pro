@@ -165,6 +165,11 @@ func (s *Service) GetMovingAverages(ctx context.Context, userID, symbol, period 
 	macd := calculateMACD(bars, 12, 26, 9)
 	bollinger := calculateBollingerBands(bars, 20, 2.0)
 
+	// ── 行情特征指标 ──
+	changePct60D := calculateChangePct(bars, 60)
+	volatility20D := calculateVolatility(bars, 20)
+	volumeMA5toMA20 := calculateVolumeRatio(bars, 5, 20)
+
 	return &MovingAveragesPayload{
 		Symbol:             normalizedSymbol,
 		Period:             supportPeriodDaily,
@@ -190,6 +195,9 @@ func (s *Service) GetMovingAverages(ctx context.Context, userID, symbol, period 
 		BollingerBandwidth: roundTo(bollinger.Bandwidth, 2),
 		BollingerPercentB:  roundTo(bollinger.PercentB, 4),
 		BollingerSeries:    bollinger.Series,
+		ChangePct60D:       roundTo(changePct60D, 2),
+		Volatility20D:      roundTo(volatility20D, 2),
+		VolumeMA5toMA20:    roundTo(volumeMA5toMA20, 2),
 		Status:             classifyMAStatus(lastBar.Close, ma20, ma200),
 		SessionState:       s.resolveSessionState(userID),
 		UpdatedAt:          time.Now().UTC().Format(time.RFC3339),
@@ -862,4 +870,85 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// ── 行情特征计算 ──
+
+// calculateChangePct returns the percentage change over the last N trading days.
+// Result is in percent, e.g. 15.3 means +15.3%.
+func calculateChangePct(bars []DailyBar, days int) float64 {
+	if len(bars) < 2 || days <= 0 {
+		return 0
+	}
+	startIdx := len(bars) - days - 1
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	startClose := bars[startIdx].Close
+	endClose := bars[len(bars)-1].Close
+	if startClose <= 0 {
+		return 0
+	}
+	return (endClose/startClose - 1) * 100
+}
+
+// calculateVolatility returns the annualised volatility based on daily close returns
+// over the last N trading days. Result is in percent, e.g. 28.5 means 28.5%.
+func calculateVolatility(bars []DailyBar, days int) float64 {
+	if len(bars) < days+1 || days < 5 {
+		return 0
+	}
+	recent := bars[len(bars)-days-1:]
+	returns := make([]float64, 0, days)
+	for i := 1; i < len(recent); i++ {
+		if recent[i-1].Close <= 0 {
+			continue
+		}
+		returns = append(returns, recent[i].Close/recent[i-1].Close-1)
+	}
+	if len(returns) < 5 {
+		return 0
+	}
+	mean := 0.0
+	for _, r := range returns {
+		mean += r
+	}
+	mean /= float64(len(returns))
+	variance := 0.0
+	for _, r := range returns {
+		diff := r - mean
+		variance += diff * diff
+	}
+	variance /= float64(len(returns))
+	dailyStd := math.Sqrt(variance)
+	return dailyStd * math.Sqrt(252) * 100
+}
+
+// calculateVolumeRatio returns the ratio of short-term average volume to
+// long-term average volume (e.g. 5-day avg / 20-day avg).
+// A ratio > 1 indicates recent volume is above normal (放量).
+func calculateVolumeRatio(bars []DailyBar, shortDays, longDays int) float64 {
+	if len(bars) < longDays || shortDays <= 0 || longDays <= 0 || shortDays >= longDays {
+		return 0
+	}
+	avgVolume := func(slice []DailyBar) float64 {
+		sum := 0.0
+		count := 0
+		for _, b := range slice {
+			if b.Volume > 0 {
+				sum += b.Volume
+				count++
+			}
+		}
+		if count == 0 {
+			return 0
+		}
+		return sum / float64(count)
+	}
+	shortAvg := avgVolume(bars[len(bars)-shortDays:])
+	longAvg := avgVolume(bars[len(bars)-longDays:])
+	if longAvg <= 0 {
+		return 0
+	}
+	return shortAvg / longAvg
 }

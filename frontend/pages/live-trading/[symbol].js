@@ -919,6 +919,11 @@ export default function LiveTradingDetailPage() {
               {movingAveragePayload.bollinger_series?.length > 0 && (
                 <BollingerChart series={movingAveragePayload.bollinger_series} />
               )}
+              <div className="grid gap-3 md:grid-cols-3">
+                <MetricMini label="60日涨跌幅" value={formatDistancePct(movingAveragePayload.change_pct_60d)} accent={movingAveragePayload.change_pct_60d >= 0 ? 'up' : 'down'} emphasis marketAccent tooltip="最近 60 个交易日（约 3 个月）的累计涨跌幅。正值表示上涨，负值表示下跌。用于判断中期趋势方向。" />
+                <MetricMini label="20日波动率" value={formatVolatility(movingAveragePayload.volatility_20d)} accent={volatilityAccent(movingAveragePayload.volatility_20d)} emphasis tooltip="基于最近 20 个交易日收盘价日收益率计算的年化波动率。波动率越高，价格变动越剧烈。>40% 为高波动，<20% 为低波动。" />
+                <MetricMini label="均量比(5日/20日)" value={formatVolumeRatio(movingAveragePayload.volume_ma5_to_ma20)} accent={volumeRatioAccent(movingAveragePayload.volume_ma5_to_ma20)} emphasis tooltip="近 5 日平均成交量与近 20 日平均成交量的比值。>1.5 说明近期明显放量，<0.7 说明近期明显缩量。放量配合涨价通常是积极信号。" />
+              </div>
             </div>
           )}
         </section>
@@ -1935,6 +1940,30 @@ function rsiAccent(rsi) {
   if (rsi === null || rsi === undefined || rsi < 0) return 'normal'
   if (rsi >= 70) return 'down'
   if (rsi <= 30) return 'up'
+  return 'normal'
+}
+
+function formatVolatility(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return `${Number(value).toFixed(1)}%`
+}
+
+function volatilityAccent(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'normal'
+  if (value > 40) return 'down'
+  if (value < 20) return 'up'
+  return 'normal'
+}
+
+function formatVolumeRatio(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value)) || value <= 0) return '--'
+  return Number(value).toFixed(2)
+}
+
+function volumeRatioAccent(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value)) || value <= 0) return 'normal'
+  if (value >= 1.5) return 'up'
+  if (value <= 0.7) return 'down'
   return 'normal'
 }
 

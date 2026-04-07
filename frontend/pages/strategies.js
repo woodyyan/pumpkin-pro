@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { requestJson } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
@@ -42,6 +42,13 @@ export default function StrategyLibraryPage() {
   const [error, setError] = useState('');
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false);
   const [success, setSuccess] = useState('');
+
+  // ── AI 生成策略弹窗 ──
+  const [aiDialogOpen, setAiDialogOpen] = useState(false);
+  const [aiTicker, setAiTicker] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState(null);
+  const [aiError, setAiError] = useState('');
   const authIdentityKey = String(user?.id || user?.email || '');
 
   const updateError = (nextError, nextNeedsLogin = false) => {
@@ -335,6 +342,61 @@ export default function StrategyLibraryPage() {
     await executeWorkspaceAction(action);
   };
 
+  // ── AI 生成策略 ──
+
+  const openAIDialog = useCallback(() => {
+    if (!isLoggedIn) {
+      openAuthModal('login', '登录后可使用 AI 智能生成策略。');
+      return;
+    }
+    setAiTicker('');
+    setAiResult(null);
+    setAiError('');
+    setAiLoading(false);
+    setAiDialogOpen(true);
+  }, [isLoggedIn, openAuthModal]);
+
+  const handleAIGenerate = async () => {
+    const trimmed = aiTicker.trim();
+    if (!trimmed) { setAiError('请输入股票代码'); return; }
+    setAiLoading(true);
+    setAiError('');
+    setAiResult(null);
+    try {
+      const data = await requestJson('/api/strategies/ai-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker: trimmed }),
+      });
+      setAiResult(data?.recommendation || null);
+    } catch (err) {
+      setAiError(err.message || 'AI 生成策略失败');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleAIAdopt = () => {
+    if (!aiResult) return;
+    const preset = getStrategyPresetByImplementation(aiResult.implementation_key);
+    if (!preset) {
+      setAiError('AI 推荐的策略类型不可用，请重试');
+      return;
+    }
+    const nextDraft = createDraftFromType(preset.typeKey, strategies);
+    // 用 AI 推荐的策略名称和参数覆盖默认值
+    nextDraft.name = aiResult.strategy_label || nextDraft.name;
+    nextDraft.description = aiResult.reason || preset.defaultDescription;
+    if (aiResult.params) {
+      nextDraft.params = { ...nextDraft.params, ...aiResult.params };
+    }
+    setMode('create');
+    setDraft(nextDraft);
+    setDraftOrigin(nextDraft);
+    setAiDialogOpen(false);
+    setSuccess('AI 推荐已填入，请检查参数后点击「创建策略」。');
+  };
+
   const showWorkspaceEmpty = mode !== 'create' && !selectedDetail && !loadingDetail;
 
   return (
@@ -363,11 +425,20 @@ export default function StrategyLibraryPage() {
           title="策略列表"
           description="你可以在这里维护多条策略。"
           action={
-            <CreateStrategyDropdown
-              open={createMenuOpen}
-              onToggle={() => setCreateMenuOpen((prev) => !prev)}
-              onSelect={(strategyType) => requestWorkspaceAction({ type: 'create', strategyType })}
-            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={openAIDialog}
+                className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs font-medium text-amber-200 transition hover:bg-amber-400/20"
+              >
+                ✨ AI 生成
+              </button>
+              <CreateStrategyDropdown
+                open={createMenuOpen}
+                onToggle={() => setCreateMenuOpen((prev) => !prev)}
+                onSelect={(strategyType) => requestWorkspaceAction({ type: 'create', strategyType })}
+              />
+            </div>
           }
         >
           <div className="space-y-3">
@@ -595,6 +666,19 @@ export default function StrategyLibraryPage() {
             }
           }}
           onConfirm={handleDeleteStrategy}
+        />
+      ) : null}
+
+      {aiDialogOpen ? (
+        <AIGenerateDialog
+          ticker={aiTicker}
+          onTickerChange={setAiTicker}
+          loading={aiLoading}
+          result={aiResult}
+          error={aiError}
+          onGenerate={handleAIGenerate}
+          onAdopt={handleAIAdopt}
+          onClose={() => setAiDialogOpen(false)}
         />
       ) : null}
     </div>
@@ -899,4 +983,145 @@ function formatParamValue(value) {
     return Number.isInteger(value) ? String(value) : String(Number(value).toFixed(4)).replace(/0+$/, '').replace(/\.$/, '');
   }
   return String(value);
+}
+
+const CONFIDENCE_META = {
+  high: { label: '高', color: 'text-emerald-300 border-emerald-400/40 bg-emerald-500/10' },
+  medium: { label: '中', color: 'text-amber-300 border-amber-400/40 bg-amber-500/10' },
+  low: { label: '低', color: 'text-rose-300 border-rose-400/40 bg-rose-500/10' },
+};
+
+function AIGenerateDialog({ ticker, onTickerChange, loading, result, error, onGenerate, onAdopt, onClose }) {
+  const summary = result?.market_summary || null;
+  const confidenceMeta = CONFIDENCE_META[result?.confidence] || CONFIDENCE_META.medium;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
+        {!result ? (
+          <>
+            <div className="space-y-3">
+              <div className="text-lg font-semibold text-white">✨ AI 智能生成策略</div>
+              <p className="text-sm leading-7 text-white/65">
+                输入一只股票代码，AI 会分析该股票近期走势，推荐最合适的策略类型和参数配置。
+              </p>
+            </div>
+            <div className="mt-4">
+              <input
+                value={ticker}
+                onChange={(e) => onTickerChange(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && !loading && onGenerate()}
+                placeholder="输入股票代码，如 600519 或 00700"
+                className="w-full rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary"
+                autoFocus
+              />
+            </div>
+            {error ? <div className="mt-3 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{error}</div> : null}
+            <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm font-medium text-white/75 transition hover:border-white/20 hover:text-white"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={onGenerate}
+                disabled={loading || !ticker.trim()}
+                className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading ? '分析中...' : '开始分析'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="space-y-3">
+              <div className="text-lg font-semibold text-white">✨ AI 策略推荐结果</div>
+              {summary ? (
+                <div className="flex flex-wrap items-center gap-2 text-xs text-white/55">
+                  <span className="font-medium text-white/80">{summary.name}（{summary.ticker}）</span>
+                  <span>最新价 {summary.price}</span>
+                </div>
+              ) : null}
+            </div>
+
+            {summary ? (
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <MiniInfo label="60日涨跌幅" value={`${summary.change_pct_60d >= 0 ? '+' : ''}${summary.change_pct_60d?.toFixed(1)}%`} accent={summary.change_pct_60d >= 0 ? 'up' : 'down'} />
+                <MiniInfo label="波动率" value={`${summary.volatility_20d?.toFixed(1)}%`} />
+                <MiniInfo label="均量比" value={summary.volume_ma5_to_ma20?.toFixed(2)} />
+                <MiniInfo label="RSI" value={summary.rsi14?.toFixed(1)} />
+                <MiniInfo label="MACD柱" value={summary.macd_histogram?.toFixed(4)} accent={summary.macd_histogram >= 0 ? 'up' : 'down'} />
+                <MiniInfo label="均线" value={summary.ma_status} />
+              </div>
+            ) : null}
+
+            <div className="mt-4 space-y-3 rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-white">🎯 {result.strategy_label}</span>
+                <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${confidenceMeta.color}`}>
+                  置信度：{confidenceMeta.label}
+                </span>
+              </div>
+              <p className="text-sm leading-7 text-white/70">{result.reason}</p>
+              {result.params ? (
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(result.params).map(([key, value]) => (
+                    <span key={key} className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white/55">
+                      {key}={String(value)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            {result.confidence === 'low' ? (
+              <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                ⚠️ AI 对该推荐的置信度较低。该股票的行情特征不太典型，推荐结果仅供参考。建议在回测引擎中先验证策略效果，或等市场走势更加明朗后重新分析。
+              </div>
+            ) : null}
+
+            {error ? <div className="mt-3 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{error}</div> : null}
+
+            <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => { onTickerChange(ticker); onClose(); setTimeout(() => {}, 0); }}
+                className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm font-medium text-white/75 transition hover:border-white/20 hover:text-white"
+              >
+                关闭
+              </button>
+              <button
+                type="button"
+                onClick={() => { onTickerChange(ticker); onGenerate(); }}
+                disabled={loading}
+                className="rounded-xl border border-primary/30 bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary transition hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading ? '分析中...' : '重新分析'}
+              </button>
+              <button
+                type="button"
+                onClick={onAdopt}
+                className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-500"
+              >
+                采纳并创建策略
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MiniInfo({ label, value, accent }) {
+  const color = accent === 'up' ? 'text-rose-300' : accent === 'down' ? 'text-emerald-300' : 'text-white/80';
+  return (
+    <div className="rounded-lg border border-white/5 bg-black/30 px-2.5 py-1.5">
+      <div className="text-[10px] text-white/40">{label}</div>
+      <div className={`mt-0.5 text-xs font-medium ${color}`}>{value ?? '--'}</div>
+    </div>
+  );
 }

@@ -41,6 +41,7 @@ type appServer struct {
 	backtestService  *backtest.Service
 	screenerService  *screener.Service
 	analyticsRepo    *analytics.Repository
+	aiRateLimiter    *strategy.AIRateLimiter
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -515,6 +516,89 @@ func (a *appServer) handleActiveStrategies(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *appServer) handleStrategyAIGenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+
+	userID := currentUserID(r)
+	if strings.TrimSpace(userID) == "" {
+		writeError(w, http.StatusUnauthorized, "请先登录")
+		return
+	}
+
+	// 限流检查
+	if !a.aiRateLimiter.Allow(userID) {
+		writeError(w, http.StatusTooManyRequests, "本小时 AI 生成次数已达上限（20 次/小时），请稍后再试")
+		return
+	}
+
+	payload, err := decodeBodyAsMap(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	ticker := strings.TrimSpace(asString(payload["ticker"]))
+	if ticker == "" {
+		writeError(w, http.StatusBadRequest, "请输入股票代码")
+		return
+	}
+
+	// 获取技术指标数据
+	maPayload, err := a.liveService.GetMovingAverages(r.Context(), userID, ticker, "daily", 240)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("无法获取该股票的技术指标数据：%v", err))
+		return
+	}
+
+	// 获取快照（取股票名称）
+	snapshot, _, _, snapErr := a.liveService.GetSymbolSnapshot(r.Context(), userID, ticker)
+	stockName := ticker
+	if snapErr == nil && snapshot != nil && snapshot.Name != "" && snapshot.Name != ticker {
+		stockName = snapshot.Name
+	}
+
+	// 构建市场摘要
+	summary := strategy.MarketSummary{
+		Ticker:          maPayload.Symbol,
+		Name:            stockName,
+		Price:           maPayload.PriceRef,
+		ChangePct60D:    maPayload.ChangePct60D,
+		Volatility20D:   maPayload.Volatility20D,
+		VolumeMA5toMA20: maPayload.VolumeMA5toMA20,
+		RSI14:           maPayload.RSI14,
+		RSI14Status:     maPayload.RSI14Status,
+		MACD:            maPayload.MACD,
+		MACDSignal:      maPayload.MACDSignal,
+		MACDHistogram:   maPayload.MACDHistogram,
+		BollingerBW:     maPayload.BollingerBandwidth,
+		BollingerPctB:   maPayload.BollingerPercentB,
+		MA5:             maPayload.MA5,
+		MA20:            maPayload.MA20,
+		MA60:            maPayload.MA60,
+		MA200:           maPayload.MA200,
+		MAStatus:        maPayload.Status,
+	}
+
+	aiCfg := strategy.AIConfig{
+		APIKey:  a.cfg.AI.APIKey,
+		BaseURL: a.cfg.AI.BaseURL,
+		Model:   a.cfg.AI.Model,
+	}
+
+	result, err := strategy.GenerateStrategy(r.Context(), aiCfg, summary)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("AI 生成策略失败：%v", err))
+		return
+	}
+
+	// 自动拼接策略名称
+	result.Recommendation.StrategyLabel = stockName + " - " + result.Recommendation.StrategyLabel
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (a *appServer) handleStrategySubroutes(w http.ResponseWriter, r *http.Request) {
@@ -1895,6 +1979,7 @@ func main() {
 		backtestService:  backtestService,
 		screenerService:  screenerService,
 		analyticsRepo:    analyticsRepo,
+		aiRateLimiter:    strategy.NewAIRateLimiter(20),
 	}
 
 	mux := http.NewServeMux()
@@ -1913,6 +1998,7 @@ func main() {
 	mux.HandleFunc("/api/backtest/runs/", server.withRequiredAuth(server.handleBacktestRunSubroutes))
 	mux.HandleFunc("/api/strategies", server.withOptionalAuth(server.handleStrategies))
 	mux.HandleFunc("/api/strategies/active", server.withOptionalAuth(server.handleActiveStrategies))
+	mux.HandleFunc("/api/strategies/ai-generate", server.withRequiredAuth(server.handleStrategyAIGenerate))
 	mux.HandleFunc("/api/strategies/", server.withOptionalAuth(server.handleStrategySubroutes))
 
 	mux.HandleFunc("/api/webhook", server.withRequiredAuth(server.handleWebhookConfig))

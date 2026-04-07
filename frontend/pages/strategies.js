@@ -368,7 +368,8 @@ export default function StrategyLibraryPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticker: trimmed }),
       });
-      setAiResult(data?.recommendation || null);
+      // 保存完整响应：recommendation + backtest_preview + iterations
+      setAiResult(data || null);
     } catch (err) {
       setAiError(err.message || 'AI 生成策略失败');
     } finally {
@@ -377,18 +378,19 @@ export default function StrategyLibraryPage() {
   };
 
   const handleAIAdopt = () => {
-    if (!aiResult) return;
-    const preset = getStrategyPresetByImplementation(aiResult.implementation_key);
+    const rec = aiResult?.recommendation;
+    if (!rec) return;
+    const preset = getStrategyPresetByImplementation(rec.implementation_key);
     if (!preset) {
       setAiError('AI 推荐的策略类型不可用，请重试');
       return;
     }
     const nextDraft = createDraftFromType(preset.typeKey, strategies);
     // 用 AI 推荐的策略名称和参数覆盖默认值
-    nextDraft.name = aiResult.strategy_label || nextDraft.name;
-    nextDraft.description = aiResult.reason || preset.defaultDescription;
-    if (aiResult.params) {
-      nextDraft.params = { ...nextDraft.params, ...aiResult.params };
+    nextDraft.name = rec.strategy_label || nextDraft.name;
+    nextDraft.description = rec.reason || preset.defaultDescription;
+    if (rec.params) {
+      nextDraft.params = { ...nextDraft.params, ...rec.params };
     }
     setMode('create');
     setDraft(nextDraft);
@@ -992,18 +994,24 @@ const CONFIDENCE_META = {
 };
 
 function AIGenerateDialog({ ticker, onTickerChange, loading, result, error, onGenerate, onAdopt, onClose }) {
-  const summary = result?.market_summary || null;
-  const confidenceMeta = CONFIDENCE_META[result?.confidence] || CONFIDENCE_META.medium;
+  const rec = result?.recommendation || null;
+  const summary = rec?.market_summary || null;
+  const btPreview = result?.backtest_preview || null;
+  const iterations = result?.iterations || [];
+  const confidenceMeta = CONFIDENCE_META[rec?.confidence] || CONFIDENCE_META.medium;
+  const [showIterations, setShowIterations] = useState(false);
+
+  const hasResult = Boolean(rec);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 backdrop-blur-md">
-      <div className="w-full max-w-lg rounded-2xl border border-white/25 bg-[#121620]/95 p-6 shadow-[0_8px_48px_rgba(0,0,0,0.6)] ring-1 ring-white/10">
-        {!result ? (
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-white/25 bg-[#121620]/95 p-6 shadow-[0_8px_48px_rgba(0,0,0,0.6)] ring-1 ring-white/10">
+        {!hasResult ? (
           <>
             <div className="space-y-3">
               <div className="text-lg font-semibold text-white">✨ AI 智能生成策略</div>
               <p className="text-sm leading-7 text-white/65">
-                输入一只股票代码，AI 会分析该股票近期走势，推荐最合适的策略类型和参数配置。
+                输入一只股票代码，AI 会分析该股票近期走势，推荐最合适的策略类型和参数，并用近 6 个月数据自动回测验证。
               </p>
             </div>
             <div className="mt-4">
@@ -1031,7 +1039,7 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, error, onGe
                 disabled={loading || !ticker.trim()}
                 className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {loading ? '分析中...' : '开始分析'}
+                {loading ? '分析中（含回测验证）...' : '开始分析'}
               </button>
             </div>
           </>
@@ -1060,15 +1068,15 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, error, onGe
 
             <div className="mt-4 space-y-3 rounded-xl border border-white/10 bg-black/20 p-4">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-white">🎯 {result.strategy_label}</span>
+                <span className="text-sm font-semibold text-white">🎯 {rec.strategy_label}</span>
                 <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${confidenceMeta.color}`}>
                   置信度：{confidenceMeta.label}
                 </span>
               </div>
-              <p className="text-sm leading-7 text-white/70">{result.reason}</p>
-              {result.params ? (
+              <p className="text-sm leading-7 text-white/70">{rec.reason}</p>
+              {rec.params ? (
                 <div className="flex flex-wrap gap-2">
-                  {Object.entries(result.params).map(([key, value]) => (
+                  {Object.entries(rec.params).map(([key, value]) => (
                     <span key={key} className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white/55">
                       {key}={String(value)}
                     </span>
@@ -1077,7 +1085,72 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, error, onGe
               ) : null}
             </div>
 
-            {result.confidence === 'low' ? (
+            {btPreview ? (
+              <div className="mt-4 space-y-2">
+                <div className="text-sm font-semibold text-white">📊 近 6 个月回测验证</div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <BacktestMiniCard label="总收益" value={fmtPct(btPreview.total_return)} accent={btPreview.total_return >= 0 ? 'up' : 'down'} />
+                  <BacktestMiniCard label="最大回撤" value={fmtPct(btPreview.max_drawdown)} accent="down" />
+                  <BacktestMiniCard label="夏普比率" value={btPreview.sharpe_ratio?.toFixed(2)} accent={btPreview.sharpe_ratio >= 1 ? 'up' : btPreview.sharpe_ratio < 0 ? 'down' : 'normal'} />
+                  <BacktestMiniCard label="交易次数" value={btPreview.trade_count ?? '--'} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <BacktestMiniCard label="胜率" value={fmtPct(btPreview.win_rate)} />
+                  <BacktestMiniCard label="年化收益" value={fmtPct(btPreview.annual_return)} accent={btPreview.annual_return >= 0 ? 'up' : 'down'} />
+                </div>
+                {btPreview.total_return < 0 ? (
+                  <div className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                    ⚠️ 该策略在近 6 个月回测中收益为负（{fmtPct(btPreview.total_return)}），建议谨慎采纳，或在回测引擎中调整参数后重新验证。
+                  </div>
+                ) : null}
+                <div className="text-[10px] text-white/30">
+                  ⓘ 回测基于近 6 个月历史数据，结果仅供参考，不代表未来收益。
+                </div>
+              </div>
+            ) : null}
+
+            {iterations.length > 0 ? (
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowIterations(!showIterations)}
+                  className="flex items-center gap-1 text-xs font-medium text-white/50 transition hover:text-white/70"
+                >
+                  <span>{showIterations ? '▼' : '▶'}</span>
+                  <span>迭代优化过程（{iterations.length} 轮）</span>
+                </button>
+                {showIterations ? (
+                  <div className="mt-2 space-y-2">
+                    {iterations.map((iter) => (
+                      <div key={iter.round} className="rounded-lg border border-white/5 bg-black/30 p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium text-white/65">第 {iter.round} 轮</span>
+                          <div className="flex items-center gap-2 text-[10px] text-white/40">
+                            <span>收益 {fmtPct(iter.backtest_preview?.total_return)}</span>
+                            <span>夏普 {iter.backtest_preview?.sharpe_ratio?.toFixed(2)}</span>
+                            <span>回撤 {fmtPct(iter.backtest_preview?.max_drawdown)}</span>
+                          </div>
+                        </div>
+                        {iter.params ? (
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {Object.entries(iter.params).map(([k, v]) => (
+                              <span key={k} className="rounded-full border border-white/5 bg-white/5 px-2 py-0.5 text-[10px] text-white/45">
+                                {k}={String(v)}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                        {iter.adjustment ? (
+                          <div className="mt-1.5 text-[11px] leading-5 text-white/50">💡 {iter.adjustment}</div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {rec.confidence === 'low' ? (
               <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                 ⚠️ AI 对该推荐的置信度较低。该股票的行情特征不太典型，推荐结果仅供参考。建议在回测引擎中先验证策略效果，或等市场走势更加明朗后重新分析。
               </div>
@@ -1088,7 +1161,7 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, error, onGe
             <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
-                onClick={() => { onTickerChange(ticker); onClose(); setTimeout(() => {}, 0); }}
+                onClick={() => { onTickerChange(ticker); onClose(); }}
                 className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm font-medium text-white/75 transition hover:border-white/20 hover:text-white"
               >
                 关闭
@@ -1114,6 +1187,21 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, error, onGe
       </div>
     </div>
   );
+}
+
+function BacktestMiniCard({ label, value, accent }) {
+  const color = accent === 'up' ? 'text-rose-300' : accent === 'down' ? 'text-emerald-300' : 'text-white/80';
+  return (
+    <div className="rounded-lg border border-white/5 bg-black/30 px-2.5 py-1.5">
+      <div className="text-[10px] text-white/40">{label}</div>
+      <div className={`mt-0.5 text-xs font-medium ${color}`}>{value ?? '--'}</div>
+    </div>
+  );
+}
+
+function fmtPct(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
+  return `${(Number(value) * 100).toFixed(2)}%`;
 }
 
 function MiniInfo({ label, value, accent }) {

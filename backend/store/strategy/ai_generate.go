@@ -103,8 +103,32 @@ type AIRecommendation struct {
 	MarketSummary     MarketSummary  `json:"market_summary"`
 }
 
+// ── 回测预览 ──
+
+type BacktestPreview struct {
+	TotalReturn    float64 `json:"total_return"`
+	MaxDrawdown    float64 `json:"max_drawdown"`
+	SharpeRatio    float64 `json:"sharpe_ratio"`
+	WinRate        float64 `json:"win_rate"`
+	TradeCount     int     `json:"trade_count"`
+	AnnualReturn   float64 `json:"annual_return"`
+	BacktestPeriod string  `json:"backtest_period"`
+}
+
+// ── 迭代轮次 ──
+
+type IterationRound struct {
+	Round           int             `json:"round"`
+	Params          map[string]any  `json:"params"`
+	BacktestPreview BacktestPreview `json:"backtest_preview"`
+	Adjustment      string          `json:"adjustment"`
+}
+
 type AIGenerateResponse struct {
 	Recommendation AIRecommendation `json:"recommendation"`
+	BacktestPreview *BacktestPreview `json:"backtest_preview,omitempty"`
+	Iterations      []IterationRound `json:"iterations,omitempty"`
+	FinalRound      int              `json:"final_round"`
 }
 
 // ── LLM 调用结构 ──
@@ -387,4 +411,260 @@ func truncateStr(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen]) + "..."
+}
+
+// ── 内部回测调用 ──
+
+// CallQuantBacktest calls the Quant engine's /api/backtest endpoint internally
+// and returns the raw response as a map. quantBaseURL should be like "http://localhost:8000".
+func CallQuantBacktest(ctx context.Context, quantBaseURL string, ticker string, implKey string, params map[string]any) (map[string]any, error) {
+	payload := map[string]any{
+		"data_source": "online",
+		"ticker":      ticker,
+		"period":      "6mo",
+		"runtime_strategy": map[string]any{
+			"implementation_key": implKey,
+			"params":             params,
+		},
+	}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("序列化回测请求失败: %w", err)
+	}
+
+	endpoint := strings.TrimRight(quantBaseURL, "/") + "/api/backtest"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
+	if err != nil {
+		return nil, fmt.Errorf("创建回测请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("调用回测引擎失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取回测响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("回测引擎返回错误 (HTTP %d): %s", resp.StatusCode, truncateStr(string(respBody), 200))
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("解析回测结果失败: %w", err)
+	}
+
+	return result, nil
+}
+
+// ExtractBacktestPreview pulls key metrics from a raw backtest result map.
+func ExtractBacktestPreview(result map[string]any) BacktestPreview {
+	metrics := asNestedMap(result, "metrics")
+	summary := asNestedMap(metrics, "summary")
+	preview := BacktestPreview{
+		TotalReturn:    asFloat(summary["total_return"]),
+		MaxDrawdown:    asFloat(summary["max_drawdown"]),
+		SharpeRatio:    asFloat(summary["sharpe_ratio"]),
+		WinRate:        asFloat(summary["win_rate"]),
+		TradeCount:     asIntValue(summary["trade_count"]),
+		AnnualReturn:   asFloat(summary["annual_return"]),
+		BacktestPeriod: "近 6 个月",
+	}
+	return preview
+}
+
+// ── 迭代优化 Prompt ──
+
+const aiIterateSystemPrompt = `你是一个量化策略调参优化器。根据策略的回测指标，判断是否需要调参，以及如何调参。
+
+## 当前策略信息
+
+策略类型：{implementation_key}
+当前参数：{current_params}
+股票技术面摘要：{market_summary}
+
+## 回测结果指标
+
+{backtest_metrics}
+
+## 你的任务
+
+分析回测指标，判断策略表现是否满意：
+- 优化目标优先级：夏普比率 > 总收益率 > 最大回撤控制
+- 如果夏普比率 > 1.5 且总收益 > 0 且最大回撤 < 20%，可以认为表现良好，返回 action=keep
+- 如果表现不佳，分析原因并给出调参建议
+
+## 策略参数约束（重要）
+
+{param_constraints}
+
+## 输出要求
+
+严格按 JSON 格式输出，不要输出任何其他内容：
+
+如果保持当前参数：
+{"action": "keep", "reason": "中文说明为什么当前参数已经足够好"}
+
+如果需要调参：
+{"action": "adjust", "params": { 调整后的完整参数 }, "reason": "中文说明调整了什么、为什么这样调整"}`
+
+// ── 迭代 LLM 输出结构 ──
+
+type llmIterateOutput struct {
+	Action string         `json:"action"`
+	Params map[string]any `json:"params,omitempty"`
+	Reason string         `json:"reason"`
+}
+
+// IterateStrategy takes an initial recommendation + backtest preview, and asks AI whether to adjust params.
+// Returns the updated params (or same if keep) and the AI's reasoning.
+func IterateStrategy(ctx context.Context, cfg AIConfig, implKey string, currentParams map[string]any, summary MarketSummary, preview BacktestPreview) (*llmIterateOutput, error) {
+	if !cfg.Enabled() {
+		return &llmIterateOutput{Action: "keep", Reason: "AI 未启用"}, nil
+	}
+
+	paramsJSON, _ := json.Marshal(currentParams)
+	summaryJSON, _ := json.Marshal(summary)
+	metricsJSON, _ := json.Marshal(preview)
+
+	constraints := getParamConstraints(implKey)
+
+	prompt := aiIterateSystemPrompt
+	prompt = strings.Replace(prompt, "{implementation_key}", implKey, 1)
+	prompt = strings.Replace(prompt, "{current_params}", string(paramsJSON), 1)
+	prompt = strings.Replace(prompt, "{market_summary}", string(summaryJSON), 1)
+	prompt = strings.Replace(prompt, "{backtest_metrics}", string(metricsJSON), 1)
+	prompt = strings.Replace(prompt, "{param_constraints}", constraints, 1)
+
+	body := aiChatRequest{
+		Model: cfg.Model,
+		Messages: []aiChatMessage{
+			{Role: "system", Content: prompt},
+			{Role: "user", Content: fmt.Sprintf("请分析回测结果并决定是否需要调参。总收益 %.2f%%，夏普比率 %.2f，最大回撤 %.2f%%。", preview.TotalReturn*100, preview.SharpeRatio, preview.MaxDrawdown*100)},
+		},
+		Temperature: 0.2,
+		MaxTokens:   1024,
+	}
+
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return &llmIterateOutput{Action: "keep", Reason: "序列化请求失败"}, nil
+	}
+
+	endpoint := cfg.BaseURL + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
+	if err != nil {
+		return &llmIterateOutput{Action: "keep", Reason: "创建请求失败"}, nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return &llmIterateOutput{Action: "keep", Reason: "AI 调用失败"}, nil
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return &llmIterateOutput{Action: "keep", Reason: "读取响应失败"}, nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return &llmIterateOutput{Action: "keep", Reason: "AI 服务返回错误"}, nil
+	}
+
+	var chatResp aiChatResponse
+	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		return &llmIterateOutput{Action: "keep", Reason: "解析响应失败"}, nil
+	}
+
+	if len(chatResp.Choices) == 0 {
+		return &llmIterateOutput{Action: "keep", Reason: "AI 未返回结果"}, nil
+	}
+
+	content := stripAICodeFence(strings.TrimSpace(chatResp.Choices[0].Message.Content))
+
+	var output llmIterateOutput
+	if err := json.Unmarshal([]byte(content), &output); err != nil {
+		return &llmIterateOutput{Action: "keep", Reason: "AI 返回格式不正确，保持当前参数"}, nil
+	}
+
+	if output.Action != "adjust" {
+		output.Action = "keep"
+	}
+
+	return &output, nil
+}
+
+func getParamConstraints(implKey string) string {
+	constraints := map[string]string{
+		"trend_cross":         "ma_short (2-250, 整数, 天), ma_long (3-500, 整数, 天); 约束: ma_short < ma_long",
+		"grid":                "grid_count (2-20, 整数, 层), grid_step (0.001-0.5, 小数, 比例)",
+		"bollinger_reversion": "bb_period (5-250, 整数, 天), bb_std (0.1-5, 小数, 倍)",
+		"rsi_range":           "rsi_period (2-120, 整数, 天), rsi_low (1-50, 数值), rsi_high (50-99, 数值); 约束: rsi_low < rsi_high",
+		"macd_cross":          "fast_period (2-50, 整数, 天), slow_period (5-100, 整数, 天), signal_period (2-30, 整数, 天); 约束: fast_period < slow_period",
+		"volume_breakout":     "lookback (5-120, 整数, 天), volume_multiple (1.2-5.0, 小数, 倍), exit_ma_period (5-120, 整数, 天)",
+		"dual_confirm":        "ma_short (2-120, 整数), ma_long (5-250, 整数), rsi_period (2-60, 整数), rsi_low (10-50), rsi_high (50-90), confirm_window (1-20, 整数), logic_mode (and/or); 约束: ma_short < ma_long, rsi_low < rsi_high",
+		"bollinger_macd":      "bb_period (5-100, 整数), bb_std (0.5-4.0, 小数), fast_period (2-50, 整数), slow_period (5-100, 整数), signal_period (2-30, 整数), logic_mode (and/or); 约束: fast_period < slow_period",
+	}
+	if c, ok := constraints[implKey]; ok {
+		return c
+	}
+	return "无特定约束"
+}
+
+// ── helpers ──
+
+func asNestedMap(m map[string]any, key string) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	sub, ok := m[key].(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	return sub
+}
+
+func asFloat(v any) float64 {
+	switch val := v.(type) {
+	case float64:
+		return val
+	case float32:
+		return float64(val)
+	case int:
+		return float64(val)
+	case int64:
+		return float64(val)
+	case json.Number:
+		f, _ := val.Float64()
+		return f
+	default:
+		return 0
+	}
+}
+
+func asIntValue(v any) int {
+	switch val := v.(type) {
+	case float64:
+		return int(val)
+	case int:
+		return val
+	case int64:
+		return int(val)
+	case json.Number:
+		i, _ := val.Int64()
+		return int(i)
+	default:
+		return 0
+	}
 }

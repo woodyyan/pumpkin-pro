@@ -598,6 +598,77 @@ func (a *appServer) handleStrategyAIGenerate(w http.ResponseWriter, r *http.Requ
 	// 自动拼接策略名称
 	result.Recommendation.StrategyLabel = stockName + " - " + result.Recommendation.StrategyLabel
 
+	// ── 自动回测验证 + 迭代优化（最多 3 轮） ──
+
+	implKey := result.Recommendation.ImplementationKey
+	currentParams := result.Recommendation.Params
+	iterations := []strategy.IterationRound{}
+	var bestPreview *strategy.BacktestPreview
+	bestParams := currentParams
+
+	const maxRounds = 3
+
+	for round := 1; round <= maxRounds; round++ {
+		// 调回测引擎
+		btResult, btErr := strategy.CallQuantBacktest(r.Context(), a.cfg.QuantServiceURL, maPayload.Symbol, implKey, currentParams)
+		if btErr != nil {
+			log.Printf("[ai-generate] backtest round %d failed for %s: %v", round, ticker, btErr)
+			break
+		}
+
+		preview := strategy.ExtractBacktestPreview(btResult)
+
+		iterRound := strategy.IterationRound{
+			Round:           round,
+			Params:          currentParams,
+			BacktestPreview: preview,
+		}
+
+		// 判断是否是最优结果
+		if bestPreview == nil || preview.SharpeRatio > bestPreview.SharpeRatio {
+			bestPreview = &preview
+			bestParams = currentParams
+		}
+
+		// 提前终止条件：夏普 > 1.5 + 收益为正 + 回撤可控
+		if preview.SharpeRatio > 1.5 && preview.TotalReturn > 0 && preview.MaxDrawdown > -0.20 {
+			iterRound.Adjustment = "表现优秀，无需继续优化"
+			iterations = append(iterations, iterRound)
+			break
+		}
+
+		// 最后一轮不再迭代
+		if round == maxRounds {
+			iterRound.Adjustment = "已达最大迭代轮数"
+			iterations = append(iterations, iterRound)
+			break
+		}
+
+		// 调 AI 分析回测结果
+		iterResult, iterErr := strategy.IterateStrategy(r.Context(), aiCfg, implKey, currentParams, summary, preview)
+		if iterErr != nil || iterResult == nil || iterResult.Action != "adjust" {
+			reason := "AI 建议保持当前参数"
+			if iterResult != nil && iterResult.Reason != "" {
+				reason = iterResult.Reason
+			}
+			iterRound.Adjustment = reason
+			iterations = append(iterations, iterRound)
+			break
+		}
+
+		iterRound.Adjustment = iterResult.Reason
+		iterations = append(iterations, iterRound)
+
+		// 用 AI 建议的新参数继续下一轮
+		currentParams = iterResult.Params
+	}
+
+	// 使用最优参数
+	result.Recommendation.Params = bestParams
+	result.BacktestPreview = bestPreview
+	result.Iterations = iterations
+	result.FinalRound = len(iterations)
+
 	writeJSON(w, http.StatusOK, result)
 }
 

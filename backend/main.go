@@ -598,10 +598,69 @@ func (a *appServer) handleStrategyAIGenerate(w http.ResponseWriter, r *http.Requ
 	// 自动拼接策略名称
 	result.Recommendation.StrategyLabel = stockName + " - " + result.Recommendation.StrategyLabel
 
-	// ── 自动回测验证 + 迭代优化（最多 3 轮） ──
+	writeJSON(w, http.StatusOK, result)
+}
 
-	implKey := result.Recommendation.ImplementationKey
-	currentParams := result.Recommendation.Params
+// stripSymbolSuffix converts "600519.SH" → "600519", "00700.HK" → "00700".
+func stripSymbolSuffix(symbol string) string {
+	if idx := strings.Index(symbol, "."); idx > 0 {
+		return symbol[:idx]
+	}
+	return symbol
+}
+
+func (a *appServer) handleStrategyAIBacktest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+
+	userID := currentUserID(r)
+	if strings.TrimSpace(userID) == "" {
+		writeError(w, http.StatusUnauthorized, "请先登录")
+		return
+	}
+
+	payload, err := decodeBodyAsMap(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+
+	symbol := strings.TrimSpace(asString(payload["symbol"]))
+	implKey := strings.TrimSpace(asString(payload["implementation_key"]))
+	paramsRaw := asMap(payload["params"])
+
+	if symbol == "" || implKey == "" {
+		writeError(w, http.StatusBadRequest, "缺少必要参数")
+		return
+	}
+
+	// 回测 API 要求纯数字 ticker
+	backtestTicker := stripSymbolSuffix(symbol)
+
+	aiCfg := strategy.AIConfig{
+		APIKey:  a.cfg.AI.APIKey,
+		BaseURL: a.cfg.AI.BaseURL,
+		Model:   a.cfg.AI.Model,
+	}
+
+	// 获取市场摘要（用于迭代 Prompt）
+	maPayload, _ := a.liveService.GetMovingAverages(r.Context(), userID, symbol, "daily", 240)
+	var summary strategy.MarketSummary
+	if maPayload != nil {
+		summary = strategy.MarketSummary{
+			Ticker:          maPayload.Symbol,
+			Price:           maPayload.PriceRef,
+			ChangePct60D:    maPayload.ChangePct60D,
+			Volatility20D:   maPayload.Volatility20D,
+			VolumeMA5toMA20: maPayload.VolumeMA5toMA20,
+			RSI14:           maPayload.RSI14,
+			MAStatus:        maPayload.Status,
+		}
+	}
+
+	currentParams := paramsRaw
 	iterations := []strategy.IterationRound{}
 	var bestPreview *strategy.BacktestPreview
 	bestParams := currentParams
@@ -609,10 +668,16 @@ func (a *appServer) handleStrategyAIGenerate(w http.ResponseWriter, r *http.Requ
 	const maxRounds = 3
 
 	for round := 1; round <= maxRounds; round++ {
-		// 调回测引擎
-		btResult, btErr := strategy.CallQuantBacktest(r.Context(), a.cfg.QuantServiceURL, maPayload.Symbol, implKey, currentParams)
+		btResult, btErr := strategy.CallQuantBacktest(r.Context(), a.cfg.QuantServiceURL, backtestTicker, implKey, currentParams)
 		if btErr != nil {
-			log.Printf("[ai-generate] backtest round %d failed for %s: %v", round, ticker, btErr)
+			log.Printf("[ai-backtest] round %d failed for %s: %v", round, backtestTicker, btErr)
+			// 如果第一轮就失败，返回错误让前端知道
+			if round == 1 {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"backtest_error": fmt.Sprintf("回测引擎调用失败：%v", btErr),
+				})
+				return
+			}
 			break
 		}
 
@@ -624,27 +689,23 @@ func (a *appServer) handleStrategyAIGenerate(w http.ResponseWriter, r *http.Requ
 			BacktestPreview: preview,
 		}
 
-		// 判断是否是最优结果
 		if bestPreview == nil || preview.SharpeRatio > bestPreview.SharpeRatio {
 			bestPreview = &preview
 			bestParams = currentParams
 		}
 
-		// 提前终止条件：夏普 > 1.5 + 收益为正 + 回撤可控
 		if preview.SharpeRatio > 1.5 && preview.TotalReturn > 0 && preview.MaxDrawdown > -0.20 {
 			iterRound.Adjustment = "表现优秀，无需继续优化"
 			iterations = append(iterations, iterRound)
 			break
 		}
 
-		// 最后一轮不再迭代
 		if round == maxRounds {
 			iterRound.Adjustment = "已达最大迭代轮数"
 			iterations = append(iterations, iterRound)
 			break
 		}
 
-		// 调 AI 分析回测结果
 		iterResult, iterErr := strategy.IterateStrategy(r.Context(), aiCfg, implKey, currentParams, summary, preview)
 		if iterErr != nil || iterResult == nil || iterResult.Action != "adjust" {
 			reason := "AI 建议保持当前参数"
@@ -658,18 +719,15 @@ func (a *appServer) handleStrategyAIGenerate(w http.ResponseWriter, r *http.Requ
 
 		iterRound.Adjustment = iterResult.Reason
 		iterations = append(iterations, iterRound)
-
-		// 用 AI 建议的新参数继续下一轮
 		currentParams = iterResult.Params
 	}
 
-	// 使用最优参数
-	result.Recommendation.Params = bestParams
-	result.BacktestPreview = bestPreview
-	result.Iterations = iterations
-	result.FinalRound = len(iterations)
-
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"backtest_preview": bestPreview,
+		"iterations":       iterations,
+		"final_round":      len(iterations),
+		"best_params":      bestParams,
+	})
 }
 
 func (a *appServer) handleStrategySubroutes(w http.ResponseWriter, r *http.Request) {
@@ -2070,6 +2128,7 @@ func main() {
 	mux.HandleFunc("/api/strategies", server.withOptionalAuth(server.handleStrategies))
 	mux.HandleFunc("/api/strategies/active", server.withOptionalAuth(server.handleActiveStrategies))
 	mux.HandleFunc("/api/strategies/ai-generate", server.withRequiredAuth(server.handleStrategyAIGenerate))
+	mux.HandleFunc("/api/strategies/ai-generate/backtest", server.withRequiredAuth(server.handleStrategyAIBacktest))
 	mux.HandleFunc("/api/strategies/", server.withOptionalAuth(server.handleStrategySubroutes))
 
 	mux.HandleFunc("/api/webhook", server.withRequiredAuth(server.handleWebhookConfig))

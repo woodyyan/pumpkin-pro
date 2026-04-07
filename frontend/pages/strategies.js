@@ -48,6 +48,8 @@ export default function StrategyLibraryPage() {
   const [aiTicker, setAiTicker] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState(null);
+  const [aiBacktestLoading, setAiBacktestLoading] = useState(false);
+  const [aiBacktestData, setAiBacktestData] = useState(null);
   const [aiError, setAiError] = useState('');
   const authIdentityKey = String(user?.id || user?.email || '');
 
@@ -351,8 +353,10 @@ export default function StrategyLibraryPage() {
     }
     setAiTicker('');
     setAiResult(null);
+    setAiBacktestData(null);
     setAiError('');
     setAiLoading(false);
+    setAiBacktestLoading(false);
     setAiDialogOpen(true);
   }, [isLoggedIn, openAuthModal]);
 
@@ -362,17 +366,49 @@ export default function StrategyLibraryPage() {
     setAiLoading(true);
     setAiError('');
     setAiResult(null);
+    setAiBacktestData(null);
+    setAiBacktestLoading(false);
     try {
+      // 第一阶段：AI 推荐（快速返回）
       const data = await requestJson('/api/strategies/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticker: trimmed }),
       });
-      // 保存完整响应：recommendation + backtest_preview + iterations
       setAiResult(data || null);
+      setAiLoading(false);
+
+      // 第二阶段：自动回测验证 + 迭代优化（异步）
+      const rec = data?.recommendation;
+      if (rec?.implementation_key && rec?.params && rec?.market_summary?.ticker) {
+        setAiBacktestLoading(true);
+        try {
+          const btData = await requestJson('/api/strategies/ai-generate/backtest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              symbol: rec.market_summary.ticker,
+              implementation_key: rec.implementation_key,
+              params: rec.params,
+            }),
+          });
+          setAiBacktestData(btData || null);
+          // 如果迭代调参后有更优参数，更新推荐结果
+          if (btData?.best_params && Object.keys(btData.best_params).length > 0) {
+            setAiResult((prev) => prev ? {
+              ...prev,
+              recommendation: { ...prev.recommendation, params: btData.best_params },
+            } : prev);
+          }
+        } catch (btErr) {
+          // 回测失败不影响推荐结果展示
+          console.warn('AI backtest failed:', btErr);
+        } finally {
+          setAiBacktestLoading(false);
+        }
+      }
     } catch (err) {
       setAiError(err.message || 'AI 生成策略失败');
-    } finally {
       setAiLoading(false);
     }
   };
@@ -677,6 +713,8 @@ export default function StrategyLibraryPage() {
           onTickerChange={setAiTicker}
           loading={aiLoading}
           result={aiResult}
+          backtestLoading={aiBacktestLoading}
+          backtestData={aiBacktestData}
           error={aiError}
           onGenerate={handleAIGenerate}
           onAdopt={handleAIAdopt}
@@ -993,11 +1031,12 @@ const CONFIDENCE_META = {
   low: { label: '低', color: 'text-rose-300 border-rose-400/40 bg-rose-500/10' },
 };
 
-function AIGenerateDialog({ ticker, onTickerChange, loading, result, error, onGenerate, onAdopt, onClose }) {
+function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoading, backtestData, error, onGenerate, onAdopt, onClose }) {
   const rec = result?.recommendation || null;
   const summary = rec?.market_summary || null;
-  const btPreview = result?.backtest_preview || null;
-  const iterations = result?.iterations || [];
+  const btPreview = backtestData?.backtest_preview || null;
+  const btError = backtestData?.backtest_error || null;
+  const iterations = backtestData?.iterations || [];
   const confidenceMeta = CONFIDENCE_META[rec?.confidence] || CONFIDENCE_META.medium;
   const [showIterations, setShowIterations] = useState(false);
 
@@ -1085,7 +1124,22 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, error, onGe
               ) : null}
             </div>
 
-            {btPreview ? (
+            {backtestLoading ? (
+              <div className="mt-4 space-y-2">
+                <div className="text-sm font-semibold text-white">📊 近 6 个月回测验证</div>
+                <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  <span className="text-xs text-white/55">正在用近 6 个月历史数据回测验证 + 迭代优化中...</span>
+                </div>
+              </div>
+            ) : btError ? (
+              <div className="mt-4 space-y-2">
+                <div className="text-sm font-semibold text-white">📊 近 6 个月回测验证</div>
+                <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                  ⚠️ {btError}
+                </div>
+              </div>
+            ) : btPreview ? (
               <div className="mt-4 space-y-2">
                 <div className="text-sm font-semibold text-white">📊 近 6 个月回测验证</div>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

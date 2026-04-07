@@ -418,11 +418,22 @@ func truncateStr(s string, maxLen int) string {
 // CallQuantBacktest calls the Quant engine's /api/backtest endpoint internally
 // and returns the raw response as a map. quantBaseURL should be like "http://localhost:8000".
 func CallQuantBacktest(ctx context.Context, quantBaseURL string, ticker string, implKey string, params map[string]any) (map[string]any, error) {
+	// 计算近 6 个月的日期范围
+	now := time.Now()
+	endDate := now.AddDate(0, 0, -1).Format("2006-01-02")
+	startDate := now.AddDate(0, -6, 0).Format("2006-01-02")
+
 	payload := map[string]any{
 		"data_source": "online",
 		"ticker":      ticker,
-		"period":      "6mo",
+		"start_date":  startDate,
+		"end_date":    endDate,
+		"capital":     100000,
+		"fee_pct":     0.001,
 		"runtime_strategy": map[string]any{
+			"id":                 "ai-backtest-" + implKey,
+			"key":                "ai_backtest_" + implKey,
+			"name":               "AI 回测验证",
 			"implementation_key": implKey,
 			"params":             params,
 		},
@@ -465,16 +476,16 @@ func CallQuantBacktest(ctx context.Context, quantBaseURL string, ticker string, 
 }
 
 // ExtractBacktestPreview pulls key metrics from a raw backtest result map.
+// Quant returns metrics as a flat dict with _pct suffix values (e.g. total_return_pct = 15.3 means 15.3%).
 func ExtractBacktestPreview(result map[string]any) BacktestPreview {
 	metrics := asNestedMap(result, "metrics")
-	summary := asNestedMap(metrics, "summary")
 	preview := BacktestPreview{
-		TotalReturn:    asFloat(summary["total_return"]),
-		MaxDrawdown:    asFloat(summary["max_drawdown"]),
-		SharpeRatio:    asFloat(summary["sharpe_ratio"]),
-		WinRate:        asFloat(summary["win_rate"]),
-		TradeCount:     asIntValue(summary["trade_count"]),
-		AnnualReturn:   asFloat(summary["annual_return"]),
+		TotalReturn:    asFloat(metrics["total_return_pct"]) / 100,
+		MaxDrawdown:    -asFloat(metrics["max_drawdown_pct"]) / 100,
+		SharpeRatio:    asFloat(metrics["sharpe_ratio"]),
+		WinRate:        asFloat(metrics["win_rate_pct"]) / 100,
+		TradeCount:     asIntValue(metrics["total_trades"]),
+		AnnualReturn:   asFloat(metrics["annual_return_pct"]) / 100,
 		BacktestPeriod: "近 6 个月",
 	}
 	return preview

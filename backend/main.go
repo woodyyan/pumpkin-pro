@@ -591,7 +591,8 @@ func (a *appServer) handleStrategyAIGenerate(w http.ResponseWriter, r *http.Requ
 
 	result, err := strategy.GenerateStrategy(r.Context(), aiCfg, summary)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("AI 生成策略失败：%v", err))
+		log.Printf("[ai-generate] LLM call failed for %s: %v", ticker, err)
+		writeError(w, http.StatusInternalServerError, "AI 服务暂时不可用，请稍后重试。如持续失败，请检查网络连接。")
 		return
 	}
 
@@ -674,7 +675,7 @@ func (a *appServer) handleStrategyAIBacktest(w http.ResponseWriter, r *http.Requ
 			// 如果第一轮就失败，返回错误让前端知道
 			if round == 1 {
 				writeJSON(w, http.StatusOK, map[string]any{
-					"backtest_error": fmt.Sprintf("回测引擎调用失败：%v", btErr),
+					"backtest_error": "回测引擎暂时不可用，请稍后重试。回测验证已跳过，推荐结果仍可参考。",
 				})
 				return
 			}
@@ -776,7 +777,8 @@ func (a *appServer) handleBacktestAIOptimize(w http.ResponseWriter, r *http.Requ
 
 	analysis, err := strategy.AnalyzeBacktest(r.Context(), aiCfg, input)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("AI 分析失败：%v", err))
+		log.Printf("[ai-optimize] analysis failed for %s/%s: %v", input.Ticker, input.ImplementationKey, err)
+		writeError(w, http.StatusInternalServerError, "AI 服务暂时不可用，请稍后重试。如持续失败，请检查网络连接。")
 		return
 	}
 

@@ -288,7 +288,7 @@ func GenerateStrategy(ctx context.Context, cfg AIConfig, summary MarketSummary) 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("调用 AI 服务失败: %w", err)
@@ -577,7 +577,7 @@ func IterateStrategy(ctx context.Context, cfg AIConfig, implKey string, currentP
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return &llmIterateOutput{Action: "keep", Reason: "AI 调用失败"}, nil
@@ -779,7 +779,7 @@ func AnalyzeBacktest(ctx context.Context, cfg AIConfig, input AnalyzeBacktestInp
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("AI 调用失败: %w", err)

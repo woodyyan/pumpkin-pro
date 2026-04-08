@@ -13,7 +13,7 @@ const HIGHLIGHTS = [
 const FEATURES = [
   {
     icon: '🤖', title: 'AI 分析与决策', href: '/live-trading',
-    points: ['整合平台所有 AI 能力：AI 个股智能决策、AI 自然语言选股、AI 策略生成与优化'],
+    points: ['AI 个股智能决策', 'AI 自然语言选股', 'AI 策略智能生成', 'AI 回测自动优化'],
     cta: '体验 AI',
   },
   {

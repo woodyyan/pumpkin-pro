@@ -361,9 +361,13 @@ export default function LiveTradingDetailPage() {
       setAiResult(result)
     } catch (err) {
       if (isAuthRequiredError(err)) {
-        setAiError('登录已过期，请重新登录')
+        setAiError('登录已过期，请重新登录后重试')
+      } else if (String(err.message || '').includes('429') || String(err.message || '').includes('Too Many')) {
+        setAiError('AI 分析次数已达上限，请 1 小时后再试，或联系管理员提升限额')
+      } else if (String(err.message || '').includes('timeout') || String(err.message || '').includes('Timeout')) {
+        setAiError('分析超时了，该股票数据量较大，请稍后重试')
       } else {
-        setAiError(err.message || '分析请求失败，请稍后重试')
+        setAiError('分析遇到问题，请稍后重试。如果反复出现，请联系客服')
       }
     } finally {
       setAiAnalyzing(false)
@@ -661,12 +665,6 @@ export default function LiveTradingDetailPage() {
                 <span>行情来源：{formatSource(snapshot?.source)}</span>
               </div>
             </div>
-            <a
-              href="/live-trading"
-              className="inline-flex items-center gap-1 rounded-xl border border-border px-3 py-2 text-xs text-white/75 transition hover:border-primary hover:text-primary"
-            >
-              ← 返回概览
-            </a>
             {privateAccessReady && (
               <button
                 type="button"
@@ -690,6 +688,30 @@ export default function LiveTradingDetailPage() {
               </button>
             )}
           </div>
+
+          {/* AI 分析错误提示 — 紧邻按钮，用户一眼可见 */}
+          {showAiPanel && !aiAnalyzing && aiError && !aiResult && (
+            <div className="mt-3 flex items-start gap-3 rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3">
+              <span className="mt-0.5 text-sm">⚠️</span>
+              <div className="flex-1">
+                <p className="text-[13px] font-medium text-rose-200">{aiError}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleAIAnalysis}
+                className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-primary/85"
+              >
+                重试
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowAiPanel(false); setAiError('') }}
+                className="shrink-0 rounded-lg border border-border px-2 py-1.5 text-xs text-white/40 hover:border-white/30 hover:text-white/70 transition"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {/* Inline signal config (login required) */}
           {privateAccessReady && signalConfig && (
@@ -1237,22 +1259,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
     )
   }
 
-  // 错误态
-  if (error && !result) {
-    return (
-      <section className="rounded-2xl border border-rose-400/40 bg-rose-500/8 p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-rose-200">分析失败</h3>
-            <p className="mt-1 text-xs text-rose-200/70">{error}</p>
-          </div>
-          <button type="button" onClick={onRetry} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-primary/85">
-              重试
-          </button>
-        </div>
-      </section>
-    )
-  }
+  // 错误由顶部 Header 区域统一展示，此处不再重复渲染
 
   // 结果展示
   const analysis = result?.analysis

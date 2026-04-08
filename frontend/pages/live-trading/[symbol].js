@@ -1335,7 +1335,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
       {analysis.layer_scores && Object.keys(analysis.layer_scores).length > 0 && (
         <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-4 py-3.5">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-white/70">📊 四层框架评分</span>
+            <span className="text-xs font-semibold text-white/70">📊 卧龙模型评分</span>
             {/* 市场状态标签 */}
             {analysis.market_state && (
               <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${

@@ -294,34 +294,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ── Section 2: Features ── */}
-      <section id="features" className="px-4 py-16 md:py-24 max-w-6xl mx-auto">
-        <div className="text-center mb-12">
-          <h2 className="text-2xl md:text-3xl font-bold tracking-tight">我们提供什么</h2>
-          <p className="mt-3 text-sm text-white/40">一站式量化分析工具，覆盖投研全流程</p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {FEATURES.map((f, i) => (
-            <Link
-              key={i}
-              href={f.href}
-              className="group rounded-2xl border border-border bg-card p-6 transition hover:-translate-y-1 hover:border-white/15 hover:shadow-lg"
-            >
-              <div className="text-4xl mb-4">{f.icon}</div>
-              <h3 className="text-lg font-semibold text-white mb-3">{f.title}</h3>
-              <ul className="space-y-1.5 text-sm text-white/50 leading-6 mb-4">
-                {f.points.map((p, j) => <li key={j} className="flex items-start gap-2"><span className="text-primary/60 mt-0.5">•</span>{p}</li>)}
-              </ul>
-              <span className="inline-flex items-center text-sm text-primary/80 font-medium group-hover:text-primary transition">
-                {f.cta} <span className="ml-1 transition-transform group-hover:translate-x-1">→</span>
-              </span>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Section 3: 场景化快速上手 ── */}
+      {/* ── Section 2: 场景化快速上手 ── */}
       <section className="px-4 py-16 md:py-24 max-w-5xl mx-auto">
         <div className="text-center mb-12">
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight">🚀 快速上手</h2>
@@ -378,6 +351,33 @@ export default function HomePage() {
               {/* CTA */}
               <span className="inline-flex items-center text-sm font-medium text-primary group-hover:text-primary transition">
                 {s.cta} <span className="ml-1 transition-transform group-hover:translate-x-1">→</span>
+              </span>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Section 3: Features ── */}
+      <section id="features" className="px-4 py-16 md:py-24 max-w-6xl mx-auto">
+        <div className="text-center mb-12">
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight">我们提供什么</h2>
+          <p className="mt-3 text-sm text-white/40">一站式量化分析工具，覆盖投研全流程</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {FEATURES.map((f, i) => (
+            <Link
+              key={i}
+              href={f.href}
+              className="group rounded-2xl border border-border bg-card p-6 transition hover:-translate-y-1 hover:border-white/15 hover:shadow-lg"
+            >
+              <div className="text-4xl mb-4">{f.icon}</div>
+              <h3 className="text-lg font-semibold text-white mb-3">{f.title}</h3>
+              <ul className="space-y-1.5 text-sm text-white/50 leading-6 mb-4">
+                {f.points.map((p, j) => <li key={j} className="flex items-start gap-2"><span className="text-primary/60 mt-0.5">•</span>{p}</li>)}
+              </ul>
+              <span className="inline-flex items-center text-sm text-primary/80 font-medium group-hover:text-primary transition">
+                {f.cta} <span className="ml-1 transition-transform group-hover:translate-x-1">→</span>
               </span>
             </Link>
           ))}

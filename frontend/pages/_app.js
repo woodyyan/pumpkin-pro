@@ -2,9 +2,10 @@ import '../styles/globals.css'
 import Head from 'next/head'
 import Link from 'next/link'
 import { useRouter } from 'next/router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { AuthProvider, useAuth } from '../lib/auth-context'
+import changelogData from '../data/changelog.json'
 
 const NAV_ITEMS = [
   { href: '/', label: '首页' },
@@ -12,8 +13,42 @@ const NAV_ITEMS = [
   { href: '/backtest', label: '回测引擎' },
   { href: '/live-trading', label: '行情看板' },
   { href: '/stock-picker', label: '选股器' },
-  { href: '/changelog', label: '更新日志' },
+  { href: '/changelog', label: '更新日志', badgeKey: 'changelog' },
 ]
+
+// ── Changelog 未读检测 ──
+const CL_KEY = 'wolong_changelog_seen'
+
+function useChangelogUnread() {
+  const [seenAt, setSeenAt] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    return localStorage.getItem(CL_KEY) || ''
+  })
+
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === CL_KEY) setSeenAt(e.newValue || '')
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
+  const lastUpdated = changelogData?.last_updated || ''
+
+  const unreadCount = useMemo(() => {
+    if (!lastUpdated || seenAt >= lastUpdated) return 0
+    const items = Array.isArray(changelogData?.items) ? changelogData.items : []
+    return items.filter((it) => it?.visible !== false && (it?.date || '') > (seenAt || '')).length
+  }, [lastUpdated, seenAt])
+
+  const markAsSeen = () => {
+    const val = lastUpdated
+    localStorage.setItem(CL_KEY, val)
+    setSeenAt(val)
+  }
+
+  return { unreadCount, markAsSeen }
+}
 
 function getVisitorId() {
   if (typeof window === 'undefined') return ''
@@ -68,6 +103,7 @@ function AppLayout({ Component, pageProps }) {
   const router = useRouter()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const mobileMenuRef = useRef(null)
+  const { unreadCount, markAsSeen } = useChangelogUnread()
 
   // Page view tracking
   useEffect(() => {
@@ -81,6 +117,13 @@ function AppLayout({ Component, pageProps }) {
   useEffect(() => {
     setMobileMenuOpen(false)
   }, [router.pathname])
+
+  // Auto-mark changelog as seen when visiting the page
+  useEffect(() => {
+    if (router.pathname === '/changelog' && unreadCount > 0) {
+      markAsSeen()
+    }
+  }, [router.pathname, unreadCount, markAsSeen])
 
   // Close mobile menu on outside click
   useEffect(() => {
@@ -138,6 +181,11 @@ function AppLayout({ Component, pageProps }) {
                     }`}
                   >
                     {item.label}
+                    {item.badgeKey === 'changelog' && unreadCount > 0 && (
+                      <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white leading-none">
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    )}
                   </Link>
                 )
               })}
@@ -177,7 +225,14 @@ function AppLayout({ Component, pageProps }) {
                         : 'text-white/60 hover:bg-white/5 hover:text-white'
                     }`}
                   >
-                    {item.label}
+                    <span className="inline-flex items-center">
+                      {item.label}
+                      {item.badgeKey === 'changelog' && unreadCount > 0 && (
+                        <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white leading-none">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                      )}
+                    </span>
                   </Link>
                 )
               })}

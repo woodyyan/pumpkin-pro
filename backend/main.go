@@ -20,6 +20,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
+	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 	"github.com/woodyyan/pumpkin-pro/backend/store/screener"
@@ -41,6 +42,7 @@ type appServer struct {
 	backtestService  *backtest.Service
 	screenerService  *screener.Service
 	analyticsRepo    *analytics.Repository
+	feedbackRepo     *feedback.Repository
 	aiRateLimiter    *strategy.AIRateLimiter
 }
 
@@ -2073,6 +2075,105 @@ func (a *appServer) handleQuadrantStatus(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, status)
 }
 
+func (a *appServer) handleFeedback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+
+	userID := currentUserID(r)
+	if strings.TrimSpace(userID) == "" {
+		writeError(w, http.StatusUnauthorized, "请先登录后再提交反馈")
+		return
+	}
+
+	user, _ := currentUser(r)
+
+	payload, err := decodeBodyAsMap(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+
+	item, err := a.feedbackRepo.Create(r.Context(), feedback.CreateInput{
+		UserID:    userID,
+		UserEmail: user.Email,
+		Category:  asString(payload["category"]),
+		Content:   asString(payload["content"]),
+		Contact:   asString(payload["contact"]),
+	})
+	if err != nil {
+		if errors.Is(err, feedback.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "提交反馈失败，请稍后重试")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"item": item})
+}
+
+func (a *appServer) handleAdminFeedback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+
+	limit := parseLimit(r.URL.Query().Get("limit"), 50)
+	offset := parseOffset(r.URL.Query().Get("offset"), 0)
+
+	items, total, err := a.feedbackRepo.List(r.Context(), limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "加载反馈列表失败")
+		return
+	}
+
+	stats, _ := a.feedbackRepo.GetStats(r.Context())
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"total": total,
+		"stats": stats,
+	})
+}
+
+func (a *appServer) handleAdminFeedbackSubroutes(w http.ResponseWriter, r *http.Request) {
+	suffix := strings.TrimPrefix(r.URL.Path, "/api/admin/feedback/")
+	suffix = strings.TrimSpace(strings.Trim(suffix, "/"))
+	if suffix == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	if r.Method != http.MethodPatch {
+		writeError(w, http.StatusMethodNotAllowed, "Only PATCH method is allowed")
+		return
+	}
+
+	payload, err := decodeBodyAsMap(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+
+	status := asString(payload["status"])
+	if err := a.feedbackRepo.UpdateStatus(r.Context(), suffix, status); err != nil {
+		if errors.Is(err, feedback.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "反馈记录不存在")
+			return
+		}
+		if errors.Is(err, feedback.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "更新状态失败")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": suffix, "status": status})
+}
+
 func (a *appServer) handleAdminQuadrantLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
@@ -2150,6 +2251,7 @@ func main() {
 	screenerService := screener.NewService(screenerRepo)
 
 	analyticsRepo := analytics.NewRepository(storeInstance.DB)
+	feedbackRepo := feedback.NewRepository(storeInstance.DB)
 
 	server := &appServer{
 		cfg:              cfg,
@@ -2163,6 +2265,7 @@ func main() {
 		backtestService:  backtestService,
 		screenerService:  screenerService,
 		analyticsRepo:    analyticsRepo,
+		feedbackRepo:     feedbackRepo,
 		aiRateLimiter:    strategy.NewAIRateLimiter(20),
 	}
 
@@ -2215,6 +2318,10 @@ func main() {
 	mux.HandleFunc("/api/quadrant/status", server.handleQuadrantStatus)
 
 	mux.HandleFunc("/api/admin/quadrant-logs", server.withSuperAdminAuth(server.handleAdminQuadrantLogs))
+
+	mux.HandleFunc("/api/feedback", server.withRequiredAuth(server.handleFeedback))
+	mux.HandleFunc("/api/admin/feedback", server.withSuperAdminAuth(server.handleAdminFeedback))
+	mux.HandleFunc("/api/admin/feedback/", server.withSuperAdminAuth(server.handleAdminFeedbackSubroutes))
 
 	mux.HandleFunc("/api/screener/scan", server.withOptionalAuth(server.handleScreenerScan))
 	mux.HandleFunc("/api/screener/ai-parse", server.withOptionalAuth(server.handleScreenerAIParse))

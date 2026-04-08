@@ -434,7 +434,10 @@ function AdminDashboard({ session, onLogout }) {
             {/* Panel 8: Quadrant Compute History */}
             <QuadrantLogsPanel />
 
-            {/* Panel 8: Audit */}
+            {/* Panel 9: User Feedback */}
+            <FeedbackPanel />
+
+            {/* Panel 10: Audit */}
             <section>
               <h2 className="text-base font-semibold text-white/80 mb-3">🛡️ 审计日志</h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -502,6 +505,99 @@ function QuadrantLogsPanel() {
               </div>
             )
           })}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ── Feedback Panel ──
+
+const FB_CATEGORY_LABELS = { bug: '🐛 Bug', feature: '💡 功能建议', wish: '🌟 许愿池' }
+const FB_STATUS_LABELS = { pending: '待处理', resolved: '已处理', dismissed: '已忽略' }
+const FB_STATUS_COLORS = { pending: 'text-amber-300 bg-amber-500/10 border-amber-400/30', resolved: 'text-emerald-300 bg-emerald-500/10 border-emerald-400/30', dismissed: 'text-white/40 bg-white/5 border-white/10' }
+
+function FeedbackPanel() {
+  const [data, setData] = useState(null)
+  const [updating, setUpdating] = useState(null)
+
+  useEffect(() => {
+    adminFetch('/api/admin/feedback?limit=50')
+      .then((d) => setData(d))
+      .catch(() => setData({ items: [], total: 0, stats: null }))
+  }, [])
+
+  if (!data) return null
+
+  const stats = data.stats
+  const items = data.items || []
+
+  const handleUpdateStatus = async (id, status) => {
+    setUpdating(id)
+    try {
+      await adminFetch(`/api/admin/feedback/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      // Refresh
+      const refreshed = await adminFetch('/api/admin/feedback?limit=50')
+      setData(refreshed)
+    } catch { /* silent */ }
+    setUpdating(null)
+  }
+
+  return (
+    <section>
+      <h2 className="text-base font-semibold text-white/80 mb-3">💬 用户反馈</h2>
+      {stats ? (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+          <StatCard label="总反馈" value={stats.total} />
+          <StatCard label="待处理" value={stats.pending} />
+          <StatCard label="Bug" value={stats.bug_count} />
+          <StatCard label="建议+许愿" value={(stats.feature_count || 0) + (stats.wish_count || 0)} />
+        </div>
+      ) : null}
+      {items.length === 0 ? (
+        <p className="text-xs text-white/40">暂无用户反馈</p>
+      ) : (
+        <div className="space-y-2">
+          {items.map((item) => (
+            <div key={item.id} className="rounded-lg border border-white/8 bg-[#15171e] px-4 py-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                <span className="font-medium text-white/80">{FB_CATEGORY_LABELS[item.category] || item.category}</span>
+                <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${FB_STATUS_COLORS[item.status] || FB_STATUS_COLORS.pending}`}>
+                  {FB_STATUS_LABELS[item.status] || item.status}
+                </span>
+                <span className="text-white/35">{new Date(item.created_at).toLocaleString('zh-CN')}</span>
+                <span className="text-white/30">{item.user_email || item.user_id}</span>
+              </div>
+              <div className="mt-2 text-sm leading-7 text-white/70 whitespace-pre-wrap">{item.content}</div>
+              {item.contact ? (
+                <div className="mt-1 text-xs text-white/40">联系方式：{item.contact}</div>
+              ) : null}
+              {item.status === 'pending' ? (
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    disabled={updating === item.id}
+                    onClick={() => handleUpdateStatus(item.id, 'resolved')}
+                    className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-50"
+                  >
+                    标记已处理
+                  </button>
+                  <button
+                    type="button"
+                    disabled={updating === item.id}
+                    onClick={() => handleUpdateStatus(item.id, 'dismissed')}
+                    className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-white/50 transition hover:bg-white/10 disabled:opacity-50"
+                  >
+                    忽略
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ))}
         </div>
       )}
     </section>

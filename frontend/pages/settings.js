@@ -33,6 +33,12 @@ export default function SettingsPage() {
   })
   const [investSaving, setInvestSaving] = useState(false)
   const [investNotice, setInvestNotice] = useState('')
+  const [fbCategory, setFbCategory] = useState('bug')
+  const [fbContent, setFbContent] = useState('')
+  const [fbContact, setFbContact] = useState('')
+  const [fbSaving, setFbSaving] = useState(false)
+  const [fbNotice, setFbNotice] = useState('')
+  const [fbError, setFbError] = useState('')
   const authIdentityKey = String(user?.id || user?.email || '')
 
   const applyError = (err, fallbackText) => {
@@ -510,6 +516,108 @@ export default function SettingsPage() {
             )}
           </div>
         </div>
+      </section>
+
+      <section className="rounded-2xl border border-border bg-card p-5">
+        <div>
+          <h2 className="text-base font-semibold text-white">反馈与建议</h2>
+          <p className="mt-1 text-xs text-white/60">遇到问题或有想法？我们很想听到你的声音。</p>
+        </div>
+
+        {!isLoggedIn ? (
+          <div className="mt-4 rounded-xl border border-dashed border-border bg-black/20 px-4 py-6 text-center">
+            <span className="text-sm text-white/45">
+              <button type="button" onClick={() => openAuthModal('login', '登录后可提交反馈和建议。')} className="text-primary hover:underline">登录</button>
+              {' '}后可提交反馈和建议
+            </span>
+          </div>
+        ) : (
+          <div className="mt-4 space-y-4 rounded-xl border border-border bg-black/20 p-4">
+            <div>
+              <div className="mb-2 text-xs text-white/55">反馈类型</div>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { value: 'bug', label: '🐛 Bug', desc: '系统报错或功能异常' },
+                  { value: 'feature', label: '💡 功能建议', desc: '改进现有功能' },
+                  { value: 'wish', label: '🌟 许愿池', desc: '想要全新功能' },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setFbCategory(opt.value)}
+                    className={`rounded-xl border px-3 py-2 text-left transition ${
+                      fbCategory === opt.value
+                        ? 'border-primary bg-primary/10 shadow-[0_0_0_1px_rgba(230,126,34,0.2)]'
+                        : 'border-border bg-black/20 hover:border-white/20'
+                    }`}
+                  >
+                    <div className="text-xs font-medium text-white">{opt.label}</div>
+                    <div className="mt-0.5 text-[10px] text-white/40">{opt.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <label className="block">
+              <span className="text-xs text-white/55">详细描述 *</span>
+              <textarea
+                value={fbContent}
+                onChange={(e) => setFbContent(e.target.value)}
+                rows={4}
+                maxLength={2000}
+                className="mt-1 block w-full resize-none rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary"
+                placeholder="请描述你遇到的问题、期望的功能、或想要的改进..."
+              />
+              <div className="mt-1 text-right text-[10px] text-white/30">{fbContent.length}/2000</div>
+            </label>
+
+            <label className="block">
+              <span className="text-xs text-white/55">联系方式（选填）</span>
+              <input
+                value={fbContact}
+                onChange={(e) => setFbContact(e.target.value)}
+                maxLength={128}
+                className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary"
+                placeholder="微信号、邮箱或其他联系方式，方便我们跟进"
+              />
+            </label>
+
+            {fbError ? (
+              <div className="rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{fbError}</div>
+            ) : null}
+
+            {fbNotice ? (
+              <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{fbNotice}</div>
+            ) : null}
+
+            <button
+              type="button"
+              disabled={fbSaving || !fbContent.trim()}
+              onClick={async () => {
+                setFbSaving(true)
+                setFbError('')
+                setFbNotice('')
+                try {
+                  await requestJson('/api/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ category: fbCategory, content: fbContent.trim(), contact: fbContact.trim() }),
+                  })
+                  setFbNotice('反馈已提交，感谢你的宝贵意见！')
+                  setFbContent('')
+                  setFbContact('')
+                } catch (err) {
+                  setFbError(err.message || '提交反馈失败，请稍后重试')
+                } finally {
+                  setFbSaving(false)
+                }
+              }}
+              className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+              {fbSaving ? '提交中...' : '提交反馈'}
+            </button>
+          </div>
+        )}
       </section>
     </div>
   )

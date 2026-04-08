@@ -1324,9 +1324,61 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 			"session_state": sessionState,
 			"items":         items,
 		})
+	case "ai-analysis":
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 请求")
+			return
+		}
+		a.handleStockAIAnalysis(w, r, symbol)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// handleStockAIAnalysis 处理 AI 个股诊断请求
+// POST /api/live/symbols/{symbol}/ai-analysis
+func (a *appServer) handleStockAIAnalysis(w http.ResponseWriter, r *http.Request, symbol string) {
+	userID := currentUserID(r)
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "请先登录后使用 AI 分析功能")
+		return
+	}
+
+	// 限流检查
+	if !a.aiRateLimiter.Allow(userID) {
+		writeError(w, http.StatusTooManyRequests, "AI 分析次数已达上限，每小时限 20 次，请稍后再试")
+		return
+	}
+
+	// 解析请求体
+	var input strategy.StockAnalysisInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "请求数据格式错误")
+		return
+	}
+
+	// 查询投资画像（容错：查不到不阻断）
+	var profile *portfolio.InvestmentProfile
+	pf, err := a.portfolioService.GetInvestmentProfile(r.Context(), userID)
+	if err == nil && pf != nil {
+		profile = pf
+	}
+
+	// 构建 AI 配置
+	cfg := strategy.AIConfig{
+		APIKey:  a.cfg.AI.APIKey,
+		BaseURL: a.cfg.AI.BaseURL,
+		Model:   a.cfg.AI.Model,
+	}
+
+	// 调用 AI 分析
+	result, err := strategy.AnalyzeStock(r.Context(), cfg, &input, profile)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeLiveJSON(w, http.StatusOK, result)
 }
 
 func parseSince(raw string) time.Time {

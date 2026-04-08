@@ -69,6 +69,12 @@ export default function LiveTradingDetailPage() {
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState('')
 
+  // ── AI 分析状态 ──
+  const [aiAnalyzing, setAiAnalyzing] = useState(false)
+  const [aiResult, setAiResult] = useState(null)
+  const [aiError, setAiError] = useState('')
+  const [showAiPanel, setShowAiPanel] = useState(false)
+
   // 关注状态
   const [isWatched, setIsWatched] = useState(null) // null=未知, true/false
   const [addingWatch, setAddingWatch] = useState(false)
@@ -218,6 +224,154 @@ export default function LiveTradingDetailPage() {
       setPortfolioData(null)
     }
   }
+
+  // ── AI 个股分析 ──
+
+  const handleAIAnalysis = async () => {
+    if (!isLoggedIn) { openAuthModal('login', '登录后可使用 AI 分析功能'); return }
+    if (!snapshotPayload?.snapshot) { setAiError('行情数据尚未加载完成，请稍后再试'); return }
+
+    setAiAnalyzing(true)
+    setAiError('')
+    setShowAiPanel(true)
+
+    try {
+      // Level 1: 行情快照已检查（上面）
+      const snap = snapshotPayload.snapshot
+
+      // 组装 payload
+      const symbolMeta = { symbol, name: symbolName || symbol, exchange, currency: isAShare ? 'CNY' : 'HKD' }
+      const market = {
+        price: snap.last_price ?? 0,
+        change_pct: snap.change_rate ?? 0,
+        volume: snap.volume ?? 0,
+        turnover_rate: snap.turnover_rate ?? 0,
+        open: snap.open ?? 0,
+        high: snap.high ?? 0,
+        low: snap.low ?? 0,
+        data_ts: lastUpdateAt || new Date().toISOString(),
+      }
+
+      // 技术指标（Level 2：降级可用）
+      let technical
+      if (movingAveragePayload && movingAveragePriceRef(movingAveragePayload) > 0) {
+        technical = {
+          ma5: movingAveragePayload.ma5 ?? 'N/A',
+          ma20: movingAveragePayload.ma20 ?? 'N/A',
+          ma60: movingAveragePayload.ma60 ?? 'N/A',
+          ma200: movingAveragePayload.ma200 ?? 'N/A',
+          ma_status: movingAveragePayload.status || 'N/A',
+          rsi14: movingAveragePayload.rsi14 ?? 'N/A',
+          rsi14_status: movingAveragePayload.rsi14_status || 'N/A',
+          macd: movingAveragePayload.macd ?? 'N/A',
+          macd_signal: movingAveragePayload.macd_signal ?? 'N/A',
+          macd_histogram: movingAveragePayload.macd_histogram ?? 'N/A',
+          bollinger_upper: movingAveragePayload.bollinger_upper ?? 'N/A',
+          bollinger_middle: movingAveragePayload.bollinger_middle ?? 'N/A',
+          bollinger_lower: movingAveragePayload.bollinger_lower ?? 'N/A',
+          bollinger_bandwidth: movingAveragePayload.bollinger_bandwidth ?? 'N/A',
+          bollinger_percent_b: movingAveragePayload.bollinger_percent_b ?? 'N/A',
+          change_pct_60d: movingAveragePayload.change_pct_60d ?? 'N/A',
+          volatility_20d: movingAveragePayload.volatility_20d ?? 'N/A',
+          volume_ma5_to_ma20: movingAveragePayload.volume_ma5_to_ma20 ?? 'N/A',
+          _valid: true,
+        }
+      } else { technical = { _valid: false } }
+
+      // 基础面（Level 2：降级可用）
+      let fundamentals
+      if (fundamentalsItems && Object.keys(fundamentalsItems).length > 3) {
+        fundamentals = {
+          market_cap: fundamentalsItems.market_cap ?? 'N/A',
+          market_cap_text: formatYiCurrency(fundamentalsItems.market_cap, isAShare ? '¥' : 'HK$'),
+          pe_ttm: fundamentalsItems.pe_ttm ?? 'N/A',
+          pb: fundamentalsItems.pb_ttm ?? 'N/A',
+          peg: fundamentalsItems.peg ?? 'N/A',
+          peg_unavailable: (fundamentalsItems.peg == null || Number(fundamentalsItems.peg) <= 0),
+          dividend_yield: fundamentalsItems.dividend_yield ?? 'N/A',
+          net_profit: fundamentalsItems.net_profit_fy ?? 'N/A',
+          net_profit_text: formatYiAmount(fundamentalsItems.net_profit_fy, isAShare ? '¥' : 'HK$'),
+          revenue: fundamentalsItems.revenue_fy ?? 'N/A',
+          revenue_text: formatYiAmount(fundamentalsItems.revenue_fy, isAShare ? '¥' : 'HK$'),
+          shares_outstanding: fundamentalsItems.float_shares ?? 'N/A',
+          shares_outstanding_text: formatYiShares(fundamentalsItems.float_shares),
+          _valid: true,
+        }
+      } else { fundamentals = { _valid: false } }
+
+      // 并行获取大盘指数（Level 2：降级可用）
+      let marketOverview = { _valid: false }
+      try {
+        const exParam = exchange === 'SSE' ? '?exchange=SSE' : ''
+        const mktRes = await requestJson(`/api/live/market/overview${exParam}`)
+        if (mktRes?.indexes && Array.isArray(mktRes.indexes)) {
+          // 生成大盘趋势摘要
+          const upCount = mktRes.indexes.filter(i => (i.change_pct || 0) >= 0).length
+          const totalCount = mktRes.indexes.length
+          let trendSummary = `${totalCount} 指数`
+          if (upCount === totalCount) trendSummary += '全部上涨'
+          else if (upCount === 0) trendSummary += '全部下跌'
+          else if (upCount > totalCount / 2) trendSummary += `多数上涨（${upCount}/${totalCount}）`
+          else trendSummary += `偏弱（${upCount}/${totalCount} 涨）`
+
+          marketOverview = {
+            indexes: mktRes.indexes.slice(0, 3).map(i => ({
+              name: i.name || '', last: i.last ?? 0, change_pct: i.change_pct ?? 0,
+            })),
+            trend_summary: trendSummary,
+            _valid: true,
+          }
+        }
+      } catch (_) { /* 大盘降级 */ }
+
+      // 持仓（Level 3：可选）
+      let portfolioPayload = { has_position: false }
+      if (portfolioData && portfolioData.shares > 0) {
+        const pnlPct = snapshot?.last_price && portfolioData.avg_cost_price > 0
+          ? ((snapshot.last_price / portfolioData.avg_cost_price) - 1) * 100
+          : 0
+        const pnlAmount = snapshot?.last_price && portfolioData.avg_cost_price > 0
+          ? (snapshot.last_price - portfolioData.avg_cost_price) * portfolioData.shares
+          : 0
+        portfolioPayload = {
+          has_position: true,
+          shares: portfolioData.shares,
+          avg_cost_price: portfolioData.avg_cost_price || 0,
+          buy_date: portfolioData.buy_date || '',
+          unrealized_pnl: pnlAmount,
+          unrealized_pnl_text: formatYiCurrency(pnlAmount, isAShare ? '¥' : 'HK$'),
+          unrealized_pnl_pct: pnlPct,
+        }
+      }
+
+      // 调用后端 AI 分析 API（后端自行查投资画像）
+      const result = await requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/ai-analysis`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol_meta: symbolMeta,
+          market,
+          technical,
+          fundamentals,
+          market_overview: marketOverview,
+          portfolio: portfolioPayload,
+        }),
+      })
+
+      setAiResult(result)
+    } catch (err) {
+      if (isAuthRequiredError(err)) {
+        setAiError('登录已过期，请重新登录')
+      } else {
+        setAiError(err.message || '分析请求失败，请稍后重试')
+      }
+    } finally {
+      setAiAnalyzing(false)
+    }
+  }
+
+  // ── 辅助函数 ──
+  function movingAveragePriceRef(ma) { return ma?.price_ref ?? 0 }
 
   // ── Daily bars (history chart) ──
 
@@ -513,6 +667,28 @@ export default function LiveTradingDetailPage() {
             >
               ← 返回概览
             </a>
+            {privateAccessReady && (
+              <button
+                type="button"
+                disabled={aiAnalyzing || !snapshotPayload?.snapshot}
+                onClick={handleAIAnalysis}
+                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition ${
+                  aiAnalyzing
+                    ? 'border-primary/40 bg-primary/10 text-primary/70 cursor-wait'
+                    : snapshotPayload?.snapshot
+                      ? 'border-primary/30 bg-primary/8 text-primary shadow-sm hover:border-primary/60 hover:shadow-primary/20 hover:bg-primary/15'
+                      : 'border-border text-white/35 cursor-not-allowed opacity-50'
+                }`}
+                title={!snapshotPayload?.snapshot ? '等待行情数据加载' : 'AI 综合分析该股票'}
+              >
+                {aiAnalyzing ? (
+                  <>
+                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+                    分析中…
+                  </>
+                ) : '✨AI分析'}
+              </button>
+            )}
           </div>
 
           {/* Inline signal config (login required) */}
@@ -1022,8 +1198,199 @@ export default function LiveTradingDetailPage() {
           <PriceVolumeChart events={priceVolumeEvents} />
           <BlockFlowChart events={blockFlowEvents} />
         </section>
+
+        {/* AI 分析结果面板 */}
+        {showAiPanel && (
+          <AIAnalysisPanel
+            analyzing={aiAnalyzing}
+            result={aiResult}
+            error={aiError}
+            onClose={() => { setShowAiPanel(false); setAiResult(null) }}
+            onRetry={handleAIAnalysis}
+          />
+        )}
       </div>
     </>
+  )
+}
+
+// ── AI 分析结果面板 ──
+
+function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
+  const [logicExpanded, setLogicExpanded] = useState(true)
+
+  // Loading 骨架屏
+  if (analyzing) {
+    return (
+      <section className="rounded-2xl border border-primary/30 bg-card p-6">
+        <div className="flex items-center gap-3">
+          <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+          <h3 className="text-base font-semibold text-white">AI 正在分析中…</h3>
+        </div>
+        <p className="mt-2 text-xs text-white/45">正在聚合 6 类数据并调用 AI 模型，预计 10-30 秒</p>
+        <div className="mt-4 space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="animate-pulse rounded-lg bg-white/5 h-16" />
+          ))}
+        </div>
+      </section>
+    )
+  }
+
+  // 错误态
+  if (error && !result) {
+    return (
+      <section className="rounded-2xl border border-rose-400/40 bg-rose-500/8 p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-rose-200">分析失败</h3>
+            <p className="mt-1 text-xs text-rose-200/70">{error}</p>
+          </div>
+          <button type="button" onClick={onRetry} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-primary/85">
+              重试
+          </button>
+        </div>
+      </section>
+    )
+  }
+
+  // 结果展示
+  const analysis = result?.analysis
+  if (!analysis) return null
+
+  const signalMap = {
+    buy: { label: '建议买入', color: 'text-red-300', bg: 'bg-red-500/12', border: 'border-red-400/40', dot: '🟢' },
+    sell: { label: '建议卖出', color: 'text-emerald-300', bg: 'bg-emerald-500/12', border: 'border-emerald-400/40', dot: '🔴' },
+    hold: { label: '建议观望', color: 'text-amber-300', bg: 'bg-amber-500/12', border: 'border-amber-400/40', dot: '🟡' },
+  }
+  const sig = signalMap[analysis.signal] || signalMap.hold
+  const confidencePct = Math.min(100, Math.max(0, analysis.confidence_score || 0))
+  const confidenceLabel = analysis.confidence_level || 'medium'
+
+  // 数据完整性标签
+  const dc = result?.meta?.data_completeness || {}
+  const completenessLabels = {
+    market: dc.market === 'complete' ? '实时' : '缺失',
+    technical: dc.technical === 'complete' ? '可用' : '部分缺失',
+    fundamentals: dc.fundamentals === 'complete' ? '昨日收盘' : '不可用',
+    market_overview: dc.market_overview === 'complete' ? '实时' : '不可用',
+  }
+
+  const ts = analysis.trading_suggestions || {}
+  const entryZone = ts.entry_zone || {}
+  const stopLoss = ts.stop_loss || {}
+  const takeProfit = ts.take_profit || {}
+
+  return (
+    <section className={`rounded-2xl border ${sig.border} ${sig.bg} p-5`}>
+      {/* 核心信号卡片 */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className="text-xl">{sig.dot}</span>
+          <div>
+            <div className={`text-lg font-bold ${sig.color}`}>{sig.label}</div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs text-white/50">置信度</span>
+              <div className="h-2 w-32 rounded-full bg-white/10 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    confidencePct >= 70 ? 'bg-red-400' : confidencePct >= 40 ? 'bg-amber-400' : 'bg-gray-500'
+                  }`}
+                  style={{ width: `${confidencePct}%` }}
+                />
+              </div>
+              <span className={`text-xs font-medium ${
+                confidencePct >= 70 ? 'text-red-300' : confidencePct >= 40 ? 'text-amber-300' : 'text-gray-400'
+              }`}>{confidencePct}%（{confidenceLabel}）</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={onRetry} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-white/60 hover:text-white hover:border-white/30 transition">
+            🔄 重新分析
+          </button>
+          <button type="button" onClick={onClose} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-white/40 hover:border-white/30 hover:text-white/70 transition">
+            ✕ 关闭
+          </button>
+        </div>
+      </div>
+
+      {/* 数据时效 */}
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-white/35">
+        <span>数据时效：</span>
+        <span>行情 {completenessLabels.market}</span>
+        <span>· 技术 {completenessLabels.technical}</span>
+        <span>· 基础面 {completenessLabels.fundamentals}</span>
+        <span>· 大盘 {completenessLabels.market_overview}</span>
+      </div>
+
+      {/* 分析逻辑 */}
+      <div className="mt-4 rounded-xl border border-white/8 bg-black/20 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setLogicExpanded(!logicExpanded)}
+          className="flex w-full items-center justify-between px-4 py-2.5 text-left"
+        >
+          <span className="text-xs font-medium text-white/70">▾ 分析逻辑{!logicExpanded && '（点击展开）'}</span>
+          <span className="text-[11px] text-white/35">{logicExpanded ? '收起' : '展开'}</span>
+        </button>
+        {logicExpanded && (
+          <div className="px-4 pb-4">
+            {(analysis.logic_summary || '').split('\n').filter(Boolean).map((line, i) => (
+              <p key={i} className="mt-2 text-[13px] leading-relaxed text-white/75 first:mt-0">
+                • {line.trim().replace(/^•\s*/, '')}
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ⚠️ 风险提示 */}
+      {Array.isArray(analysis.risk_warnings) && analysis.risk_warnings.length > 0 && (
+        <div className="mt-4 rounded-xl border border-rose-400/25 bg-rose-500/8 px-4 py-3">
+          <div className="text-xs font-semibold text-rose-200/90 mb-2">⚠️ 风险提示</div>
+          {analysis.risk_warnings.map((w, i) => (
+            <p key={i} className="text-[12px] leading-relaxed text-rose-200/70 mt-1.5 first:mt-0">⚠️ {w}</p>
+          ))}
+        </div>
+      )}
+
+      {/* 📋 交易建议表格 */}
+      {ts.action_suggestion && (
+        <div className="mt-4 rounded-xl border border-sky-400/20 bg-sky-500/5 px-4 py-3">
+          <div className="text-xs font-semibold text-sky-200/90 mb-2">📋 交易建议</div>
+          <p className="text-[13px] leading-relaxed text-white/80">{ts.action_suggestion}</p>
+          <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 md:grid-cols-4">
+            <MetricMini label="建议买价" value={`${entryZone.low ?? '--'} ~ ${entryZone.high ?? '--'}`} emphasis tooltip="建议的买入价格区间" />
+            <MetricMini label="止损位" value={`${stopLoss.price || '--'}${stopLoss.pct != null ? `(${stopLoss.pct}%)` : ''}`} accent="down" tooltip="跌破此价位应考虑止损" />
+            <MetricMini label="目标位" value={`${takeProfit.price || '--'}${takeProfit.pct != null ? `(+${takeProfit.pct}%)` : ''}`} accent="up" tooltip="预期盈利目标价位" />
+            <MetricMini label="仓位建议" value={`${ts.position_size_pct || '--'}`} tooltip="占总资金的比例建议" />
+          </div>
+          {ts.time_horizon && (
+            <div className="mt-2 text-[11px] text-white/45">投资周期：{ts.time_horizon}</div>
+          )}
+        </div>
+      )}
+
+      {/* 持仓参考 */}
+      {dc.portfolio === 'has_position' && (
+        <div className="mt-3 rounded-lg border border-emerald-400/15 bg-emerald-500/5 px-3.5 py-2.5 text-[12px] text-emerald-200/80">
+          💡 你当前持有该股票，AI 已结合持仓盈亏给出针对性建议。
+        </div>
+      )}
+
+      {/* 免责声明 */}
+      <div className="mt-4 rounded-lg bg-black/20 px-3.5 py-2.5 text-[11px] text-white/30 text-center">
+        ⚠️ AI 分析仅供参考，不构成任何投资建议。市场有风险，投资需谨慎。
+      </div>
+
+      {/* 分析时间 */}
+      {analysis.data_timestamp && (
+        <div className="mt-2 text-center text-[10px] text-white/20">
+          分析时间：{new Date(analysis.data_timestamp).toLocaleString('zh-CN', { hour12: false })}
+        </div>
+      )}
+    </section>
   )
 }
 

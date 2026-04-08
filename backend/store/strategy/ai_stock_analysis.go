@@ -225,75 +225,110 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, input *StockAnalysisInput, 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 
-	client := &http.Client{Timeout: 45 * time.Second}
+	// 个股分析是重计算任务（长 prompt → 长推理 → 长 output），
+	// 使用 90s 超时 + 1 次重试覆盖网络抖动 / AI 服务瞬时过载
+	const maxRetries = 1
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(2 * time.Second):
+				// 重试前等待 2s
+			}
+		}
 
-	// ── AI 调用日志埋点 ──
-	logEntry := AILogEntry{
-		FeatureKey:  "stock_analysis",
-		FeatureName: "AI 个股诊断",
-		Model:       cfg.Model,
-		ExtraMeta:   map[string]any{"symbol": input.SymbolMeta["symbol"]},
-	}
-	start := time.Now()
-	resp, err := client.Do(req)
-	logEntry.ResponseMS = int(time.Since(start).Milliseconds())
-	if err != nil {
-		logEntry.Status = "error"
-		logEntry.ErrorMessage = err.Error()
+		client := &http.Client{Timeout: 90 * time.Second}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
+		if err != nil {
+			return nil, fmt.Errorf("创建 AI 请求失败: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+
+		// ── AI 调用日志埋点 ──
+		logEntry := AILogEntry{
+			FeatureKey:  "stock_analysis",
+			FeatureName: "AI 个股诊断",
+			Model:       cfg.Model,
+			ExtraMeta:   map[string]any{"symbol": input.SymbolMeta["symbol"], "attempt": attempt + 1},
+		}
+		start := time.Now()
+		resp, err := client.Do(req)
+		logEntry.ResponseMS = int(time.Since(start).Milliseconds())
+		if err != nil {
+			logEntry.Status = "error"
+			logEntry.ErrorMessage = err.Error()
+			LogAICall(logEntry)
+			lastErr = fmt.Errorf("调用 AI 服务失败: %w", err)
+			continue // 重试
+		}
+
+		respBody, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("读取 AI 响应失败: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("AI 服务返回错误 (HTTP %d): %s", resp.StatusCode, truncateStr(string(respBody), 200))
+			logEntry.Status = "error"
+			logEntry.ErrorMessage = lastErr.Error()
+			LogAICall(logEntry)
+			continue // 非服务端错误可重试
+		}
+
+		var chatResp aiChatResponse
+		if err := json.Unmarshal(respBody, &chatResp); err != nil {
+			return nil, fmt.Errorf("解析 AI 响应失败: %w", err)
+		}
+
+		if chatResp.Error != nil {
+			lastErr = fmt.Errorf("AI 服务报错: %s", chatResp.Error.Message)
+			logEntry.Status = "error"
+			logEntry.ErrorMessage = lastErr.Error()
+			LogAICall(logEntry)
+			continue
+		}
+
+		if len(chatResp.Choices) == 0 {
+			return nil, fmt.Errorf("AI 未返回有效结果")
+		}
+
+		content := stripAICodeFence(strings.TrimSpace(chatResp.Choices[0].Message.Content))
+
+		var output StockAnalysisOutput
+		if err := json.Unmarshal([]byte(content), &output); err != nil {
+			return nil, fmt.Errorf("AI 返回的 JSON 格式不正确: %w", err)
+		}
+
+		// 后置校验
+		warnings := validateStockAnalysis(input, &output)
+
+		logEntry.Status = "success"
 		LogAICall(logEntry)
-		return nil, fmt.Errorf("调用 AI 服务失败: %w", err)
-	}
-	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("读取 AI 响应失败: %w", err)
-	}
+		// 成功，直接返回
+		now := time.Now().UTC().Format(time.RFC3339)
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("AI 服务返回错误 (HTTP %d): %s", resp.StatusCode, truncateStr(string(respBody), 200))
-	}
+		// 构建 data_completeness
+		completeness := buildDataCompleteness(input, profile)
 
-	var chatResp aiChatResponse
-	if err := json.Unmarshal(respBody, &chatResp); err != nil {
-		return nil, fmt.Errorf("解析 AI 响应失败: %w", err)
-	}
-
-	if chatResp.Error != nil {
-		return nil, fmt.Errorf("AI 服务报错: %s", chatResp.Error.Message)
+		return &AnalysisResponse{
+			Analysis: &output,
+			Meta: map[string]any{
+				"model":             cfg.Model,
+				"generated_at":      now,
+				"data_completeness": completeness,
+				"validation":        warnings,
+			},
+		}, nil
 	}
 
-	if len(chatResp.Choices) == 0 {
-		return nil, fmt.Errorf("AI 未返回有效结果")
-	}
-
-	content := stripAICodeFence(strings.TrimSpace(chatResp.Choices[0].Message.Content))
-
-	var output StockAnalysisOutput
-	if err := json.Unmarshal([]byte(content), &output); err != nil {
-		return nil, fmt.Errorf("AI 返回的 JSON 格式不正确: %w", err)
-	}
-
-	// 后置校验
-	warnings := validateStockAnalysis(input, &output)
-
-	logEntry.Status = "success"
-	LogAICall(logEntry)
-
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	// 构建 data_completeness
-	completeness := buildDataCompleteness(input, profile)
-
-	return &AnalysisResponse{
-		Analysis: &output,
-		Meta: map[string]any{
-			"model":             cfg.Model,
-			"generated_at":      now,
-			"data_completeness": completeness,
-			"validation":        warnings,
-		},
-	}, nil
+	// 所有重试均失败
+	return nil, fmt.Errorf("AI 分析失败（已重试 %d 次）: %w", maxRetries, lastErr)
 }
 
 // ── User Prompt 模板拼装 ──

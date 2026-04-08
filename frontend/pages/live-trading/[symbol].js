@@ -344,19 +344,42 @@ export default function LiveTradingDetailPage() {
         }
       }
 
-      // 调用后端 AI 分析 API（后端自行查投资画像）
-      const result = await requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/ai-analysis`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbol_meta: symbolMeta,
-          market,
-          technical,
-          fundamentals,
-          market_overview: marketOverview,
-          portfolio: portfolioPayload,
-        }),
-      })
+      // 调用后端 AI 分析 API（后端自行查投资画像），超时自动重试 1 次覆盖网络抖动
+      const maxAIRetries = 1
+      let result = null
+      let lastErr = null
+      for (let attempt = 0; attempt <= maxAIRetries; attempt++) {
+        try {
+          result = await requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/ai-analysis`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              symbol_meta: symbolMeta,
+              market,
+              technical,
+              fundamentals,
+              market_overview: marketOverview,
+              portfolio: portfolioPayload,
+            }),
+          })
+          lastErr = null
+          break // 成功，跳出
+        } catch (e) {
+          lastErr = e
+          // 仅对超时类错误重试；429 / 认证错误不重试
+          const msg = String(e.message || '')
+          const isTimeout = msg.includes('timeout') || msg.includes('Timeout')
+          const isRateLimit = msg.includes('429') || msg.includes('Too Many')
+          if (attempt < maxAIRetries && isTimeout && !isRateLimit && !isAuthRequiredError(e)) {
+            // 静默等待 2s 后重试
+            await new Promise(r => setTimeout(r, 2000))
+            continue
+          }
+          break // 不满足重试条件或已用完次数
+        }
+      }
+
+      if (!result) throw lastErr
 
       setAiResult(result)
     } catch (err) {
@@ -365,7 +388,8 @@ export default function LiveTradingDetailPage() {
       } else if (String(err.message || '').includes('429') || String(err.message || '').includes('Too Many')) {
         setAiError('AI 分析次数已达上限，请 1 小时后再试，或联系管理员提升限额')
       } else if (String(err.message || '').includes('timeout') || String(err.message || '').includes('Timeout')) {
-        setAiError('分析超时了，该股票数据量较大，请稍后重试')
+        setAiError('分析响应较慢（已自动重试），该股票数据量较大，请稍后再试')
+
       } else {
         setAiError('分析遇到问题，请稍后重试。如果反复出现，请联系客服')
       }

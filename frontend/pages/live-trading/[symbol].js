@@ -1266,9 +1266,9 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
   if (!analysis) return null
 
   const signalMap = {
-    buy: { label: '建议买入', color: 'text-red-300', bg: 'bg-red-500/12', border: 'border-red-400/40', dot: '🟢' },
-    sell: { label: '建议卖出', color: 'text-emerald-300', bg: 'bg-emerald-500/12', border: 'border-emerald-400/40', dot: '🔴' },
-    hold: { label: '建议观望', color: 'text-amber-300', bg: 'bg-amber-500/12', border: 'border-amber-400/40', dot: '🟡' },
+    buy: { label: '看多', arrow: '↑', hint: '偏多配置', color: 'text-red-300', bg: 'bg-red-500/12', border: 'border-red-400/40', dot: '🟢' },
+    sell: { label: '看空', arrow: '↓', hint: '注意风险', color: 'text-emerald-300', bg: 'bg-emerald-500/12', border: 'border-emerald-400/40', dot: '🔴' },
+    hold: { label: '观望', arrow: '→', hint: '持仓不变', color: 'text-amber-300', bg: 'bg-amber-500/12', border: 'border-amber-400/40', dot: '🟡' },
   }
   const sig = signalMap[analysis.signal] || signalMap.hold
   const confidencePct = Math.min(100, Math.max(0, analysis.confidence_score || 0))
@@ -1295,8 +1295,9 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
         <div className="flex items-center gap-3">
           <span className="text-xl">{sig.dot}</span>
           <div>
-            <div className={`text-lg font-bold ${sig.color}`}>{sig.label}</div>
-            <div className="flex items-center gap-2 mt-1">
+            <div className={`text-lg font-bold ${sig.color}`}>{sig.label} <span className="text-base">{sig.arrow}</span></div>
+            <div className="text-[11px] text-white/40 mt-0.5">{sig.hint}</div>
+            <div className="flex items-center gap-2 mt-1.5">
               <span className="text-xs text-white/50">置信度</span>
               <div className="h-2 w-32 rounded-full bg-white/10 overflow-hidden">
                 <div

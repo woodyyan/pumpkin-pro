@@ -58,6 +58,7 @@ type StatsResult struct {
 	Trends      TrendStats      `json:"trends"`
 	Retention   RetentionStats  `json:"retention"`
 	Traffic     TrafficStats    `json:"traffic"`
+	AI          AIStats         `json:"ai"`
 	GeneratedAt string          `json:"generated_at"`
 }
 
@@ -125,4 +126,30 @@ type RetentionStats struct {
 type TrafficStats struct {
 	UTMSources []SourceCount `json:"utm_sources"`
 	Referrers  []SourceCount `json:"referrers"`
+}
+
+// ── AI 调用统计 ──
+
+type AIStats struct {
+	TotalCalls    int64          `json:"total_calls"`
+	TodayCalls    int64          `json:"today_calls"`
+	Last7DCalls   int64          `json:"last_7d_calls"`
+	SuccessRate   float64        `json:"success_rate"`
+	AvgResponseMS float64        `json:"avg_response_ms"`
+	UniqueUsers   int64          `json:"unique_users"`
+	ByFeature     []FeatureCount `json:"by_feature"`
+	DailyTrend    []DailyCount   `json:"daily_trend"`
+	TopUsers      []TopAIUser    `json:"top_users"`
+}
+
+type FeatureCount struct {
+	FeatureKey  string `json:"feature_key"`
+	FeatureName string `json:"feature_name"`
+	Count       int64  `json:"count"`
+}
+
+type TopAIUser struct {
+	UserID       string `json:"user_id"`
+	CallCount    int64  `json:"call_count"`
+	LastCalledAt string `json:"last_called_at"`
 }

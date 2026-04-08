@@ -289,8 +289,21 @@ func GenerateStrategy(ctx context.Context, cfg AIConfig, summary MarketSummary) 
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 
 	client := &http.Client{Timeout: 60 * time.Second}
+
+	// ── AI 调用日志埋点 ──
+	logEntry := AILogEntry{
+		FeatureKey:  "strategy_generate",
+		FeatureName: "AI 策略生成",
+		Model:       cfg.Model,
+		ExtraMeta:   map[string]any{"ticker": summary.Ticker},
+	}
+	start := time.Now()
 	resp, err := client.Do(req)
+	logEntry.ResponseMS = int(time.Since(start).Milliseconds())
 	if err != nil {
+		logEntry.Status = "error"
+		logEntry.ErrorMessage = err.Error()
+		LogAICall(logEntry)
 		return nil, fmt.Errorf("调用 AI 服务失败: %w", err)
 	}
 	defer resp.Body.Close()
@@ -322,9 +335,15 @@ func GenerateStrategy(ctx context.Context, cfg AIConfig, summary MarketSummary) 
 
 	var output llmStrategyOutput
 	if err := json.Unmarshal([]byte(content), &output); err != nil {
+		logEntry.Status = "error"
+		logEntry.ErrorMessage = "JSON parse error"
+		LogAICall(logEntry)
 		// 兜底：返回 dual_confirm
 		return buildFallbackRecommendation(summary, "AI 返回格式不正确，已使用默认推荐"), nil
 	}
+
+	logEntry.Status = "success"
+	LogAICall(logEntry)
 
 	return validateAndBuild(output, summary)
 }
@@ -578,8 +597,21 @@ func IterateStrategy(ctx context.Context, cfg AIConfig, implKey string, currentP
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 
 	client := &http.Client{Timeout: 60 * time.Second}
+
+	// ── AI 调用日志埋点（迭代调参）──
+	iterLogEntry := AILogEntry{
+		FeatureKey:  "strategy_iterate",
+		FeatureName: "AI 迭代调参",
+		Model:       cfg.Model,
+		ExtraMeta:   map[string]any{"implementation_key": implKey},
+	}
+	start := time.Now()
 	resp, err := client.Do(req)
+	iterLogEntry.ResponseMS = int(time.Since(start).Milliseconds())
 	if err != nil {
+		iterLogEntry.Status = "error"
+		iterLogEntry.ErrorMessage = err.Error()
+		LogAICall(iterLogEntry)
 		return &llmIterateOutput{Action: "keep", Reason: "AI 调用失败"}, nil
 	}
 	defer resp.Body.Close()
@@ -612,6 +644,9 @@ func IterateStrategy(ctx context.Context, cfg AIConfig, implKey string, currentP
 	if output.Action != "adjust" {
 		output.Action = "keep"
 	}
+
+	iterLogEntry.Status = "success"
+	LogAICall(iterLogEntry)
 
 	return &output, nil
 }
@@ -780,8 +815,21 @@ func AnalyzeBacktest(ctx context.Context, cfg AIConfig, input AnalyzeBacktestInp
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 
 	client := &http.Client{Timeout: 60 * time.Second}
+
+	// ── AI 调用日志埋点（回测优化）──
+	btLogEntry := AILogEntry{
+		FeatureKey:  "backtest_optimize",
+		FeatureName: "AI 回测优化",
+		Model:       cfg.Model,
+		ExtraMeta:   map[string]any{"ticker": input.Ticker, "implementation_key": input.ImplementationKey},
+	}
+	start := time.Now()
 	resp, err := client.Do(req)
+	btLogEntry.ResponseMS = int(time.Since(start).Milliseconds())
 	if err != nil {
+		btLogEntry.Status = "error"
+		btLogEntry.ErrorMessage = err.Error()
+		LogAICall(btLogEntry)
 		return nil, fmt.Errorf("AI 调用失败: %w", err)
 	}
 	defer resp.Body.Close()
@@ -818,6 +866,9 @@ func AnalyzeBacktest(ctx context.Context, cfg AIConfig, input AnalyzeBacktestInp
 	if analysis.Confidence != "high" && analysis.Confidence != "medium" && analysis.Confidence != "low" {
 		analysis.Confidence = "medium"
 	}
+
+	btLogEntry.Status = "success"
+	LogAICall(btLogEntry)
 
 	return &analysis, nil
 }

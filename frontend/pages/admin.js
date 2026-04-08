@@ -446,6 +446,92 @@ function AdminDashboard({ session, onLogout }) {
                 <StatCard label="7天登录失败" value={stats.audit.failed_logins_7d} />
               </div>
             </section>
+
+            {/* Panel 11: AI 调用统计 */}
+            {stats.ai && (
+              <section>
+                <h2 className="text-base font-semibold text-white/80 mb-3">🤖 AI 调用统计</h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  <StatCard label="总调用量" value={stats.ai.total_calls} />
+                  <StatCard label="今日调用" value={stats.ai.today_calls} />
+                  <StatCard label="近7天调用" value={stats.ai.last_7d_calls} />
+                  <RateCard label="成功率" value={stats.ai.success_rate} />
+                  <StatCard
+                    label="平均响应(ms)"
+                    value={stats.ai.avg_response_ms != null ? Math.round(stats.ai.avg_response_ms) : '--'}
+                    sub="越低越好"
+                  />
+                  <StatCard label="使用用户数" value={stats.ai.unique_users} />
+                </div>
+
+                {/* 按功能分布 */}
+                {stats.ai.by_feature && stats.ai.by_feature.length > 0 && (
+                  <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-4">
+                    <div className="text-xs text-white/40 mb-3">按功能分布</div>
+                    <div className="space-y-2">
+                      {stats.ai.by_feature.map((f) => {
+                        const maxCount = stats.ai.by_feature[0]?.count || 1
+                        const pct = (f.count / maxCount) * 100
+                        return (
+                          <div key={f.feature_key} className="flex items-center gap-3 text-sm">
+                            <span className="w-28 truncate text-white/60 text-xs">{f.feature_name}</span>
+                            <div className="flex-1 h-4 rounded bg-white/5 overflow-hidden">
+                              <div
+                                className="h-full rounded bg-violet-500/40"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            <span className="text-xs text-white/50 tabular-nums w-12 text-right">
+                              {f.count}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 每日趋势 */}
+                {stats.ai.daily_trend && stats.ai.daily_trend.length > 1 && (
+                  <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-3">
+                    <MiniChart data={stats.ai.daily_trend} label="每日 AI 调用趋势（30天）" width={780} height={130} type="bar" color="#a78bfa" />
+                  </div>
+                )}
+
+                {/* TOP 用户 */}
+                {stats.ai.top_users && stats.ai.top_users.length > 0 && (
+                  <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-4">
+                    <div className="text-xs text-white/40 mb-3">TOP 调用用户（前 10）</div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs text-left">
+                        <thead>
+                          <tr className="border-b border-white/8 text-white/35">
+                            <th className="pb-2 pr-4 font-medium">排名</th>
+                            <th className="pb-2 pr-4 font-medium">用户ID</th>
+                            <th className="pb-2 pr-4 font-medium text-right">调用次数</th>
+                            <th className="pb-2 font-medium text-right">最近一次</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-white/65">
+                          {stats.ai.top_users.map((u, i) => (
+                            <tr key={u.user_id} className="border-b border-white/[0.04] last:border-0">
+                              <td className="py-1.5 pr-4 tabular-nums text-white/40">{i + 1}</td>
+                              <td className="py-1.5 pr-4 font-mono">{u.user_id.slice(0, 12)}…</td>
+                              <td className="py-1.5 pr-4 text-right tabular-nums font-medium text-violet-300">
+                                {u.call_count}
+                              </td>
+                              <td className="py-1.5 text-right text-white/30 whitespace-nowrap">
+                                {u.last_called_at ? new Date(u.last_called_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
           </>
         ) : null}
       </main>

@@ -2264,6 +2264,10 @@ func main() {
 		log.Fatalf("Failed to initialize store: %v", err)
 	}
 
+	// 初始化 AI 调用日志写入器（异步批量写入）
+	store.InitAILogger(storeInstance.DB)
+	strategy.SetAILogWriter(store.WriteAICallBatch)
+
 	authRepo := auth.NewRepository(storeInstance.DB)
 	authService := auth.NewService(authRepo, auth.ServiceConfig{
 		JWTSecret:  strings.TrimSpace(cfg.Auth.JWTSecret),

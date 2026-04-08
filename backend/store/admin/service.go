@@ -253,6 +253,7 @@ func (s *Service) GetStats(ctx context.Context) (*StatsResult, error) {
 		Trends:      s.collectTrendStats(ctx),
 		Retention:   s.collectRetentionStats(ctx),
 		Traffic:     s.collectTrafficStats(ctx),
+		AI:          s.collectAIStats(ctx, today, sevenDaysAgo),
 		GeneratedAt: now.Format(time.RFC3339),
 	}, nil
 }
@@ -321,6 +322,34 @@ func (s *Service) collectTrafficStats(ctx context.Context) TrafficStats {
 }
 
 // ── Helpers ──
+
+func (s *Service) collectAIStats(ctx context.Context, today, sevenDaysAgo time.Time) AIStats {
+	totalCalls, _ := s.repo.AITotalCalls(ctx)
+	todayCalls, _ := s.repo.AICallsSince(ctx, today)
+	calls7D, _ := s.repo.AICallsSince(ctx, sevenDaysAgo)
+	successRate, _ := s.repo.AISuccessRate(ctx)
+	avgMS, _ := s.repo.AIAvgResponseMS(ctx)
+	uniqueUsers, _ := s.repo.AIUniqueUsers(ctx)
+	byFeature, _ := s.repo.AIByFeatureBreakdown(ctx)
+	dailyTrend, _ := s.repo.AIDailyTrend(ctx, 30)
+	topUsers, _ := s.repo.AITopUsers(ctx, 10)
+
+	if byFeature == nil { byFeature = []FeatureCount{} }
+	if dailyTrend == nil { dailyTrend = []DailyCount{} }
+	if topUsers == nil { topUsers = []TopAIUser{} }
+
+	return AIStats{
+		TotalCalls:    totalCalls,
+		TodayCalls:    todayCalls,
+		Last7DCalls:   calls7D,
+		SuccessRate:   successRate,
+		AvgResponseMS: avgMS,
+		UniqueUsers:   uniqueUsers,
+		ByFeature:     byFeature,
+		DailyTrend:    dailyTrend,
+		TopUsers:      topUsers,
+	}
+}
 
 func signPayload(payloadPart string, secret string) string {
 	mac := hmac.New(sha256.New, []byte(secret))

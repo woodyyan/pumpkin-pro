@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
 )
 
 // ── AI 配置 ──────────────────────────────────────────────────
@@ -201,8 +203,20 @@ func ParseNaturalLanguage(ctx context.Context, cfg AIConfig, userInput string) (
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 
 	client := &http.Client{Timeout: 30 * time.Second}
+
+	// ── AI 调用日志埋点（选股解析）──
+	parseLogEntry := strategy.AILogEntry{
+		FeatureKey:  "screener_parse",
+		FeatureName: "AI 选股解析",
+		Model:       cfg.Model,
+	}
+	start := time.Now()
 	resp, err := client.Do(req)
+	parseLogEntry.ResponseMS = int(time.Since(start).Milliseconds())
 	if err != nil {
+		parseLogEntry.Status = "error"
+		parseLogEntry.ErrorMessage = err.Error()
+		strategy.LogAICall(parseLogEntry)
 		return nil, fmt.Errorf("调用 AI 服务失败: %w", err)
 	}
 	defer resp.Body.Close()
@@ -251,6 +265,9 @@ func ParseNaturalLanguage(ctx context.Context, cfg AIConfig, userInput string) (
 			cleaned[k] = v
 		}
 	}
+
+	parseLogEntry.Status = "success"
+	strategy.LogAICall(parseLogEntry)
 
 	return &AIParseResponse{
 		Filters: cleaned,

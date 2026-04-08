@@ -331,3 +331,82 @@ func (r *Repository) ReferrerBreakdown(ctx context.Context, since time.Time) ([]
 		Scan(&results).Error
 	return results, err
 }
+
+// ── AI call log stats ──
+
+func (r *Repository) AITotalCalls(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("ai_call_logs").Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) AICallsSince(ctx context.Context, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("ai_call_logs").Where("created_at >= ?", since).Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) AISuccessRate(ctx context.Context) (float64, error) {
+	var total, success int64
+	r.db.WithContext(ctx).Table("ai_call_logs").Count(&total)
+	if total == 0 {
+		return 0, nil
+	}
+	r.db.WithContext(ctx).Table("ai_call_logs").Where("status = ?", "success").Count(&success)
+	return float64(success) / float64(total), nil
+}
+
+func (r *Repository) AIAvgResponseMS(ctx context.Context) (float64, error) {
+	type msResult struct { AvgMs float64 }
+	var result msResult
+	err := r.db.WithContext(ctx).Table("ai_call_logs").Select("AVG(response_ms) as avg_ms").Scan(&result).Error
+	return result.AvgMs, err
+}
+
+func (r *Repository) AIUniqueUsers(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("ai_call_logs").Distinct("user_id").Where("user_id != ''").Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) AIByFeatureBreakdown(ctx context.Context) ([]FeatureCount, error) {
+	var results []FeatureCount
+	err := r.db.WithContext(ctx).Table("ai_call_logs").
+		Select("feature_key, feature_name, COUNT(*) as count").
+		Group("feature_key, feature_name").Order("count DESC").
+		Scan(&results).Error
+	return results, err
+}
+
+func (r *Repository) AIDailyTrend(ctx context.Context, days int) ([]DailyCount, error) {
+	since := time.Now().UTC().AddDate(0, 0, -days)
+	var results []DailyCount
+	err := r.db.WithContext(ctx).Table("ai_call_logs").
+		Select("DATE(created_at) as date, COUNT(*) as count").
+		Where("created_at >= ?", since).
+		Group("DATE(created_at)").Order("date ASC").
+		Scan(&results).Error
+	return results, err
+}
+
+func (r *Repository) AITopUsers(ctx context.Context, limit int) ([]TopAIUser, error) {
+	type rawTopUser struct {
+		UserID       string `gorm:"column:user_id"`
+		CallCount    int64  `gorm:"column:call_count"`
+		LastCalledAt string `gorm:"column:last_called_at"`
+	}
+	var raw []rawTopUser
+	err := r.db.WithContext(ctx).Table("ai_call_logs").
+		Select("user_id, COUNT(*) as call_count, MAX(created_at) as last_called_at").
+		Where("user_id != '' AND user_id IS NOT NULL").
+		Group("user_id").Order("call_count DESC").Limit(limit).
+		Scan(&raw).Error
+	if err != nil {
+		return nil, err
+	}
+	results := make([]TopAIUser, len(raw))
+	for i, r := range raw {
+		results[i] = TopAIUser{UserID: r.UserID, CallCount: r.CallCount, LastCalledAt: r.LastCalledAt}
+	}
+	return results, nil
+}

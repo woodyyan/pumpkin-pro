@@ -52,5 +52,10 @@ func New(cfg config.DBConfig) (*Store, error) {
 		}
 	}
 
+	// AI 调用日志表（独立于模块 Migrator，避免循环依赖）
+	if err := db.AutoMigrate(&AICallLog{}).Error; err != nil {
+		return nil, fmt.Errorf("auto migrate ai_call_logs failed: %w", err)
+	}
+
 	return &Store{DB: db}, nil
 }

@@ -226,8 +226,21 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, input *StockAnalysisInput, 
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 
 	client := &http.Client{Timeout: 45 * time.Second}
+
+	// ── AI 调用日志埋点 ──
+	logEntry := AILogEntry{
+		FeatureKey:  "stock_analysis",
+		FeatureName: "AI 个股诊断",
+		Model:       cfg.Model,
+		ExtraMeta:   map[string]any{"symbol": input.SymbolMeta["symbol"]},
+	}
+	start := time.Now()
 	resp, err := client.Do(req)
+	logEntry.ResponseMS = int(time.Since(start).Milliseconds())
 	if err != nil {
+		logEntry.Status = "error"
+		logEntry.ErrorMessage = err.Error()
+		LogAICall(logEntry)
 		return nil, fmt.Errorf("调用 AI 服务失败: %w", err)
 	}
 	defer resp.Body.Close()
@@ -263,6 +276,9 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, input *StockAnalysisInput, 
 
 	// 后置校验
 	warnings := validateStockAnalysis(input, &output)
+
+	logEntry.Status = "success"
+	LogAICall(logEntry)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 

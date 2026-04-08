@@ -43,19 +43,60 @@ const FEATURES = [
   },
 ]
 
-const STEPS = [
-  { icon: '👤', title: '注册账号', desc: '免费注册即可开始使用全部功能' },
-  { icon: '📐', title: '配置策略', desc: '在策略库中选择预设或自建策略' },
-  { icon: '📊', title: '进行回测', desc: '用历史数据验证策略是否有效' },
-  { icon: '⭐', title: '添加关注股票', desc: '把感兴趣的股票加入关注池' },
-  { icon: '🔔', title: '配置交易信号', desc: '配置 Webhook 接收买卖信号通知' },
-]
 
-const SCREENSHOTS = [
-  { id: 'live', label: '行情看板', desc: '实时行情数据 + 技术指标 + 基本面分析' },
-  { id: 'backtest', label: '策略回测', desc: '历史数据回测 + 收益曲线 + 交易记录' },
-  { id: 'picker', label: '选股器', desc: 'AI 智能选股 + 多维条件筛选' },
-  { id: 'quadrant', label: '四象限', desc: '全市场风险机会全景散点图' },
+const SCENARIOS = [
+  {
+    icon: '📊',
+    title: '我想研究一只股票',
+    href: '/live-trading',
+    cta: '去研究股票',
+    value: '🎯 30 秒获得 AI 专业级诊断报告',
+    recommended: true,
+    steps: [
+      '进入「行情看板」，添加你想研究的股票（输入代码或名称）',
+      '点击卡片进入详情页，浏览实时行情和技术指标',
+      '点击顶部「✨AI分析」按钮，等待 AI 综合诊断报告',
+    ],
+    aiPreview: [
+      { icon: '🟢', text: '建议：观望', color: 'text-emerald-300', highlight: true },
+      { text: '置信度：72%（中高）', color: 'text-white/60' },
+      { icon: '⚠️', text: '风险提示：短期波动较大', color: 'text-amber-300/80' },
+    ],
+  },
+  {
+    icon: '🔍',
+    title: '我想选股',
+    href: '/stock-picker',
+    cta: '去 AI 选股',
+    value: "🎯 不懂指标？用说话就能从全市场筛选",
+    recommended: false,
+    steps: [
+      '进入「选股器」页面',
+      '在搜索框中用自然语言描述你的选股条件，如：「医药行业，市盈率低于 20，利润增长 > 30%」',
+      'AI 自动解析条件并全市场扫描，展示匹配结果列表',
+    ],
+    aiPreview: [
+      { icon: '📋', text: '找到 12 只匹配标的', color: 'text-white', highlight: true },
+      { text: '已按收益率排序，可逐个查看详情', color: 'text-white/55' },
+    ],
+  },
+  {
+    icon: '⚙️',
+    title: '我想验证策略',
+    href: '/backtest',
+    cta: '去验证策略',
+    value: '🎯 用历史数据说话，不靠直觉猜',
+    recommended: false,
+    steps: [
+      '进入「回测引擎」页面',
+      '选择预设策略或使用「AI 生成策略」自动定制',
+      '设置参数后运行回测，查看收益曲线和关键指标',
+    ],
+    aiPreview: [
+      { icon: '📈', text: '年化 +23.4%', color: 'text-red-300', highlight: true },
+      { text: '夏普比率 1.82 · 最大回撤 12%', color: 'text-white/60' },
+    ],
+  },
 ]
 
 const TUTORIALS = [
@@ -196,7 +237,6 @@ function Accordion({ items }) {
 
 export default function HomePage() {
   const { isLoggedIn, openAuthModal } = useAuth()
-  const [screenshotTab, setScreenshotTab] = useState(0)
 
   const handleCTA = () => {
     if (isLoggedIn) {
@@ -281,81 +321,65 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ── Section 3: Screenshots ── */}
-      <section className="px-4 py-16 md:py-24 max-w-5xl mx-auto">
-        <div className="text-center mb-10">
-          <h2 className="text-2xl md:text-3xl font-bold tracking-tight">产品一览</h2>
-        </div>
-
-        <div className="flex items-center justify-center gap-2 mb-6 flex-wrap">
-          {SCREENSHOTS.map((s, i) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => setScreenshotTab(i)}
-              className={`rounded-lg px-4 py-2 text-sm transition ${
-                screenshotTab === i
-                  ? 'bg-primary/15 text-white border border-primary/40 font-medium'
-                  : 'text-white/45 border border-transparent hover:text-white/70'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Placeholder */}
-        <div className="rounded-2xl border border-border bg-gradient-to-br from-[#12141a] to-[#0d0f14] flex items-center justify-center aspect-video max-h-[450px] w-full">
-          <div className="text-center space-y-2">
-            <div className="text-4xl opacity-20">📸</div>
-            <p className="text-sm text-white/25">{SCREENSHOTS[screenshotTab].label}截图</p>
-            <p className="text-xs text-white/15">即将更新</p>
-          </div>
-        </div>
-        <p className="mt-4 text-center text-sm text-white/35">{SCREENSHOTS[screenshotTab].desc}</p>
-      </section>
-
-      {/* ── Section 4: Getting Started ── */}
+      {/* ── Section 3: 场景化快速上手 ── */}
       <section className="px-4 py-16 md:py-24 max-w-5xl mx-auto">
         <div className="text-center mb-12">
-          <h2 className="text-2xl md:text-3xl font-bold tracking-tight">快速上手</h2>
-          <p className="mt-3 text-sm text-white/40">5 步开始你的量化分析之旅</p>
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight">🚀 快速上手</h2>
+          <p className="mt-3 text-sm text-white/40">选择你的使用场景，3 步开始体验</p>
         </div>
 
-        {/* Desktop: horizontal */}
-        <div className="hidden md:flex items-start justify-between gap-2">
-          {STEPS.map((s, i) => (
-            <div key={i} className="flex-1 flex flex-col items-center text-center relative">
-              {/* Connector line */}
-              {i < STEPS.length - 1 && (
-                <div className="absolute top-6 left-[calc(50%+24px)] right-[calc(-50%+24px)] h-px bg-gradient-to-r from-primary/30 to-primary/10" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {SCENARIOS.map((s, i) => (
+            <Link
+              key={i}
+              href={s.href}
+              className={`group relative rounded-2xl border bg-card p-6 transition hover:-translate-y-1 hover:shadow-lg ${
+                s.recommended
+                  ? 'border-primary/40 shadow-primary/[0.04]'
+                  : 'border-border hover:border-white/15'
+              }`}
+            >
+              {s.recommended && (
+                <span className="absolute right-4 top-4 rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-medium text-primary">推荐</span>
               )}
-              <div className="relative w-12 h-12 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center text-xl mb-3">
-                {s.icon}
-              </div>
-              <div className="text-xs font-bold text-primary/70 mb-1">Step {i + 1}</div>
-              <h4 className="text-sm font-semibold text-white mb-1">{s.title}</h4>
-              <p className="text-xs text-white/40 leading-5 max-w-[140px]">{s.desc}</p>
-            </div>
-          ))}
-        </div>
 
-        {/* Mobile: vertical timeline */}
-        <div className="md:hidden space-y-0">
-          {STEPS.map((s, i) => (
-            <div key={i} className="flex gap-4">
-              <div className="flex flex-col items-center">
-                <div className="w-10 h-10 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center text-lg shrink-0">
-                  {s.icon}
+              <div className="flex items-center gap-2.5 mb-4">
+                <span className="text-2xl">{s.icon}</span>
+                <h3 className="text-lg font-semibold text-white">{s.title}</h3>
+              </div>
+
+              {/* Steps */}
+              <div className="space-y-2 mb-5">
+                {s.steps.map((step, j) => (
+                  <div key={j} className="flex items-start gap-2.5">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">{j + 1}</span>
+                    <span className="text-[13px] leading-relaxed text-white/65">{step}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* AI Preview */}
+              {s.aiPreview && (
+                <div className="rounded-xl bg-gradient-to-r from-primary/[0.07] to-transparent border border-primary/12 p-3.5 mb-4">
+                  <div className="space-y-1.5">
+                    {s.aiPreview.map((line, k) => (
+                      <div key={k} className={`text-[13px] ${line.highlight ? 'font-semibold text-white' : line.color || 'text-white/55'}`}>
+                        {line.icon && <span className="mr-1.5">{line.icon}</span>}
+                        {line.text}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                {i < STEPS.length - 1 && <div className="w-px flex-1 bg-primary/15 my-1" />}
-              </div>
-              <div className="pb-6">
-                <div className="text-xs font-bold text-primary/70">Step {i + 1}</div>
-                <h4 className="text-sm font-semibold text-white">{s.title}</h4>
-                <p className="text-xs text-white/40 leading-5 mt-0.5">{s.desc}</p>
-              </div>
-            </div>
+              )}
+
+              {/* Value tag */}
+              <p className="mb-4 text-xs text-white/35 italic">{s.value}</p>
+
+              {/* CTA */}
+              <span className="inline-flex items-center text-sm font-medium text-primary group-hover:text-primary transition">
+                {s.cta} <span className="ml-1 transition-transform group-hover:translate-x-1">→</span>
+              </span>
+            </Link>
           ))}
         </div>
       </section>

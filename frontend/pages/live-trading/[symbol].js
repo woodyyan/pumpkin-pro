@@ -670,21 +670,21 @@ export default function LiveTradingDetailPage() {
                 type="button"
                 disabled={aiAnalyzing || !snapshotPayload?.snapshot}
                 onClick={handleAIAnalysis}
-                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition ${
+                className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold transition-all duration-300 ${
                   aiAnalyzing
-                    ? 'border-primary/40 bg-primary/10 text-primary/70 cursor-wait'
+                    ? 'cursor-wait bg-gradient-to-r from-indigo-500 to-violet-500 opacity-70'
                     : snapshotPayload?.snapshot
-                      ? 'border-primary/30 bg-primary/8 text-primary shadow-sm hover:border-primary/60 hover:shadow-primary/20 hover:bg-primary/15'
-                      : 'border-border text-white/35 cursor-not-allowed opacity-50'
+                      ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-[0_0_16px_rgba(99,102,241,0.35)] hover:scale-[1.03] hover:shadow-[0_0_24px_rgba(99,102,241,0.5)] active:scale-[0.98] animate-ai-glow'
+                      : 'cursor-not-allowed border border-white/15 bg-white/5 text-white/35 opacity-50'
                 }`}
                 title={!snapshotPayload?.snapshot ? '等待行情数据加载' : 'AI 综合分析该股票'}
               >
                 {aiAnalyzing ? (
                   <>
-                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
                     分析中…
                   </>
-                ) : '✨AI分析'}
+                ) : '✨ AI 分析'}
               </button>
             )}
           </div>
@@ -699,9 +699,9 @@ export default function LiveTradingDetailPage() {
               <button
                 type="button"
                 onClick={handleAIAnalysis}
-                className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-primary/85"
+                className="shrink-0 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_0_12px_rgba(99,102,241,0.3)] transition hover:scale-[1.03] active:scale-[0.98]"
               >
-                重试
+                ✨ 重试
               </button>
               <button
                 type="button"

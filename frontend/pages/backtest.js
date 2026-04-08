@@ -903,9 +903,9 @@ export default function BacktestPage() {
                 type="button"
                 onClick={handleAIOptimize}
                 disabled={aiOptLoading || !result?.metrics}
-                className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-xs font-medium text-amber-200 transition hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 px-4 py-2 text-xs font-semibold text-white shadow-[0_0_16px_rgba(99,102,241,0.35)] transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_0_24px_rgba(99,102,241,0.5)] active:scale-[0.98] animate-ai-glow disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
               >
-                {aiOptLoading ? '分析中...' : '获取 AI 建议'}
+                {aiOptLoading ? '分析中...' : '✨ 获取 AI 建议'}
               </button>
             </div>
             {aiOptLoading ? (

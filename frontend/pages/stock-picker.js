@@ -666,9 +666,9 @@ export default function StockPickerPage() {
               type="button"
               onClick={handleAIParse}
               disabled={aiParsing || !aiQuery.trim()}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg bg-primary/15 px-3 py-1 text-xs font-medium text-primary transition hover:bg-primary/25 disabled:cursor-not-allowed disabled:opacity-40"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_0_12px_rgba(99,102,241,0.3)] transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_0_18px_rgba(99,102,241,0.45)] active:scale-[0.98] animate-ai-glow disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
             >
-              {aiParsing ? '解析中...' : 'AI 选股'}
+              {aiParsing ? '解析中...' : '✨ AI 选股'}
             </button>
           </div>
         </div>

@@ -34,6 +34,29 @@ type StockAnalysisOutput struct {
 	RiskWarnings      []string               `json:"risk_warnings"`
 	TradingSuggestions map[string]any        `json:"trading_suggestions"`
 	DataTimestamp     string                 `json:"data_timestamp"`
+
+	// ── 四层分析框架（第二步新增）──
+	LayerScores       map[string]*LayerScore `json:"layer_scores,omitempty"`
+	TotalScore        float64                `json:"total_score,omitempty"`
+	MarketState       string                 `json:"market_state,omitempty"`
+	MarketStateLabel  string                 `json:"market_state_label,omitempty"`
+	ActionTrigger     *ActionTrigger         `json:"action_trigger,omitempty"`
+	KeyRisks          []string               `json:"key_risks,omitempty"`
+	KeyCatalysts      []string               `json:"key_catalysts,omitempty"`
+}
+
+// LayerScore 单层评分结果
+type LayerScore struct {
+	Direction  string  `json:"direction"`   // bullish / neutral / bearish
+	Score      float64 `json:"score"`       // -2 ~ +2
+	Confidence float64 `json:"confidence"`  // 0 ~ 1
+	Reason     string  `json:"reason"`      // 核心逻辑说明
+}
+
+// ActionTrigger 执行触发条件
+type ActionTrigger struct {
+	BuyTrigger  string `json:"buy_trigger"`  // 触发买入条件
+	SellTrigger string `json:"sell_trigger"` // 触发卖出条件
 }
 
 // AnalysisResponse API 返回给前端的完整响应
@@ -125,7 +148,7 @@ const stockAnalysisSystemPrompt = `你是一个专业的多层框架股票分析
 
 **你只能输出一个 JSON 对象，包含以下字段，不要有任何其他文字。**
 
-内部推理完成后，将结论映射到以下格式输出：
+内部推理完成后，将四层分析结论映射到以下扁平格式输出：
 
 {
   "signal": "buy 或 sell 或 hold 三选一",
@@ -142,13 +165,30 @@ const stockAnalysisSystemPrompt = `你是一个专业的多层框架股票分析
     如果某类数据有缺失，需说明'因XX数据缺失，主要依据YY判断'。",
   "risk_warnings": ["2-4条具体风险", "每条一句话，避免空洞表述", "至少一条来自预期层或矛盾检测的发现"],
   "trading_suggestions": {
-    "action_suggestion": "一段话总结操作建议（2-4句），需包含触发条件说明（如'若放量突破XX价位可考虑建仓'/'若跌破关键支撑位需及时止损'）",
+    "action_suggestion": "一段话总结操作建议（2-4句），需包含触发条件说明",
     "entry_zone": {"low": 数值, "high": 数值, "currency": "CNY或HKD"},
     "stop_loss": {"price": 数值, "pct": 百分比数值如-4.8},
     "take_profit": {"price": 数值, "pct": 百分比数值如8.5},
     "position_size_pct": "如 '15-20%'",
     "time_horizon": "短期(1-2周) / 中期(1-3月) / 长期(3月以上)"
   },
+
+  "layer_scores": {
+    "narrative":   {"direction": "bullish/neutral/bearish", "score": -2~+2, "confidence": 0~1, "reason": "叙事层判断理由"},
+    "liquidity":   {"direction": "bullish/neutral/bearish", "score": -2~+2, "confidence": 0~1, "reason": "资金层判断理由"},
+    "expectation": {"direction": "bullish/neutral/bearish", "score": -2~+2, "confidence": 0~1, "reason": "预期差判断理由"},
+    "fundamental": {"direction": "bullish/neutral/bearish", "score": -2~+2, "confidence": 0~1, "reason": "基本面判断理由"}
+  },
+  "total_score": 加权综合评分（范围约 -2 ~ +2）,
+  "market_state": "trend / speculative / divergence / bubble / decline",
+  "market_state_label": "市场状态的中文标签，如「趋势行情」「投机驱动」「分歧震荡」「过热泡沫」「下行趋势」",
+  "action_trigger": {
+    "buy_trigger": "明确的买入触发条件描述（如：放量突破MA20且成交量放大30%以上）",
+    "sell_trigger": "明确的卖出触发条件描述（如：跌破MA60或连续3日缩量下跌）"
+  },
+  "key_risks": ["2-4条关键风险，每条一句话"],
+  "key_catalysts": ["2-4条潜在催化因素，每条一句话"],
+
   "data_timestamp": "当前时间戳 ISO 格式"
 }`
 
@@ -169,7 +209,7 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, input *StockAnalysisInput, 
 			{Role: "user", Content: userPrompt},
 		},
 		Temperature: 0.2,
-		MaxTokens:   2048,
+		MaxTokens:   3000,
 	}
 
 	encoded, err := json.Marshal(body)
@@ -399,6 +439,14 @@ func buildStockUserPrompt(input *StockAnalysisInput, profile *portfolio.Investme
 func validateStockAnalysis(output *StockAnalysisInput, result *StockAnalysisOutput) []string {
 	var warnings []string
 	validSignals := map[string]bool{"buy": true, "sell": true, "hold": true}
+	validStates := map[string]bool{"trend": true, "speculative": true, "divergence": true, "bubble": true, "decline": true}
+	stateLabels := map[string]string{
+		"trend":       "趋势行情",
+		"speculative": "投机驱动",
+		"divergence":  "分歧震荡",
+		"bubble":      "过热泡沫",
+		"decline":     "下行趋势",
+	}
 	currentPrice := asFloat(output.Market["price"])
 
 	if !validSignals[result.Signal] {
@@ -425,6 +473,50 @@ func validateStockAnalysis(output *StockAnalysisInput, result *StockAnalysisOutp
 	}
 	if result.DataTimestamp == "" {
 		result.DataTimestamp = time.Now().UTC().Format(time.RFC3339)
+	}
+
+	// ── 新增字段校验：layer_scores ──
+	if result.LayerScores == nil || len(result.LayerScores) == 0 {
+		// LLM 未返回四层评分，不影响旧字段，记录 warning
+		warnings = append(warnings, "layer_scores_missing")
+	} else {
+		layerNames := []string{"narrative", "liquidity", "expectation", "fundamental"}
+		for _, name := range layerNames {
+			if ls, ok := result.LayerScores[name]; ok {
+				if ls.Direction != "bullish" && ls.Direction != "neutral" && ls.Direction != "bearish" {
+					ls.Direction = "neutral"
+				}
+				if ls.Score < -2 {
+					ls.Score = -2
+				} else if ls.Score > 2 {
+					ls.Score = 2
+				}
+				if ls.Confidence < 0 {
+					ls.Confidence = 0
+				} else if ls.Confidence > 1 {
+					ls.Confidence = 1
+				}
+			}
+		}
+	}
+
+	// ── 新增字段校验：market_state ──
+	if result.MarketState != "" && !validStates[result.MarketState] {
+		result.MarketState = ""
+		warnings = append(warnings, "invalid_market_state_cleared")
+	}
+	if result.MarketState != "" && result.MarketStateLabel == "" {
+		if label, ok := stateLabels[result.MarketState]; ok {
+			result.MarketStateLabel = label
+		}
+	}
+
+	// ── 新增字段校验：action_trigger ──
+	if result.ActionTrigger != nil {
+		if result.ActionTrigger.BuyTrigger == "" && result.ActionTrigger.SellTrigger == "" {
+			result.ActionTrigger = nil
+			warnings = append(warnings, "empty_action_trigger_cleared")
+		}
 	}
 
 	// 价格合理性校验（如果 trading_suggestions 存在）

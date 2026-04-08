@@ -1331,6 +1331,80 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
         <span>· 大盘 {completenessLabels.market_overview}</span>
       </div>
 
+      {/* ── 四层分析评分（第二步新增）── */}
+      {analysis.layer_scores && Object.keys(analysis.layer_scores).length > 0 && (
+        <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-4 py-3.5">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-semibold text-white/70">📊 四层框架评分</span>
+            {/* 市场状态标签 */}
+            {analysis.market_state && (
+              <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+                analysis.market_state === 'trend' ? 'bg-red-500/15 text-red-300' :
+                analysis.market_state === 'speculative' ? 'bg-purple-500/15 text-purple-300' :
+                analysis.market_state === 'bubble' ? 'bg-orange-500/15 text-orange-300' :
+                analysis.market_state === 'decline' ? 'bg-emerald-500/15 text-emerald-300' :
+                'bg-sky-500/15 text-sky-300'
+              }`}>
+                🏷️ {analysis.market_state_label || analysis.market_state}
+              </span>
+            )}
+          </div>
+          {(['narrative', 'liquidity', 'expectation', 'fundamental']).map((key) => {
+            const ls = analysis.layer_scores[key]
+            if (!ls) return null
+            const layerMeta = {
+              narrative:   { label: '叙事层', icon: '📖', color: '#a78bfa', weight: '25%' },
+              liquidity:   { label: '资金层', icon: '💧', color: '#38bdf8', weight: '25%' },
+              expectation: { label: '预期层', icon: '🎯', color: '#f472b6', weight: '30%' },
+              fundamental: { label: '基本面', icon: '📈', color: '#34d399', weight: '20%' },
+            }
+            const meta = layerMeta[key]
+            // score -2~+2 映射到 0~100% 进度条
+            const barPct = Math.max(0, Math.min(100, ((ls.score + 2) / 4) * 100))
+            const dirLabel = { bullish: '看多', neutral: '中性', bearish: '看空' }[ls.direction] || '中性'
+            const dirColor = ls.direction === 'bullish' ? '#ef4444' : ls.direction === 'bearish' ? '#22c55e' : '#9ca3af'
+            return (
+              <div key={key} className="mt-2 first:mt-0">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[13px]">{meta.icon}</span>
+                    <span className="text-[12px] font-medium text-white/80">{meta.label}</span>
+                    <span className="text-[10px] text-white/30">({meta.weight})</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-semibold" style={{ color: dirColor }}>{dirLabel}</span>
+                    <span className="text-[11px] font-mono text-white/50">{ls.score > 0 ? '+' : ''}{ls.score}</span>
+                    <span className="text-[10px] text-white/30">置信度 {(ls.confidence * 100).toFixed(0)}%</span>
+                  </div>
+                </div>
+                <div className="h-1.5 w-full rounded-full bg-white/8 overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{ width: `${barPct}%`, backgroundColor: meta.color }}
+                  />
+                </div>
+                {ls.reason && (
+                  <p className="mt-1 text-[11px] leading-relaxed text-white/40">{ls.reason}</p>
+                )}
+              </div>
+            )
+          })}
+          {/* 综合评分 */}
+          {analysis.total_score != null && (
+            <div className="mt-3 pt-3 border-t border-white/8 flex items-center justify-between">
+              <span className="text-[11px] text-white/40">加权综合评分</span>
+              <span className={`text-sm font-bold font-mono ${
+                analysis.total_score >= 0.5 ? 'text-red-400' :
+                analysis.total_score <= -0.5 ? 'text-emerald-400' :
+                'text-amber-400'
+              }`}>
+                {analysis.total_score > 0 ? '+' : ''}{analysis.total_score.toFixed(2)}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 分析逻辑 */}
       <div className="mt-4 rounded-xl border border-white/8 bg-black/20 overflow-hidden">
         <button
@@ -1376,6 +1450,41 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
           {ts.time_horizon && (
             <div className="mt-2 text-[11px] text-white/45">投资周期：{ts.time_horizon}</div>
           )}
+        </div>
+      )}
+
+      {/* ── 触发条件（第二步新增）── */}
+      {analysis.action_trigger && (analysis.action_trigger.buy_trigger || analysis.action_trigger.sell_trigger) && (
+        <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/5 px-4 py-3">
+          <div className="text-xs font-semibold text-amber-200/90 mb-2">🎯 执行触发条件</div>
+          {analysis.action_trigger.buy_trigger && (
+            <div className="flex items-start gap-2 mt-1.5 first:mt-0">
+              <span className="mt-0.5 text-xs">🟢</span>
+              <div>
+                <span className="text-[11px] font-medium text-white/50">买入触发</span>
+                <p className="text-[13px] leading-relaxed text-red-300/80 mt-0.5">{analysis.action_trigger.buy_trigger}</p>
+              </div>
+            </div>
+          )}
+          {analysis.action_trigger.sell_trigger && (
+            <div className="flex items-start gap-2 mt-2.5 first:mt-0">
+              <span className="mt-0.5 text-xs">🔴</span>
+              <div>
+                <span className="text-[11px] font-medium text-white/50">卖出触发</span>
+                <p className="text-[13px] leading-relaxed text-emerald-300/80 mt-0.5">{analysis.action_trigger.sell_trigger}</p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 关键催化因素（第二步新增）── */}
+      {Array.isArray(analysis.key_catalysts) && analysis.key_catalysts.length > 0 && (
+        <div className="mt-4 rounded-xl border border-sky-400/15 bg-sky-500/[0.04] px-4 py-3">
+          <div className="text-xs font-semibold text-sky-200/90 mb-2">✨ 潜在催化因素</div>
+          {analysis.key_catalysts.map((c, i) => (
+            <p key={i} className="text-[12px] leading-relaxed text-sky-200/65 mt-1.5 first:mt-0">💡 {c}</p>
+          ))}
         </div>
       )}
 

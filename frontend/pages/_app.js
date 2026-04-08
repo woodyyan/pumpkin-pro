@@ -20,31 +20,38 @@ const NAV_ITEMS = [
 const CL_KEY = 'wolong_changelog_seen'
 
 function useChangelogUnread() {
-  const [seenAt, setSeenAt] = useState(() => {
-    if (typeof window === 'undefined') return ''
-    return localStorage.getItem(CL_KEY) || ''
-  })
-
-  useEffect(() => {
-    const onStorage = (e) => {
-      if (e.key === CL_KEY) setSeenAt(e.newValue || '')
-    }
-    window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
-  }, [])
+  const [unreadCount, setUnreadCount] = useState(0)
 
   const lastUpdated = changelogData?.last_updated || ''
 
-  const unreadCount = useMemo(() => {
-    if (!lastUpdated || seenAt >= lastUpdated) return 0
+  useEffect(() => {
+    const seenAt = localStorage.getItem(CL_KEY) || ''
+    if (!lastUpdated || seenAt >= lastUpdated) {
+      setUnreadCount(0)
+      return
+    }
     const items = Array.isArray(changelogData?.items) ? changelogData.items : []
-    return items.filter((it) => it?.visible !== false && (it?.date || '') > (seenAt || '')).length
-  }, [lastUpdated, seenAt])
+    setUnreadCount(items.filter((it) => it?.visible !== false && (it?.date || '') > (seenAt || '')).length)
+  }, [])
+
+  // Cross-tab sync
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === CL_KEY) {
+        const seenAt = e.newValue || ''
+        if (!lastUpdated || seenAt >= lastUpdated) { setUnreadCount(0); return }
+        const items = Array.isArray(changelogData?.items) ? changelogData.items : []
+        setUnreadCount(items.filter((it) => it?.visible !== false && (it?.date || '') > seenAt).length)
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [lastUpdated])
 
   const markAsSeen = () => {
     const val = lastUpdated
     localStorage.setItem(CL_KEY, val)
-    setSeenAt(val)
+    setUnreadCount(0)
   }
 
   return { unreadCount, markAsSeen }

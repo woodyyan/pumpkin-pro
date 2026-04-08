@@ -367,7 +367,7 @@ func validateStockAnalysis(output *StockAnalysisInput, result *StockAnalysisOutp
 	}
 
 	// 价格合理性校验（如果 trading_suggestions 存在）
-	if ts, ok := result.TradingSuggestions.(map[string]any); ok {
+	if ts := result.TradingSuggestions; ts != nil {
 		currency, _ := output.SymbolMeta["currency"].(string)
 		if currency == "" {
 			currency = "CNY"
@@ -407,7 +407,6 @@ func validateStockAnalysis(output *StockAnalysisInput, result *StockAnalysisOutp
 func buildDataCompleteness(input *StockAnalysisInput, profile *portfolio.InvestmentProfile) map[string]string {
 	c := make(map[string]string)
 	if mkt := input.Market; mkt != nil && mkt["price"] != nil {
-		priceRef = asFloat(mkt["price"])
 		c["market"] = "complete"
 	} else {
 		c["market"] = "missing"

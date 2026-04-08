@@ -791,6 +791,17 @@ export default function LiveTradingDetailPage() {
           </div>
         ) : null}
 
+        {/* AI 分析结果面板 — 标题栏下方、实时快照上方 */}
+        {showAiPanel && (
+          <AIAnalysisPanel
+            analyzing={aiAnalyzing}
+            result={aiResult}
+            error={aiError}
+            onClose={() => { setShowAiPanel(false); setAiResult(null); setAiError('') }}
+            onRetry={handleAIAnalysis}
+          />
+        )}
+
         {/* Snapshot */}
         <section className="rounded-2xl border border-border bg-card p-5">
           <h3 className="text-base font-semibold text-white">实时快照</h3>
@@ -1220,17 +1231,6 @@ export default function LiveTradingDetailPage() {
           <PriceVolumeChart events={priceVolumeEvents} />
           <BlockFlowChart events={blockFlowEvents} />
         </section>
-
-        {/* AI 分析结果面板 */}
-        {showAiPanel && (
-          <AIAnalysisPanel
-            analyzing={aiAnalyzing}
-            result={aiResult}
-            error={aiError}
-            onClose={() => { setShowAiPanel(false); setAiResult(null) }}
-            onRetry={handleAIAnalysis}
-          />
-        )}
       </div>
     </>
   )

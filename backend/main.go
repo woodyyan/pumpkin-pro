@@ -623,6 +623,11 @@ func (a *appServer) handleStrategyAIBacktest(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusUnauthorized, "请先登录")
 		return
 	}
+	// 限流检查（该接口内部会循环调用 LLM 多次）
+	if !a.aiRateLimiter.Allow(userID) {
+		writeError(w, http.StatusTooManyRequests, "本小时 AI 调用次数已达上限（20 次/小时），请稍后再试")
+		return
+	}
 
 	payload, err := decodeBodyAsMap(r)
 	if err != nil {
@@ -1826,6 +1831,16 @@ func (a *appServer) handleScreenerAIParse(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
 		return
 	}
+	userID := currentUserID(r)
+	if strings.TrimSpace(userID) == "" {
+		writeError(w, http.StatusUnauthorized, "请先登录后使用 AI 选股功能")
+		return
+	}
+	// 限流检查
+	if !a.aiRateLimiter.Allow(userID) {
+		writeError(w, http.StatusTooManyRequests, "本小时 AI 调用次数已达上限（20 次/小时），请稍后再试")
+		return
+	}
 	payload, err := decodeBodyAsMap(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "请求格式错误")
@@ -2376,7 +2391,7 @@ func main() {
 	mux.HandleFunc("/api/admin/feedback/", server.withSuperAdminAuth(server.handleAdminFeedbackSubroutes))
 
 	mux.HandleFunc("/api/screener/scan", server.withOptionalAuth(server.handleScreenerScan))
-	mux.HandleFunc("/api/screener/ai-parse", server.withOptionalAuth(server.handleScreenerAIParse))
+	mux.HandleFunc("/api/screener/ai-parse", server.withRequiredAuth(server.handleScreenerAIParse))
 	mux.HandleFunc("/api/screener/watchlists", server.withRequiredAuth(server.handleScreenerWatchlists))
 	mux.HandleFunc("/api/screener/watchlists/", server.withRequiredAuth(server.handleScreenerWatchlistSubroutes))
 

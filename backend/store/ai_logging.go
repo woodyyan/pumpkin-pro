@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -26,6 +27,32 @@ type AICallLog struct {
 }
 
 func (AICallLog) TableName() string { return "ai_call_logs" }
+
+// createAICallLogsTable 使用 raw SQL 创建 ai_call_logs 表（避免 glebarez/sqlite AutoMigrate SIGSEGV）
+func createAICallLogsTable(db *gorm.DB) error {
+	sqls := []string{
+		`CREATE TABLE IF NOT EXISTS ai_call_logs (` +
+			`id INTEGER PRIMARY KEY AUTOINCREMENT, ` +
+			`user_id TEXT NOT NULL DEFAULT '', ` +
+			`feature_key TEXT NOT NULL, ` +
+			`feature_name TEXT NOT NULL DEFAULT '', ` +
+			`status TEXT NOT NULL DEFAULT 'success', ` +
+			`error_message TEXT DEFAULT '', ` +
+			`model TEXT DEFAULT '', ` +
+			`response_ms INTEGER NOT NULL DEFAULT 0, ` +
+			`extra_meta TEXT DEFAULT '{}', ` +
+			`created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP` +
+			`)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_call_user ON ai_call_logs(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_call_feature ON ai_call_logs(feature_key)`,
+	}
+	for _, s := range sqls {
+		if err := db.Exec(s).Error; err != nil {
+			return fmt.Errorf("exec %q failed: %w", s[:40], err)
+		}
+	}
+	return nil
+}
 
 // ── 异步批量写入器 ──
 

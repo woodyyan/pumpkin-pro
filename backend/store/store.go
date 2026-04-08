@@ -52,8 +52,8 @@ func New(cfg config.DBConfig) (*Store, error) {
 		}
 	}
 
-	// AI 调用日志表（独立于模块 Migrator，避免循环依赖）
-	if err := db.AutoMigrate(&AICallLog{}).Error; err != nil {
+	// AI 调用日志表（使用 raw SQL 建表，避免 glebarez/sqlite 在处理此 struct 时偶发 SIGSEGV）
+	if err := createAICallLogsTable(db); err != nil {
 		return nil, fmt.Errorf("auto migrate ai_call_logs failed: %w", err)
 	}
 

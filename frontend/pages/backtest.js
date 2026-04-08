@@ -553,7 +553,7 @@ export default function BacktestPage() {
   }, [result]);
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 pb-12">
+    <div className="max-w-7xl mx-auto space-y-6 pb-12 overflow-x-hidden">
       <section className="bg-card border border-border rounded-2xl p-6 md:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3 max-w-3xl">
@@ -597,7 +597,7 @@ export default function BacktestPage() {
               ))}
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <Field label="开始日期">
                 <Input type="date" value={form.startDate} onChange={(event) => updateField('startDate', event.target.value)} />
               </Field>
@@ -1262,7 +1262,7 @@ function Field({ label, children }) {
 }
 
 function Input(props) {
-  return <input {...props} className="w-full rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary" />;
+  return <input {...props} className="w-full box-border min-w-0 rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary" />;
 }
 
 function SectionCard({ title, description, children }) {
@@ -1379,11 +1379,11 @@ function HistoryRunCard({ run, isActive, onSelect, onDelete }) {
         </svg>
       </button>
 
-      <div className="mb-2 pr-6 text-sm font-medium text-white leading-tight truncate" title={run.title}>
+      <div className="mb-2 pr-8 text-sm font-medium text-white leading-tight truncate" title={run.title}>
         {run.title || '回测记录'}
       </div>
 
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-white/55">
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-white/55 min-w-0">
         {totalReturn != null && (
           <span>
             收益{' '}
@@ -1414,11 +1414,11 @@ function HistoryRunCard({ run, isActive, onSelect, onDelete }) {
         )}
       </div>
 
-      <div className="mt-2 flex items-center gap-3 text-[11px] text-white/30">
-        <span>{run.start_date} ~ {run.end_date}</span>
-        {createdAt && <span>{createdAt}</span>}
+      <div className="mt-2 flex items-center gap-2 overflow-x-auto text-[11px] text-white/30 whitespace-nowrap scrollbar-none">
+        <span className="shrink-0">{run.start_date} ~ {run.end_date}</span>
+        {createdAt && <span className="shrink-0">{createdAt}</span>}
         {run.status === 'failed' && (
-          <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] text-red-300">失败</span>
+          <span className="shrink-0 rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] text-red-300">失败</span>
         )}
       </div>
     </div>

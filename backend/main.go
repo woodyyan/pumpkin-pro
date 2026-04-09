@@ -20,6 +20,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
+	"github.com/woodyyan/pumpkin-pro/backend/store/fundcache"
 	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
@@ -44,6 +45,7 @@ type appServer struct {
 	analyticsRepo    *analytics.Repository
 	feedbackRepo     *feedback.Repository
 	aiRateLimiter    *strategy.AIRateLimiter
+	fundCacheRepo    *fundcache.Repository
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -1221,7 +1223,7 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
 			return
 		}
-		a.proxyToQuant(w, r, "/api/fundamentals/"+strings.ToUpper(symbol), nil)
+		a.handleFundamentalsWithCache(w, r, strings.ToUpper(symbol))
 	case "support-levels":
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
@@ -1518,6 +1520,62 @@ func (a *appServer) writeLiveError(w http.ResponseWriter, err error) {
 		"message":    message,
 		"details":    map[string]any{"error": err.Error()},
 	})
+}
+
+// handleFundamentalsWithCache 带缓存的基础面数据代理
+// 优先从 SQLite 缓存读取（TTL 2h），未命中时透传 Quant 并写入缓存
+func (a *appServer) handleFundamentalsWithCache(w http.ResponseWriter, r *http.Request, symbol string) {
+	ctx := r.Context()
+
+	// 1. 尝试从本地缓存读取
+	dataJSON, hit, err := a.fundCacheRepo.Get(ctx, symbol)
+	if err != nil {
+		log.Printf("[fundcache] cache read error for %s: %v", symbol, err)
+		// 缓存读取出错不阻塞，继续走透传
+	}
+	if hit {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Cache", "HIT")
+		w.Write([]byte(dataJSON))
+		return
+	}
+
+	// 2. 缓存未命中，透传到 Quant
+	targetPath := "/api/fundamentals/" + symbol
+	targetURL := a.cfg.QuantServiceURL + targetPath
+
+	req, err := http.NewRequestWithContext(ctx, r.Method, targetURL, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create fundamentals request")
+		return
+	}
+	copyForwardHeaders(r, req)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("Quant service unavailable: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Failed to read fundamentals response")
+		return
+	}
+
+	// 仅对成功响应写入缓存（2xx）
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 && len(respBody) > 0 {
+		if cacheErr := a.fundCacheRepo.Upsert(ctx, symbol, string(respBody)); cacheErr != nil {
+			log.Printf("[fundcache] cache write error for %s: %v", symbol, cacheErr)
+			// 写入失败不影响响应返回
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Cache", "MISS")
+	w.WriteHeader(resp.StatusCode)
+	w.Write(respBody)
 }
 
 func (a *appServer) proxyToQuant(w http.ResponseWriter, r *http.Request, targetPath string, body []byte) {
@@ -2323,6 +2381,7 @@ func main() {
 
 	analyticsRepo := analytics.NewRepository(storeInstance.DB)
 	feedbackRepo := feedback.NewRepository(storeInstance.DB)
+	fundCacheRepo := fundcache.NewRepository(storeInstance.DB)
 
 	server := &appServer{
 		cfg:              cfg,
@@ -2338,6 +2397,7 @@ func main() {
 		analyticsRepo:    analyticsRepo,
 		feedbackRepo:     feedbackRepo,
 		aiRateLimiter:    strategy.NewAIRateLimiter(20),
+		fundCacheRepo:    fundCacheRepo,
 	}
 
 	mux := http.NewServeMux()

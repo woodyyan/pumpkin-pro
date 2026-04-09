@@ -20,6 +20,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
+	"github.com/woodyyan/pumpkin-pro/backend/store/analysis_history"
 	"github.com/woodyyan/pumpkin-pro/backend/store/fundcache"
 	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
@@ -45,7 +46,8 @@ type appServer struct {
 	analyticsRepo    *analytics.Repository
 	feedbackRepo     *feedback.Repository
 	aiRateLimiter    *strategy.AIRateLimiter
-	fundCacheRepo    *fundcache.Repository
+	fundCacheRepo       *fundcache.Repository
+	analysisHistoryRepo *analysis_history.Repository
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -1337,8 +1339,51 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 			return
 		}
 		a.handleStockAIAnalysis(w, r, symbol)
+	case "analysis-history":
+		a.handleAnalysisHistorySubroutes(w, r, symbol)
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+// handleAnalysisHistorySubroutes 处理分析历史子路由
+// GET  /api/live/symbols/{symbol}/analysis-history?limit=20   → 列表
+// DELETE /api/live/symbols/{symbol}/analysis-history/{id}     → 删除单条
+func (a *appServer) handleAnalysisHistorySubroutes(w http.ResponseWriter, r *http.Request, symbol string) {
+	userID := currentUserID(r)
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "请先登录")
+		return
+	}
+	symbol = strings.ToUpper(symbol)
+
+	switch r.Method {
+	case http.MethodGet:
+		limit := parseLimit(r.URL.Query().Get("limit"), 20)
+		records, err := a.analysisHistoryRepo.ListBySymbol(r.Context(), userID, symbol, limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "查询分析历史失败")
+			return
+		}
+		items := make([]analysis_history.HistoryListItem, len(records))
+		for i, rec := range records {
+			items[i] = rec.ToListItem()
+		}
+		writeLiveJSON(w, http.StatusOK, map[string]any{"items": items})
+	case http.MethodDelete:
+		// DELETE /api/live/symbols/{symbol}/analysis-history/{id}
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "缺少 id 参数")
+			return
+		}
+		if err := a.analysisHistoryRepo.Delete(r.Context(), userID, id); err != nil {
+			writeError(w, http.StatusInternalServerError, "删除失败")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "id": id})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Only GET and DELETE methods are allowed")
 	}
 }
 
@@ -1385,7 +1430,20 @@ func (a *appServer) handleStockAIAnalysis(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// 序列化响应用于返回 + 异步保存历史
+	respBytes, _ := json.Marshal(result)
 	writeLiveJSON(w, http.StatusOK, result)
+
+	// 异步保存分析历史（不阻塞响应）
+	if userID != "" && len(respBytes) > 0 {
+		go func(body []byte) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if saveErr := a.analysisHistoryRepo.SaveFromAPIResponse(ctx, userID, body); saveErr != nil {
+				log.Printf("[analysis-history] save failed: %v", saveErr)
+			}
+		}(respBytes)
+	}
 }
 
 func parseSince(raw string) time.Time {
@@ -2382,6 +2440,7 @@ func main() {
 	analyticsRepo := analytics.NewRepository(storeInstance.DB)
 	feedbackRepo := feedback.NewRepository(storeInstance.DB)
 	fundCacheRepo := fundcache.NewRepository(storeInstance.DB)
+	analysisHistoryRepo := analysis_history.NewRepository(storeInstance.DB)
 
 	server := &appServer{
 		cfg:              cfg,
@@ -2397,7 +2456,8 @@ func main() {
 		analyticsRepo:    analyticsRepo,
 		feedbackRepo:     feedbackRepo,
 		aiRateLimiter:    strategy.NewAIRateLimiter(20),
-		fundCacheRepo:    fundCacheRepo,
+		fundCacheRepo:       fundCacheRepo,
+		analysisHistoryRepo: analysisHistoryRepo,
 	}
 
 	mux := http.NewServeMux()

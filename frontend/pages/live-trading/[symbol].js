@@ -75,6 +75,10 @@ export default function LiveTradingDetailPage() {
   const [aiError, setAiError] = useState('')
   const [showAiPanel, setShowAiPanel] = useState(false)
 
+  // ── AI 分析历史 ──
+  const [analysisHistory, setAnalysisHistory] = useState([])
+  const [historyExpanded, setHistoryExpanded] = useState(false)
+
   // 关注状态
   const [isWatched, setIsWatched] = useState(null) // null=未知, true/false
   const [addingWatch, setAddingWatch] = useState(false)
@@ -222,6 +226,17 @@ export default function LiveTradingDetailPage() {
       setPortfolioData(data?.item || null)
     } catch {
       setPortfolioData(null)
+    }
+  }
+
+  const loadAnalysisHistory = async (sym, { limit = 20 } = {}) => {
+    if (!sym || !isLoggedIn) { setAnalysisHistory([]); return }
+    try {
+      const data = await requestJson(`/api/live/symbols/${encodeURIComponent(sym)}/analysis-history?limit=${limit}`)
+      const items = data?.items || []
+      setAnalysisHistory(items)
+    } catch {
+      setAnalysisHistory([])
     }
   }
 
@@ -382,6 +397,8 @@ export default function LiveTradingDetailPage() {
       if (!result) throw lastErr
 
       setAiResult(result)
+      // 刷新历史记录（新结果已异步保存到后端）
+      loadAnalysisHistory(symbol, { limit: 10 })
     } catch (err) {
       if (isAuthRequiredError(err)) {
         setAiError('登录已过期，请重新登录后重试')
@@ -527,6 +544,7 @@ export default function LiveTradingDetailPage() {
           await Promise.all([
             loadSignalCenter({ force: true }),
             loadPortfolio(symbol),
+            loadAnalysisHistory(symbol, { limit: 10 }),
           ])
         } catch (err) {
           setSignalError(err.message || '信号配置加载失败')
@@ -823,6 +841,28 @@ export default function LiveTradingDetailPage() {
             error={aiError}
             onClose={() => { setShowAiPanel(false); setAiResult(null); setAiError('') }}
             onRetry={handleAIAnalysis}
+          />
+        )}
+
+        {/* AI 分析历史（登录后展示，默认折叠） */}
+        {privateAccessReady && analysisHistory.length > 0 && (
+          <AnalysisHistoryPanel
+            items={analysisHistory}
+            expanded={historyExpanded}
+            onToggleExpand={() => setHistoryExpanded(!historyExpanded)}
+            onViewDetail={(id) => {
+              // TODO: 可扩展为点击查看完整历史详情
+            }}
+            onDelete={async (id) => {
+              try {
+                await requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/analysis-history?id=${id}`, {
+                  method: 'DELETE',
+                })
+                loadAnalysisHistory(symbol, { limit: 10 })
+              } catch {
+                // silent fail
+              }
+            }}
           />
         )}
 
@@ -1529,6 +1569,100 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
       {analysis.data_timestamp && (
         <div className="mt-2 text-center text-[10px] text-white/20">
           分析时间：{new Date(analysis.data_timestamp).toLocaleString('zh-CN', { hour12: false })}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ── AI 分析历史面板（可折叠，默认收起）──
+
+function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, onDelete }) {
+  const signalMap = {
+    buy: { label: '看多', arrow: '↑', color: 'text-red-300', dot: '🔴' },
+    sell: { label: '看空', arrow: '↓', color: 'text-emerald-300', dot: '🟢' },
+    hold: { label: '观望', arrow: '→', color: 'text-amber-300', dot: '🟡' },
+  }
+
+  // 时效格式化
+  const formatTimeAgo = (isoStr) => {
+    if (!isoStr) return ''
+    const d = new Date(isoStr)
+    const diff = Date.now() - d.getTime()
+    const mins = Math.floor(diff / 60000)
+    const hours = Math.floor(diff / 3600000)
+    const days = Math.floor(diff / 86400000)
+    if (mins < 1) return '刚刚'
+    if (mins < 60) return `${mins} 分钟前`
+    if (hours < 24) return `${hours} 小时前`
+    return `${days} 天前 · ${d.toLocaleDateString('zh-CN')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+  }
+
+  // 判断是否过时（超过24小时）
+  const isStale = (isoStr) => {
+    if (!isoStr) return false
+    return (Date.now() - new Date(isoStr).getTime()) > 86400000
+  }
+
+  return (
+    <section className="rounded-2xl border border-white/8 bg-card p-4">
+      {/* 折叠标题栏 */}
+      <button
+        type="button"
+        onClick={onToggleExpand}
+        className="flex w-full items-center justify-between text-left"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-sm">📋</span>
+          <span className="text-[13px] font-medium text-white/70">分析历史</span>
+          <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/40">{items.length} 条</span>
+        </div>
+        <span className={`text-white/35 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>▼</span>
+      </button>
+
+      {/* 展开内容 */}
+      {expanded && (
+        <div className="mt-3 space-y-2">
+          {/* 最新一条高亮 */}
+          {items.slice(0, 5).map((item) => {
+            const sig = signalMap[item.signal] || signalMap.hold
+            const stale = isStale(item.created_at)
+            return (
+              <div
+                key={item.id}
+                className={`group flex items-start justify-between gap-3 rounded-xl border px-3.5 py-2.5 transition ${
+                  stale ? 'border-white/[0.06] bg-white/[0.02]' : 'border-primary/15 bg-primary/[0.04]'
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="shrink-0 text-sm">{sig.dot}</span>
+                  <div className="min-w-0">
+                    <div className={`text-xs font-medium ${sig.color}`}>
+                      {sig.label} {sig.arrow}
+                      <span className={`ml-1.5 text-[10px] ${stale ? 'text-white/25' : 'text-white/45'}`}>
+                        置信度 {item.confidence_score ?? '--'}%
+                      </span>
+                    </div>
+                    <div className={`mt-0.5 text-[11px] truncate ${stale ? 'text-white/20' : 'text-white/35'}`}>
+                      {formatTimeAgo(item.created_at)}
+                      {stale && <span className="ml-1.5 text-amber-400/50">⚠️ 可能已过时</span>}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onDelete(item.id)}
+                  className="shrink-0 rounded-lg border border-transparent px-1.5 py-0.5 text-[10px] text-white/20 opacity-0 transition hover:border-rose-400/30 hover:text-rose-300 group-hover:opacity-100"
+                  title="删除此记录"
+                >
+                  ✕
+                </button>
+              </div>
+            )
+          })}
+          {items.length > 5 && (
+            <div className="pt-1 text-center text-[10px] text-white/25">仅显示最近 5 条，更多可在后续版本中查看</div>
+          )}
         </div>
       )}
     </section>

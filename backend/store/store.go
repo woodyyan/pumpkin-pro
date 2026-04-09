@@ -9,6 +9,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/fundcache"
+	"github.com/woodyyan/pumpkin-pro/backend/store/analysis_history"
 	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
@@ -47,6 +48,7 @@ func New(cfg config.DBConfig) (*Store, error) {
 		analytics.NewMigrator(),
 		feedback.NewMigrator(),
 		fundcache.NewMigrator(),
+		analysis_history.NewMigrator(),
 	}
 	for _, migrator := range migrators {
 		if err := migrator.AutoMigrate(db); err != nil {

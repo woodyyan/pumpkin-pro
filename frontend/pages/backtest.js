@@ -102,6 +102,9 @@ export default function BacktestPage() {
   const equityChartRef = useRef(null);
   const auxChartRef = useRef(null);
 
+  // 回测表单区域 ref（用于 AI 建议应用后自动滚动定位）
+  const backtestFormRef = useRef(null);
+
   const selectedStrategy = useMemo(
     () => strategies.find((item) => item.id === form.strategyId) || null,
     [form.strategyId, strategies],
@@ -531,11 +534,19 @@ export default function BacktestPage() {
         setForm((prev) => ({ ...prev, strategyId: created.item.id }));
         setAiOptResult(null);
 
-        // 自动运行回测
+        // 自动运行回测（使用当前回测结果的 ticker，而非表单默认值）
         setLoading(true);
         setError('');
         try {
-          const btPayload = buildPayload({ ...form, strategyId: created.item.id }, created.item);
+          const btForm = { ...form, strategyId: created.item.id };
+          // 优先使用当前回测结果的股票代码，避免回退到默认 600519
+          if (result?.data_summary?.ticker) {
+            btForm.ticker = result.data_summary.ticker;
+          }
+          if (result?.data_summary?.start_date) btForm.startDate = result.data_summary.start_date;
+          if (result?.data_summary?.end_date) btForm.endDate = result.data_summary.end_date;
+          setForm(btForm);
+          const btPayload = buildPayload(btForm, created.item);
           const responseData = await requestJson('/api/backtest', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -550,6 +561,10 @@ export default function BacktestPage() {
         } finally {
           setLoading(false);
         }
+        // 滚动到回测表单区域，让用户看到正在运行的回测
+        requestAnimationFrame(() => {
+          backtestFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
       }
     } catch (err) {
       setAiOptError(err.message || '应用 AI 建议失败');
@@ -564,7 +579,7 @@ export default function BacktestPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-12 overflow-x-hidden">
-      <section className="bg-card border border-border rounded-2xl p-6 md:p-8">
+      <section ref={backtestFormRef} className="bg-card border border-border rounded-2xl p-6 md:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3 max-w-3xl">
             <span className="inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">

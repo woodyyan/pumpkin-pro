@@ -410,3 +410,67 @@ func (r *Repository) AITopUsers(ctx context.Context, limit int) ([]TopAIUser, er
 	}
 	return results, nil
 }
+
+// ── User Funnel queries ──
+
+// CountUV counts unique visitors (DISTINCT visitor_id) from page_views.
+func (r *Repository) CountUV(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("page_views").
+		Distinct("visitor_id").Where("visitor_id != ''").Count(&count).Error
+	return count, err
+}
+
+// CountUVSince counts UV since given time.
+func (r *Repository) CountUVSince(ctx context.Context, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("page_views").
+		Where("created_at >= ? AND visitor_id != ''", since).
+		Distinct("visitor_id").Count(&count).Error
+	return count, err
+}
+
+// CountUniqueLoginsSince counts distinct users who logged in successfully since the given time.
+func (r *Repository) CountUniqueLoginsSince(ctx context.Context, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("auth_audit_logs").
+		Where("action = ? AND success = ? AND created_at >= ?", "login", true, since).
+		Distinct("user_id").Count(&count).Error
+	return count, err
+}
+
+// CountUsersWithWatchlistSince counts distinct users who have at least one watchlist item since.
+func (r *Repository) CountUsersWithWatchlistSince(ctx context.Context, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("live_watchlist_items").
+		Where("created_at >= ?", since).
+		Distinct("user_id").Count(&count).Error
+	return count, err
+}
+
+// CountUsersWithSignalConfigsSince counts distinct users who have configured at least one signal since.
+func (r *Repository) CountUsersWithSignalConfigsSince(ctx context.Context, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("symbol_signal_configs").
+		Where("created_at >= ?", since).
+		Distinct("user_id").Count(&count).Error
+	return count, err
+}
+
+// CountBacktestUsersSince counts distinct users who have run backtests since.
+func (r *Repository) CountBacktestUsersSince(ctx context.Context, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("backtest_runs").
+		Where("created_at >= ?", since).
+		Distinct("user_id").Count(&count).Error
+	return count, err
+}
+
+// CountAIUniqueUsersSince counts distinct users who have used AI features since.
+func (r *Repository) CountAIUniqueUsersSince(ctx context.Context, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("ai_call_logs").
+		Where("created_at >= ? AND user_id != '' AND user_id IS NOT NULL", since).
+		Distinct("user_id").Count(&count).Error
+	return count, err
+}

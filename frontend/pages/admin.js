@@ -450,6 +450,9 @@ function AdminDashboard({ session, onLogout }) {
             {/* Panel 12: System Health (Error Monitoring) */}
             <SystemHealthPanel />
 
+            {/* Panel 13: User Funnel */}
+            <UserFunnelPanel />
+
             {/* Panel 11: AI 调用统计 */}
             {stats.ai && (
               <section>
@@ -870,6 +873,131 @@ function SystemHealthPanel() {
           暂无错误记录 — 系统运行正常 ✅
         </div>
       )}
+    </section>
+  )
+}
+
+// ── User Funnel Panel (Conversion Funnel) ──
+
+const FUNNEL_COLORS = [
+  'from-blue-500 to-cyan-400',   // 访客
+  'from-emerald-500 to-green-400', // 注册
+  'from-violet-500 to-purple-400', // 登录
+  'from-orange-500 to-amber-400', // 关注池
+  'from-pink-500 to-rose-400',   // 配置信号
+  'from-indigo-500 to-blue-400',  // 跑回测
+  'from-fuchsia-500 to-pink-400',  // 用 AI
+]
+
+function fmt(n) {
+  if (n == null) return '--'
+  if (n >= 1000000) return (n / 10000).toFixed(1) + '万'
+  return n.toLocaleString()
+}
+
+function convRate(prev, curr) {
+  if (!prev || prev === 0) return '--'
+  return ((curr / prev) * 100).toFixed(1) + '%'
+}
+
+function UserFunnelPanel() {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    adminFetch('/api/admin/user-funnel')
+      .then((d) => { setData(d); setLoading(false) })
+      .catch(() => { setLoading(false) })
+  }, [])
+
+  if (loading && !data) return null
+  const steps = data?.steps || []
+  if (steps.length === 0) return null
+
+  const maxAll = Math.max(...steps.map(s => s.count_all), 1)
+
+  return (
+    <section>
+      <h2 className="text-base font-semibold text-white/80 mb-3">📊 用户转化漏斗</h2>
+
+      {/* Funnel Visualization */}
+      <div className="rounded-xl border border-white/8 bg-[#15171e] p-5">
+        <div className="flex flex-col gap-2">
+          {steps.map((step, i) => {
+            const w = Math.max((step.count_all / maxAll) * 100, i === 0 ? 4 : 2)
+            const prev = i > 0 ? steps[i - 1].count_all : step.count_all
+            return (
+              <div key={step.label} className="flex items-center gap-3">
+                {/* Label */}
+                <div className="w-20 text-right text-xs font-medium text-white/60 shrink-0 pt-0.5">
+                  {step.label}
+                </div>
+                {/* Bar */}
+                <div className="flex-1 h-9 relative rounded-lg overflow-hidden bg-white/[0.04]">
+                  <div
+                    className={`h-full rounded-lg bg-gradient-to-r ${FUNNEL_COLORS[i]} transition-all duration-500 flex items-center justify-between px-3`}
+                    style={{ width: `${w}%` }}
+                  >
+                    <span className="text-[11px] font-bold text-white/90 truncate drop-shadow-sm">
+                      {fmt(step.count_all)}
+                    </span>
+                    <span className="text-[11px] font-medium text-white/70 tabular-nums">
+                      {convRate(prev, step.count_all)}
+                    </span>
+                  </div>
+                </div>
+                {/* Time breakdown */}
+                <div className="w-56 flex gap-2 shrink-0 text-[10px] text-white/35 tabular-nums">
+                  <span title="今日">{fmt(step.count_today)}</span>
+                  <span title="7天" className="text-white/25">7d:{fmt(step.count_7d)}</span>
+                  <span title="30天" className="text-white/20">30d:{fmt(step.count_30d)}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Summary table below funnel */}
+        <div className="mt-5 overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead>
+              <tr className="border-b border-white/[0.06] text-white/30">
+                <th className="py-2 pl-3 font-medium">阶段</th>
+                <th className="py-2 px-3 text-right font-medium">全部</th>
+                <th className="py-2 px-3 text-right font-medium">今日</th>
+                <th className="py-2 px-3 text-right font-medium">7 天</th>
+                <th className="py-2 px-3 text-right font-medium">30 天</th>
+                <th className="py-2 px-3 text-right font-medium">层转化率</th>
+              </tr>
+            </thead>
+            <tbody className="text-white/65">
+              {steps.map((step, i) => (
+                <tr key={step.label} className="border-b border-white/[0.03] last:border-0 hover:bg-white/[0.02]">
+                  <td className="py-1.5 pl-3">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-sm bg-gradient-to-r shrink-0" style={{ background: `linear-gradient(to right, ${FUNNEL_COLORS[i].replace('from-', '').replace('to-', ', ')})` }} />
+                      {step.label}
+                    </span>
+                  </td>
+                  <td className="py-1.5 px-3 text-right tabular-nums font-medium text-white/80">{fmt(step.count_all)}</td>
+                  <td className="py-1.5 px-3 text-right tabular-nums text-white/50">{fmt(step.count_today)}</td>
+                  <td className="py-1.5 px-3 text-right tabular-nums text-white/40">{fmt(step.count_7d)}</td>
+                  <td className="py-1.5 px-3 text-right tabular-nums text-white/30">{fmt(step.count_30d)}</td>
+                  <td className="py-1.5 px-3 text-right tabular-nums text-emerald-300/70">
+                    {i > 0 ? convRate(steps[i - 1].count_all, step.count_all) : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Key insight: overall conversion */}
+        <div className="mt-3 flex items-center justify-between text-[11px] text-white/30">
+          <span>整体转化（访客 → 用 AI）：{convRate(steps[0]?.count_all, steps[steps.length - 1]?.count_all)}</span>
+          <span>{data?.generated_at ? `数据更新：${new Date(data.generated_at).toLocaleString('zh-CN')}` : ''}</span>
+        </div>
+      </div>
     </section>
   )
 }

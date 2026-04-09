@@ -181,6 +181,87 @@ func (s *Service) PurgeOldAPIErrors(ctx context.Context, days int) (int64, error
 	return s.repo.PurgeOldAPIErrors(ctx, days)
 }
 
+// ── Funnel ──
+
+func (s *Service) GetFunnelStats(ctx context.Context) (*FunnelStats, error) {
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	sevenDaysAgo := now.AddDate(0, 0, -7)
+	thirtyDaysAgo := now.AddDate(0, 0, -30)
+
+	safeNoArg := func(fn func(context.Context) (int64, error)) int64 {
+		v, err := fn(ctx)
+		if err != nil {
+			return 0
+		}
+		return v
+	}
+	since := func(fn func(context.Context, time.Time) (int64, error), t time.Time) int64 {
+		v, err := fn(ctx, t)
+		if err != nil {
+			return 0
+		}
+		return v
+	}
+
+	steps := []FunnelStep{
+		{
+			Label: "访客",
+			CountAll: since(s.repo.CountUVSince, time.Time{}),
+			CountToday: since(s.repo.CountUVSince, today),
+			Count7D:    since(s.repo.CountUVSince, sevenDaysAgo),
+			Count30D:   since(s.repo.CountUVSince, thirtyDaysAgo),
+		},
+		{
+			Label: "注册",
+			CountAll: safeNoArg(s.repo.CountUsers),
+			CountToday: since(s.repo.CountUsersSince, today),
+			Count7D:    since(s.repo.CountUsersSince, sevenDaysAgo),
+			Count30D:   since(s.repo.CountUsersSince, thirtyDaysAgo),
+		},
+		{
+			Label: "登录",
+			CountAll: since(s.repo.CountUniqueLoginsSince, time.Time{}),
+			CountToday: since(s.repo.CountUniqueLoginsSince, today),
+			Count7D:    since(s.repo.CountUniqueLoginsSince, sevenDaysAgo),
+			Count30D:   since(s.repo.CountUniqueLoginsSince, thirtyDaysAgo),
+		},
+		{
+			Label: "加关注池",
+			CountAll: safeNoArg(s.repo.CountUsersWithWatchlist),
+			CountToday: since(s.repo.CountUsersWithWatchlistSince, today),
+			Count7D:    since(s.repo.CountUsersWithWatchlistSince, sevenDaysAgo),
+			Count30D:   since(s.repo.CountUsersWithWatchlistSince, thirtyDaysAgo),
+		},
+		{
+			Label: "配置信号",
+			CountAll: since(s.repo.CountUsersWithSignalConfigsSince, time.Time{}),
+			CountToday: since(s.repo.CountUsersWithSignalConfigsSince, today),
+			Count7D:    since(s.repo.CountUsersWithSignalConfigsSince, sevenDaysAgo),
+			Count30D:   since(s.repo.CountUsersWithSignalConfigsSince, thirtyDaysAgo),
+		},
+		{
+			Label: "跑回测",
+			CountAll: safeNoArg(s.repo.CountBacktestUsers),
+			CountToday: since(s.repo.CountBacktestUsersSince, today),
+			Count7D:    since(s.repo.CountBacktestUsersSince, sevenDaysAgo),
+			Count30D:   since(s.repo.CountBacktestUsersSince, thirtyDaysAgo),
+		},
+		{
+			Label: "用 AI",
+			CountAll: safeNoArg(s.repo.AIUniqueUsers),
+			CountToday: since(s.repo.CountAIUniqueUsersSince, today),
+			Count7D:    since(s.repo.CountAIUniqueUsersSince, sevenDaysAgo),
+			Count30D:   since(s.repo.CountAIUniqueUsersSince, thirtyDaysAgo),
+		},
+	}
+
+	return &FunnelStats{
+		Steps:       steps,
+		GeneratedAt: now.Format(time.RFC3339),
+	}, nil
+}
+
 // ── Stats ──
 
 func (s *Service) GetStats(ctx context.Context) (*StatsResult, error) {

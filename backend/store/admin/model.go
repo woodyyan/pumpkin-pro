@@ -153,3 +153,20 @@ type TopAIUser struct {
 	CallCount    int64  `json:"call_count"`
 	LastCalledAt string `json:"last_called_at"`
 }
+
+// ── User Funnel Stats ──
+
+// FunnelStep represents one layer of the user conversion funnel.
+type FunnelStep struct {
+	Label      string `json:"label"`               // e.g. "注册", "登录"
+	CountAll   int64  `json:"count_all"`           // total (all time)
+	CountToday int64  `json:"count_today"`         // today
+	Count7D    int64  `json:"count_7d"`            // last 7 days
+	Count30D   int64  `json:"count_30d"`           // last 30 days
+}
+
+// FunnelStats is the full funnel response.
+type FunnelStats struct {
+	Steps       []FunnelStep `json:"steps"`                 // ordered 7 steps
+	GeneratedAt string       `json:"generated_at"`
+}

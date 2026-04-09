@@ -65,6 +65,21 @@ func (a *appServer) handleAdminSystemHealthLogs(w http.ResponseWriter, r *http.R
 	})
 }
 
+// handleAdminUserFunnel returns the user conversion funnel data (7 layers).
+// GET /api/admin/user-funnel
+func (a *appServer) handleAdminUserFunnel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	stats, err := a.adminService.GetFunnelStats(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "获取用户漏斗数据失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
 // handleAdminSystemHealthPurge triggers cleanup of old error logs (admin-only).
 // POST /api/admin/system-health/purge
 func (a *appServer) handleAdminSystemHealthPurge(w http.ResponseWriter, r *http.Request) {

@@ -2504,6 +2504,7 @@ func main() {
 	mux.HandleFunc("/api/admin/system-health", server.withSuperAdminAuth(server.handleAdminSystemHealth))
 	mux.HandleFunc("/api/admin/system-health/logs", server.withSuperAdminAuth(server.handleAdminSystemHealthLogs))
 	mux.HandleFunc("/api/admin/system-health/purge", server.withSuperAdminAuth(server.handleAdminSystemHealthPurge))
+	mux.HandleFunc("/api/admin/user-funnel", server.withSuperAdminAuth(server.handleAdminUserFunnel))
 
 	mux.HandleFunc("/api/analytics/pageview", server.withOptionalAuth(server.handlePageView))
 

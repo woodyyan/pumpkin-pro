@@ -489,6 +489,16 @@ export default function BacktestPage() {
     if (!preset) return;
 
     try {
+      // 过滤 AI 建议参数，只保留当前策略 param_schema 中已定义的 key，
+      // 避免 LLM 返回跨策略参数名（如 grid 策略的 grid_count 混入 macd_cross）导致校验失败
+      const validParamKeys = new Set(
+        (selectedStrategy.param_schema || preset.paramSchema || []).map((p) => p.key),
+      );
+      const filteredParams = {};
+      for (const [k, v] of Object.entries(aiOptResult.suggested_params)) {
+        if (validParamKeys.has(k)) filteredParams[k] = v;
+      }
+
       const newStrategyPayload = {
         id: `ai-opt-${selectedStrategy.implementation_key}-${Date.now()}`,
         key: `ai_opt_${selectedStrategy.implementation_key}_${Date.now()}`,
@@ -499,7 +509,7 @@ export default function BacktestPage() {
         status: 'active',
         version: 1,
         param_schema: selectedStrategy.param_schema || preset.paramSchema,
-        default_params: aiOptResult.suggested_params,
+        default_params: filteredParams,
         required_indicators: selectedStrategy.required_indicators || preset.requiredIndicators || [],
         chart_overlays: selectedStrategy.chart_overlays || preset.chartOverlays || [],
         ui_schema: selectedStrategy.ui_schema || preset.uiSchema || {},

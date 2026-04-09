@@ -1290,8 +1290,8 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
   if (!analysis) return null
 
   const signalMap = {
-    buy: { label: '看多', arrow: '↑', hint: '偏多配置', color: 'text-red-300', bg: 'bg-red-500/12', border: 'border-red-400/40', dot: '🟢' },
-    sell: { label: '看空', arrow: '↓', hint: '注意风险', color: 'text-emerald-300', bg: 'bg-emerald-500/12', border: 'border-emerald-400/40', dot: '🔴' },
+    buy: { label: '看多', arrow: '↑', hint: '偏多配置', color: 'text-red-300', bg: 'bg-red-500/12', border: 'border-red-400/40', dot: '🔴' },
+    sell: { label: '看空', arrow: '↓', hint: '注意风险', color: 'text-emerald-300', bg: 'bg-emerald-500/12', border: 'border-emerald-400/40', dot: '🟢' },
     hold: { label: '观望', arrow: '→', hint: '持仓不变', color: 'text-amber-300', bg: 'bg-amber-500/12', border: 'border-amber-400/40', dot: '🟡' },
   }
   const sig = signalMap[analysis.signal] || signalMap.hold

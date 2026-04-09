@@ -1,26 +1,116 @@
-import { getAccessToken } from './auth-storage'
+import { getAccessToken, getRefreshToken, readAuthSession, writeAuthSession, clearAuthSession } from './auth-storage'
 
-export async function readApiResponse(response) {
-  const responseText = await response.text();
-  if (!responseText) return null;
+// ── Network Error Detection ──
+// Distinguishes "server unreachable / timeout / CORS" from real auth/business errors.
+// This is critical: after deployment the backend may be temporarily unavailable;
+// we must NOT treat those transient failures as "session expired".
 
-  const contentType = response.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
+export function isNetworkError(error) {
+  if (!error) return false
+  // status === 0 means request never completed (CORS, abort, network down)
+  if (error.status === 0 || error.status === undefined) return true
+  // Standard HTTP status codes for server-side / proxy issues
+  const s = Number(error.status)
+  if (s >= 500 && s < 600) return true   // 5xx = server error (including 502 Bad Gateway)
+  if (s === 502 || s === 503 || s === 504) return true // gateway/proxy errors during deployment
+  return false
+}
+
+const MAX_RETRIES = 2
+const RETRY_DELAY_MS = 1500
+
+/** Guard: prevent concurrent refresh calls when multiple requests hit 401 simultaneously. */
+let _refreshPromise = null
+
+/**
+ * Core fetch wrapper with:
+ *  - Auto Bearer token injection
+ *  - Auto-retry on network errors (max MAX_RETRIES times)
+ *  - Auto-refresh on 401 (silent token rotation)
+ *  - Structured error objects
+ */
+export async function requestJson(input, init = {}, fallbackMessage = '请求失败') {
+  let lastError
+  let attempt = 0
+
+  while (attempt <= MAX_RETRIES) {
     try {
-      return JSON.parse(responseText);
-    } catch {
-      return responseText;
+      const result = await _fetchOnce(input, init, fallbackMessage)
+      return result
+    } catch (err) {
+      lastError = err
+
+      // Only retry on network/transient errors — NOT on 4xx business errors
+      if (!isNetworkError(err) || attempt >= MAX_RETRIES) {
+        throw err
+      }
+
+      attempt++
+      if (attempt <= MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt))
+      }
     }
   }
 
-  try {
-    return JSON.parse(responseText);
-  } catch {
-    return responseText;
-  }
+  throw lastError
 }
 
-export async function requestJson(input, init = {}, fallbackMessage = '请求失败') {
+/**
+ * Attempt a silent token refresh. Returns true if the session was refreshed.
+ * Uses a singleton promise to avoid thundering-herd when multiple API calls
+ * all receive 401 at the same time.
+ */
+async function tryRefreshToken() {
+  // If a refresh is already in flight, reuse that promise
+  if (_refreshPromise) return _refreshPromise
+
+  _refreshPromise = (async () => {
+    const refreshToken = getRefreshToken()
+    if (!refreshToken) {
+      clearAuthSession()
+      return false
+    }
+
+    try {
+      const res = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      })
+
+      if (!res.ok) {
+        clearAuthSession()
+        return false
+      }
+
+      const data = await res.json()
+      if (!data?.tokens?.access_token || !data?.tokens?.refresh_token) {
+        clearAuthSession()
+        return false
+      }
+
+      // Merge updated tokens into existing session (preserve user info)
+      const existing = readAuthSession() || {}
+      const next = {
+        ...existing,
+        tokens: data.tokens,
+        user: data.user || existing.user,
+      }
+      writeAuthSession(next)
+      return true
+    } catch {
+      // Network error during refresh — don't clear session, let caller decide
+      return false
+    } finally {
+      _refreshPromise = null
+    }
+  })()
+
+  return _refreshPromise
+}
+
+/** Single fetch attempt (no retry logic). Handles 401 → auto-refresh → retry. */
+async function _fetchOnce(input, init, fallbackMessage) {
   const headers = new Headers(init?.headers || {})
   if (!headers.has('accept')) {
     headers.set('Accept', 'application/json')
@@ -37,11 +127,37 @@ export async function requestJson(input, init = {}, fallbackMessage = '请求失
   })
   const data = await readApiResponse(response)
 
-  if (!response.ok) {
-    throw buildApiError(response, data, fallbackMessage)
+  if (response.ok) {
+    return data
   }
 
-  return data
+  // On 401 Unauthorized → attempt silent token refresh, then retry once
+  if (response.status === 401) {
+    const refreshed = await tryRefreshToken()
+    if (refreshed) {
+      // Retry original request with fresh token
+      const retryHeaders = new Headers(init?.headers || {})
+      if (!retryHeaders.has('accept')) retryHeaders.set('Accept', 'application/json')
+      const newToken = getAccessToken()
+      if (newToken) retryHeaders.set('Authorization', `Bearer ${newToken}`)
+
+      const retryResponse = await fetch(input, { ...init, headers: retryHeaders })
+      const retryData = await readApiResponse(retryResponse)
+
+      if (retryResponse.ok) return retryData
+      if (retryResponse.status === 401) {
+        // Still unauthorized after refresh — session truly expired
+        clearAuthSession()
+        throw buildApiError(retryResponse, retryData, fallbackMessage)
+      }
+      throw buildApiError(retryResponse, retryData, fallbackMessage)
+    }
+
+    // Refresh failed or impossible — clear & throw
+    clearAuthSession()
+  }
+
+  throw buildApiError(response, data, fallbackMessage)
 }
 
 function buildApiError(response, responseData, fallbackText) {

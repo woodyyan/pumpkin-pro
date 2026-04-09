@@ -68,7 +68,7 @@ func Load() Config {
 		},
 		Auth: AuthConfig{
 			JWTSecret:             getEnv("AUTH_JWT_SECRET", "dev-only-change-me"),
-			AccessTokenTTLMinutes: getEnvAsInt("AUTH_ACCESS_TOKEN_TTL_MINUTES", 120),
+			AccessTokenTTLMinutes: getEnvAsInt("AUTH_ACCESS_TOKEN_TTL_MINUTES", 1440),
 			RefreshTokenTTLHours:  getEnvAsInt("AUTH_REFRESH_TOKEN_TTL_HOURS", 168),
 		},
 		AI: AIConfig{

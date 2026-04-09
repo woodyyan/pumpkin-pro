@@ -447,6 +447,9 @@ function AdminDashboard({ session, onLogout }) {
               </div>
             </section>
 
+            {/* Panel 12: System Health (Error Monitoring) */}
+            <SystemHealthPanel />
+
             {/* Panel 11: AI 调用统计 */}
             {stats.ai && (
               <section>
@@ -684,6 +687,187 @@ function FeedbackPanel() {
               ) : null}
             </div>
           ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ── System Health Panel (Error Monitoring) ──
+
+const STATUS_LABELS = { 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 409: 'Conflict', 429: 'Too Many Requests', 500: 'Internal Error', 502: 'Bad Gateway', 503: 'Service Unavailable', 504: 'Gateway Timeout' }
+
+function statusColor(code) {
+  if (code >= 500) return 'text-rose-400 bg-rose-500/10 border-rose-400/25'
+  return 'text-amber-300 bg-amber-500/10 border-amber-400/25'
+}
+
+function formatMS(ms) {
+  if (ms == null) return '--'
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+function SystemHealthPanel() {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [logsExpanded, setLogsExpanded] = useState(false)
+  const [logsData, setLogsData] = useState(null)
+
+  useEffect(() => {
+    adminFetch('/api/admin/system-health')
+      .then((d) => { setData(d); setLoading(false) })
+      .catch(() => { setLoading(false) })
+  }, [])
+
+  const loadMoreLogs = async () => {
+    try {
+      const d = await adminFetch('/api/admin/system-health/logs?limit=200&offset=0')
+      setLogsData(d)
+      setLogsExpanded(true)
+    } catch { /* silent */ }
+  }
+
+  const handlePurge = async () => {
+    if (!window.confirm('确定要清理历史错误日志吗？（保留最近 30 天）')) return
+    try {
+      await adminFetch('/api/admin/system-health/purge', { method: 'POST' })
+      // Refresh
+      const refreshed = await adminFetch('/api/admin/system-health')
+      setData(refreshed)
+      setLogsData(null)
+      setLogsExpanded(false)
+    } catch { /* silent */ }
+  }
+
+  if (loading && !data) return null
+
+  const summary = data?.error_summary || {}
+  const topEndpoints = data?.top_error_endpoints || []
+  const recentErrors = data?.recent_errors || []
+  const trends = data?.error_trends || []
+
+  return (
+    <section>
+      <h2 className="text-base font-semibold text-white/80 mb-3">🖥️ 系统健康（错误监控）</h2>
+
+      {/* Error Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+        <StatCard label="今日错误总数" value={summary.today_total ?? '--'} />
+        <StatCard label="客户端错误(4xx)" value={summary.client_errors ?? '--'} sub="请求参数/权限问题" />
+        <StatCard label="服务端错误(5xx)" value={summary.server_errors ?? '--'} sub="系统内部错误" />
+        <StatCard label="平均耗时" value={formatMS(summary.avg_duration)} sub="仅错误请求" />
+        <StatCard label="Top 错误接口" value={topEndpoints.length || '--'} />
+        <StatCard label="最新记录" value={recentErrors.length > 0 ? `${recentErrors[0]?.status_code}` : '--'} />
+      </div>
+
+      {/* Error Trend Chart + Top Endpoints */}
+      {(trends.length > 1 || topEndpoints.length > 0) && (
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Trend */}
+          {trends.length > 1 && (
+            <div className="rounded-xl border border-white/8 bg-[#15171e] p-3">
+              <MiniChart data={trends} label="错误趋势（14天）" width={380} height={130} type="bar" color="#ef4444" />
+            </div>
+          )}
+          {/* Top Error Endpoints */}
+          {topEndpoints.length > 0 && (
+            <div className="rounded-xl border border-white/8 bg-[#15171e] p-4">
+              <div className="text-xs text-white/40 mb-3">Top 出错接口（今日）</div>
+              <div className="space-y-2">
+                {topEndpoints.slice(0, 8).map((ep, i) => (
+                  <div key={`${ep.path}-${ep.method}`} className="flex items-center gap-3 text-sm">
+                    <span className={`text-[11px] font-mono px-1.5 py-0.5 rounded border ${ep.count > 20 ? statusColor(500) : statusColor(400)}`}>
+                      {ep.method}
+                    </span>
+                    <span className="w-44 truncate text-white/60 text-xs font-mono">{ep.path}</span>
+                    <div className="flex-1 h-4 rounded bg-white/5 overflow-hidden">
+                      <div
+                        className="h-full rounded bg-rose-500/30"
+                        style={{ width: `${Math.min((ep.count / (topEndpoints[0].count || 1)) * 100, 100)}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-white/50 tabular-nums w-8 text-right">{ep.count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Recent Errors Table */}
+      {recentErrors.length > 0 ? (
+        <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/8">
+            <div className="text-xs text-white/40">
+              最近报错日志（{data?.generated_at ? `更新于 ${new Date(data.generated_at).toLocaleTimeString('zh-CN')}` : ''}）
+            </div>
+            <div className="flex gap-2">
+              {!logsExpanded && (
+                <button
+                  type="button"
+                  onClick={loadMoreLogs}
+                  className="rounded-lg border border-white/12 bg-white/5 px-2.5 py-1 text-[11px] text-white/60 transition hover:bg-white/10 hover:text-white"
+                >
+                  展开全部
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handlePurge}
+                className="rounded-lg border border-rose-400/20 bg-rose-500/8 px-2.5 py-1 text-[11px] text-rose-300 transition hover:bg-rose-500/15"
+              >
+                清理旧数据
+              </button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead>
+                <tr className="border-b border-white/[0.06] text-white/30">
+                  <th className="py-2 pl-4 pr-3 font-medium">时间</th>
+                  <th className="py-2 px-3 font-medium">方法</th>
+                  <th className="py-2 px-3 font-medium">接口</th>
+                  <th className="py-2 px-3 font-medium text-center">状态码</th>
+                  <th className="py-2 px-3 font-medium">错误码</th>
+                  <th className="py-2 px-3 font-medium">信息</th>
+                  <th className="py-2 px-3 font-medium text-right">耗时</th>
+                  <th className="py-2 pr-4 pl-3 font-medium text-right">IP</th>
+                </tr>
+              </thead>
+              <tbody className="text-white/65">
+                {(logsExpanded && logsData ? logsData.items : recentErrors).map((err) => (
+                  <tr key={err.id} className="border-b border-white/[0.03] last:border-0 hover:bg-white/[0.02]">
+                    <td className="py-1.5 pl-4 pr-3 whitespace-nowrap text-white/35">
+                      {new Date(err.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </td>
+                    <td className="py-1.5 px-3">
+                      <span className="font-mono text-[11px] text-white/45">{err.method}</span>
+                    </td>
+                    <td className="py-1.5 px-3 max-w-[220px]">
+                      <span className="font-mono text-[11px] truncate block" title={err.path}>{err.path}</span>
+                    </td>
+                    <td className="py-1.5 px-3 text-center">
+                      <span className={`inline-flex rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${statusColor(err.status_code)}`}>
+                        {err.status_code}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-3 font-mono text-[11px] text-white/40">{err.error_code || '-'}</td>
+                    <td className="py-1.5 px-3 max-w-[240px] truncate text-white/55" title={err.error_message}>{err.error_message || '-'}</td>
+                    <td className="py-1.5 px-3 text-right tabular-nums text-white/35 whitespace-nowrap">{formatMS(err.duration_ms)}</td>
+                    <td className="py-1.5 pr-4 pl-3 text-right text-white/25 font-mono text-[11px]" title={err.client_ip}>
+                      {err.client_ip ? err.client_ip.split('.').slice(0, 2).join('.') + '.*' : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 text-xs text-white/30 p-3 rounded-xl border border-dashed border-white/10 text-center">
+          暂无错误记录 — 系统运行正常 ✅
         </div>
       )}
     </section>

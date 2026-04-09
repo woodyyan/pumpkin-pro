@@ -2501,6 +2501,9 @@ func main() {
 	mux.HandleFunc("/api/admin/login", server.handleAdminLogin)
 	mux.HandleFunc("/api/admin/stats", server.withSuperAdminAuth(server.handleAdminStats))
 	mux.HandleFunc("/api/admin/analytics", server.withSuperAdminAuth(server.handleAdminAnalytics))
+	mux.HandleFunc("/api/admin/system-health", server.withSuperAdminAuth(server.handleAdminSystemHealth))
+	mux.HandleFunc("/api/admin/system-health/logs", server.withSuperAdminAuth(server.handleAdminSystemHealthLogs))
+	mux.HandleFunc("/api/admin/system-health/purge", server.withSuperAdminAuth(server.handleAdminSystemHealthPurge))
 
 	mux.HandleFunc("/api/analytics/pageview", server.withOptionalAuth(server.handlePageView))
 
@@ -2519,7 +2522,7 @@ func main() {
 	mux.HandleFunc("/api/screener/watchlists", server.withRequiredAuth(server.handleScreenerWatchlists))
 	mux.HandleFunc("/api/screener/watchlists/", server.withRequiredAuth(server.handleScreenerWatchlistSubroutes))
 
-	handler := corsMiddleware(mux)
+	handler := corsMiddleware(server.loggingMiddleware(mux))
 	log.Printf("🚀 Wolong Pro Backend is running on port %s (db=%s)", cfg.Port, cfg.DB.Type)
 	if err := http.ListenAndServe(fmt.Sprintf(":%s", cfg.Port), handler); err != nil {
 		log.Fatalf("Server failed to start: %v", err)

@@ -165,6 +165,22 @@ func (s *Service) ParseAdminToken(raw string) (*AdminAccessClaims, error) {
 	return claims, nil
 }
 
+// ── Insert API Error (called by logging middleware) ──
+
+func (s *Service) InsertAPIError(ctx context.Context, record APIErrorRecord) error {
+	return s.repo.InsertAPIError(ctx, record)
+}
+
+// ── API Error Log Access (for admin panel) ──
+
+func (s *Service) ListAPIErrors(ctx context.Context, limit, offset int) ([]APIErrorRecord, int64, error) {
+	return s.repo.ListAPIErrors(ctx, limit, offset)
+}
+
+func (s *Service) PurgeOldAPIErrors(ctx context.Context, days int) (int64, error) {
+	return s.repo.PurgeOldAPIErrors(ctx, days)
+}
+
 // ── Stats ──
 
 func (s *Service) GetStats(ctx context.Context) (*StatsResult, error) {

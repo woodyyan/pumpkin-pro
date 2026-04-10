@@ -110,6 +110,20 @@ async function tryRefreshToken() {
 }
 
 /** Single fetch attempt (no retry logic). Handles 401 → auto-refresh → retry. */
+
+/** Safely read a fetch Response body as JSON.
+ *  Handles empty bodies (204), non-JSON content, and parse errors gracefully. */
+async function readApiResponse(response) {
+  const text = await response.text()
+  if (!text) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    // Non-JSON response (e.g., HTML error page) — return raw text wrapped
+    return { detail: text }
+  }
+}
+
 async function _fetchOnce(input, init, fallbackMessage) {
   const headers = new Headers(init?.headers || {})
   if (!headers.has('accept')) {

@@ -70,7 +70,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies (math only, no akshare)
-        run: pip install pandas numpy pytest
+        run: pip install pandas numpy pytest matplotlib
 
       - name: Syntax check
         run: python -m compileall -q .

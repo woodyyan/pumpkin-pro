@@ -392,7 +392,7 @@ func buildStockUserPrompt(input *StockAnalysisInput, profile *portfolio.Investme
 			asFloat(input.Technical["bollinger_bandwidth"]),
 			asFloat(input.Technical["bollinger_percent_b"]))
 		fmt.Fprintf(&sb, "- 60日涨跌幅：%.2f%%\n", asFloat(input.Technical["change_pct_60d"]))
-		fmt.Fprintf(&sb, "- 20日年化波动率：.2f%%\n", asFloat(input.Technical["volatility_20d"]))
+		fmt.Fprintf(&sb, "- 20日年化波动率：%.2f%%\n", asFloat(input.Technical["volatility_20d"]))
 		fmt.Fprintf(&sb, "- 均量比（MA5/MA20）：%.2f\n", asFloat(input.Technical["volume_ma5_to_ma20"]))
 	} else {
 		sb.WriteString("\n## 技术指标\n⚠️ 技术指标数据暂不可用（可能正在初始化计算），请仅从价格行为角度分析。\n")

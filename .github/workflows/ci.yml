@@ -20,7 +20,8 @@ jobs:
     name: Backend (Go)
     runs-on: ubuntu-latest
     defaults:
-      working-directory: backend
+      run:
+        working-directory: backend
 
     steps:
       - name: Checkout
@@ -55,7 +56,8 @@ jobs:
     name: Quant (Python)
     runs-on: ubuntu-latest
     defaults:
-      working-directory: quant
+      run:
+        working-directory: quant
 
     steps:
       - name: Checkout
@@ -83,7 +85,8 @@ jobs:
     name: Frontend (Node.js)
     runs-on: ubuntu-latest
     defaults:
-      working-directory: frontend
+      run:
+        working-directory: frontend
 
     steps:
       - name: Checkout

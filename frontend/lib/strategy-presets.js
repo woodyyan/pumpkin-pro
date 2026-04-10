@@ -1,7 +1,7 @@
 import {
   buildInitialStrategyParams,
   sanitizeStrategyParams,
-} from './strategy-form';
+} from './strategy-form.js';
 
 export const STRATEGY_PRESETS = [
   {

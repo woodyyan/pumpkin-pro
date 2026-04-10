@@ -36,17 +36,24 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Unit Tests
+      - name: Unit Tests with Coverage
         run: |
-          go test -v -count=1 -race \
-            ./config/ \
-            ./store/auth/ \
-            ./store/portfolio/ \
-            -timeout 60s
+          go test -v -count=1 -race -coverprofile=coverage.out -covermode=atomic ./... \
+            -timeout 120s
         env:
           GORM_DIALECT: sqlite
           DB_PATH: ":memory:"
           AUTH_JWT_SECRET: "test-secret-for-ci-only"
+
+      - name: Coverage Gate (≥60%)
+        run: |
+          TOTAL=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
+          echo "Total coverage: ${TOTAL}%"
+          if (( $(echo "$TOTAL < 60" | bc -l) )); then
+            echo "::error::Coverage ${TOTAL}% is below threshold 60%"
+            exit 1
+          fi
+          echo "::notice::Coverage ${TOTAL}% passes threshold 60% ✅"
 
       - name: Build
         run: go build ./...
@@ -70,13 +77,16 @@ jobs:
           cache: pip
 
       - name: Install dependencies (math only, no akshare)
-        run: pip install pandas numpy pytest matplotlib
+        run: pip install pandas numpy pytest matplotlib pytest-cov
 
       - name: Syntax check
         run: python -m compileall -q .
 
-      - name: Unit Tests
-        run: pytest tests/ -v --tb=short -q --strict-markers
+      - name: Unit Tests with Coverage Gate (≥60%)
+        run: pytest tests/ -v --tb=short -q --strict-markers \
+          --cov=indicators --cov=result --cov=strategy --cov=strategy_library \
+          --cov=engine --cov=config --cov=screener \
+          --cov-report=term-missing --cov-fail-under=60
         env:
           PYTHONPATH: .
 
@@ -104,6 +114,9 @@ jobs:
 
       - name: ESLint
         run: npx eslint . --ext .js,.jsx --max-warnings 999 || true
+
+      - name: Unit Tests
+        run: npm test
 
       - name: Build
         run: npm run build

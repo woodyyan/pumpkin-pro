@@ -563,7 +563,7 @@ function formatLastComputed(s) {
     if (diff < 1) return '刚刚'
     if (diff < 24) return `${diff}小时前`
     return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-  } catch { return '-- }
+  } catch { return '--' }
 }
 
 function QuadrantAdminPanel() {

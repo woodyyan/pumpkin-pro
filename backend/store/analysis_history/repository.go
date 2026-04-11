@@ -123,8 +123,9 @@ func (r AnalysisHistoryRecord) ToDetail() (HistoryDetail, error) {
 	}, nil
 }
 
-// SaveFromAPIResponse 从 AI 分析 API 响应中构造并保存记录
-func (r *Repository) SaveFromAPIResponse(ctx context.Context, userID string, respBytes []byte) error {
+// SaveFromAPIResponse 从 AI 分析 API 响应中构造并保存记录。
+// symbol / symbolName 由调用方显式传入，不依赖响应体中的 symbol_meta。
+func (r *Repository) SaveFromAPIResponse(ctx context.Context, userID, symbol, symbolName string, respBytes []byte) error {
 	// 解析完整响应
 	var apiResp struct {
 		Analysis *json.RawMessage `json:"analysis"`
@@ -141,22 +142,9 @@ func (r *Repository) SaveFromAPIResponse(ctx context.Context, userID string, res
 	var analysis struct {
 		Signal          string `json:"signal"`
 		ConfidenceScore int    `json:"confidence_score"`
-		SymbolMeta      map[string]any `json:"-"` // 不在 output 里，需要从 meta 提取
 	}
 	if err := json.Unmarshal(*apiResp.Analysis, &analysis); err != nil {
 		return fmt.Errorf("parse analysis: %w", err)
-	}
-
-	// 从 meta 中提取 symbol 信息
-	symbolRaw, _ := apiResp.Meta["symbol_meta"].(map[string]any)
-	symbol := ""
-	symbolName := ""
-	if symbolRaw != nil {
-		symbol, _ = symbolRaw["symbol"].(string)
-		symbolName, _ = symbolRaw["name"].(string)
-	}
-	if symbol == "" {
-		return fmt.Errorf("missing symbol in response meta")
 	}
 
 	record := &AnalysisHistoryRecord{
@@ -177,11 +165,9 @@ func (r *Repository) SaveFromAPIResponse(ctx context.Context, userID string, res
 // generateUUID 简易 UUID v4（不需要引入额外依赖）
 func generateUUID() string {
 	b := make([]byte, 16)
-	// 使用 crypto/rand 会更好，但这里用 time+伪随机足够唯一性
 	for i := range b {
 		b[i] = byte(time.Now().UnixNano()>>uint(i*7) & 0xff)
 	}
-	// 设置版本号和变体位
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",

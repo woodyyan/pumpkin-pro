@@ -1436,13 +1436,13 @@ func (a *appServer) handleStockAIAnalysis(w http.ResponseWriter, r *http.Request
 
 	// 异步保存分析历史（不阻塞响应）
 	if userID != "" && len(respBytes) > 0 {
-		go func(body []byte) {
+		go func(body []byte, sym string) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if saveErr := a.analysisHistoryRepo.SaveFromAPIResponse(ctx, userID, body); saveErr != nil {
+			if saveErr := a.analysisHistoryRepo.SaveFromAPIResponse(ctx, userID, sym, "", body); saveErr != nil {
 				log.Printf("[analysis-history] save failed: %v", saveErr)
 			}
-		}(respBytes)
+		}(respBytes, symbol)
 	}
 }
 

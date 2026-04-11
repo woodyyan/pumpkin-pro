@@ -187,9 +187,7 @@ const stockAnalysisSystemPrompt = `你是一个专业的多层框架股票分析
     "sell_trigger": "明确的卖出触发条件描述（如：跌破MA60或连续3日缩量下跌）"
   },
   "key_risks": ["2-4条关键风险，每条一句话"],
-  "key_catalysts": ["2-4条潜在催化因素，每条一句话"],
-
-  "data_timestamp": "当前时间戳 ISO 格式"
+  "key_catalysts": ["2-4条潜在催化因素，每条一句话"]
 }`
 
 // ── 核心：执行 AI 个股诊断 ──
@@ -522,9 +520,8 @@ func validateStockAnalysis(output *StockAnalysisInput, result *StockAnalysisOutp
 		result.RiskWarnings = []string{"请关注市场波动风险"}
 		warnings = append(warnings, "empty_risks_padded")
 	}
-	if result.DataTimestamp == "" {
-		result.DataTimestamp = time.Now().UTC().Format(time.RFC3339)
-	}
+	// 强制使用服务器时间，覆盖 LLM 可能返回的幻觉时间
+	result.DataTimestamp = time.Now().Local().Format("2006/01/02 15:04:05")
 
 	// ── 新增字段校验：layer_scores ──
 	if result.LayerScores == nil || len(result.LayerScores) == 0 {

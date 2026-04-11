@@ -1085,7 +1085,7 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
         ) : (
           <>
             <div className="space-y-3">
-              <div className="text-lg font-semibold text-white">✨ AI 策略推荐结果</div>
+              <div className="text-lg font-semibold text-white">✨ AI 策略匹配结果</div>
               {summary ? (
                 <div className="flex flex-wrap items-center gap-2 text-xs text-white/55">
                   <span className="font-medium text-white/80">{summary.name}（{summary.ticker}）</span>

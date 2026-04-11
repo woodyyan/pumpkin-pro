@@ -6,13 +6,13 @@ import { useAuth } from '../lib/auth-context'
 
 const HIGHLIGHTS = [
   { value: 'A 股 + 港股', desc: '双市场支持' },
-  { value: 'AI 辅助决策', desc: '智能分析选股' },
-  { value: '100+', desc: '技术指标' },
+  { value: '卧龙AI投研模型', desc: 'AI 辅助分析决策' },
+  { value: '100+', desc: '指标与独家模型' },
 ]
 
 const FEATURES = [
   {
-    icon: '🤖', title: 'AI 分析与决策', href: '/live-trading',
+    icon: '🤖', title: '卧龙投研AI模型', href: '/live-trading',
     points: ['AI 个股智能决策', 'AI 自然语言选股', 'AI 策略智能生成', 'AI 回测自动优化'],
     cta: '体验 AI',
   },

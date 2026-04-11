@@ -2258,6 +2258,36 @@ func (a *appServer) handleQuadrantStatus(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, status)
 }
 
+// ── Stock Search handler ──
+
+func (a *appServer) handleSearchStocks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(q) < 2 {
+		writeJSON(w, http.StatusOK, map[string]any{"results": []struct{}{}})
+		return
+	}
+	limit := parseLimit(r.URL.Query().Get("limit"), 8)
+	if limit > 20 {
+		limit = 20 // hard cap to prevent abuse
+	}
+	if limit < 1 {
+		limit = 8
+	}
+
+	results, err := a.quadrantService.Search(r.Context(), q, limit)
+	if err != nil {
+		log.Printf("[search] error: %v", err)
+		writeError(w, http.StatusInternalServerError, "search failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
 func (a *appServer) handleFeedback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
@@ -2511,6 +2541,8 @@ func main() {
 	mux.HandleFunc("/api/quadrant", server.handleQuadrant)
 	mux.HandleFunc("/api/quadrant/bulk-save", server.handleQuadrantBulkSave)
 	mux.HandleFunc("/api/quadrant/status", server.handleQuadrantStatus)
+
+	mux.HandleFunc("/api/search", server.withOptionalAuth(server.handleSearchStocks))
 
 	mux.HandleFunc("/api/admin/quadrant-logs", server.withSuperAdminAuth(server.handleAdminQuadrantLogs))
 

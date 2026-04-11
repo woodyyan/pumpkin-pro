@@ -57,6 +57,48 @@ func (r *Repository) FindAll(ctx context.Context) ([]QuadrantScoreRecord, error)
 	return records, nil
 }
 
+// FindByExchange returns scores filtered by exchange codes (e.g. "SSE","SZSE" or "HKEX").
+func (r *Repository) FindByExchange(ctx context.Context, exchanges []string) ([]QuadrantScoreRecord, error) {
+	if len(exchanges) == 0 {
+		return r.FindAll(ctx)
+	}
+	var records []QuadrantScoreRecord
+	if err := r.db.WithContext(ctx).Where("exchange IN ?", exchanges).Find(&records).Error; err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+// SearchResult is a minimal item returned by stock search.
+type SearchResult struct {
+	Code     string `json:"code"`
+	Name     string `json:"name"`
+	Exchange string `json:"exchange"`
+}
+
+// Search searches stocks by code or name prefix/fuzzy match.
+func (r *Repository) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+	if query == "" || limit <= 0 {
+		return []SearchResult{}, nil
+	}
+	pattern := "%" + query + "%"
+	var records []QuadrantScoreRecord
+	err := r.db.WithContext(ctx).
+		Select("code, name, exchange").
+		Where("name LIKE ? OR code LIKE ?", pattern, pattern).
+		Order("LENGTH(code) ASC").
+		Limit(limit).
+		Find(&records).Error
+	if err != nil {
+		return nil, err
+	}
+	results := make([]SearchResult, len(records))
+	for i, rec := range records {
+		results[i] = SearchResult{Code: rec.Code, Name: rec.Name, Exchange: rec.Exchange}
+	}
+	return results, nil
+}
+
 // FindBySymbols returns quadrant scores for specific symbols (A-share codes, 6 digits).
 func (r *Repository) FindBySymbols(ctx context.Context, codes []string) ([]QuadrantScoreRecord, error) {
 	if len(codes) == 0 {

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { AuthProvider, useAuth } from '../lib/auth-context'
 import changelogData from '../data/changelog.json'
+import NavSearchBox from '../components/NavSearchBox'
 
 const NAV_ITEMS = [
   { href: '/', label: '首页' },
@@ -198,8 +199,12 @@ function AppLayout({ Component, pageProps }) {
               })}
             </div>
 
-            {/* Right side: hamburger (mobile) + account */}
+            {/* Right side: search + hamburger (mobile) + account */}
             <div className="flex items-center gap-2 shrink-0">
+              {/* Search — desktop only */}
+              <div className="hidden md:block">
+                <NavSearchBox />
+              </div>
               {/* Hamburger button — mobile only */}
               <button
                 type="button"
@@ -213,6 +218,8 @@ function AppLayout({ Component, pageProps }) {
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 12h18M3 6h18M3 18h18" /></svg>
                 )}
               </button>
+              {/* Mobile search button */}
+              <MobileSearchButton />
               <AccountEntry />
             </div>
           </div>
@@ -353,6 +360,113 @@ function AccountEntry() {
     </div>
   )
 }
+
+function MobileSearchButton() {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="md:hidden inline-flex items-center justify-center w-9 h-9 rounded-lg border border-white/15 text-white/70 transition hover:bg-white/10 hover:text-white"
+        aria-label="搜索股票"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
+      </button>
+
+      {/* Full-screen overlay */}
+      {open && (
+        <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm md:hidden flex items-start pt-20 px-4">
+          <div className="w-full max-w-lg mx-auto relative">
+            <div className="flex items-center bg-white/10 border border-primary/30 rounded-xl px-4 py-3 focus-within:border-primary/60 transition">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-white/40 mr-3">
+                <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
+              </svg>
+              <MobileSearchInner onSelect={(code) => { setOpen(false); window.open(`/live-trading/${code}`, '_blank') }} />
+            </div>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="absolute -top-12 right-0 text-white/50 hover:text-white text-sm flex items-center gap-1"
+            >
+              取消
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+// Extracted inner search logic for reuse
+function MobileSearchInner({ onSelect }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [isLoading, setIsLoading] = useState(false)
+  const debounceRef = useRef(null)
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    if (inputRef.current) inputRef.current.focus()
+  }, [])
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (query.length < 2) { setResults([]); return }
+    debounceRef.current = setTimeout(async () => {
+      setIsLoading(true)
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=${MAX_RESULTS}`)
+        const data = await res.json()
+        setResults(data.results || [])
+      } catch { setResults([]) }
+      finally { setIsLoading(false) }
+    }, DEBOUNCE_MS)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [query])
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="text"
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        placeholder="输入代码或名称搜索股票..."
+        className="flex-1 bg-transparent text-base text-white placeholder-white/30 outline-none min-w-0"
+      />
+      {results.length > 0 && (
+        <ul className="absolute top-full left-0 right-0 mt-2 bg-slate-900/95 border border-white/10 rounded-xl shadow-2xl z-10 max-h-[60vh] overflow-y-auto">
+          {results.map(item => (
+            <li key={item.code}>
+              <button
+                type="button"
+                onClick={() => onSelect(item.code)}
+                className="w-full flex items-center justify-between px-4 py-3 text-left text-sm text-white/80 hover:bg-primary/15 transition border-b border-white/5 last:border-b-0"
+              >
+                <span>
+                  <span className="font-mono font-semibold text-primary">{item.code}</span>
+                  <span className="ml-2 text-white/50">{item.name}</span>
+                  {item.exchange === 'HKEX' && <span className="ml-1.5 inline-flex items-center px-1 rounded text-[10px] font-medium bg-blue-500/20 text-blue-300">HK</span>}
+                </span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 opacity-30"><path d="M7 17L17 7M7 7h10v10" /></svg>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!isLoading && query.length >= 2 && results.length === 0 && (
+        <div className="mt-2 text-center text-sm text-white/30 py-3">未找到匹配股票</div>
+      )}
+    </>
+  )
+}
+
+const DEBOUNCE_MS = 300
+const MIN_QUERY_LEN = 2
+const MAX_RESULTS = 8
 
 export default function MyApp({ Component, pageProps, router }) {
   // /admin 使用独立布局，不显示主站导航

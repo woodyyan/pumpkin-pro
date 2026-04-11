@@ -8,6 +8,7 @@ import (
 type QuadrantScoreRecord struct {
 	Code        string    `gorm:"primaryKey;size:10"`
 	Name        string    `gorm:"size:128;not null"`
+	Exchange    string    `gorm:"size:8;not null;default:'SZSE';index:idx_quadrant_exchange"`
 	Opportunity float64   `gorm:"not null"`
 	Risk        float64   `gorm:"not null"`
 	Quadrant    string    `gorm:"size:16;not null"`

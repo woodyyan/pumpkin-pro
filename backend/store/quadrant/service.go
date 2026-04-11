@@ -97,7 +97,7 @@ func (s *Service) saveComputeLog(ctx context.Context, computedAt time.Time, repo
 
 // GetAllWithWatchlist returns all scores (compact) + watchlist details.
 func (s *Service) GetAllWithWatchlist(ctx context.Context, watchlistCodes []string) (*QuadrantResponse, error) {
-	allRecords, err := s.repo.FindAll(ctx)
+	allRecords, err := s.repo.FindByExchange(ctx, []string{"SSE", "SZSE"})
 	if err != nil {
 		return nil, err
 	}
@@ -196,4 +196,12 @@ func (s *Service) ListComputeLogs(ctx context.Context, limit int) ([]ComputeLogR
 		limit = 30
 	}
 	return s.repo.ListComputeLogs(ctx, limit)
+}
+
+// Search searches stocks by query string (code or name).
+func (s *Service) Search(ctx context.Context, q string, limit int) ([]SearchResult, error) {
+	if len(q) < 2 {
+		return []SearchResult{}, nil
+	}
+	return s.repo.Search(ctx, q, limit)
 }

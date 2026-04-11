@@ -682,7 +682,7 @@ class QuadrantComputeRequest(BaseModel):
 
 @app.post("/api/quadrant/compute-all")
 def quadrant_compute_all(req: QuadrantComputeRequest):
-    """触发全市场四象限评分计算（异步后台执行）。
+    """触发全市场 A 股四象限评分计算（异步后台执行）。
 
     Go 后端定时调用此端点，Quant 立即返回 accepted，
     计算完成后回调 callback_url 写入 DB。
@@ -699,7 +699,37 @@ def quadrant_compute_all(req: QuadrantComputeRequest):
             logger.exception("[quadrant] compute-all 后台任务失败: %s", exc)
 
     _threading.Thread(target=_run, daemon=True).start()
-    return {"status": "accepted", "message": "四象限计算已在后台启动"}
+    return {"status": "accepted", "message": "A 股四象限计算已在后台启动"}
+
+
+# ── HK Quadrant compute endpoint ──
+
+
+class HkQuadrantComputeRequest(BaseModel):
+    callback_url: str = Field(default="http://backend:8080/api/quadrant/bulk-save", description="Go 后端回调 URL")
+    force_full: bool = Field(default=False, description="是否强制全量刷新（忽略缓存）")
+
+
+@app.post("/api/quadrant/compute-hk-all")
+def quadrant_hk_compute_all(req: HkQuadrantComputeRequest):
+    """触发全市场港股四象限评分计算（异步后台执行）。
+
+    Go Worker 定时调用此端点，Quant 立即返回 accepted，
+    计算完成后回调 callback_url 写入 DB（items 带 exchange=HKEX 标记）。
+    """
+    import threading as _threading
+
+    callback = req.callback_url.strip() if req.callback_url else None
+    force_full = req.force_full
+
+    def _run():
+        try:
+            compute_hk_quadrant_scores(callback_url=callback, force_full=force_full)
+        except Exception as exc:
+            logger.exception("[hk-quadrant] compute-hk-all 后台任务失败: %s", exc)
+
+    _threading.Thread(target=_run, daemon=True).start()
+    return {"status": "accepted", "message": "港股四象限计算已在后台启动"}
 
 
 @app.get("/api/quadrant/scores")

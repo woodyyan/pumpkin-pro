@@ -311,9 +311,17 @@ export default function QuadrantChart({
     // Don't clear tooltip on mouse leave — user may want to click the button
   }, [])
 
+  // Code → display format: HK=5-digit, A-share=6-digit
+  const formatCodeDisplay = (code) => {
+    if (/^\d{5}$/.test(String(code))) return String(code).padStart(5, '0')
+    return String(code).padStart(6, '0')
+  }
+
   // Code → symbol helper
   const codeToSymbol = (code) => {
     const c = String(code).padStart(6, '0')
+    // HK codes are 5-digit (e.g. 00700)
+    if (/^\d{5}$/.test(String(code))) return `${c}.HK`
     return c.startsWith('6') || c.startsWith('9') ? `${c}.SH` : `${c}.SZ`
   }
 
@@ -340,7 +348,7 @@ export default function QuadrantChart({
             top: Math.max(activeTooltip.y - 10, 0),
           }}
         >
-          <div className="font-medium">{activeTooltip.name} ({String(activeTooltip.code).padStart(6, '0')})</div>
+          <div className="font-medium">{activeTooltip.name} ({formatCodeDisplay(activeTooltip.code)})</div>
           <div className="mt-1 text-white/60">
             机会: {activeTooltip.opportunity.toFixed(1)} | 风险: {activeTooltip.risk.toFixed(1)}
             {activeTooltip.quadrant && <span> | {activeTooltip.quadrant}</span>}

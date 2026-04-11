@@ -101,28 +101,32 @@ func (w *Worker) runWithRetry(ctx context.Context) {
 	w.attemptsToday = 0
 	w.mu.Unlock()
 
+	// Phase 1: Trigger A-share quadrant computation (primary)
 	for attempt := 1; attempt <= workerMaxAttempts; attempt++ {
 		w.mu.Lock()
 		w.attemptsToday = attempt
 		w.mu.Unlock()
 
-		log.Printf("[quadrant-worker] attempt %d/%d: triggering Quant compute-all", attempt, workerMaxAttempts)
+		log.Printf("[quadrant-worker] attempt %d/%d: triggering Quant compute-all (A-share)", attempt, workerMaxAttempts)
 
 		err := w.triggerCompute(ctx)
 		if err == nil {
-			// Wait for callback (Quant will POST to bulk-save when done)
 			if waitErr := w.waitForCompletion(ctx); waitErr == nil {
 				w.mu.Lock()
 				w.lastError = ""
 				w.mu.Unlock()
-				log.Printf("[quadrant-worker] ✅ compute cycle completed successfully on attempt %d", attempt)
+				log.Printf("[quadrant-worker] ✅ A-share compute cycle completed successfully on attempt %d", attempt)
+
+				// Phase 2: Trigger HK quadrant computation (best-effort, non-blocking)
+				w.triggerHKCompute(ctx)
+
 				return
 			} else {
-				log.Printf("[quadrant-worker] ⚠️ callback wait failed on attempt %d: %v", attempt, waitErr)
+				log.Printf("[quadrant-worker] ⚠️ A-share callback wait failed on attempt %d: %v", attempt, waitErr)
 				err = waitErr
 			}
 		} else {
-			log.Printf("[quadrant-worker] ⚠️ trigger failed on attempt %d: %v", attempt, err)
+			log.Printf("[quadrant-worker] ⚠️ A-share trigger failed on attempt %d: %v", attempt, err)
 		}
 
 		w.mu.Lock()
@@ -143,11 +147,9 @@ func (w *Worker) runWithRetry(ctx context.Context) {
 		}
 	}
 
-	// All attempts failed
+	// All attempts failed — send notification
 	errMsg := fmt.Sprintf("四象限数据计算失败：已重试 %d 次均失败。最后错误：%s", workerMaxAttempts, w.lastError)
 	log.Printf("[quadrant-worker] ❌ %s", errMsg)
-
-	// Send webhook notification if configured
 	if w.signalService != nil {
 		notifyMsg := fmt.Sprintf(
 			"⚠️ 四象限数据计算失败\n时间：%s\n重试：已重试 %d 次均失败\n原因：%s\n影响：四象限图数据可能已过期",
@@ -185,6 +187,35 @@ func (w *Worker) triggerCompute(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// triggerHKCompute triggers the HK quadrant computation as a best-effort fire-and-forget operation.
+// Failure here does NOT affect the overall A-share compute cycle success status.
+func (w *Worker) triggerHKCompute(ctx context.Context) {
+	url := w.quantURL + "/api/quadrant/compute-hk-all"
+	payload := map[string]string{"callback_url": w.callbackURL}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("[quadrant-worker] [hk] create request failed: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: workerHTTPTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[quadrant-worker] [hk] quant request failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("[quadrant-worker] [hk] quant returned HTTP %d", resp.StatusCode)
+		return
+	}
+
+	log.Printf("[quadrant-worker] [hk] ✅ HK quadrant compute triggered successfully")
 }
 
 func (w *Worker) waitForCompletion(ctx context.Context) error {

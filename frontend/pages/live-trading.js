@@ -25,6 +25,7 @@ export default function LiveTradingOverviewPage() {
   const [signalConfigMap, setSignalConfigMap] = useState({})
   const [quadrantData, setQuadrantData] = useState(null)
   const [quadrantLoading, setQuadrantLoading] = useState(false)
+  const [quadrantExchange, setQuadrantExchange] = useState('ASHARE') // 'ASHARE' | 'HKEX'
 
   const privateAccessReady = ready && isLoggedIn
 
@@ -89,11 +90,15 @@ export default function LiveTradingOverviewPage() {
     }
   }
 
-  const loadQuadrant = async (watchlistSymbols = []) => {
+  const loadQuadrant = async (watchlistSymbols = [], exchange = 'ASHARE') => {
     try {
       setQuadrantLoading(true)
-      const symbolsParam = watchlistSymbols.join(',')
-      const data = await requestJson(`/api/quadrant${symbolsParam ? `?watchlist_symbols=${encodeURIComponent(symbolsParam)}` : ''}`)
+      const params = new URLSearchParams()
+      if (exchange === 'HKEX') params.set('exchange', 'HKEX')
+      // ASHARE is the default, no need to send param
+      if (watchlistSymbols.length > 0) params.set('watchlist_symbols', watchlistSymbols.join(','))
+      const qs = params.toString()
+      const data = await requestJson(`/api/quadrant${qs ? `?${qs}` : ''}`)
       setQuadrantData(data)
     } catch {
       // Quadrant loading is non-critical
@@ -116,11 +121,12 @@ export default function LiveTradingOverviewPage() {
       if (bootstrap) {
         const wl = await loadWatchlist()
         loadSignalConfigs()
-        // Load quadrant with watchlist symbols (non-blocking)
+        // Load quadrant with watchlist symbols filtered by current exchange
         const symbols = (wl?.items || []).map((i) => i.symbol)
-        // 四象限只覆盖 A 股，过滤掉港股（.HK）
-        const aShareSymbols = symbols.filter((s) => !s.endsWith('.HK'))
-        loadQuadrant(aShareSymbols)
+        const filteredSymbols = quadrantExchange === 'HKEX'
+          ? symbols.filter((s) => s.toUpperCase().endsWith('.HK'))
+          : symbols.filter((s) => !s.toUpperCase().endsWith('.HK'))
+        loadQuadrant(filteredSymbols, quadrantExchange)
       }
       await loadSnapshots()
       updateError('')
@@ -198,6 +204,18 @@ export default function LiveTradingOverviewPage() {
     window.open(`/live-trading/${encodeURIComponent(symbol)}`, '_blank')
   }
 
+  const handleQuadrantExchangeChange = async (newExchange) => {
+    if (newExchange === quadrantExchange) return
+    setQuadrantExchange(newExchange)
+    setQuadrantData(null)
+    // Reload quadrant with new exchange
+    const symbols = (watchlist.items || []).map((i) => i.symbol)
+    const filteredSymbols = newExchange === 'HKEX'
+      ? symbols.filter((s) => s.toUpperCase().endsWith('.HK'))
+      : symbols.filter((s) => !s.toUpperCase().endsWith('.HK'))
+    await loadQuadrant(filteredSymbols, newExchange)
+  }
+
   const sortedWatchlist = useMemo(() => {
     return [...(watchlist.items || [])]
   }, [watchlist.items])
@@ -234,7 +252,7 @@ export default function LiveTradingOverviewPage() {
       <section className="rounded-2xl border border-border bg-card p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold text-white">风险机会全景图<span className="ml-2 inline-block rounded bg-white/8 px-1.5 py-0.5 text-[11px] font-normal text-white/45">A 股</span></h3>
+            <h3 className="text-base font-semibold text-white">风险机会全景图<span className="ml-2 inline-block rounded bg-white/8 px-1.5 py-0.5 text-[11px] font-normal text-white/45">{quadrantExchange === 'HKEX' ? '港股' : 'A 股'}</span></h3>
             {quadrantData?.meta?.computed_at && (
               <div className="mt-1 flex items-center gap-2 text-xs text-white/50">
                 <span>数据日期：{formatDateTime(quadrantData.meta.computed_at)}</span>
@@ -249,6 +267,26 @@ export default function LiveTradingOverviewPage() {
                 })()}
               </div>
             )}
+          </div>
+          {/* Exchange Tab Switch */}
+          <div className="flex items-center gap-1 rounded-lg bg-black/20 p-0.5">
+            {[
+              { key: 'ASHARE', label: 'A 股' },
+              { key: 'HKEX', label: '港股' },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => handleQuadrantExchangeChange(tab.key)}
+                className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+                  quadrantExchange === tab.key
+                    ? 'bg-primary text-black'
+                    : 'text-white/55 hover:text-white/80 hover:bg-white/[0.05]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         </div>
 

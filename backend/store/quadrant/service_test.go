@@ -254,7 +254,7 @@ func TestQuadrantService_GetAllWithWatchlist(t *testing.T) {
 		_ = repo.BulkUpsert(ctx, []QuadrantScoreRecord{r})
 	}
 
-	resp, err := s.GetAllWithWatchlist(ctx, []string{"W1", "O1"})
+	resp, err := s.GetAllWithWatchlist(ctx, nil, []string{"W1", "O1"})
 	if err != nil {
 		t.Fatalf("GetAllWithWatchlist failed: %v", err)
 	}

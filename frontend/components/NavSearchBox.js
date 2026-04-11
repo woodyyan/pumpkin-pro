@@ -70,7 +70,15 @@ export default function NavSearchBox() {
     setIsOpen(false)
     setQuery('')
     setResults([])
-    window.open(`/live-trading/${item.code}`, '_blank')
+    // Convert raw code to symbol with exchange suffix
+    let symbol
+    if (item.exchange === 'HKEX') {
+      symbol = `${String(item.code).padStart(5, '0')}.HK`
+    } else {
+      const c = String(item.code).padStart(6, '0')
+      symbol = (c.startsWith('6') || c.startsWith('9')) ? `${c}.SH` : `${c}.SZ`
+    }
+    window.open(`/live-trading/${symbol}`, '_blank')
   }
 
   const handleKeyDown = (e) => {

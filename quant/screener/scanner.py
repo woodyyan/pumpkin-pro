@@ -1,7 +1,8 @@
 """
-A 股全市场选股筛选器
-- 主数据源：AKShare stock_zh_a_spot_em()（东方财富实时推送）
-- 备用数据源：腾讯财经 qt.gtimg.cn（全天候可用）
+A 股/港股全市场选股筛选器
+- A 股主数据源：AKShare stock_zh_a_spot_em()（东方财富实时推送）
+- A 股备用数据源：腾讯财经 qt.gtimg.cn（全天候可用）
+- 港股主数据源：AKShare stock_hk_spot_em()（东方财富实时推送）
 - 内存缓存 5 分钟
 - 支持多维指标范围筛选 + 排序 + 分页
 """
@@ -495,6 +496,209 @@ def sort_and_paginate(
     page_df = df.iloc[start:end]
 
     return page_df, total
+
+
+# ---------------------------------------------------------------------------
+# 港股列名映射
+# ---------------------------------------------------------------------------
+HK_COLUMN_MAP = {
+    "代码": "code",
+    "名称": "name",
+    "最新价": "price",
+    "涨跌幅": "change_pct",
+    "涨跌额": "change_amt",
+    "成交量": "volume",
+    "成交额": "turnover",
+    "振幅": "amplitude",
+    "最高": "high",
+    "最低": "low",
+    "今开": "open",
+    "昨收": "prev_close",
+    "量比": "volume_ratio",
+    "换手率": "turnover_rate",
+    "市盈率-动态": "pe",
+    "市净率": "pb",
+    "总市值": "total_mv",
+    "流通市值": "float_mv",
+}
+
+HK_NUMERIC_COLUMNS = [
+    "price", "change_pct", "change_amt", "volume", "turnover",
+    "amplitude", "high", "low", "open", "prev_close",
+    "volume_ratio", "turnover_rate", "pe", "pb",
+    "total_mv", "float_mv",
+]
+
+_hk_cache_data: Optional[pd.DataFrame] = None
+_hk_cache_ts: float = 0.0
+_HK_CACHE_TTL = 900  # 15 分钟
+
+
+# ---------------------------------------------------------------------------
+# 港股全市场快照
+# ---------------------------------------------------------------------------
+def get_hk_snapshot() -> pd.DataFrame:
+    """获取港股全市场实时快照，15 分钟内存缓存（东财主源，腾讯兜底）"""
+    global _hk_cache_data, _hk_cache_ts
+
+    with _cache_lock:
+        if _hk_cache_data is not None and (time.time() - _hk_cache_ts) < _HK_CACHE_TTL:
+            logger.debug("港股 screener 缓存命中，缓存年龄 %.1fs", time.time() - _hk_cache_ts)
+            return _hk_cache_data.copy()
+
+    logger.info("港股 screener 缓存未命中，正在拉取全市场快照...")
+    start = time.time()
+
+    df = None
+
+    # ---- 主数据源：东方财富港股 ----
+    try:
+        raw_df = ak.stock_hk_spot_em()
+        if raw_df is not None and not raw_df.empty:
+            available_columns = [col for col in HK_COLUMN_MAP if col in raw_df.columns]
+            df = raw_df[available_columns].copy()
+            df = df.rename(columns=HK_COLUMN_MAP)
+            if "code" in df.columns:
+                df["code"] = df["code"].astype(str).str.zfill(5)
+            for col in HK_NUMERIC_COLUMNS:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+            logger.info("东财港股主数据源加载成功: %d 只股票", len(df))
+    except Exception as exc:
+        logger.warning("东财港股主数据源失败: %s，尝试腾讯备用源...", exc)
+
+    # ---- 备用数据源：腾讯财经港股 ----
+    if df is None or df.empty:
+        try:
+            df = _get_hk_snapshot_via_qq()
+        except Exception as exc:
+            logger.error("腾讯港股备用源也失败: %s", exc)
+            raise RuntimeError("获取港股行情数据失败，请稍后重试") from exc
+
+    elapsed = time.time() - start
+    logger.info("港股全市场快照加载完成: %d 只股票, 耗时 %.2fs", len(df), elapsed)
+
+    with _cache_lock:
+        _hk_cache_data = df.copy()
+        _hk_cache_ts = time.time()
+
+    return df
+
+
+def _parse_qq_hk_line(line: str) -> Optional[Dict[str, Any]]:
+    """
+    解析腾讯财经港股单行行情数据。
+    港股格式与 A 股类似但字段索引不同：
+      1:名称  2:代码  3:最新价  4:昨收
+      ...
+      34:成交额  35:成交量  36:换手率(%)  37:PE  38:振幅
+      39:总市值(亿)  ...  50:市盈率(TTM)
+    """
+    if "~" not in line:
+        return None
+    parts = line.split("~")
+    if len(parts) < 51:
+        return None
+
+    price = _safe_float(parts[3])
+    prev_close = _safe_float(parts[4])
+
+    change_pct = None
+    if price is not None and prev_close is not None and prev_close != 0:
+        change_pct = round((price - prev_close) / prev_close * 100, 3)
+
+    turnover_raw = _safe_float(parts[37])  # 成交额（万？）
+    turnover = turnover_raw * 1e4 if turnover_raw is not None else None
+
+    total_mv_raw = _safe_float(parts[39])   # 总市值（亿）
+    total_mv = total_mv_raw * 1e8 if total_mv_raw is not None else None
+
+    # 从代码中提取纯数字：hk00700 → 00700
+    code_raw = str(parts[2] or "").replace("hk", "").replace("HK", "")
+    hk_code = code_raw.zfill(5) if code_raw.isdigit() else code_raw
+
+    pe_val = _safe_float(parts[50])
+
+    return {
+        "code": hk_code,
+        "name": parts[1],
+        "price": price,
+        "change_pct": change_pct,
+        "change_amt": round(price - prev_close, 3) if (price and prev_close) else None,
+        "volume": _safe_float(parts[36]),
+        "turnover": turnover,
+        "amplitude": _safe_float(parts[38]),
+        "high": None,
+        "low": None,
+        "open": None,
+        "prev_close": prev_close,
+        "volume_ratio": None,
+        "turnover_rate": _safe_float(parts[36]),  # 换手率近似
+        "pe": pe_val,
+        "pb": None,
+        "total_mv": total_mv,
+        "float_mv": None,
+    }
+
+
+def _get_hk_snapshot_via_qq() -> pd.DataFrame:
+    """通过腾讯财经接口获取港股全市场快照（备用方案）。
+
+    不依赖 AKShare 获取代码列表，直接用 5 位数字代码段批量查询腾讯。
+    腾讯返回空/无效的代码会被自动跳过。
+    """
+    logger.info("尝试腾讯财经港股备用数据源...")
+
+    # 港股代码范围：00001-09999（约 2000+ 只活跃股票）
+    # 分批查询，每批 500 个，腾讯自动跳过无效代码
+    hk_codes = [str(i).zfill(5) for i in range(1, 10000)]
+    qq_codes = [f"hk{c}" for c in hk_codes]
+    logger.info("准备从腾讯财经拉取 %d 个潜在港股代码...", len(qq_codes))
+
+    def _fetch_qq_batch_hk(qq_codes_batch: List[str]) -> List[Dict[str, Any]]:
+        """查询一批腾讯港股行情数据"""
+        url = f"http://qt.gtimg.cn/q={','.join(qq_codes_batch)}"
+        resp = requests.get(url, headers=_QQ_HEADERS, timeout=_QQ_TIMEOUT)
+        resp.encoding = "gbk"
+        results = []
+        for line in resp.text.strip().split("\n"):
+            record = _parse_qq_hk_line(line)
+            if record and record.get("price") is not None:
+                results.append(record)
+        return results
+
+    batches = [
+        qq_codes[i:i + _QQ_BATCH_SIZE]
+        for i in range(0, len(qq_codes), _QQ_BATCH_SIZE)
+    ]
+
+    all_records: List[Dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(_fetch_qq_batch_hk, batch): idx for idx, batch in enumerate(batches)}
+        done_count = 0
+        total_batches = len(batches)
+        for future in as_completed(futures):
+            try:
+                records = future.result()
+                all_records.extend(records)
+            except Exception as exc:
+                logger.warning("港股腾讯行情批次 %d 拉取失败: %s", futures[future], exc)
+            done_count += 1
+            if done_count % 4 == 0:
+                logger.info("港股腾讯行情进度: %d/%d 批次, 已获取 %d 只",
+                            done_count, total_batches, len(all_records))
+
+    if not all_records:
+        raise RuntimeError("腾讯财经港股数据源返回空数据")
+
+    df = pd.DataFrame(all_records)
+    for col in HK_NUMERIC_COLUMNS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.drop_duplicates(subset=["code"], keep="first").reset_index(drop=True)
+
+    logger.info("腾讯财经港股备用源加载完成: %d 只股票", len(df))
+    return df
 
 
 # ---------------------------------------------------------------------------

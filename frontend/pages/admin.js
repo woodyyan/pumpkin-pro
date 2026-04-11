@@ -431,8 +431,8 @@ function AdminDashboard({ session, onLogout }) {
               </section>
             )}
 
-            {/* Panel 8: Quadrant Compute History */}
-            <QuadrantLogsPanel />
+            {/* Panel 8: Quadrant Overview + Compute History (enhanced) */}
+            <QuadrantAdminPanel />
 
             {/* Panel 9: User Feedback */}
             <FeedbackPanel />
@@ -545,60 +545,136 @@ function AdminDashboard({ session, onLogout }) {
   )
 }
 
-// ── Quadrant Compute Logs ──
+// ── Quadrant Overview + Compute Logs (Panel 8 enhanced) ──
 
-function QuadrantLogsPanel() {
+const QUADRANT_LABELS = {
+  opportunity_zone: { label: '机会', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-400/25' },
+  crowded_zone: { label: '拥挤', color: 'text-amber-400 bg-amber-500/10 border-amber-400/25' },
+  bubble_zone: { label: '泡沫', color: 'text-rose-400 bg-rose-500/10 border-rose-400/25' },
+  defensive_zone: { label: '防御', color: 'text-white/50 bg-white/5 border-white/10' },
+  neutral_zone: { label: '中性', color: 'text-blue-400 bg-blue-500/10 border-blue-400/25' },
+}
+
+function formatLastComputed(s) {
+  if (!s) return '--'
+  try {
+    const d = new Date(s)
+    const diff = Math.floor((Date.now() - d.getTime()) / 3600000)
+    if (diff < 1) return '刚刚'
+    if (diff < 24) return `${diff}小时前`
+    return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  } catch { return '-- }
+}
+
+function QuadrantAdminPanel() {
+  const [overview, setOverview] = useState(null)
   const [logs, setLogs] = useState(null)
-  const [expanded, setExpanded] = useState(null)
+  const [expandedLog, setExpandedLog] = useState(null)
 
   useEffect(() => {
-    adminFetch('/api/admin/quadrant-logs')
-      .then((data) => setLogs(data.items || []))
-      .catch(() => setLogs([]))
+    Promise.all([
+      adminFetch('/api/admin/quadrant-overview').catch(() => null),
+      adminFetch('/api/admin/quadrant-logs').then((d) => d.items || []).catch(() => []),
+    ]).then(([ov, lg]) => { setOverview(ov); setLogs(lg) })
   }, [])
 
-  if (!logs) return null
+  if (!overview && !logs) return null
 
   return (
     <section>
-      <h2 className="text-base font-semibold text-white/80 mb-3">🔲 四象限计算历史</h2>
-      {logs.length === 0 ? (
-        <p className="text-xs text-white/40">暂无计算记录</p>
-      ) : (
-        <div className="space-y-2">
-          {logs.slice(0, 15).map((log) => {
-            const report = (() => { try { return JSON.parse(log.ReportJSON || '{}') } catch { return {} } })()
-            const isExpanded = expanded === log.ID
-            const statusColor = log.Status === 'success' ? 'text-emerald-400' : log.Status === 'failed' ? 'text-rose-400' : 'text-amber-400'
-            const qc = report.quadrant_counts || {}
-            return (
-              <div key={log.ID} className="rounded-lg border border-white/8 bg-[#15171e] px-3 py-2">
-                <div
-                  className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs cursor-pointer"
-                  onClick={() => setExpanded(isExpanded ? null : log.ID)}
-                >
-                  <span className="text-white/50">{new Date(log.ComputedAt).toLocaleString('zh-CN')}</span>
-                  <span className={`font-medium ${statusColor}`}>{log.Status}</span>
-                  <span className="text-white/40">{log.Mode}</span>
-                  <span className="text-white/40">{log.StockCount} 只</span>
-                  <span className="text-white/40">{log.DurationSec.toFixed(0)}s</span>
-                  {Object.keys(qc).length > 0 && (
-                    <span className="text-white/30">
-                      机会{qc['机会']||0} / 拥挤{qc['拥挤']||0} / 泡沫{qc['泡沫']||0} / 防御{qc['防御']||0} / 中性{qc['中性']||0}
-                    </span>
-                  )}
-                  <span className="ml-auto text-white/30">{isExpanded ? '▼' : '▶'}</span>
+      <h2 className="text-base font-semibold text-white/80 mb-3">🔲 四象限数据总览</h2>
+
+      {/* Overview Cards */}
+      {overview && (
+        <>
+          {/* Exchange summary cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <StatCard label="A 股总数" value={overview.exchanges?.[0]?.total_count ?? '--'} sub={formatLastComputed(overview.exchanges?.[0]?.last_computed)} />
+            <StatCard label="港股总数" value={overview.exchanges?.[1]?.total_count ?? '--'} sub={formatLastComputed(overview.exchanges?.[1]?.last_computed)} />
+            <StatCard label="合计股票" value={overview.grand_total} />
+            <StatCard label="最后更新" value={formatLastComputed(
+              (overview.exchanges?.[0]?.last_computed || '') > (overview.exchanges?.[1]?.last_computed || '')
+                ? overview.exchanges?.[0]?.last_computed
+                : overview.exchanges?.[1]?.last_computed
+            )} />
+          </div>
+
+          {/* Per-exchange quadrant breakdown */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {overview.exchanges.filter(e => e.total_count > 0).map(ex => (
+              <div key={ex.exchange} className="rounded-xl border border-white/8 bg-[#15171e] p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm font-semibold text-white/80">{ex.exchange} 象限分布</span>
+                  <span className="text-xs text-white/35">{ex.total_count.toLocaleString()} 只</span>
                 </div>
-                {isExpanded && (
-                  <pre className="mt-2 max-h-60 overflow-auto rounded bg-black/30 p-2 text-[10px] text-white/50">
-                    {JSON.stringify(report, null, 2)}
-                  </pre>
-                )}
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    ['opportunity_zone', ex.summary.opportunity_zone],
+                    ['crowded_zone', ex.summary.crowded_zone],
+                    ['bubble_zone', ex.summary.bubble_zone],
+                    ['defensive_zone', ex.summary.defensive_zone],
+                    ['neutral_zone', ex.summary.neutral_zone],
+                  ].map(([key, count]) => {
+                    const q = QUADRANT_LABELS[key]
+                    const total = ex.total_count || 1
+                    return (
+                      <span key={key} className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium ${q?.color}`}>
+                        {q?.label}{count}
+                        <span className="text-white/25 ml-0.5">{Math.round(count / total * 100)}%</span>
+                      </span>
+                    )
+                  })}
+                </div>
               </div>
-            )
-          })}
-        </div>
+            ))}
+          </div>
+        </>
       )}
+
+      {/* Compute Logs */}
+      <div className="mt-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-white/55">计算历史</h3>
+          {!logs && <span className="text-xs text-white/25">加载中…</span>}
+        </div>
+        {!logs || logs.length === 0 ? (
+          <p className="text-xs text-white/30">暂无计算记录</p>
+        ) : (
+          <div className="space-y-1.5">
+            {logs.slice(0, 15).map((log) => {
+              const report = (() => { try { return JSON.parse(log.ReportJSON || '{}') } catch { return {} } })()
+              const isExp = expandedLog === log.ID
+              const statusColor = log.Status === 'success' ? 'text-emerald-400' : log.Status === 'failed' ? 'text-rose-400' : 'text-amber-400'
+              const qc = report.quadrant_counts || {}
+              return (
+                <div key={log.ID} className="rounded-lg border border-white/6 bg-[#15171e]/70 px-3 py-2">
+                  <div
+                    className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] cursor-pointer hover:bg-white/[0.02] rounded transition"
+                    onClick={() => setExpandedLog(isExp ? null : log.ID)}
+                  >
+                    <span className="text-white/40 tabular-nums">{new Date(log.ComputedAt).toLocaleString('zh-CN')}</span>
+                    <span className={`font-medium ${statusColor}`}>{log.Status}</span>
+                    <span className="text-white/30">{log.Mode}</span>
+                    <span className="text-white/30">{log.StockCount} 只</span>
+                    <span className="text-white/30">{log.DurationSec.toFixed(0)}s</span>
+                    {Object.keys(qc).length > 0 && (
+                      <span className="text-white/20 hidden sm:inline">
+                        机:{qc['机会']||0}/挤:{qc['拥挤']||0}/泡:{qc['泡沫']||0}/防:{qc['防御']||0}/中:{qc['中性']||0}
+                      </span>
+                    )}
+                    <span className="ml-auto text-white/25">{isExp ? '▼' : '▶'}</span>
+                  </div>
+                  {isExp && (
+                    <pre className="mt-2 max-h-56 overflow-auto rounded bg-black/40 p-2 text-[10px] leading-relaxed text-white/45 font-mono">
+                      {JSON.stringify(report, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </section>
   )
 }

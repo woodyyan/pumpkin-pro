@@ -1511,6 +1511,19 @@ func splitCSV(raw string) []string {
 	return items
 }
 
+// containsExchange checks if a target exchange is in the list (nil means all).
+func containsExchange(exchanges []string, target string) bool {
+	if exchanges == nil || len(exchanges) == 0 {
+		return true
+	}
+	for _, e := range exchanges {
+		if e == target {
+			return true
+		}
+	}
+	return false
+}
+
 func writeLiveJSON(w http.ResponseWriter, statusCode int, payload any) {
 	requestID := fmt.Sprintf("live-%d", time.Now().UnixNano())
 	if payload == nil {
@@ -2187,21 +2200,38 @@ func (a *appServer) handleQuadrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse exchange parameter: "ASHARE" (default), "HKEX", or "ALL"
+	exchangeParam := strings.TrimSpace(r.URL.Query().Get("exchange"))
+	var exchanges []string
+	switch strings.ToUpper(exchangeParam) {
+	case "HKEX":
+		exchanges = []string{"HKEX"}
+	case "ALL":
+		exchanges = nil // FindByExchange returns all when empty
+	default:
+		// Default: A-share only (SSE + SZSE)
+		exchanges = []string{"SSE", "SZSE"}
+	}
+
 	// Parse watchlist_symbols from query
 	watchlistSymbols := splitCSV(r.URL.Query().Get("watchlist_symbols"))
-	// Convert A-share symbols (e.g. 600519.SH) to 6-digit codes (600519)
-	// Skip HK stocks to avoid code collision (e.g. 00700.HK → 000700 ≠ A-share 000700)
 	watchlistCodes := make([]string, 0, len(watchlistSymbols))
 	for _, sym := range watchlistSymbols {
 		sym = strings.TrimSpace(sym)
 		if sym == "" {
 			continue
 		}
-		// Skip Hong Kong stocks
 		upper := strings.ToUpper(sym)
-		if strings.HasSuffix(upper, ".HK") {
+		isHK := strings.HasSuffix(upper, ".HK")
+
+		// Skip HK symbols when querying A-share data and vice versa
+		if isHK && !containsExchange(exchanges, "HKEX") {
 			continue
 		}
+		if !isHK && containsExchange(exchanges, "HKEX") && !containsExchange(exchanges, "SSE") {
+			continue
+		}
+
 		code := sym
 		if idx := strings.Index(code, "."); idx > 0 {
 			code = code[:idx]
@@ -2215,7 +2245,7 @@ func (a *appServer) handleQuadrant(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp, err := a.quadrantService.GetAllWithWatchlist(r.Context(), watchlistCodes)
+	resp, err := a.quadrantService.GetAllWithWatchlist(r.Context(), exchanges, watchlistCodes)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2403,6 +2433,24 @@ func (a *appServer) handleAdminQuadrantLogs(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"items": logs})
 }
 
+// handleAdminQuadrantOverview returns quadrant statistics grouped by exchange.
+// GET /api/admin/quadrant-overview (super admin only)
+func (a *appServer) handleAdminQuadrantOverview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	overview, err := a.quadrantService.GetAdminOverview(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if overview == nil {
+		overview = &quadrant.QuadrantOverviewResponse{}
+	}
+	writeJSON(w, http.StatusOK, overview)
+}
+
 func main() {
 	cfg := config.Load()
 	storeInstance, err := store.New(cfg.DB)
@@ -2545,6 +2593,7 @@ func main() {
 	mux.HandleFunc("/api/search", server.withOptionalAuth(server.handleSearchStocks))
 
 	mux.HandleFunc("/api/admin/quadrant-logs", server.withSuperAdminAuth(server.handleAdminQuadrantLogs))
+	mux.HandleFunc("/api/admin/quadrant-overview", server.withSuperAdminAuth(server.handleAdminQuadrantOverview))
 
 	mux.HandleFunc("/api/feedback", server.withRequiredAuth(server.handleFeedback))
 	mux.HandleFunc("/api/admin/feedback", server.withSuperAdminAuth(server.handleAdminFeedback))

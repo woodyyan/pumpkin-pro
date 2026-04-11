@@ -32,9 +32,15 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 		if code == "" {
 			continue
 		}
+		// Determine exchange: use item's explicit exchange, or default to SZSE (A-share)
+		exchange := strings.TrimSpace(item.Exchange)
+		if exchange == "" {
+			exchange = "SZSE"
+		}
 		records = append(records, QuadrantScoreRecord{
 			Code:        code,
 			Name:        strings.TrimSpace(item.Name),
+			Exchange:    exchange,
 			Opportunity: item.Opportunity,
 			Risk:        item.Risk,
 			Quadrant:    strings.TrimSpace(item.Quadrant),
@@ -95,9 +101,10 @@ func (s *Service) saveComputeLog(ctx context.Context, computedAt time.Time, repo
 	})
 }
 
-// GetAllWithWatchlist returns all scores (compact) + watchlist details.
-func (s *Service) GetAllWithWatchlist(ctx context.Context, watchlistCodes []string) (*QuadrantResponse, error) {
-	allRecords, err := s.repo.FindByExchange(ctx, []string{"SSE", "SZSE"})
+// GetAllWithWatchlist returns all scores (compact) + watchlist details for the given exchange.
+// When exchanges is nil or empty, returns all records (no filter).
+func (s *Service) GetAllWithWatchlist(ctx context.Context, exchanges []string, watchlistCodes []string) (*QuadrantResponse, error) {
+	allRecords, err := s.repo.FindByExchange(ctx, exchanges)
 	if err != nil {
 		return nil, err
 	}
@@ -204,4 +211,100 @@ func (s *Service) Search(ctx context.Context, q string, limit int) ([]SearchResu
 		return []SearchResult{}, nil
 	}
 	return s.repo.Search(ctx, q, limit)
+}
+
+// ── Admin Overview ──
+
+// ExchangeOverview holds per-exchange quadrant statistics.
+type ExchangeOverview struct {
+	Exchange     string          `json:"exchange"`      // "ASHARE", "HKEX"
+	TotalCount   int64           `json:"total_count"`
+	LastComputed string          `json:"last_computed"`
+	Summary      QuadrantSummary `json:"summary"`
+}
+
+// QuadrantOverviewResponse is the response for GET /api/admin/quadrant-overview.
+type QuadrantOverviewResponse struct {
+	Exchanges    []ExchangeOverview `json:"exchanges"`
+	GrandTotal   int64             `json:"grand_total"`
+	GrandSummary QuadrantSummary   `json:"grand_summary"`
+}
+
+// GetAdminOverview returns quadrant statistics grouped by exchange for the admin dashboard.
+func (s *Service) GetAdminOverview(ctx context.Context) (*QuadrantOverviewResponse, error) {
+	records, err := s.repo.FindAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Group by exchange
+	m := make(map[string]exchangeAccum)
+	var grandSummary QuadrantSummary
+
+	for _, r := range records {
+		ex := r.Exchange
+		if ex == "SSE" || ex == "SZSE" {
+			ex = "ASHARE"
+		}
+
+		e := m[ex]
+		e.key = ex
+		e.count++
+		if r.ComputedAt.After(e.lastComputed) {
+			e.lastComputed = r.ComputedAt
+		}
+
+		switch r.Quadrant {
+		case "机会":
+			e.summary.OpportunityZone++
+			grandSummary.OpportunityZone++
+		case "拥挤":
+			e.summary.CrowdedZone++
+			grandSummary.CrowdedZone++
+		case "泡沫":
+			e.summary.BubbleZone++
+			grandSummary.BubbleZone++
+		case "防御":
+			e.summary.DefensiveZone++
+			grandSummary.DefensiveZone++
+		default:
+			grandSummary.NeutralZone++
+			e.summary.NeutralZone++
+		}
+
+		m[ex] = e
+	}
+
+	exchanges := []ExchangeOverview{
+		buildExchangeOverview(m["ASHARE"], "A股"),
+		buildExchangeOverview(m["HKEX"], "港股"),
+	}
+
+	grandTotal := int64(len(records))
+	return &QuadrantOverviewResponse{
+		Exchanges:    exchanges,
+		GrandTotal:   grandTotal,
+		GrandSummary: grandSummary,
+	}, nil
+}
+
+// exchangeAccum is an internal accumulator for per-exchange stats.
+type exchangeAccum struct {
+	key          string
+	lastComputed time.Time
+	summary      QuadrantSummary
+	count        int64
+}
+
+func buildExchangeOverview(e exchangeAccum, label string) ExchangeOverview {
+	computedAtStr := ""
+	if !e.lastComputed.IsZero() {
+		computedAtStr = e.lastComputed.UTC().Format(time.RFC3339)
+	}
+	return ExchangeOverview{
+		Exchange:     label,
+		TotalCount:   e.count,
+		LastComputed: computedAtStr,
+		Summary:      e.summary,
+	}
 }

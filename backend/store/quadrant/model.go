@@ -91,6 +91,7 @@ type BulkSaveItem struct {
 	Volatility  float64 `json:"volatility"`
 	Drawdown    float64 `json:"drawdown"`
 	Crowding    float64 `json:"crowding"`
+	Exchange    string  `json:"exchange,omitempty"` // "SSE"/"SZSE"(默认)/"HKEX"
 }
 
 // ComputeLogRecord stores quadrant compute history for observability.

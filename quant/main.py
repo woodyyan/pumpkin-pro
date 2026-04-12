@@ -27,7 +27,7 @@ from screener.scanner import (
     get_industry_options,
     sort_and_paginate,
 )
-from screener.quadrant import compute_all_quadrant_scores, get_cached_scores
+from screener.quadrant import compute_all_quadrant_scores, compute_hk_quadrant_scores, get_cached_scores
 from strategy_library.service import StrategyService
 
 logger = logging.getLogger(__name__)

@@ -1347,8 +1347,9 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 }
 
 // handleAnalysisHistorySubroutes 处理分析历史子路由
-// GET  /api/live/symbols/{symbol}/analysis-history?limit=20   → 列表
-// DELETE /api/live/symbols/{symbol}/analysis-history/{id}     → 删除单条
+// GET    /api/live/symbols/{symbol}/analysis-history              → 列表
+// GET    /api/live/symbols/{symbol}/analysis-history?id=xxx        → 单条详情（含完整 analysis 内容）
+// DELETE /api/live/symbols/{symbol}/analysis-history?id=xxx        → 删除单条
 func (a *appServer) handleAnalysisHistorySubroutes(w http.ResponseWriter, r *http.Request, symbol string) {
 	userID := currentUserID(r)
 	if userID == "" {
@@ -1359,6 +1360,28 @@ func (a *appServer) handleAnalysisHistorySubroutes(w http.ResponseWriter, r *htt
 
 	switch r.Method {
 	case http.MethodGet:
+		// 如果有 id 参数 → 返回单条详情（含完整 analysis）
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		if id != "" {
+			rec, err := a.analysisHistoryRepo.GetByID(r.Context(), userID, id)
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					writeError(w, http.StatusNotFound, "记录不存在")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "查询失败")
+				return
+			}
+			detail, err := rec.ToDetail()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "解析数据失败")
+				return
+			}
+			writeLiveJSON(w, http.StatusOK, detail)
+			return
+		}
+
+		// 无 id → 返回列表
 		limit := parseLimit(r.URL.Query().Get("limit"), 20)
 		records, err := a.analysisHistoryRepo.ListBySymbol(r.Context(), userID, symbol, limit)
 		if err != nil {

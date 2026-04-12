@@ -1578,10 +1578,14 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
 // ── AI 分析历史面板（可折叠，默认收起）──
 
 function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, onDelete }) {
+  const [expandedId, setExpandedId] = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailData, setDetailData] = useState(null)
+
   const signalMap = {
-    buy: { label: '看多', arrow: '↑', color: 'text-red-300', dot: '🔴' },
-    sell: { label: '看空', arrow: '↓', color: 'text-emerald-300', dot: '🟢' },
-    hold: { label: '观望', arrow: '→', color: 'text-amber-300', dot: '🟡' },
+    buy: { label: '看多', arrow: '↑', color: 'text-red-300', dot: '🔴', bg: 'bg-red-500/12', border: 'border-red-400/40' },
+    sell: { label: '看空', arrow: '↓', color: 'text-emerald-300', dot: '🟢', bg: 'bg-emerald-500/12', border: 'border-emerald-400/40' },
+    hold: { label: '观望', arrow: '→', color: 'text-amber-300', dot: '🟡', bg: 'bg-amber-500/12', border: 'border-amber-400/40' },
   }
 
   // 时效格式化
@@ -1602,6 +1606,23 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
   const isStale = (isoStr) => {
     if (!isoStr) return false
     return (Date.now() - new Date(isoStr).getTime()) > 86400000
+  }
+
+  // 点击展开/收起单条详情
+  const handleToggleDetail = async (id) => {
+    if (expandedId === id) {
+      setExpandedId(null)
+      setDetailData(null)
+      return
+    }
+    setExpandedId(id)
+    setDetailData(null)
+    setDetailLoading(true)
+    try {
+      const data = await requestJson(`/api/live/symbols/${encodeURIComponent(window.location.pathname.split('/').pop())}/analysis-history?id=${id}`)
+      setDetailData(data || null)
+    } catch { /* silent */ }
+    finally { setDetailLoading(false) }
   }
 
   return (
@@ -1627,36 +1648,202 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
           {items.slice(0, 5).map((item) => {
             const sig = signalMap[item.signal] || signalMap.hold
             const stale = isStale(item.created_at)
+            const isExpanded = expandedId === item.id
+            const analysis = detailData?.analysis || {}
+            const meta = detailData?.meta || {}
+
             return (
-              <div
-                key={item.id}
-                className={`group flex items-start justify-between gap-3 rounded-xl border px-3.5 py-2.5 transition ${
-                  stale ? 'border-white/[0.06] bg-white/[0.02]' : 'border-primary/15 bg-primary/[0.04]'
-                }`}
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="shrink-0 text-sm">{sig.dot}</span>
-                  <div className="min-w-0">
-                    <div className={`text-xs font-medium ${sig.color}`}>
-                      {sig.label} {sig.arrow}
-                      <span className={`ml-1.5 text-[10px] ${stale ? 'text-white/25' : 'text-white/45'}`}>
-                        置信度 {item.confidence_score ?? '--'}%
-                      </span>
-                    </div>
-                    <div className={`mt-0.5 text-[11px] truncate ${stale ? 'text-white/20' : 'text-white/35'}`}>
-                      {formatTimeAgo(item.created_at)}
-                      {stale && <span className="ml-1.5 text-amber-400/50">⚠️ 可能已过时</span>}
+              <div key={item.id}>
+                <div
+                  className={`group flex items-start justify-between gap-3 rounded-xl border px-3.5 py-2.5 transition cursor-pointer ${
+                    stale ? 'border-white/[0.06] bg-white/[0.02]' : 'border-primary/15 bg-primary/[0.04]'
+                  } ${isExpanded ? `${sig.border} ${sig.bg} ring-1 ring-inset ring-white/8` : ''}`}
+                  onClick={() => handleToggleDetail(item.id)}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="shrink-0 text-sm">{sig.dot}</span>
+                    <div className="min-w-0">
+                      <div className={`text-xs font-medium ${sig.color}`}>
+                        {sig.label} {sig.arrow}
+                        <span className={`ml-1.5 text-[10px] ${stale ? 'text-white/25' : 'text-white/45'}`}>
+                          置信度 {item.confidence_score ?? '--'}%
+                        </span>
+                      </div>
+                      <div className={`mt-0.5 text-[11px] truncate ${stale ? 'text-white/20' : 'text-white/35'}`}>
+                        {formatTimeAgo(item.created_at)}
+                        {stale && <span className="ml-1.5 text-amber-400/50">⚠️ 可能已过时</span>}
+                      </div>
                     </div>
                   </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {/* 展开/收起箭头 */}
+                    <span className={`text-[10px] text-white/25 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
+                    {/* 删除按钮 */}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onDelete(item.id) }}
+                      className="shrink-0 rounded-lg border border-transparent px-1.5 py-0.5 text-[10px] text-white/20 opacity-0 transition hover:border-rose-400/30 hover:text-rose-300 group-hover:opacity-100"
+                      title="删除此记录"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => onDelete(item.id)}
-                  className="shrink-0 rounded-lg border border-transparent px-1.5 py-0.5 text-[10px] text-white/20 opacity-0 transition hover:border-rose-400/30 hover:text-rose-300 group-hover:opacity-100"
-                  title="删除此记录"
-                >
-                  ✕
-                </button>
+
+                {/* 展开的详情内容 */}
+                {isExpanded && (
+                  <div className="mt-1 ml-6 pl-4 border-l border-white/10 space-y-3 py-3 pr-1">
+                    {detailLoading ? (
+                      <div className="space-y-2">
+                        {[1, 2, 3].map((i) => (
+                          <div key={i} className="animate-pulse rounded-lg bg-white/5 h-12" />
+                        ))}
+                      </div>
+                    ) : detailData ? (
+                      <>
+                        {/* 数据时效标签 */}
+                        {(meta.data_completeness) && (() => {
+                          const dc = meta.data_completeness || {}
+                          return (
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-white/30">
+                              <span>数据时效：</span>
+                              <span>行情 {dc.market === 'complete' ? '实时' : '缺失'}</span>
+                              <span>· 技术 {dc.technical === 'complete' ? '可用' : '部分缺失'}</span>
+                              <span>· 基础面 {dc.fundamentals === 'complete' ? '昨日收盘' : '不可用'}</span>
+                            </div>
+                          )
+                        })()}
+
+                        {/* 卧龙模型评分 */}
+                        {analysis.layer_scores && Object.keys(analysis.layer_scores).length > 0 && (
+                          <div className="rounded-lg border border-white/8 bg-black/20 px-3.5 py-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[11px] font-semibold text-white/70">📊 卧龙模型评分</span>
+                              {analysis.market_state_label && (
+                                <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-medium text-sky-300">
+                                  🏷️ {analysis.market_state_label}
+                                </span>
+                              )}
+                            </div>
+                            {(['narrative', 'liquidity', 'expectation', 'fundamental']).map((key) => {
+                              const ls = analysis.layer_scores[key]
+                              if (!ls) return null
+                              const layerMeta = {
+                                narrative:   { label: '叙事层', icon: '📖', color: '#a78bfa' },
+                                liquidity:   { label: '资金层', icon: '💧', color: '#38bdf8' },
+                                expectation: { label: '预期层', icon: '🎯', color: '#f472b6' },
+                                fundamental: { label: '基本面', icon: '📈', color: '#34d399' },
+                              }
+                              const m = layerMeta[key]
+                              const barPct = Math.max(0, Math.min(100, ((ls.score + 2) / 4) * 100))
+                              const dirLabel = { bullish: '看多', neutral: '中性', bearish: '看空' }[ls.direction] || '中性'
+                              const dirColor = ls.direction === 'bullish' ? '#ef4444' : ls.direction === 'bearish' ? '#22c55e' : '#9ca3af'
+                              return (
+                                <div key={key} className="mt-1.5 first:mt-0">
+                                  <div className="flex items-center justify-between mb-0.5">
+                                    <span className="text-[11px] font-medium text-white/80">{m.icon} {m.label}</span>
+                                    <span className="text-[10px]" style={{ color: dirColor }}>
+                                      {dirLabel} {ls.score > 0 ? '+' : ''}{ls.score}
+                                      <span className="ml-1 text-white/30">({(ls.confidence * 100).toFixed(0)}%)</span>
+                                    </span>
+                                  </div>
+                                  <div className="h-1 w-full rounded-full bg-white/8 overflow-hidden">
+                                    <div className="h-full rounded-full" style={{ width: `${barPct}%`, backgroundColor: m.color }} />
+                                  </div>
+                                  {ls.reason && <p className="mt-0.5 text-[10px] leading-relaxed text-white/40">{ls.reason}</p>}
+                                </div>
+                              )
+                            })}
+                            {analysis.total_score != null && (
+                              <div className="mt-2 pt-2 border-t border-white/8 flex items-center justify-between">
+                                <span className="text-[10px] text-white/35">综合评分</span>
+                                <span className={`text-xs font-bold font-mono ${
+                                  analysis.total_score >= 0.5 ? 'text-red-400' :
+                                  analysis.total_score <= -0.5 ? 'text-emerald-400' : 'text-amber-400'
+                                }`}>
+                                  {analysis.total_score > 0 ? '+' : ''}{analysis.total_score.toFixed(2)}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 分析逻辑 */}
+                        {analysis.logic_summary && (
+                          <div className="rounded-lg border border-white/8 bg-black/20 px-3.5 py-3">
+                            <span className="text-[11px] font-medium text-white/60">▾ 分析逻辑</span>
+                            <div className="mt-1.5">
+                              {analysis.logic_summary.split('\n').filter(Boolean).map((line, i) => (
+                                <p key={i} className="mt-1 text-[12px] leading-relaxed text-white/65 first:mt-0">
+                                  • {line.trim().replace(/^•\s*/, '')}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 风险提示 */}
+                        {Array.isArray(analysis.risk_warnings) && analysis.risk_warnings.length > 0 && (
+                          <div className="rounded-lg border border-rose-400/20 bg-rose-500/6 px-3.5 py-2.5">
+                            <span className="text-[11px] font-semibold text-rose-200/80">⚠️ 风险提示</span>
+                            {analysis.risk_warnings.map((w, i) => (
+                              <p key={i} className="text-[11px] leading-relaxed text-rose-200/55 mt-1 first:mt-0">⚠️ {w}</p>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* 交易建议 */}
+                        {analysis.trading_suggestions?.action_suggestion && (
+                          <div className="rounded-lg border border-sky-400/15 bg-sky-500/[0.03] px-3.5 py-2.5">
+                            <span className="text-[11px] font-semibold text-sky-200/80">📋 交易建议</span>
+                            <p className="text-[12px] leading-relaxed text-white/70 mt-1">{analysis.trading_suggestions.action_suggestion}</p>
+                            <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 md:grid-cols-4">
+                              {[
+                                ['建议买价', `${analysis.trading_suggestions.entry_zone?.low ?? '--'} ~ ${analysis.trading_suggestions.entry_zone?.high ?? '--'}`],
+                                ['止损位', `${analysis.trading_suggestions.stop_loss?.price || '--'}${analysis.trading_suggestions.stop_loss?.pct != null ? `(${analysis.trading_suggestions.stop_loss.pct}%)` : ''}`],
+                                ['目标位', `${analysis.trading_suggestions.take_profit?.price || '--'}${analysis.trading_suggestions.take_profit?.pct != null ? `(+${analysis.trading_suggestions.take_profit.pct}%)` : ''}`],
+                                ['仓位建议', `${analysis.trading_suggestions.position_size_pct || '--'}`]
+                              ].map(([label, val]) => (
+                                <div key={label}>
+                                  <div className="text-[9px] text-white/30">{label}</div>
+                                  <div className="text-[11px] text-white/75 font-medium">{val}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 触发条件 */}
+                        {analysis.action_trigger && (analysis.action_trigger.buy_trigger || analysis.action_trigger.sell_trigger) && (
+                          <div className="rounded-lg border border-amber-400/15 bg-amber-500/[0.03] px-3.5 py-2.5">
+                            <span className="text-[11px] font-semibold text-amber-200/80">🎯 执行触发条件</span>
+                            {analysis.action_trigger.buy_trigger && (
+                              <p className="text-[11px] leading-relaxed text-red-300/70 mt-1 first:mt-0">🟢 {analysis.action_trigger.buy_trigger}</p>
+                            )}
+                            {analysis.action_trigger.sell_trigger && (
+                              <p className="text-[11px] leading-relaxed text-emerald-300/70 mt-1 first:mt-0">🔴 {analysis.action_trigger.sell_trigger}</p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* 催化因素 */}
+                        {Array.isArray(analysis.key_catalysts) && analysis.key_catalysts.length > 0 && (
+                          <div className="rounded-lg border border-sky-400/15 bg-sky-500/[0.02] px-3.5 py-2.5">
+                            <span className="text-[11px] font-semibold text-sky-200/70">✨ 潜在催化因素</span>
+                            {analysis.key_catalysts.map((c, i) => (
+                              <p key={i} className="text-[11px] leading-relaxed text-sky-200/50 mt-1 first:mt-0">💡 {c}</p>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* 分析时间 */}
+                        <div className="text-center text-[9px] text-white/20 pt-1">
+                          分析时间：{new Date(analysis.data_timestamp || item.created_at).toLocaleString('zh-CN', { hour12: false })}
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                )}
               </div>
             )
           })}

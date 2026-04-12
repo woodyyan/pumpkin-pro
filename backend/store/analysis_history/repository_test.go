@@ -221,6 +221,108 @@ func TestToDetail_EmptyResult(t *testing.T) {
 	if err != nil || d.Result == nil || d.Meta == nil { t.Error("empty maps expected") }
 }
 
+// ═════ 5. GetByID — 详情 API 场景 ═════
+
+func TestGetByID_Found_ReturnsFullAnalysis(t *testing.T) {
+	repo, cleanup := setupTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	fullAnalysis := map[string]any{
+		"signal": "sell", "confidence_score": 82,
+		"logic_summary": "• MACD 死叉\n• RSI 超买\n",
+		"layer_scores": map[string]any{
+			"narrative":   map[string]any{"score": 1.0, "direction": "bullish", "confidence": 0.85, "reason": "AI 叙事强"},
+			"liquidity":   map[string]any{"score": -0.5, "direction": "neutral", "confidence": 0.6},
+			"expectation": map[string]any{"score": 1.2, "direction": "bullish", "confidence": 0.75},
+			"fundamental": map[string]any{"score": -0.3, "direction": "bearish", "confidence": 0.55},
+		},
+		"total_score": 0.72,
+		"market_state_label": "趋势行情",
+		"trading_suggestions": map[string]any{
+			"action_suggestion": "建议逢高减仓",
+			"entry_zone":       map[string]any{"low": 175, "high": 180},
+			"stop_loss":        map[string]any{"price": 168, "pct": -4.5},
+			"take_profit":      map[string]any{"price": 155, "pct": 12.3},
+			"position_size_pct": "20%",
+			"time_horizon":     "2~4 周",
+		},
+		"risk_warnings": []string{"大盘系统性风险", "板块轮动加速"},
+		"action_trigger": map[string]any{
+			"buy_trigger":  "放量突破 MA20 可加仓",
+			"sell_trigger": "跌破止损位立即清仓",
+		},
+		"key_catalysts": []string{"Q1 业绩预告超预期", "新产品发布会"},
+		"data_timestamp": "2026-04-11T18:00:00Z",
+	}
+	resultJSON, _ := json.Marshal(fullAnalysis)
+	metaJSON, _ := json.Marshal(map[string]any{
+		"model": "gpt-4o", "generated_at": "2026-04-11T18:00:00Z",
+		"data_completeness": map[string]string{
+			"market": "complete", "technical": "complete",
+			"fundamentals": "complete", "market_overview": "complete",
+		},
+	})
+	record := &AnalysisHistoryRecord{
+		ID: genID(), UserID: "u-detail", Symbol: "00700.HK", SymbolName: "腾讯控股",
+		Signal: "sell", ConfidenceScore: 82,
+		ResultJSON: string(resultJSON), MetaJSON: string(metaJSON),
+		CreatedAt: time.Date(2026, 4, 11, 18, 0, 0, 0, time.UTC),
+	}
+	if err := repo.Create(ctx, record); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := repo.GetByID(ctx, "u-detail", record.ID)
+	if err != nil || got == nil {
+		t.Fatalf("expected to find record: %v", err)
+	}
+
+	detail, err := got.ToDetail()
+	if err != nil { t.Fatalf("toDetail: %v", err) }
+
+	// 验证基本字段
+	if detail.ID != record.ID { t.Errorf("id = %q", detail.ID) }
+	if detail.Symbol != "00700.HK" { t.Errorf("symbol = %q", detail.Symbol) }
+	if detail.Signal != "sell" { t.Errorf("signal = %q", detail.Signal) }
+	if detail.ConfidenceScore != 82 { t.Errorf("confidence = %d", detail.ConfidenceScore) }
+
+	// 验证完整 analysis 内容（核心：展开功能依赖这些字段）
+	sig, _ := detail.Result["signal"].(string)
+	if sig != "sell" { t.Errorf("result.signal = %q", sig) }
+	score, _ := detail.Result["confidence_score"].(float64)
+	if score != 82 { t.Errorf("result.confidence_score = %v", score) }
+
+	// 验证 layer_scores 完整保留
+	ls, ok := detail.Result["layer_scores"].(map[string]any)
+	if !ok { t.Fatal("layer_scores missing or not object") }
+	narrative, ok := ls["narrative"].(map[string]any)
+	if !ok { t.Fatal("narrative layer missing") }
+	if narrative["score"].(float64) != 1.0 { t.Errorf("narrative.score = %v", narrative["score"]) }
+
+	// 验证 trading_suggestions
+	ts, ok := detail.Result["trading_suggestions"].(map[string]any)
+	if !ok { t.Fatal("trading_suggestions missing") }
+	if ts["action_suggestion"] != "建议逢高减仓" { t.Errorf("action_suggestion = %v", ts["action_suggestion"]) }
+
+	// 验证 risk_warnings
+	rw, ok := detail.Result["risk_warnings"].([]any)
+	if !ok || len(rw) != 2 { t.Fatalf("risk_warnings wrong: %+v", rw) }
+
+	// 验证 meta.data_completeness
+	dc, ok := detail.Meta["data_completeness"].(map[string]any)
+	if !ok { t.Fatal("meta.data_completeness missing") }
+	if dc["market"] != "complete" { t.Errorf("dc.market = %v", dc["market"]) }
+}
+
+func TestGetByID_NotFound(t *testing.T) {
+	repo, cleanup := setupTestDB(t)
+	defer cleanup()
+	if _, err := repo.GetByID(context.Background(), "u-nf", "nonexistent-id"); err == nil {
+		t.Error("should return error for non-existent id")
+	}
+}
+
 // ── helpers ──
 
 func genID() string { return generateUUID() }

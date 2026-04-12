@@ -279,9 +279,19 @@ function AppLayout({ Component, pageProps }) {
 }
 
 function AccountEntry() {
-  const { isLoggedIn, user, openAuthModal, logout } = useAuth()
+  const { isLoggedIn, user, openAuthModal, logout, ready } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef(null)
+
+  // Don't expose login state until initial fetchMe resolves.
+  // Prevents flash of "logged-in name → login button" during page load.
+  if (!ready) {
+    return (
+      <div className="flex items-center gap-2 shrink-0">
+        <span className="text-sm text-white/30">···</span>
+      </div>
+    )
+  }
 
   useEffect(() => {
     if (!menuOpen) return

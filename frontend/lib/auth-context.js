@@ -55,7 +55,7 @@ export function AuthProvider({ children }) {
       // Only clear session on explicit auth errors (401 / AUTH_REQUIRED).
       // Network errors (502/timeout/unreachable during deployment) must NOT
       // clear the session — the cached session is still valid.
-      if (isAuthRequiredError(error)) {
+      if (isAuthRequiredError(error) && !isNetworkError(error)) {
         clearSession()
       }
       // For network errors, silently keep the cached session so the UI

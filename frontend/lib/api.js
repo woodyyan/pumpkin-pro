@@ -56,7 +56,11 @@ export async function requestJson(input, init = {}, fallbackMessage = '请求失
 }
 
 /**
- * Attempt a silent token refresh. Returns true if the session was refreshed.
+ * Attempt a silent token refresh.
+ * Returns 'ok' | 'auth_failed' | 'network_failed':
+ *   - 'ok':            token refreshed successfully
+ *   - 'auth_failed':   server rejected the credentials (clear session)
+ *   - 'network_failed': request failed (502, timeout, etc.) — preserve session
  * Uses a singleton promise to avoid thundering-herd when multiple API calls
  * all receive 401 at the same time.
  */
@@ -68,7 +72,7 @@ async function tryRefreshToken() {
     const refreshToken = getRefreshToken()
     if (!refreshToken) {
       clearAuthSession()
-      return false
+      return 'auth_failed'
     }
 
     try {
@@ -80,13 +84,13 @@ async function tryRefreshToken() {
 
       if (!res.ok) {
         clearAuthSession()
-        return false
+        return 'auth_failed'
       }
 
       const data = await res.json()
       if (!data?.tokens?.access_token || !data?.tokens?.refresh_token) {
         clearAuthSession()
-        return false
+        return 'auth_failed'
       }
 
       // Merge updated tokens into existing session (preserve user info)
@@ -97,10 +101,10 @@ async function tryRefreshToken() {
         user: data.user || existing.user,
       }
       writeAuthSession(next)
-      return true
+      return 'ok'
     } catch {
-      // Network error during refresh — don't clear session, let caller decide
-      return false
+      // Network error during refresh — don't clear session, caller decides
+      return 'network_failed'
     } finally {
       _refreshPromise = null
     }
@@ -147,8 +151,8 @@ async function _fetchOnce(input, init, fallbackMessage) {
 
   // On 401 Unauthorized → attempt silent token refresh, then retry once
   if (response.status === 401) {
-    const refreshed = await tryRefreshToken()
-    if (refreshed) {
+    const result = await tryRefreshToken()
+    if (result === 'ok') {
       // Retry original request with fresh token
       const retryHeaders = new Headers(init?.headers || {})
       if (!retryHeaders.has('accept')) retryHeaders.set('Accept', 'application/json')
@@ -167,7 +171,13 @@ async function _fetchOnce(input, init, fallbackMessage) {
       throw buildApiError(retryResponse, retryData, fallbackMessage)
     }
 
-    // Refresh failed or impossible — clear & throw
+    // Network failure (502 / timeout / unreachable during deployment)
+    if (result === 'network_failed') {
+      // Preserve cached session — UI stays logged-in, will retry later
+      throw { status: 0, message: '网络暂时不可用，请稍后重试', transient: true }
+    }
+
+    // auth_failed — server explicitly rejected credentials
     clearAuthSession()
   }
 

@@ -1,8 +1,12 @@
 // ── Pure function tests for auth-storage.js ──
 // Uses Node 20+ built-in test runner (node --test)
 
-import { describe, it } from 'node:test'
+import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
+
+// ═══════════════════════════════════════════
+// Section A: isAuthRequiredError (original tests)
+// ═══════════════════════════════════════════
 
 // Exact copy of isAuthRequiredError from lib/auth-storage.js
 function isAuthRequiredError(error) {
@@ -73,5 +77,135 @@ describe('network-error-like detection (status edge cases)', () => {
   it('non-zero status = not network error', () => {
     assert.equal(isNetworkErrorLike({ status: 401 }), false)
     assert.equal(isNetworkErrorLike({ status: 500 }), false)
+  })
+})
+
+// ═══════════════════════════════════════════
+// Section B: Session Storage (NEW — T2.1 ~ T2.5)
+// ═══════════════════════════════════════════
+
+const AUTH_SESSION_STORAGE_KEY = 'pumpkin_pro_auth_session'
+
+/** In-memory localStorage mock */
+let _store = {}
+
+/** Simulated readAuthSession (mirrors source exactly) */
+function readAuthSession() {
+  const text = _store[AUTH_SESSION_STORAGE_KEY]
+  if (!text) return null
+  try {
+    const parsed = JSON.parse(text)
+    if (!parsed || typeof parsed !== 'object') return null
+    if (!parsed.tokens?.access_token || !parsed.tokens?.refresh_token) return null
+    return parsed
+  } catch { return null }
+}
+
+/** Simulated writeAuthSession (mirrors source exactly) */
+function writeAuthSession(session) {
+  if (!session) delete _store[AUTH_SESSION_STORAGE_KEY]
+  else _store[AUTH_SESSION_STORAGE_KEY] = JSON.stringify(session)
+}
+
+/** Simulated clearAuthSession (mirrors source exactly) */
+function clearAuthSession() {
+  delete _store[AUTH_SESSION_STORAGE_KEY]
+}
+
+/** Simulated getAccessToken */
+function getAccessToken() {
+  return readAuthSession()?.tokens?.access_token || ''
+}
+
+/** Simulated getRefreshToken */
+function getRefreshToken() {
+  return readAuthSession()?.tokens?.refresh_token || ''
+}
+
+describe('session storage operations', () => {
+  beforeEach(() => {
+    _store = {}
+  })
+
+  // T2.1: Write → Read round-trip consistency
+  it('T2.1: writeAuthSession + readAuthSession round-trip preserves data', () => {
+    const session = {
+      user: { email: 'woody@example.com', nickname: 'Woody' },
+      tokens: {
+        access_token: 'at_abc123',
+        refresh_token: 'rt_xyz789',
+      },
+    }
+
+    writeAuthSession(session)
+    const loaded = readAuthSession()
+
+    assert.notEqual(loaded, null, 'should load session after writing')
+    assert.deepEqual(loaded.user, session.user)
+    assert.equal(loaded.tokens.access_token, 'at_abc123')
+    assert.equal(loaded.tokens.refresh_token, 'rt_xyz789')
+  })
+
+  // T2.2: Clear removes session completely
+  it('T2.2: clearAuthSession removes session so read returns null', () => {
+    writeAuthSession({
+      user: { email: 'a@b.com' },
+      tokens: { access_token: 'x', refresh_token: 'y' },
+    })
+    assert.notEqual(readAuthSession(), null, 'precondition: session exists')
+
+    clearAuthSession()
+    assert.equal(readAuthSession(), null, 'session must be null after clearing')
+  })
+
+  // T2.3: getAccessToken / getRefreshToken extract correct fields
+  it('T2.3: getAccessToken and getRefreshToken return correct values', () => {
+    writeAuthSession({
+      user: {},
+      tokens: {
+        access_token: 'my_access_token_value',
+        refresh_token: 'my_refresh_token_value',
+      },
+    })
+
+    assert.equal(getAccessToken(), 'my_access_token_value')
+    assert.equal(getRefreshToken(), 'my_refresh_token_value')
+  })
+
+  // T2.4: Corrupted JSON returns null (fault tolerance)
+  it('T2.4: corrupted JSON in storage returns null gracefully', () => {
+    _store[AUTH_SESSION_STORAGE_KEY] = '{this is not valid json!!!'
+    assert.equal(readAuthSession(), null, 'malformed JSON must return null')
+
+    _store[AUTH_SESSION_STORAGE_KEY] = 'just-a-string'
+    assert.equal(readAuthSession(), null, 'non-object JSON string must return null')
+  })
+
+  // T2.5: Missing required fields returns null
+  it('T2.5: missing required token fields returns null', () => {
+    // No tokens at all
+    _store[AUTH_SESSION_STORAGE_KEY] = JSON.stringify({ user: { email: 'x' } })
+    assert.equal(readAuthSession(), null, 'no tokens → null')
+
+    // Only access_token, no refresh_token
+    _store[AUTH_SESSION_STORAGE_KEY] = JSON.stringify({
+      user: {},
+      tokens: { access_token: 'only_at' },
+    })
+    assert.equal(readAuthSession(), null, 'missing refresh_token → null')
+
+    // Only refresh_token, no access_token
+    _store[AUTH_SESSION_STORAGE_KEY] = JSON.stringify({
+      user: {},
+      tokens: { refresh_token: 'only_rt' },
+    })
+    assert.equal(readAuthSession(), null, 'missing access_token → null')
+
+    // Empty tokens object
+    _store[AUTH_SESSION_STORAGE_KEY] = JSON.stringify({
+      user: {},
+      tokens: {},
+    })
+    assert.equal(readAuthSession(), null, 'empty tokens → null')
   })
 })

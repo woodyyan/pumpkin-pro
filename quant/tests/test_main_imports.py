@@ -9,8 +9,11 @@
 """
 
 import ast
+import importlib
 import inspect
 import re
+
+import pytest
 
 
 def _extract_imported_from_quadrant(main_source):
@@ -45,7 +48,11 @@ def _extract_quadrant_calls_in_main(main_source):
 
 
 def _get_quadrant_module_public_names():
-    """返回 screener.quadrant 模块中所有顶层可调用对象名（不含 _ 前缀）。"""
+    """返回 screener.quadrant 模块中所有顶层可调用对象名（不含 _ 前缀）。
+    
+    需要 requests 等运行时依赖，缺失时跳过相关测试。
+    """
+    pytest.importorskip("requests", reason="screener.quadrant 依赖 requests")
     from screener import quadrant as qm
     public = set()
     for name, obj in inspect.getmembers(qm):

@@ -1064,17 +1064,21 @@ def compute_hk_quadrant_scores(
     else:
         merged["volume_ratio"] = merged["volume_ratio_calc"]
 
-    # ── Trend ──
-    change_60d_rank = _percentile_rank(merged["change_pct_60d"]).fillna(50)
-    excess_return = merged["change_pct_60d"] - bench_60d
+    # ── Trend (NaN-tolerant) ──
+    c60d = merged.get("change_pct_60d", pd.Series(np.nan, index=merged.index))
+    change_60d_rank = _percentile_rank(c60d).fillna(50)
+    excess_return = c60d.fillna(0) - bench_60d
     excess_rank = _percentile_rank(excess_return).fillna(50)
     merged["trend"] = 0.5 * change_60d_rank + 0.5 * excess_rank
 
-    # ── Flow ──
-    volume_ratio_rank = _percentile_rank(merged["volume_ratio"]).fillna(50)
-    turnover_rate_rank = _percentile_rank(merged["turnover_rate"]).fillna(50)
-    turnover_ratio = merged["turnover"] / merged["turnover_20d_avg"]
-    turnover_ratio_rank = _percentile_rank(turnover_ratio).fillna(50)
+    # ── Flow (NaN-tolerant, 列可能因数据源不同而缺失) ──
+    volume_ratio_rank = _percentile_rank(merged["volume_ratio"]).fillna(50) if "volume_ratio" in merged.columns else pd.Series(50.0, index=merged.index)
+    turnover_rate_rank = _percentile_rank(merged["turnover_rate"]).fillna(50) if "turnover_rate" in merged.columns else pd.Series(50.0, index=merged.index)
+    if "turnover" in merged.columns and "turnover_20d_avg" in merged.columns:
+        turnover_ratio = merged["turnover"] / merged["turnover_20d_avg"].replace(0, np.nan)
+        turnover_ratio_rank = _percentile_rank(turnover_ratio).fillna(50)
+    else:
+        turnover_ratio_rank = pd.Series(50.0, index=merged.index)
     merged["flow"] = 0.4 * volume_ratio_rank + 0.3 * turnover_rate_rank + 0.3 * turnover_ratio_rank
 
     # ── Revision: 港股使用快照 PE/PB 作为基本面参考，
@@ -1082,21 +1086,24 @@ def compute_hk_quadrant_scores(
     #   快照中可能没有 profit_growth_rate，尝试从基本面补充
     if "profit_growth_rate" not in merged.columns or merged["profit_growth_rate"].isna().all():
         logger.info("[hk-quadrant] 快照无利润增速字段，使用 PE 作为 Revision 替代信号")
+        pe_for_revision = merged.get("pe", pd.Series(999.0, index=merged.index))
         # 低 PE → 高 revision score（估值低=机会）
-        merged["revision"] = _percentile_rank(-merged["pe"].fillna(999)).fillna(50)
+        merged["revision"] = _percentile_rank(-pe_for_revision.fillna(999)).fillna(50)
     else:
         merged["revision"] = _percentile_rank(merged["profit_growth_rate"]).fillna(50)
 
     # ── Volatility ──
-    merged["volatility_raw"] = _percentile_rank(merged["std_20d"]).fillna(50)
+    merged["volatility_raw"] = _percentile_rank(merged.get("std_20d", pd.Series(dtype=float))).fillna(50)
 
     # ── Drawdown ──
-    merged["drawdown_raw"] = _percentile_rank(merged["max_drawdown_60d"]).fillna(50)
+    merged["drawdown_raw"] = _percentile_rank(merged.get("max_drawdown_60d", pd.Series(dtype=float))).fillna(50)
 
     # ── Crowding ──
-    pe_rank = _percentile_rank(merged["pe"])
-    cum_turnover_rank = _percentile_rank(merged["cumulative_turnover_20d"])
-    has_cum_turnover = merged["cumulative_turnover_20d"].notna()
+    pe_col = merged.get("pe", pd.Series(np.nan, index=merged.index))
+    pe_rank = _percentile_rank(pe_col).fillna(50)
+    cum_tr_col = merged.get("cumulative_turnover_20d", pd.Series(dtype=float))
+    cum_turnover_rank = _percentile_rank(cum_tr_col).fillna(50)
+    has_cum_turnover = cum_tr_col.notna()
     merged["crowding_raw"] = pd.Series(np.where(
         has_cum_turnover,
         0.5 * pe_rank + 0.5 * cum_turnover_rank,

@@ -4,7 +4,11 @@ import Link from 'next/link'
 export default function Disclaimer() {
   return (
     <>
-      <Head><title>免责声明 — 卧龙AI量化交易台</title></Head>
+      <Head>
+        <title>免责声明 — 卧龙AI量化交易台</title>
+        <meta name="description" content="卧龙AI量化交易台免责声明 — 本平台仅提供数据分析工具，不构成任何投资建议。投资有风险，入市需谨慎。" />
+        <link rel="canonical" href="https://wolongtrader.top/disclaimer" />
+      </Head>
       <div className="max-w-3xl mx-auto pb-16 space-y-8">
         <header className="space-y-2">
           <h1 className="text-3xl font-bold tracking-tight">免责声明</h1>

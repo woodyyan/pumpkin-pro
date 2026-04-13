@@ -1095,6 +1095,7 @@ export default function AdminPage() {
       <>
         <Head>
           <title>管理后台 — Wolong Pro</title>
+          <meta name="robots" content="noindex, nofollow" />
         </Head>
         <div className="min-h-screen bg-[#0a0b0f]" />
       </>
@@ -1105,6 +1106,7 @@ export default function AdminPage() {
     <>
       <Head>
         <title>管理后台 — Wolong Pro</title>
+        <meta name="robots" content="noindex, nofollow" />
       </Head>
       {session ? (
         <AdminDashboard session={session} onLogout={() => setSession(null)} />

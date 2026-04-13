@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { requestJson } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
 import { isAuthRequiredError } from '../lib/auth-storage';
+import Head from 'next/head';
 import {
   getInputAttributes,
   validateStrategyParams,
@@ -439,6 +440,11 @@ export default function StrategyLibraryPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-12">
+      <Head>
+        <title>策略库 — 卧龙AI量化交易台</title>
+        <meta name="description" content="卧龙AI量化交易台策略库 — 创建和管理量化策略，支持趋势跟踪、均线交叉、RSI 等多种策略类型，AI 智能生成策略并自动回测验证。" />
+        <link rel="canonical" href="https://wolongtrader.top/strategies" />
+      </Head>
       <section className="bg-card border border-border rounded-2xl p-6 md:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3 max-w-3xl">

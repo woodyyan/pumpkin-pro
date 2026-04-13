@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { requestJson } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
 import { getStrategyPresetByImplementation } from '../lib/strategy-presets';
+import Head from 'next/head';
 
 const DATA_SOURCE_OPTIONS = [
   { value: 'online', label: '在线下载', description: '下载 A 股 / 港股历史数据' },
@@ -579,6 +580,11 @@ export default function BacktestPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-12 overflow-x-hidden">
+      <Head>
+        <title>回测引擎 — 卧龙AI量化交易台</title>
+        <meta name="description" content="卧龙AI量化交易台回测引擎 — 基于历史数据验证策略表现，查看收益率、最大回撤、夏普比率等关键指标，支持 A 股/港股在线数据下载与自定义策略回测。" />
+        <link rel="canonical" href="https://wolongtrader.top/backtest" />
+      </Head>
       <section ref={backtestFormRef} className="bg-card border border-border rounded-2xl p-6 md:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3 max-w-3xl">

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
+import Head from 'next/head'
 
 // ─── sessionStorage 缓存 ─────────────────────────────────
 const SCREENER_CACHE_KEY = 'pumpkin_screener_cache'
@@ -638,6 +639,11 @@ export default function StockPickerPage() {
 
   return (
     <div className="space-y-4">
+      <Head>
+        <title>选股器 — 卧龙AI量化交易台</title>
+        <meta name="description" content="卧龙AI量化交易台选股器 — A 股全市场多维指标筛选，支持行业、财务、技术面条件过滤与自然语言 AI 选股，实时行情数据驱动。" />
+        <link rel="canonical" href="https://wolongtrader.top/stock-picker" />
+      </Head>
       {/* ─── Hero Section ─── */}
       <div className="flex items-center justify-between gap-4">
         <div>

@@ -149,6 +149,24 @@ function AppLayout({ Component, pageProps }) {
     <>
       <Head>
         <title>卧龙AI量化交易台</title>
+        <meta name="description" content="卧龙AI量化交易台（Wolong Pro）— 面向个人投资者的 AI 量化分析平台。支持 A 股+港股双市场，提供 AI 个股诊断、策略回测、四象限风险全景、信号推送等一站式投研工具。" />
+        <meta name="keywords" content="卧龙AI,量化交易,A股分析,港股分析,股票策略,策略回测,选股器,AI选股,四象限分析,技术指标,量化平台,Wolong Pro" />
+        {/* Open Graph */}
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="卧龙AI量化交易台" />
+        <meta property="og:title" content="卧龙AI量化交易台 — AI驱动的量化分析平台" />
+        <meta property="og:description" content="面向个人投资者的 AI 量化分析平台，支持 A 股+港股双市场，AI 个股诊断、策略回测、信号推送一站式投研工具。" />
+        <meta property="og:image" content="https://wolongtrader.top/logo.png" />
+        <meta property="og:url" content="https://wolongtrader.top" />
+        <meta property="og:locale" content="zh_CN" />
+        {/* Twitter Card */}
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="卧龙AI量化交易台 — AI驱动的量化分析平台" />
+        <meta name="twitter:description" content="面向个人投资者的 AI 量化分析平台，支持 A 股+港股双市场，AI 个股诊断、策略回测、信号推送一站式投研工具。" />
+        <meta name="twitter:image" content="https://wolongtrader.top/logo.png" />
+        {/* Canonical */}
+        <link rel="canonical" href="https://wolongtrader.top" />
+        {/* Misc */}
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" type="image/png" href="/favicon.png" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-
+import Head from 'next/head'
 import changelogData from '../data/changelog.json'
 
 const FILTER_OPTIONS = ['全部', '新功能', '修复优化', '工程维护']
@@ -73,6 +73,11 @@ export default function ChangelogPage() {
 
   return (
     <div className="space-y-6 pb-8">
+      <Head>
+        <title>更新日志 — 卧龙AI量化交易台</title>
+        <meta name="description" content="卧龙AI量化交易台更新日志 — 查看最新功能、优化与修复记录。" />
+        <link rel="canonical" href="https://wolongtrader.top/changelog" />
+      </Head>
       <section className="relative overflow-hidden rounded-[28px] border border-white/10 bg-[#111114] p-8 shadow-[0_24px_80px_rgba(0,0,0,0.35)] lg:p-10">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(230,126,34,0.18),transparent_34%),radial-gradient(circle_at_85%_20%,rgba(56,189,248,0.14),transparent_24%),linear-gradient(135deg,rgba(255,255,255,0.04),transparent_55%)]" />
         <div className="absolute inset-y-0 right-0 hidden w-1/3 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),transparent_70%)] lg:block" />

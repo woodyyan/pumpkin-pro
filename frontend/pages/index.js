@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { useState } from 'react'
+import Head from 'next/head'
 import { useAuth } from '../lib/auth-context'
 
 // ── Data ──
@@ -248,6 +249,11 @@ export default function HomePage() {
 
   return (
     <div className="space-y-0">
+      <Head>
+        <title>卧龙AI量化交易台 — AI驱动的量化分析平台</title>
+        <meta name="description" content="卧龙AI量化交易台（Wolong Pro）— 面向个人投资者的 AI 量化分析平台。支持 A 股+港股，AI 个股诊断、策略回测、选股器、信号推送、四象限风险全景，免费开始使用。" />
+        <link rel="canonical" href="https://wolongtrader.top/" />
+      </Head>
 
       {/* ── Section 1: Hero ── */}
       <section className="relative flex flex-col items-center text-center px-4 pt-8 pb-16 md:pt-16 md:pb-24">

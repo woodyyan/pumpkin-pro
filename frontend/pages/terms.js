@@ -4,7 +4,11 @@ import Link from 'next/link'
 export default function Terms() {
   return (
     <>
-      <Head><title>用户协议 — 卧龙AI量化交易台</title></Head>
+      <Head>
+        <title>用户协议 — 卧龙AI量化交易台</title>
+        <meta name="description" content="卧龙AI量化交易台用户协议 — 使用本平台服务需遵守的条款与条件。" />
+        <link rel="canonical" href="https://wolongtrader.top/terms" />
+      </Head>
       <div className="max-w-3xl mx-auto pb-16 space-y-8">
         <header className="space-y-2">
           <h1 className="text-3xl font-bold tracking-tight">用户协议</h1>

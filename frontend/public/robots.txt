@@ -1,0 +1,14 @@
+# https://wolongtrader.top/robots.txt
+
+User-agent: *
+Allow: /
+
+# 管理后台禁止索引
+Disallow: /admin
+
+# 静态资源不必要抓取
+Disallow: /api/
+Disallow: /_next/
+
+# Sitemap 位置
+Sitemap: https://wolongtrader.top/sitemap.xml

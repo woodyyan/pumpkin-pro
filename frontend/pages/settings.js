@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import { isAuthRequiredError } from '../lib/auth-storage'
+import Head from 'next/head'
 
 export default function SettingsPage() {
   const { openAuthModal, isLoggedIn, ready, user } = useAuth()
@@ -202,6 +203,11 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
+      <Head>
+        <title>设置 — 卧龙AI量化交易台</title>
+        <meta name="description" content="卧龙AI量化交易台设置 — 管理 Webhook 推送配置、信号通知偏好、投资画像等个人设置。" />
+        <link rel="canonical" href="https://wolongtrader.top/settings" />
+      </Head>
       <section className="rounded-2xl border border-border bg-card p-8">
         <h1 className="text-2xl font-semibold tracking-tight">设置</h1>
         <p className="mt-3 text-sm leading-7 text-white/65">

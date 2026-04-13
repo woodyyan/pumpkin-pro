@@ -4,7 +4,11 @@ import Link from 'next/link'
 export default function PrivacyPolicy() {
   return (
     <>
-      <Head><title>隐私政策 — 卧龙AI量化交易台</title></Head>
+      <Head>
+        <title>隐私政策 — 卧龙AI量化交易台</title>
+        <meta name="description" content="卧龙AI量化交易台隐私政策 — 说明我们如何收集、使用和保护您的个人信息。" />
+        <link rel="canonical" href="https://wolongtrader.top/privacy" />
+      </Head>
       <div className="max-w-3xl mx-auto pb-16 space-y-8">
         <header className="space-y-2">
           <h1 className="text-3xl font-bold tracking-tight">隐私政策</h1>

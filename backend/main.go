@@ -1549,6 +1549,26 @@ func containsExchange(exchanges []string, target string) bool {
 	return false
 }
 
+// normalizeWatchlistCode 将关注列表中的股票代码标准化为 DB 存储格式。
+// 港股（isHK=true）补零到 5 位（如 "00700"），A 股补零到 6 位（如 "000001"）。
+func normalizeWatchlistCode(sym string, isHK bool) string {
+	code := sym
+	if idx := strings.Index(code, "."); idx > 0 {
+		code = code[:idx]
+	}
+	code = strings.TrimLeft(code, "0")
+	if isHK {
+		if len(code) < 5 {
+			code = strings.Repeat("0", 5-len(code)) + code
+		}
+	} else {
+		if len(code) < 6 {
+			code = strings.Repeat("0", 6-len(code)) + code
+		}
+	}
+	return code
+}
+
 func writeLiveJSON(w http.ResponseWriter, statusCode int, payload any) {
 	requestID := fmt.Sprintf("live-%d", time.Now().UnixNano())
 	if payload == nil {
@@ -2257,14 +2277,7 @@ func (a *appServer) handleQuadrant(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		code := sym
-		if idx := strings.Index(code, "."); idx > 0 {
-			code = code[:idx]
-		}
-		code = strings.TrimLeft(code, "0")
-		if len(code) < 6 {
-			code = strings.Repeat("0", 6-len(code)) + code
-		}
+		code := normalizeWatchlistCode(sym, isHK)
 		if code != "" {
 			watchlistCodes = append(watchlistCodes, code)
 		}

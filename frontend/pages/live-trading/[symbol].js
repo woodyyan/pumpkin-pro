@@ -1316,7 +1316,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
           <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
           <h3 className="text-base font-semibold text-white">AI 正在分析中…</h3>
         </div>
-        <p className="mt-2 text-xs text-white/45">正在聚合 6 类数据并调用 AI 模型，预计 10-30 秒</p>
+        <p className="mt-2 text-xs text-white/45">正在聚合 6 类数据并调用卧龙AI投研模型，预计 20-50 秒</p>
         <div className="mt-4 space-y-3">
           {[1, 2, 3].map((i) => (
             <div key={i} className="animate-pulse rounded-lg bg-white/5 h-16" />
@@ -1402,7 +1402,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
       {/* ── 四层分析评分（第二步新增）── */}
       {analysis.layer_scores && Object.keys(analysis.layer_scores).length > 0 && (
         <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-4 py-3.5">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2 mb-3">
             <span className="text-xs font-semibold text-white/70">📊 卧龙模型评分</span>
             {/* 市场状态标签 */}
             {analysis.market_state && (
@@ -1720,7 +1720,7 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                         {/* 卧龙模型评分 */}
                         {analysis.layer_scores && Object.keys(analysis.layer_scores).length > 0 && (
                           <div className="rounded-lg border border-white/8 bg-black/20 px-3.5 py-3">
-                            <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2 mb-2">
                               <span className="text-[11px] font-semibold text-white/70">📊 卧龙模型评分</span>
                               {analysis.market_state_label && (
                                 <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-medium text-sky-300">

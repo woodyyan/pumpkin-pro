@@ -3,6 +3,9 @@
 /backend/backend
 /data/
 *.db
+*.db-wal
+*.db-shm
+quant/data/cache/
 .workbuddy/
 .env
 .workb/

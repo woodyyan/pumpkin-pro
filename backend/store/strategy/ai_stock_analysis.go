@@ -363,6 +363,15 @@ func buildStockUserPrompt(input *StockAnalysisInput, profile *portfolio.Investme
 	if v := mkt["turnover_rate"]; v != nil {
 		fmt.Fprintf(&sb, "- 换手率：%.2f%%\n", asFloat(v))
 	}
+	if v := mkt["open"]; v != nil {
+		fmt.Fprintf(&sb, "- 开盘价：%.2f\n", asFloat(v))
+	}
+	if v := mkt["high"]; v != nil {
+		fmt.Fprintf(&sb, "- 最高价：%.2f\n", asFloat(v))
+	}
+	if v := mkt["low"]; v != nil {
+		fmt.Fprintf(&sb, "- 最低价：%.2f\n", asFloat(v))
+	}
 
 	// 技术指标
 	techValid := boolField(input.Technical, "_valid")
@@ -402,8 +411,19 @@ func buildStockUserPrompt(input *StockAnalysisInput, profile *portfolio.Investme
 		sb.WriteString("\n## 基本面数据\n")
 		mcapText, _ := input.Fundamentals["market_cap_text"].(string)
 		fmt.Fprintf(&sb, "- 市值：%s\n", mcapText)
-		fmt.Fprintf(&sb, "- 市盈率（PE TTM）：%.2f\n", asFloat(input.Fundamentals["pe_ttm"]))
-		fmt.Fprintf(&sb, "- 市净率（PB）：%.2f\n", asFloat(input.Fundamentals["pb"]))
+		// PE TTM
+		if boolField(input.Fundamentals, "pe_unavailable") {
+			sb.WriteString("- 市盈率（PE TTM）：暂无数据\n")
+		} else {
+			fmt.Fprintf(&sb, "- 市盈率（PE TTM）：%.2f\n", asFloat(input.Fundamentals["pe_ttm"]))
+		}
+		// PB
+		if boolField(input.Fundamentals, "pb_unavailable") {
+			sb.WriteString("- 市净率（PB）：暂无数据\n")
+		} else {
+			fmt.Fprintf(&sb, "- 市净率（PB）：%.2f\n", asFloat(input.Fundamentals["pb"]))
+		}
+		// PEG（已有 unavailable 分支，保持不变）
 		peg := asFloat(input.Fundamentals["peg"])
 		pegUnavailable := boolField(input.Fundamentals, "peg_unavailable")
 		if pegUnavailable {
@@ -411,7 +431,12 @@ func buildStockUserPrompt(input *StockAnalysisInput, profile *portfolio.Investme
 		} else {
 			fmt.Fprintf(&sb, "- PEG 指数：%.2f\n", peg)
 		}
-		fmt.Fprintf(&sb, "- 股息收益率：%.2f%%\n", asFloat(input.Fundamentals["dividend_yield"]))
+		// 股息率
+		if boolField(input.Fundamentals, "div_yield_unavailable") {
+			sb.WriteString("- 股息收益率：暂无数据\n")
+		} else {
+			fmt.Fprintf(&sb, "- 股息收益率：%.2f%%\n", asFloat(input.Fundamentals["dividend_yield"]))
+		}
 		netProfitText, _ := input.Fundamentals["net_profit_text"].(string)
 		fmt.Fprintf(&sb, "- 净利润：%s\n", netProfitText)
 		revenueText, _ := input.Fundamentals["revenue_text"].(string)

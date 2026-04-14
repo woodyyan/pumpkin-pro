@@ -7,6 +7,8 @@ A 股/港股全市场选股筛选器
 - 支持多维指标范围筛选 + 排序 + 分页
 """
 
+from __future__ import annotations
+
 import logging
 import math
 import threading
@@ -16,15 +18,28 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-# 延迟导入：akshare 仅在实际调用数据源时加载，避免 CI 环境未安装时测试收集失败
+# ---------------------------------------------------------------------------
+# 延迟导入辅助函数：所有第三方依赖（akshare / requests / pandas）仅在
+# 实际调用数据源时加载，避免 CI 环境未安装时 pytest 收集阶段就 ImportError。
+# ---------------------------------------------------------------------------
 
 
 def _get_ak() -> Any:
     """延迟导入 akshare，返回模块引用"""
     import akshare as ak  # noqa: F811
     return ak
-import pandas as pd
-import requests
+
+
+def _get_requests():
+    """延迟导入 requests，返回模块引用"""
+    import requests
+    return requests
+
+
+def _get_pd():
+    """延迟导入 pandas，返回模块引用"""
+    import pandas as pd
+    return pd
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +92,7 @@ NUMERIC_COLUMNS = [
 # 内存缓存
 # ---------------------------------------------------------------------------
 _cache_lock = threading.Lock()
-_cache_data: Optional[pd.DataFrame] = None
+_cache_data: Optional[Any] = None
 _cache_ts: float = 0.0
 _CACHE_TTL = 900  # 15 分钟（选股场景不需要秒级实时性）
 
@@ -177,7 +192,7 @@ def _parse_qq_line(line: str) -> Optional[Dict[str, Any]]:
 def _fetch_qq_batch(qq_codes: List[str]) -> List[Dict[str, Any]]:
     """查询一批腾讯行情数据"""
     url = f"http://qt.gtimg.cn/q={','.join(qq_codes)}"
-    resp = requests.get(url, headers=_QQ_HEADERS, timeout=_QQ_TIMEOUT)
+    resp = _get_requests().get(url, headers=_QQ_HEADERS, timeout=_QQ_TIMEOUT)
     resp.encoding = "gbk"
     results = []
     for line in resp.text.strip().split("\n"):
@@ -187,7 +202,7 @@ def _fetch_qq_batch(qq_codes: List[str]) -> List[Dict[str, Any]]:
     return results
 
 
-def _get_snapshot_via_qq() -> pd.DataFrame:
+def _get_snapshot_via_qq() -> Any:
     """通过腾讯财经接口获取全市场快照（备用方案）"""
     logger.info("尝试腾讯财经备用数据源...")
 
@@ -221,8 +236,8 @@ def _get_snapshot_via_qq() -> pd.DataFrame:
     if not all_records:
         raise RuntimeError("腾讯财经数据源返回空数据")
 
-    df = pd.DataFrame(all_records)
-
+    df = _get_pd().DataFrame(all_records)
+    pd = _get_pd()
     # 数值列转 float
     for col in NUMERIC_COLUMNS:
         if col in df.columns:
@@ -235,7 +250,7 @@ def _get_snapshot_via_qq() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # 主入口：先试东财，失败则回退腾讯
 # ---------------------------------------------------------------------------
-def get_a_share_snapshot() -> pd.DataFrame:
+def get_a_share_snapshot() -> Any:
     """获取 A 股全市场实时快照，5 分钟内存缓存"""
     global _cache_data, _cache_ts
 
@@ -260,7 +275,7 @@ def get_a_share_snapshot() -> pd.DataFrame:
                 df["code"] = df["code"].astype(str).str.zfill(6)
             for col in NUMERIC_COLUMNS:
                 if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
+                    df[col] = _get_pd().to_numeric(df[col], errors="coerce")
             logger.info("东财主数据源加载成功: %d 只股票", len(df))
     except Exception as exc:
         logger.warning("东财主数据源失败: %s，切换腾讯备用源", exc)
@@ -287,9 +302,9 @@ def get_a_share_snapshot() -> pd.DataFrame:
 # 筛选
 # ---------------------------------------------------------------------------
 def apply_filters(
-    df: pd.DataFrame,
+    df: Any,
     filters: Dict[str, Dict[str, Any]],
-) -> pd.DataFrame:
+) -> Any:
     """
     按 min/max 范围过滤 DataFrame。
     filters 示例:
@@ -329,12 +344,12 @@ def apply_filters(
 
 
 def sort_and_paginate(
-    df: pd.DataFrame,
+    df: Any,
     sort_by: str = "code",
     sort_order: str = "asc",
     page: int = 1,
     page_size: int = 50,
-) -> Tuple[pd.DataFrame, int]:
+) -> Tuple[Any, int]:
     """排序并分页，返回 (page_df, total)"""
     # 白名单校验排序列
     if sort_by not in SORTABLE_COLUMNS:
@@ -391,7 +406,7 @@ HK_NUMERIC_COLUMNS = [
 # 排序列白名单 = A 股列名 ∪ 港股列名（不包含 industry / profit_growth_rate）
 SORTABLE_COLUMNS = set(COLUMN_MAP.values()) | set(HK_COLUMN_MAP.values())
 
-_hk_cache_data: Optional[pd.DataFrame] = None
+_hk_cache_data: Optional[Any] = None
 _hk_cache_ts: float = 0.0
 _HK_CACHE_TTL = 900  # 15 分钟
 
@@ -399,7 +414,7 @@ _HK_CACHE_TTL = 900  # 15 分钟
 # ---------------------------------------------------------------------------
 # 港股全市场快照
 # ---------------------------------------------------------------------------
-def get_hk_snapshot() -> pd.DataFrame:
+def get_hk_snapshot() -> Any:
     """获取港股全市场实时快照，15 分钟内存缓存（东财主源，腾讯兜底）"""
     global _hk_cache_data, _hk_cache_ts
 
@@ -424,7 +439,7 @@ def get_hk_snapshot() -> pd.DataFrame:
                 df["code"] = df["code"].astype(str).str.zfill(5)
             for col in HK_NUMERIC_COLUMNS:
                 if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
+                    df[col] = _get_pd().to_numeric(df[col], errors="coerce")
             logger.info("东财港股主数据源加载成功: %d 只股票", len(df))
     except Exception as exc:
         logger.warning("东财港股主数据源失败: %s，尝试腾讯备用源...", exc)
@@ -503,7 +518,7 @@ def _parse_qq_hk_line(line: str) -> Optional[Dict[str, Any]]:
     }
 
 
-def _get_hk_snapshot_via_qq() -> pd.DataFrame:
+def _get_hk_snapshot_via_qq() -> Any:
     """通过腾讯财经接口获取港股全市场快照（备用方案）。
 
     不依赖 AKShare 获取代码列表，直接用 5 位数字代码段批量查询腾讯。
@@ -520,7 +535,7 @@ def _get_hk_snapshot_via_qq() -> pd.DataFrame:
     def _fetch_qq_batch_hk(qq_codes_batch: List[str]) -> List[Dict[str, Any]]:
         """查询一批腾讯港股行情数据"""
         url = f"http://qt.gtimg.cn/q={','.join(qq_codes_batch)}"
-        resp = requests.get(url, headers=_QQ_HEADERS, timeout=_QQ_TIMEOUT)
+        resp = _get_requests().get(url, headers=_QQ_HEADERS, timeout=_QQ_TIMEOUT)
         resp.encoding = "gbk"
         results = []
         for line in resp.text.strip().split("\n"):
@@ -553,10 +568,10 @@ def _get_hk_snapshot_via_qq() -> pd.DataFrame:
     if not all_records:
         raise RuntimeError("腾讯财经港股数据源返回空数据")
 
-    df = pd.DataFrame(all_records)
+    df = _get_pd().DataFrame(all_records)
     for col in HK_NUMERIC_COLUMNS:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            df[col] = _get_pd().to_numeric(df[col], errors="coerce")
     df = df.drop_duplicates(subset=["code"], keep="first").reset_index(drop=True)
 
     logger.info("腾讯财经港股备用源加载完成: %d 只股票", len(df))
@@ -566,11 +581,12 @@ def _get_hk_snapshot_via_qq() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # DataFrame → JSON-safe list[dict]
 # ---------------------------------------------------------------------------
-def df_to_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
+def df_to_records(df: Any) -> List[Dict[str, Any]]:
     """将 DataFrame 转为 JSON 安全的 list[dict]"""
     if df is None or df.empty:
         return []
 
+    pd = _get_pd()
     safe_df = df.copy()
     safe_df = safe_df.replace([np.inf, -np.inf], np.nan)
     safe_df = safe_df.where(pd.notnull(safe_df), None)

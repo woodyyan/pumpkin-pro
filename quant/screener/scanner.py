@@ -14,8 +14,15 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
 
-import akshare as ak
 import numpy as np
+
+# 延迟导入：akshare 仅在实际调用数据源时加载，避免 CI 环境未安装时测试收集失败
+
+
+def _get_ak() -> Any:
+    """延迟导入 akshare，返回模块引用"""
+    import akshare as ak  # noqa: F811
+    return ak
 import pandas as pd
 import requests
 
@@ -186,7 +193,7 @@ def _get_snapshot_via_qq() -> pd.DataFrame:
 
     # 第一步：获取全部 A 股代码列表
     try:
-        info_df = ak.stock_info_a_code_name()
+        info_df = _get_ak().stock_info_a_code_name()
     except Exception as exc:
         logger.error("获取 A 股代码列表失败: %s", exc)
         raise RuntimeError("获取 A 股代码列表失败") from exc
@@ -244,7 +251,7 @@ def get_a_share_snapshot() -> pd.DataFrame:
 
     # ---- 主数据源：东方财富（AKShare） ----
     try:
-        raw_df = ak.stock_zh_a_spot_em()
+        raw_df = _get_ak().stock_zh_a_spot_em()
         if raw_df is not None and not raw_df.empty:
             available_columns = [col for col in COLUMN_MAP if col in raw_df.columns]
             df = raw_df[available_columns].copy()
@@ -408,7 +415,7 @@ def get_hk_snapshot() -> pd.DataFrame:
 
     # ---- 主数据源：东方财富港股 ----
     try:
-        raw_df = ak.stock_hk_spot_em()
+        raw_df = _get_ak().stock_hk_spot_em()
         if raw_df is not None and not raw_df.empty:
             available_columns = [col for col in HK_COLUMN_MAP if col in raw_df.columns]
             df = raw_df[available_columns].copy()

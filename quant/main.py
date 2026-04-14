@@ -24,7 +24,7 @@ from screener.scanner import (
     apply_filters,
     df_to_records,
     get_a_share_snapshot,
-    get_industry_options,
+    get_hk_snapshot,
     sort_and_paginate,
 )
 from screener.quadrant import compute_all_quadrant_scores, compute_hk_quadrant_scores, get_cached_scores
@@ -80,8 +80,11 @@ class ScreenerFilterRange(BaseModel):
 
 
 class ScreenerScanRequest(BaseModel):
+    exchange: Optional[str] = Field(
+        default=None,
+        description="市场: HKEX=港股, 其他/null=A股",
+    )
     filters: Dict[str, ScreenerFilterRange] = Field(default_factory=dict)
-    industry: Optional[str] = Field(default=None)
     sort_by: str = Field(default="code")
     sort_order: str = Field(default="asc")
     page: int = Field(default=1, ge=1)
@@ -116,9 +119,16 @@ def health_check():
 
 @app.post("/api/screener/scan")
 def screener_scan(req: ScreenerScanRequest):
-    """A 股全市场筛选：获取实时快照 → 多维指标范围过滤 → 排序 → 分页返回"""
+    """全市场筛选：获取实时快照 → 多维指标范围过滤 → 排序 → 分页返回
+
+    支持 A 股（默认）和港股（exchange=HKEX）两个市场。
+    """
     try:
-        df = get_a_share_snapshot()
+        # 根据 exchange 参数分流到对应市场的快照
+        if req.exchange and req.exchange.upper() == "HKEX":
+            df = get_hk_snapshot()
+        else:
+            df = get_a_share_snapshot()
 
         # 将 Pydantic 模型转为 dict
         raw_filters = {}
@@ -133,8 +143,7 @@ def screener_scan(req: ScreenerScanRequest):
             if entry:
                 raw_filters[key] = entry
 
-        industries = get_industry_options(df)
-        df = apply_filters(df, raw_filters, industry=req.industry)
+        df = apply_filters(df, raw_filters)
         page_df, total = sort_and_paginate(df, req.sort_by, req.sort_order, req.page, req.page_size)
 
         return {
@@ -142,7 +151,6 @@ def screener_scan(req: ScreenerScanRequest):
             "page": req.page,
             "page_size": req.page_size,
             "items": df_to_records(page_df),
-            "industries": industries,
         }
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

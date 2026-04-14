@@ -39,6 +39,16 @@ func (s *Service) Create(ctx context.Context, userID string, input CreateWatchli
 	if len([]rune(name)) > 64 {
 		return nil, fmt.Errorf("%w: 自选表名称过长", ErrInvalid)
 	}
+
+	// Validate and normalize exchange
+	exchange := strings.TrimSpace(strings.ToUpper(input.Exchange))
+	if exchange == "" {
+		exchange = "ASHARE"
+	}
+	if exchange != "ASHARE" && exchange != "HKEX" {
+		return nil, fmt.Errorf("%w: 无效的市场类型，仅支持 ASHARE 或 HKEX", ErrInvalid)
+	}
+
 	if len(input.Stocks) == 0 {
 		return nil, fmt.Errorf("%w: 至少需要包含一只股票", ErrInvalid)
 	}
@@ -62,6 +72,7 @@ func (s *Service) Create(ctx context.Context, userID string, input CreateWatchli
 		ID:        wlID,
 		UserID:    userID,
 		Name:      name,
+		Exchange:  exchange,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}

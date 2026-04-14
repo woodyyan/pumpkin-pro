@@ -3,27 +3,36 @@ import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import Head from 'next/head'
 
-// ─── sessionStorage 缓存 ─────────────────────────────────
-const SCREENER_CACHE_KEY = 'pumpkin_screener_cache'
+// ─── sessionStorage 缓存（按市场隔离） ──────────────────────────
 const SKELETON_ROWS = 10
 
-function readScreenerCache() {
+function getScreenerCacheKey(exchange) {
+  return `pumpkin_screener_cache_${(exchange || 'ASHARE').toLowerCase()}`
+}
+
+function readScreenerCache(exchange) {
   try {
-    const raw = sessionStorage.getItem(SCREENER_CACHE_KEY)
+    const raw = sessionStorage.getItem(getScreenerCacheKey(exchange))
     if (!raw) return null
     return JSON.parse(raw)
   } catch { return null }
 }
 
-function writeScreenerCache(data) {
+function writeScreenerCache(data, exchange) {
   try {
     if (!data) return
-    sessionStorage.setItem(SCREENER_CACHE_KEY, JSON.stringify(data))
+    sessionStorage.setItem(getScreenerCacheKey(exchange), JSON.stringify(data))
   } catch { /* quota exceeded, ignore */ }
 }
 
-// ─── AI 选股示例标签 ─────────────────────────────────────────
-const AI_EXAMPLE_QUERIES = [
+function clearScreenerCache(exchange) {
+  try {
+    sessionStorage.removeItem(getScreenerCacheKey(exchange))
+  } catch { /* ignore */ }
+}
+
+// ─── AI 选股示例标签（按市场） ───────────────────────────────
+const AI_EXAMPLE_QUERIES_ASHARE = [
   '挣钱的蓝筹股',
   '低估值绩优股',
   '高增长小盘股',
@@ -32,9 +41,19 @@ const AI_EXAMPLE_QUERIES = [
   '今天涨停的',
 ]
 
-// ─── 筛选条件配置（单下拉 · 预设区间） ──────────────────────
+const AI_EXAMPLE_QUERIES_HKEX = [
+  '香港科技龙头',
+  '低估值港股蓝筹',
+  '高股息红利股',
+  '近期超跌的优质港股',
+  '香港金融地产',
+  '南向资金重仓股',
+]
+
+// ─── 筛选条件配置（A 股 / 港股 双套） ─────────────────────
 // 每个选项自带 min/max，选中即生效，用户只需选一次
-const FILTER_FIELDS = [
+
+const FILTER_FIELDS_ASHARE = [
   {
     key: 'price', label: '最新价',
     options: [
@@ -62,24 +81,6 @@ const FILTER_FIELDS = [
       { label: '跌幅 3~5%',    min: -5,   max: -3 },
       { label: '跌幅 >5%',     min: null, max: -5 },
       { label: '跌停 (≤-9.8%)',min: null, max: -9.8 },
-    ],
-  },
-  {
-    key: 'industry', label: '行业', type: 'enum',
-    options: [
-      { label: '不限', value: '' },
-    ],
-  },
-  {
-    key: 'profit_growth_rate', label: '利润增长率',
-    options: [
-      { label: '不限',          min: null, max: null },
-      { label: '下滑 (<0%)',    min: null, max: 0 },
-      { label: '0 - 20%',      min: 0,    max: 20 },
-      { label: '20 - 50%',     min: 20,   max: 50 },
-      { label: '50 - 100%',    min: 50,   max: 100 },
-      { label: '100 - 200%',   min: 100,  max: 200 },
-      { label: '200% 以上',     min: 200,  max: null },
     ],
   },
   {
@@ -202,11 +203,121 @@ const FILTER_FIELDS = [
   },
 ]
 
-// ─── 表格列配置 ──────────────────────────────────────────────
+const FILTER_FIELDS_HKEX = [
+  {
+    key: 'price', label: '最新价',
+    options: [
+      { label: '不限',         min: null, max: null },
+      { label: '5 HKD 以下',   min: null, max: 5 },
+      { label: '5 - 20 HKD',   min: 5,    max: 20 },
+      { label: '20 - 50 HKD',  min: 20,   max: 50 },
+      { label: '50 - 100 HKD', min: 50,   max: 100 },
+      { label: '100 HKD 以上',  min: 100,  max: null },
+    ],
+  },
+  {
+    key: 'change_pct', label: '涨跌幅',
+    options: [
+      { label: '不限',         min: null, max: null },
+      { label: '涨幅 >5%',     min: 5,    max: null },
+      { label: '涨幅 3~5%',    min: 3,    max: 5 },
+      { label: '涨幅 1~3%',    min: 1,    max: 3 },
+      { label: '小幅波动 ±1%', min: -1,   max: 1 },
+      { label: '跌幅 1~3%',    min: -3,   max: -1 },
+      { label: '跌幅 3~5%',    min: -5,   max: -3 },
+      { label: '跌幅 >5%',     min: null, max: -5 },
+      // 港股无涨跌停概念，不提供涨跌停选项
+    ],
+  },
+  {
+    key: 'total_mv', label: '总市值',
+    options: [
+      { label: '不限',             min: null,       max: null },
+      { label: '小型 (<10亿 HKD)', min: null,       max: 10e8 },
+      { label: '中小 (10~50亿)',    min: 10e8,       max: 50e8 },
+      { label: '中型 (50~200亿)',   min: 50e8,       max: 200e8 },
+      { label: '大型 (200~1000亿)', min: 200e8,      max: 1000e8 },
+      { label: '超大型 (>1000亿)',  min: 1000e8,     max: null },
+    ],
+  },
+  {
+    key: 'pe', label: 'PE（动态）',
+    options: [
+      { label: '不限',         min: null, max: null },
+      { label: '亏损 (<0)',    min: null, max: 0 },
+      { label: '0 - 10',      min: 0,    max: 10 },
+      { label: '10 - 20',     min: 10,   max: 20 },
+      { label: '20 - 30',     min: 20,   max: 30 },
+      { label: '30 - 50',     min: 30,   max: 50 },
+      { label: '50 - 100',    min: 50,   max: 100 },
+      { label: '高估值 (>100)',min: 100,  max: null },
+    ],
+  },
+  {
+    key: 'pb', label: 'PB',
+    options: [
+      { label: '不限',          min: null, max: null },
+      { label: '破净 (<1)',     min: null, max: 1 },
+      { label: '1 - 2',        min: 1,    max: 2 },
+      { label: '2 - 3',        min: 2,    max: 3 },
+      { label: '3 - 5',        min: 3,    max: 5 },
+      { label: '5 - 10',       min: 5,    max: 10 },
+      { label: '高 PB (>10)',   min: 10,   max: null },
+    ],
+  },
+  {
+    key: 'turnover_rate', label: '换手率',
+    options: [
+      { label: '不限',          min: null, max: null },
+      { label: '低 (<1%)',      min: null, max: 1 },
+      { label: '1 - 3%',       min: 1,    max: 3 },
+      { label: '3 - 5%',       min: 3,    max: 5 },
+      { label: '5 - 10%',      min: 5,    max: 10 },
+      { label: '10 - 20%',     min: 10,   max: 20 },
+      { label: '高 (>20%)',     min: 20,   max: null },
+    ],
+  },
+  {
+    key: 'volume_ratio', label: '量比',
+    options: [
+      { label: '不限',           min: null, max: null },
+      { label: '极度萎缩 (<0.5)',min: null, max: 0.5 },
+      { label: '萎缩 (0.5~1)',   min: 0.5,  max: 1 },
+      { label: '正常 (1~2)',     min: 1,    max: 2 },
+      { label: '放量 (2~5)',     min: 2,    max: 5 },
+      { label: '巨量 (>5)',      min: 5,    max: null },
+    ],
+  },
+  {
+    key: 'amplitude', label: '振幅',
+    options: [
+      { label: '不限',       min: null, max: null },
+      { label: '小 (<2%)',   min: null, max: 2 },
+      { label: '2 - 5%',    min: 2,    max: 5 },
+      { label: '5 - 10%',   min: 5,    max: 10 },
+      { label: '大 (>10%)',  min: 10,   max: null },
+    ],
+  },
+  {
+    key: 'turnover', label: '成交额',
+    options: [
+      { label: '不限',                 min: null,    max: null },
+      { label: '低 (<1000万 HKD)',     min: null,    max: 1000e4 },
+      { label: '1000万 - 5000万 HKD',  min: 1000e4,  max: 5000e4 },
+      { label: '5000万 - 1亿 HKD',     min: 5000e4,  max: 1e8 },
+      { label: '1亿 - 5亿 HKD',        min: 1e8,     max: 5e8 },
+      { label: '5亿 - 10亿 HKD',       min: 5e8,     max: 10e8 },
+      { label: '大于 10亿 HKD',        min: 10e8,    max: null },
+    ],
+  },
+  // 注：港股快照无 change_pct_60d / change_pct_ytd / float_mv（腾讯兜底时可能缺失）
+  // 这些字段不在此列出，前端会自动隐藏数据为 null 的列
+]
+
+// ─── 表格列配置（通用，港股会隐藏数据为 null 的列） ────────────
 const TABLE_COLUMNS = [
   { key: 'code',               label: '代码',         sortable: true,  width: 80,  format: 'code' },
   { key: 'name',               label: '名称',         sortable: true,  width: 90,  format: 'text' },
-  { key: 'industry',           label: '行业',         sortable: true,  width: 120, format: 'industry' },
   { key: 'price',              label: '最新价',       sortable: true,  width: 80,  format: 'price' },
   { key: 'change_pct',         label: '涨跌幅',       sortable: true,  width: 80,  format: 'percent', colorize: true },
   { key: 'change_amt',         label: '涨跌额',       sortable: true,  width: 80,  format: 'price',   colorize: true },
@@ -217,14 +328,16 @@ const TABLE_COLUMNS = [
   { key: 'volume_ratio',       label: '量比',         sortable: true,  width: 60,  format: 'number' },
   { key: 'pe',                 label: 'PE',           sortable: true,  width: 70,  format: 'number' },
   { key: 'pb',                 label: 'PB',           sortable: true,  width: 60,  format: 'number' },
-  { key: 'profit_growth_rate', label: '利润增长率',   sortable: true,  width: 95,  format: 'percent' },
   { key: 'total_mv',           label: '总市值',       sortable: true,  width: 100, format: 'bigNumber' },
   { key: 'float_mv',           label: '流通市值',     sortable: true,  width: 100, format: 'bigNumber' },
   { key: 'change_pct_60d',     label: '60日涨幅',     sortable: true,  width: 85,  format: 'percent', colorize: true },
   { key: 'change_pct_ytd',     label: 'YTD涨幅',      sortable: true,  width: 85,  format: 'percent', colorize: true },
 ]
 
-// ─── 格式化工具 ──────────────────────────────────────────────
+// 港股快照中可能为 null 的列（这些列在港股 Tab 中自动隐藏）
+const HK_MAYBE_NULL_COLUMNS = new Set(['change_pct_60d', 'change_pct_ytd', 'float_mv', 'volume_ratio', 'pb'])
+
+// ─── 格式化工具（支持 A 股 / 港股）────────────────────────────
 const INDUSTRY_LEVEL_SUFFIX_RE = /\s*[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+$/u
 
 function formatIndustryLabel(value) {
@@ -239,19 +352,20 @@ function normalizeIndustryText(value) {
   return formatIndustryLabel(value).replace(/\s+/g, '').toLowerCase()
 }
 
-function formatValue(value, format) {
+function formatValue(value, format, exchange) {
   if (value === null || value === undefined || value === '') return '--'
   const num = Number(value)
+  const isHKEX = exchange === 'HKEX'
 
   switch (format) {
     case 'code':
-      return String(value).padStart(6, '0')
+      // 港股 5 位补零，A 股 6 位
+      return String(value).padStart(isHKEX ? 5 : 6, '0')
     case 'text':
       return String(value)
-    case 'industry':
-      return formatIndustryLabel(value)
     case 'price':
-      return isNaN(num) ? '--' : num.toFixed(2)
+      if (isNaN(num)) return '--'
+      return isHKEX ? `${num.toFixed(2)} HKD` : num.toFixed(2)
     case 'percent':
       if (isNaN(num)) return '--'
       return (num >= 0 ? '+' : '') + num.toFixed(2) + '%'
@@ -260,7 +374,10 @@ function formatValue(value, format) {
     case 'bigNumber': {
       if (isNaN(num)) return '--'
       const absNum = Math.abs(num)
-      if (absNum >= 1e8) return (num / 1e8).toFixed(2) + ' 亿'
+      if (absNum >= 1e8) {
+        const formatted = (num / 1e8).toFixed(2)
+        return isHKEX ? `${formatted} 亿 HKD` : `${formatted} 亿`
+      }
       if (absNum >= 1e4) return (num / 1e4).toFixed(2) + ' 万'
       return num.toFixed(2)
     }
@@ -271,7 +388,7 @@ function formatValue(value, format) {
   }
 }
 
-// A 股惯例：涨→红，跌→绿
+// A 股惯例：涨→红，跌→绿（港股同色规则）
 function getColorClass(value) {
   if (value === null || value === undefined) return ''
   const num = Number(value)
@@ -281,8 +398,11 @@ function getColorClass(value) {
   return 'text-white/50'
 }
 
-// 6 位纯数字 code → 带交易所后缀的 symbol（用于跳转详情页）
-function codeToSymbol(code) {
+// code + exchange → 带交易所后缀的 symbol（用于跳转详情页）
+function codeToSymbol(code, exchange) {
+  if (exchange === 'HKEX') {
+    return `${String(code).padStart(5, '0')}.HK`
+  }
   const c = String(code).padStart(6, '0')
   return c.startsWith('6') || c.startsWith('9') ? `${c}.SH` : `${c}.SZ`
 }
@@ -301,6 +421,7 @@ function useDebounce(value, delay) {
 export default function StockPickerPage() {
   const { isLoggedIn, openAuthModal } = useAuth()
 
+  const [exchange, setExchange] = useState('ASHARE') // 'ASHARE' | 'HKEX'
   const [filters, setFilters] = useState({})
   const [sortBy, setSortBy] = useState('code')
   const [sortOrder, setSortOrder] = useState('asc')
@@ -310,7 +431,6 @@ export default function StockPickerPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [filtersExpanded, setFiltersExpanded] = useState(true)
-  const [industryOptions, setIndustryOptions] = useState([])
 
   // ── 关注池（用于判断是否已关注）──
   const [watchedSymbols, setWatchedSymbols] = useState(new Set())
@@ -321,10 +441,11 @@ export default function StockPickerPage() {
     if (!isLoggedIn) { setWatchedSymbols(new Set()); return }
     try {
       const res = await requestJson('/api/live/watchlist')
-      const codes = new Set((res?.items || []).map((i) => i.symbol.split('.')[0].padStart(6, '0')))
+      const codeLen = exchange === 'HKEX' ? 5 : 6
+      const codes = new Set((res?.items || []).map((i) => i.symbol.split('.')[0].padStart(codeLen, '0')))
       setWatchedSymbols(codes)
     } catch { /* non-critical */ }
-  }, [isLoggedIn])
+  }, [isLoggedIn, exchange])
 
   useEffect(() => { fetchWatchedSymbols() }, [fetchWatchedSymbols])
 
@@ -334,7 +455,7 @@ export default function StockPickerPage() {
       openAuthModal('login', '登录后可关注股票')
       return
     }
-    const symbol = codeToSymbol(code)
+    const symbol = codeToSymbol(code, exchange)
     setAddingCode(code)
     try {
       await requestJson('/api/live/watchlist', {
@@ -342,14 +463,15 @@ export default function StockPickerPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol, name: name || '' }),
       })
-      setWatchedSymbols((prev) => new Set([...prev, String(code).padStart(6, '0')]))
+      const codeLen = exchange === 'HKEX' ? 5 : 6
+      setWatchedSymbols((prev) => new Set([...prev, String(code).padStart(codeLen, '0')]))
     } catch { /* 静默：可能已存在 */ }
     setAddingCode(null)
   }
 
   // 跳转详情页（新标签页）
   const handleOpenDetail = (code) => {
-    window.open(`/live-trading/${codeToSymbol(code)}`, '_blank')
+    window.open(`/live-trading/${codeToSymbol(code, exchange)}`, '_blank')
   }
 
   // ── 自选表状态 ──
@@ -371,17 +493,8 @@ export default function StockPickerPage() {
   const [aiError, setAiError] = useState('')
 
   const filterFields = useMemo(() => {
-    const resolvedIndustryOptions = [
-      { label: '不限', value: '' },
-      ...industryOptions.map((industry) => ({ label: formatIndustryLabel(industry), value: industry })),
-    ]
-
-    return FILTER_FIELDS.map((field) => (
-      field.key === 'industry'
-        ? { ...field, options: resolvedIndustryOptions }
-        : field
-    ))
-  }, [industryOptions])
+    return exchange === 'HKEX' ? FILTER_FIELDS_HKEX : FILTER_FIELDS_ASHARE
+  }, [exchange])
 
   // ── 自选表 API ──
   const fetchWatchlists = useCallback(async () => {
@@ -411,7 +524,7 @@ export default function StockPickerPage() {
       await requestJson('/api/screener/watchlists', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: trimmed, stocks }),
+        body: JSON.stringify({ name: trimmed, stocks, exchange }),
       }, '保存自选表失败')
       setSaveDialogOpen(false)
       setSaveName('')
@@ -468,7 +581,7 @@ export default function StockPickerPage() {
       const res = await requestJson('/api/screener/ai-parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: trimmed }),
+        body: JSON.stringify({ query: trimmed, exchange }),
       }, 'AI 解析失败')
 
       if (res?.summary) setAiSummary(res.summary)
@@ -483,13 +596,6 @@ export default function StockPickerPage() {
         if (bestIdx > 0) newFilters[key] = bestIdx
       }
 
-      const aiIndustry = typeof res?.industry === 'string' ? res.industry.trim() : ''
-      if (aiIndustry) {
-        const industryField = filterFields.find((f) => f.key === 'industry')
-        const industryIdx = findBestIndustryOptionIndex(industryField?.options || [], aiIndustry)
-        if (industryIdx > 0) newFilters.industry = industryIdx
-      }
-
       setFilters(newFilters)
       setActiveWatchlistId(null) // 退出自选表模式
       if (!filtersExpanded) setFiltersExpanded(true)
@@ -502,7 +608,7 @@ export default function StockPickerPage() {
 
   // 构建 API 请求参数：数值字段映射到 filters，枚举字段走顶层参数
   const buildScanPayload = useCallback((rawFilters) => {
-    const payload = { filters: {} }
+    const payload = { filters: {}, exchange }
 
     for (const [key, optionIdx] of Object.entries(rawFilters)) {
       const field = filterFields.find((f) => f.key === key)
@@ -525,7 +631,7 @@ export default function StockPickerPage() {
     }
 
     return payload
-  }, [filterFields])
+  }, [filterFields, exchange])
 
   const fetchScreener = useCallback(async (currentFilters, currentSortBy, currentSortOrder, currentPage) => {
     setLoading(true)
@@ -543,49 +649,42 @@ export default function StockPickerPage() {
           page_size: pageSize,
         }),
       }, '选股查询失败')
-      if (Array.isArray(result?.industries)) {
-        setIndustryOptions(result.industries)
-      }
       setData(result)
       // Cache default view (no filters, page 1) for instant next visit
       if (Object.keys(currentFilters).length === 0 && currentPage === 1) {
-        writeScreenerCache(result)
+        writeScreenerCache(result, exchange)
       }
     } catch (err) {
       setError(err.message || '查询失败')
     } finally {
       setLoading(false)
     }
-  }, [buildScanPayload, pageSize])
+  }, [buildScanPayload, pageSize, exchange])
 
   // 初始加载：先读缓存即时展示，再后台刷新最新数据
   useEffect(() => {
     if (!initialLoadRef.current) {
       initialLoadRef.current = true
-      const cached = readScreenerCache()
+      const cached = readScreenerCache(exchange)
       if (cached) {
         setData(cached)
-        if (Array.isArray(cached?.industries)) {
-          setIndustryOptions(cached.industries)
-        }
         // 后台静默刷新（不显示 loading）
         ;(async () => {
           try {
             const result = await requestJson('/api/screener/scan', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ filters: {}, sort_by: 'code', sort_order: 'asc', page: 1, page_size: pageSize }),
+              body: JSON.stringify({ exchange, filters: {}, sort_by: 'code', sort_order: 'asc', page: 1, page_size: pageSize }),
             }, '选股查询失败')
-            if (Array.isArray(result?.industries)) setIndustryOptions(result.industries)
             setData(result)
-            writeScreenerCache(result)
+            writeScreenerCache(result, exchange)
           } catch { /* 静默失败，保留缓存数据 */ }
         })()
       } else {
         fetchScreener({}, 'code', 'asc', 1)
       }
     }
-  }, [fetchScreener, pageSize])
+  }, [fetchScreener, pageSize, exchange])
 
   // 筛选条件变化时自动查询（防抖后）
   useEffect(() => {
@@ -632,6 +731,44 @@ export default function StockPickerPage() {
     setPage(1)
   }
 
+  // 市场切换：重置所有状态 + 清空当前市场缓存
+  const handleExchangeChange = (newExchange) => {
+    if (newExchange === exchange) return
+    clearScreenerCache(exchange) // 清除旧市场缓存
+    setExchange(newExchange)
+    setFilters({})
+    setSortBy('code')
+    setSortOrder('asc')
+    setPage(1)
+    setData(null)
+    setActiveWatchlistId(null)
+    setError('')
+    setAiQuery('')
+    setAiSummary('')
+    setAiError('')
+  }
+
+  // 当前市场的有效表格列（港股隐藏数据可能为 null 的列）
+  const visibleColumns = useMemo(() => {
+    if (exchange !== 'HKEX') return TABLE_COLUMNS
+    // 港股：只保留有数据的列（首次加载前先全部显示，等数据返回后再过滤）
+    // 策略：如果 data 已加载且某列全为 null 则隐藏
+    if (!data || !data.items || data.items.length === 0) return TABLE_COLUMNS
+    return TABLE_COLUMNS.filter((col) => {
+      if (!HK_MAYBE_NULL_COLUMNS.has(col.key)) return true
+      return data.items.some((row) => row[col.key] !== null && row[col.key] !== undefined)
+    })
+  }, [exchange, data])
+
+  // 当前市场的 AI 示例标签
+  const aiExampleQueries = exchange === 'HKEX' ? AI_EXAMPLE_QUERIES_HKEX : AI_EXAMPLE_QUERIES_ASHARE
+
+  // 自选表按市场过滤
+  const filteredWatchlists = useMemo(() => {
+    if (!isLoggedIn || !watchlists.length) return []
+    return watchlists.filter((wl) => wl.exchange === exchange)
+  }, [watchlists, exchange, isLoggedIn])
+
   const total = data?.total || 0
   const items = data?.items || []
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -640,18 +777,40 @@ export default function StockPickerPage() {
   return (
     <div className="space-y-4">
       <Head>
-        <title>选股器 — 卧龙AI量化交易台</title>
-        <meta name="description" content="卧龙AI量化交易台选股器 — A 股全市场多维指标筛选，支持行业、财务、技术面条件过滤与自然语言 AI 选股，实时行情数据驱动。" />
+        <title>AI 选股器 — 卧龙AI量化交易台（A 股 + 港股）</title>
+        <meta name="description" content="卧龙AI量化交易台选股器 — 覆盖 A 股全市场与港股通标的，支持多维指标筛选、自然语言 AI 选股，实时行情数据驱动。" />
         <link rel="canonical" href="https://wolongtrader.top/stock-picker" />
       </Head>
-      {/* ─── Hero Section ─── */}
+      {/* ─── Hero Section + 市场切换 ─── */}
       <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">选股器</h1>
-          <p className="mt-1 text-sm text-white/50">A 股全市场多维指标筛选，实时行情数据</p>
+        <div className="flex items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">选股器</h1>
+            <p className="mt-1 text-sm text-white/50">{exchange === 'HKEX' ? '港股全市场多维指标筛选，实时行情数据' : 'A 股全市场多维指标筛选，实时行情数据'}</p>
+          </div>
+          {/* 市场 Tab 切换 */}
+          <div className="flex rounded-xl border border-white/10 bg-white/[0.03] p-0.5">
+            {[
+              { key: 'ASHARE', label: '📊 A 股' },
+              { key: 'HKEX', label: '🇭🇰 港股' },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => handleExchangeChange(tab.key)}
+                className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
+                  exchange === tab.key
+                    ? 'bg-primary text-black shadow-sm'
+                    : 'text-white/55 hover:text-white/80'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex items-center gap-3 text-sm">
-          <MiniStat label="全市场" value={total.toLocaleString('zh-CN')} suffix="只" />
+          <MiniStat label={exchange === 'HKEX' ? '港股' : '全市场'} value={total.toLocaleString('zh-CN')} suffix="只" />
           <MiniStat label="当前页" value={items.length} suffix="只" />
         </div>
       </div>
@@ -665,7 +824,7 @@ export default function StockPickerPage() {
               value={aiQuery}
               onChange={(e) => setAiQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !aiParsing && handleAIParse()}
-              placeholder={'随便说，如"最近涨得好的科技股"'}
+              placeholder={exchange === 'HKEX' ? '描述你想找的港股，如"香港科技龙头"' : '描述你想找的 A 股，如"最近涨得好的科技股"'}
               className="w-full rounded-xl border border-white/15 bg-white/5 py-2 pl-3 pr-20 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary/50 focus:ring-1 focus:ring-primary/30"
             />
             <button
@@ -680,7 +839,7 @@ export default function StockPickerPage() {
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className="text-[11px] text-white/30">试试：</span>
-          {AI_EXAMPLE_QUERIES.map((example) => (
+          {aiExampleQueries.map((example) => (
             <button
               key={example}
               type="button"
@@ -751,7 +910,7 @@ export default function StockPickerPage() {
       <WatchlistToolbar
         isLoggedIn={isLoggedIn}
         openAuthModal={openAuthModal}
-        watchlists={watchlists}
+        watchlists={filteredWatchlists}
         wlLoading={wlLoading}
         activeWatchlistId={activeWatchlistId}
         items={items}
@@ -787,7 +946,7 @@ export default function StockPickerPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-white/[0.02]">
-                {TABLE_COLUMNS.map((col) => (
+                {visibleColumns.map((col) => (
                   <th
                     key={col.key}
                     className={`whitespace-nowrap px-3 py-2.5 text-left text-xs font-medium text-white/50 ${
@@ -813,7 +972,7 @@ export default function StockPickerPage() {
               {loading && items.length === 0 ? (
                 Array.from({ length: SKELETON_ROWS }).map((_, rowIdx) => (
                   <tr key={`skeleton-${rowIdx}`} className="border-b border-white/[0.04]">
-                    {TABLE_COLUMNS.map((col) => (
+                    {visibleColumns.map((col) => (
                       <td key={col.key} className="px-3 py-2" style={{ minWidth: col.width }}>
                         <div className={`h-4 rounded bg-white/[0.06] animate-pulse ${col.key === 'name' ? 'w-16' : col.key === 'code' ? 'w-14' : 'w-12'}`} />
                       </td>
@@ -825,21 +984,22 @@ export default function StockPickerPage() {
                 ))
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={TABLE_COLUMNS.length + 1} className="py-16 text-center text-white/40">
+                  <td colSpan={visibleColumns.length + 1} className="py-16 text-center text-white/40">
                     {error ? '查询失败' : '无匹配结果'}
                   </td>
                 </tr>
               ) : (
                 items.map((row, idx) => {
-                  const code6 = String(row.code || '').padStart(6, '0')
-                  const isWatched = watchedSymbols.has(code6)
+                  const codeLen = exchange === 'HKEX' ? 5 : 6
+                  const codeStr = String(row.code || '').padStart(codeLen, '0')
+                  const isWatched = watchedSymbols.has(codeStr)
                   const isAdding = addingCode === row.code
                   return (
                     <tr
                       key={row.code || idx}
                       className="border-b border-white/[0.04] transition hover:bg-white/[0.03]"
                     >
-                      {TABLE_COLUMNS.map((col) => {
+                      {visibleColumns.map((col) => {
                         const colorClass = col.colorize ? getColorClass(row[col.key]) : ''
                         // 代码和名称列可点击跳转详情页
                         if (col.key === 'code' || col.key === 'name') {
@@ -858,7 +1018,7 @@ export default function StockPickerPage() {
                                     : 'text-white/90 hover:text-primary hover:underline underline-offset-2'
                                 }`}
                               >
-                                {formatValue(row[col.key], col.format)}
+                                {formatValue(row[col.key], col.format, exchange)}
                               </button>
                             </td>
                           )
@@ -869,7 +1029,7 @@ export default function StockPickerPage() {
                             className={`whitespace-nowrap px-3 py-2 ${colorClass}`}
                             style={{ minWidth: col.width }}
                           >
-                            {formatValue(row[col.key], col.format)}
+                            {formatValue(row[col.key], col.format, exchange)}
                           </td>
                         )
                       })}
@@ -1156,6 +1316,12 @@ function WatchlistToolbar({
                     <button type="button" onClick={() => onLoad(wl.id)} className="flex items-center gap-1">
                       <span>{wl.name}</span>
                       <span className="text-[10px] opacity-50">({wl.stock_count})</span>
+                      {wl.exchange === 'HKEX' && (
+                        <span className="text-[9px] rounded bg-white/10 px-1 py-0.5 text-white/40">港股</span>
+                      )}
+                      {(!wl.exchange || wl.exchange === 'ASHARE') && (
+                        <span className="text-[9px] rounded bg-white/10 px-1 py-0.5 text-white/40">A股</span>
+                      )}
                     </button>
                     {isDeleting ? (
                       <span className="ml-1 flex items-center gap-1">

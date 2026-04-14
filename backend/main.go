@@ -2021,6 +2021,10 @@ func (a *appServer) handleScreenerAIParse(w http.ResponseWriter, r *http.Request
 		return
 	}
 	query := asString(payload["query"])
+	exchange := asString(payload["exchange"])
+	if exchange == "" {
+		exchange = "ASHARE"
+	}
 
 	aiCfg := screener.AIConfig{
 		APIKey:  a.cfg.AI.APIKey,
@@ -2028,7 +2032,7 @@ func (a *appServer) handleScreenerAIParse(w http.ResponseWriter, r *http.Request
 		Model:   a.cfg.AI.Model,
 	}
 
-	result, err := screener.ParseNaturalLanguage(r.Context(), aiCfg, query)
+	result, err := screener.ParseNaturalLanguage(r.Context(), aiCfg, query, exchange)
 	if err != nil {
 		a.writeScreenerError(w, err)
 		return

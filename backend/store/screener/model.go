@@ -11,6 +11,7 @@ type WatchlistRecord struct {
 	ID        string    `gorm:"primaryKey;size:36"`
 	UserID    string    `gorm:"size:36;not null;index:idx_screener_wl_user,priority:1;uniqueIndex:idx_screener_wl_user_name,priority:1"`
 	Name      string    `gorm:"size:128;not null;uniqueIndex:idx_screener_wl_user_name,priority:2"`
+	Exchange  string    `gorm:"size:8;not null;default:'ASHARE';index"` // ASHARE | HKEX
 	CreatedAt time.Time `gorm:"not null"`
 	UpdatedAt time.Time `gorm:"not null"`
 }
@@ -34,19 +35,21 @@ func (WatchlistStockRecord) TableName() string {
 // ── API Output ──
 
 type Watchlist struct {
-	ID        string           `json:"id"`
-	Name      string           `json:"name"`
-	StockCount int             `json:"stock_count"`
-	CreatedAt string           `json:"created_at"`
-	UpdatedAt string           `json:"updated_at"`
+	ID         string           `json:"id"`
+	Name       string           `json:"name"`
+	Exchange   string           `json:"exchange"`
+	StockCount int              `json:"stock_count"`
+	CreatedAt  string           `json:"created_at"`
+	UpdatedAt  string           `json:"updated_at"`
 }
 
 type WatchlistDetail struct {
-	ID        string           `json:"id"`
-	Name      string           `json:"name"`
-	Stocks    []WatchlistStock `json:"stocks"`
-	CreatedAt string           `json:"created_at"`
-	UpdatedAt string           `json:"updated_at"`
+	ID       string           `json:"id"`
+	Name     string           `json:"name"`
+	Exchange string           `json:"exchange"`
+	Stocks   []WatchlistStock `json:"stocks"`
+	CreatedAt string          `json:"created_at"`
+	UpdatedAt string          `json:"updated_at"`
 }
 
 type WatchlistStock struct {
@@ -57,8 +60,9 @@ type WatchlistStock struct {
 // ── API Input ──
 
 type CreateWatchlistInput struct {
-	Name   string           `json:"name"`
-	Stocks []WatchlistStock `json:"stocks"`
+	Name     string           `json:"name"`
+	Exchange string           `json:"exchange"` // ASHARE | HKEX
+	Stocks   []WatchlistStock `json:"stocks"`
 }
 
 // ── Filter persistence (stored as JSON in a text column) ──
@@ -89,6 +93,7 @@ func (r WatchlistRecord) toListItem(stockCount int) Watchlist {
 	return Watchlist{
 		ID:         r.ID,
 		Name:       r.Name,
+		Exchange:   r.Exchange,
 		StockCount: stockCount,
 		CreatedAt:  r.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:  r.UpdatedAt.UTC().Format(time.RFC3339),
@@ -103,6 +108,7 @@ func (r WatchlistRecord) toDetail(stocks []WatchlistStockRecord) WatchlistDetail
 	return WatchlistDetail{
 		ID:        r.ID,
 		Name:      r.Name,
+		Exchange:  r.Exchange,
 		Stocks:    items,
 		CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: r.UpdatedAt.UTC().Format(time.RFC3339),

@@ -665,7 +665,7 @@ export default function StockPickerPage() {
               value={aiQuery}
               onChange={(e) => setAiQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !aiParsing && handleAIParse()}
-              placeholder={'随便说，如"挣钱的蓝筹股""最近涨得好的科技股""帮我找便宜的小盘股"'}
+              placeholder={'随便说，如"最近涨得好的科技股"'}
               className="w-full rounded-xl border border-white/15 bg-white/5 py-2 pl-3 pr-20 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary/50 focus:ring-1 focus:ring-primary/30"
             />
             <button

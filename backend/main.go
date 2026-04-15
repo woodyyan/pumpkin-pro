@@ -2330,6 +2330,33 @@ func (a *appServer) handleQuadrantStatus(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, status)
 }
 
+func (a *appServer) handleQuadrantRanking(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+
+	exchangeParam := strings.TrimSpace(r.URL.Query().Get("exchange"))
+	limitParam := strings.TrimSpace(r.URL.Query().Get("limit"))
+
+	limit := 20
+	if limitParam != "" {
+		if v, err := strconv.Atoi(limitParam); err == nil && v > 0 {
+			if v > 50 {
+				v = 50
+			}
+			limit = v
+		}
+	}
+
+	resp, err := a.quadrantService.GetRanking(r.Context(), exchangeParam, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // ── Stock Search handler ──
 
 func (a *appServer) handleSearchStocks(w http.ResponseWriter, r *http.Request) {
@@ -2631,6 +2658,7 @@ func main() {
 	mux.HandleFunc("/api/quadrant", server.handleQuadrant)
 	mux.HandleFunc("/api/quadrant/bulk-save", server.handleQuadrantBulkSave)
 	mux.HandleFunc("/api/quadrant/status", server.handleQuadrantStatus)
+	mux.HandleFunc("/api/quadrant/ranking", server.handleQuadrantRanking)
 
 	mux.HandleFunc("/api/search", server.withOptionalAuth(server.handleSearchStocks))
 

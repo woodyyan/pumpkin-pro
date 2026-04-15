@@ -157,3 +157,41 @@ func (r *Repository) GetLatestComputeLog(ctx context.Context) (*ComputeLogRecord
 	}
 	return &log, nil
 }
+
+// FindOpportunityZone returns records in the "机会" (opportunity) zone,
+// ordered by opportunity DESC, risk ASC, limited to `limit`.
+func (r *Repository) FindOpportunityZone(ctx context.Context, exchanges []string, limit int) ([]QuadrantScoreRecord, int64, error) {
+	var records []QuadrantScoreRecord
+
+	query := r.db.WithContext(ctx).
+		Where("quadrant = ?", "机会")
+
+	if len(exchanges) > 0 {
+		query = query.Where("exchange IN ?", exchanges)
+	}
+
+	// Get total count in zone before limit
+	var totalInZone int64
+	countQuery := r.db.WithContext(ctx).
+		Model(&QuadrantScoreRecord{}).
+		Where("quadrant = ?", "机会")
+	if len(exchanges) > 0 {
+		countQuery = countQuery.Where("exchange IN ?", exchanges)
+	}
+	if err := countQuery.Count(&totalInZone).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// Apply sort + limit
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	err := query.
+		Order("opportunity DESC, risk ASC").
+		Limit(limit).
+		Find(&records).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	return records, totalInZone, nil
+}

@@ -288,6 +288,75 @@ func (s *Service) GetAdminOverview(ctx context.Context) (*QuadrantOverviewRespon
 	}, nil
 }
 
+// ── Ranking (卧龙AI精选) ─_
+
+// resolveRankingExchanges converts an API exchange param to DB-level exchange codes.
+func resolveRankingExchanges(exchange string) []string {
+	switch strings.ToUpper(strings.TrimSpace(exchange)) {
+	case "HKEX":
+		return []string{"HKEX"}
+	case "ASHARE", "":
+		fallthrough
+	default:
+		return []string{"SSE", "SZSE"}
+	}
+}
+
+// GetRanking returns the top-N stocks from the opportunity zone (机会区),
+// ordered by opportunity DESC + risk ASC.
+func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*RankingResponse, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	exchanges := resolveRankingExchanges(exchange)
+
+	records, totalInZone, err := s.repo.FindOpportunityZone(ctx, exchanges, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]RankingItem, 0, len(records))
+	var latestComputedAt time.Time
+
+	for i, r := range records {
+		items = append(items, RankingItem{
+			Rank:       i + 1,
+			Code:       r.Code,
+			Name:       r.Name,
+			Exchange:   r.Exchange,
+			Opportunity: r.Opportunity,
+			Risk:       r.Risk,
+			Quadrant:   r.Quadrant,
+			Trend:      r.Trend,
+			Flow:       r.Flow,
+			Revision:   r.Revision,
+		})
+		if r.ComputedAt.After(latestComputedAt) {
+			latestComputedAt = r.ComputedAt
+		}
+	}
+
+	computedAtStr := ""
+	if !latestComputedAt.IsZero() {
+		computedAtStr = latestComputedAt.UTC().Format(time.RFC3339)
+	}
+
+	displayExchange := strings.ToUpper(strings.TrimSpace(exchange))
+	if displayExchange == "" || displayExchange != "HKEX" {
+		displayExchange = "ASHARE"
+	}
+
+	return &RankingResponse{
+		Meta: RankingMeta{
+			ComputedAt:    computedAtStr,
+			TotalInZone:   int(totalInZone),
+			ReturnedCount: len(items),
+			Exchange:      displayExchange,
+		},
+		Items: items,
+	}, nil
+}
+
 // exchangeAccum is an internal accumulator for per-exchange stats.
 type exchangeAccum struct {
 	key          string

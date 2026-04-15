@@ -118,6 +118,36 @@ type QuadrantStatusResponse struct {
 	LastReport     map[string]any `json:"last_report,omitempty"`
 }
 
+// ── Ranking (卧龙AI精选) ──
+
+// RankingItem is a single stock in the ranking list.
+type RankingItem struct {
+	Rank       int     `json:"rank"`
+	Code       string  `json:"code"`
+	Name       string  `json:"name"`
+	Exchange   string  `json:"exchange"`
+	Opportunity float64 `json:"opportunity"`
+	Risk       float64 `json:"risk"`
+	Quadrant   string  `json:"quadrant"`
+	Trend      float64 `json:"trend"`
+	Flow       float64 `json:"flow"`
+	Revision   float64 `json:"revision"`
+}
+
+// RankingMeta holds ranking metadata.
+type RankingMeta struct {
+	ComputedAt    string `json:"computed_at"`
+	TotalInZone   int    `json:"total_in_zone"`
+	ReturnedCount int    `json:"returned_count"`
+	Exchange      string `json:"exchange"`
+}
+
+// RankingResponse is the API response for GET /api/quadrant/ranking.
+type RankingResponse struct {
+	Meta  RankingMeta   `json:"meta"`
+	Items []RankingItem `json:"items"`
+}
+
 func (r QuadrantScoreRecord) ToCompact() QuadrantScoreCompact {
 	return QuadrantScoreCompact{
 		Code:        r.Code,

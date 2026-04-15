@@ -7,6 +7,7 @@ import { useAuth } from '../lib/auth-context'
 import { isAuthRequiredError } from '../lib/auth-storage'
 
 const QuadrantChart = dynamic(() => import('../components/QuadrantChart'), { ssr: false })
+const RankingPanel = dynamic(() => import('../components/RankingPanel'), { ssr: false })
 
 const POLL_MS = 5000
 const MARKET_OVERVIEW_POLL_MS = 5000
@@ -27,6 +28,9 @@ export default function LiveTradingOverviewPage() {
   const [quadrantData, setQuadrantData] = useState(null)
   const [quadrantLoading, setQuadrantLoading] = useState(false)
   const [quadrantExchange, setQuadrantExchange] = useState('ASHARE') // 'ASHARE' | 'HKEX'
+  const [rankingData, setRankingData] = useState(null)
+  const [rankingLoading, setRankingLoading] = useState(false)
+  const [rankingExchange, setRankingExchange] = useState('ASHARE') // independent tab state for ranking
 
   const privateAccessReady = ready && isLoggedIn
 
@@ -108,6 +112,25 @@ export default function LiveTradingOverviewPage() {
     }
   }
 
+  const loadRanking = async (exchange) => {
+    try {
+      setRankingLoading(true)
+      const qs = exchange && exchange !== 'ASHARE' ? `?exchange=${exchange}` : ''
+      const data = await requestJson(`/api/quadrant/ranking${qs}&limit=20`)
+      setRankingData(data)
+    } catch {
+      // Ranking loading is non-critical
+    } finally {
+      setRankingLoading(false)
+    }
+  }
+
+  const handleRankingExchangeChange = (newExchange) => {
+    if (newExchange === rankingExchange) return
+    setRankingExchange(newExchange)
+    loadRanking(newExchange)
+  }
+
   const loadMarketOverview = async () => {
     const [aRes, hkRes] = await Promise.allSettled([
       requestJson('/api/live/market/overview?exchange=SSE'),
@@ -148,6 +171,7 @@ export default function LiveTradingOverviewPage() {
   useEffect(() => {
     if (!ready) return
     loadPublicData()
+    loadRanking(rankingExchange)
     if (privateAccessReady) {
       loadPrivateData({ bootstrap: true })
     } else {
@@ -367,6 +391,15 @@ export default function LiveTradingOverviewPage() {
           </div>
         )}
       </section>
+
+      {/* AI Ranking (卧龙AI精选) */}
+      <RankingPanel
+        items={rankingData?.items}
+        meta={rankingData?.meta}
+        loading={rankingLoading}
+        exchange={rankingExchange}
+        onExchangeChange={handleRankingExchangeChange}
+      />
 
       {error ? (
         <div className="rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">

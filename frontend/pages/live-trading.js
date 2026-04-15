@@ -115,8 +115,13 @@ export default function LiveTradingOverviewPage() {
   const loadRanking = async (exchange) => {
     try {
       setRankingLoading(true)
-      const qs = exchange && exchange !== 'ASHARE' ? `?exchange=${exchange}` : ''
-      const data = await requestJson(`/api/quadrant/ranking${qs}&limit=20`)
+      const params = new URLSearchParams()
+      params.set('limit', '20')
+      if (exchange && exchange !== 'ASHARE') {
+        params.set('exchange', exchange)
+      }
+      // ASHARE 不传 exchange，走后端默认值 (SSE+SZSE)
+      const data = await requestJson(`/api/quadrant/ranking?${params.toString()}`)
       setRankingData(data)
     } catch {
       // Ranking loading is non-critical

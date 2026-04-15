@@ -810,7 +810,7 @@ export default function StockPickerPage() {
           </div>
         </div>
         <div className="flex items-center gap-3 text-sm">
-          <MiniStat label={exchange === 'HKEX' ? '港股' : '全市场'} value={total.toLocaleString('zh-CN')} suffix="只" />
+          <MiniStat label={exchange === 'HKEX' ? '港股' : 'A股'} value={total.toLocaleString('zh-CN')} suffix="只" />
           <MiniStat label="当前页" value={items.length} suffix="只" />
         </div>
       </div>

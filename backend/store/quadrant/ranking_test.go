@@ -632,3 +632,111 @@ func TestGetRanking_RankingItemHasLiquidityFields(t *testing.T) {
 		}
 	}
 }
+
+// ── Backward-compat: old data without avg_amount5d must still show results ──
+
+// makeLegacyRecord simulates pre-liquidity data where avg_amount5d = 0
+func makeLegacyRecord(code, exchange string, opportunity float64) QuadrantScoreRecord {
+	r := makeRankingRecord(code, exchange, opportunity, 20.0)
+	r.AvgAmount5d = 0 // no liquidity data — old computation
+	return r
+}
+
+// TestGetRanking_LegacyData_ZeroAmount_ShowsResults:
+// When ALL records have avg_amount5d=0 (pre-liquidity computation),
+// the filter must be disabled so users still see ranking results.
+func TestGetRanking_LegacyData_ZeroAmount_ShowsResults(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	records := []QuadrantScoreRecord{
+		makeLegacyRecord("600519", "SSE", 98),
+		makeLegacyRecord("000001", "SZSE", 95),
+		makeLegacyRecord("601318", "SSE", 93),
+		makeLegacyRecord("300750", "SZSE", 91),
+	}
+	seedOpportunityRecords(t, repo, records)
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking(ASHARE) with legacy zero-amount data failed: %v", err)
+	}
+
+	if len(resp.Items) == 0 {
+		t.Error("expected non-empty results for legacy data (avg_amount5d=0) — filter should be auto-disabled")
+	}
+	if len(resp.Items) != 4 {
+		t.Errorf("expected all 4 legacy items to appear (filter disabled), got %d", len(resp.Items))
+	}
+
+	// Verify sort order still works correctly on legacy data
+	for i := 1; i < len(resp.Items); i++ {
+		if resp.Items[i].Opportunity > resp.Items[i-1].Opportunity {
+			t.Errorf("sort order violation in legacy data at index %d", i)
+		}
+	}
+}
+
+// TestGetRanking_LegacyData_HKEX_ShowsResults: same backward-compat check for HKEX
+func TestGetRanking_LegacyData_HKEX_ShowsResults(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	records := []QuadrantScoreRecord{
+		makeLegacyRecord("00700", "HKEX", 92),
+		makeLegacyRecord("03968", "HKEX", 88),
+	}
+	seedOpportunityRecords(t, repo, records)
+
+	resp, err := svc.GetRanking(ctx, "HKEX", 20)
+	if err != nil {
+		t.Fatalf("GetRanking(HKEX) with legacy data failed: %v", err)
+	}
+	if len(resp.Items) != 2 {
+		t.Errorf("expected 2 HK legacy items (filter disabled), got %d", len(resp.Items))
+	}
+}
+
+// TestHasNonZeroLiquidity: verify repository method directly
+func TestHasNonZeroLiquidity(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Empty table → false
+	hasData, err := repo.HasNonZeroLiquidity(ctx, []string{"SSE"})
+	if err != nil {
+		t.Fatalf("HasNonZeroLiquidity on empty table failed: %v", err)
+	}
+	if hasData {
+		t.Error("empty table should return false")
+	}
+
+	// Only zero-amount records → false
+	seedOpportunityRecords(t, repo, []QuadrantScoreRecord{
+		makeLegacyRecord("600519", "SSE", 90),
+	})
+	hasData, err = repo.HasNonZeroLiquidity(ctx, []string{"SSE"})
+	if err != nil {
+		t.Fatalf("HasNonZeroLiquidity with zero data failed: %v", err)
+	}
+	if hasData {
+		t.Error("all-zero amounts should return false")
+	}
+
+	// At least one non-zero record → true
+	seedOpportunityRecords(t, repo, []QuadrantScoreRecord{
+		makeHighLiquidityRecord("000001", "SZSE", 85),
+	})
+	hasData, err = repo.HasNonZeroLiquidity(ctx, []string{"SSE", "SZSE"})
+	if err != nil {
+		t.Fatalf("HasNonZeroLiquidity with mixed data failed: %v", err)
+	}
+	if !hasData {
+		t.Error("at least one non-zero amount should return true")
+	}
+}

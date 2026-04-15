@@ -308,6 +308,10 @@ func resolveRankingExchanges(exchange string) []string {
 // ordered by opportunity DESC + risk ASC.
 // Applies a minimum liquidity filter (avg_amount_5d threshold) per market:
 //   A-share: 5000 万元, HKEX: 2000 万 HKD.
+//
+// Backward compatibility: if no records have non-zero avg_amount5d (i.e.
+// data was computed before the liquidity field was introduced), the filter is
+// automatically disabled so old datasets still show results.
 func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*RankingResponse, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
@@ -315,11 +319,22 @@ func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*
 	exchanges := resolveRankingExchanges(exchange)
 
 	// Liquidity hard-filter thresholds (万元 / 万HKD)
-	minAmount := 5000.0 // A-share default
+	defaultMinAmount := 5000.0 // A-share default
 	for _, ex := range exchanges {
 		if ex == "HKEX" {
-			minAmount = 2000.0
+			defaultMinAmount = 2000.0
 		}
+	}
+
+	// Check if the data has been recomputed with liquidity field.
+	// If all avg_amount5d are zero/NULL, skip the filter (backward compat).
+	hasLiquidityData, err := s.repo.HasNonZeroLiquidity(ctx, exchanges)
+	if err != nil {
+		return nil, fmt.Errorf("check liquidity data: %w", err)
+	}
+	minAmount := defaultMinAmount
+	if !hasLiquidityData {
+		minAmount = 0
 	}
 
 	records, totalInZone, err := s.repo.FindOpportunityZone(ctx, exchanges, limit, minAmount)

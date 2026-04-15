@@ -70,6 +70,21 @@ func (r *Repository) FindByExchange(ctx context.Context, exchanges []string) ([]
 	return records, nil
 }
 
+// HasNonZeroLiquidity returns true if any record in the given exchanges has
+// avg_amount5d > 0, indicating that data was computed after the liquidity field
+// was introduced. Used for backward-compatible filter activation.
+func (r *Repository) HasNonZeroLiquidity(ctx context.Context, exchanges []string) (bool, error) {
+	var count int64
+	query := r.db.WithContext(ctx).Model(&QuadrantScoreRecord{}).Where("avg_amount5d > 0")
+	if len(exchanges) > 0 {
+		query = query.Where("exchange IN ?", exchanges)
+	}
+	if err := query.Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // SearchResult is a minimal item returned by stock search.
 type SearchResult struct {
 	Code     string `json:"code"`

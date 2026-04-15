@@ -108,3 +108,68 @@ func (a *appServer) handleAdminSystemHealthPurge(w http.ResponseWriter, r *http.
 		"kept_days":   retentionDays,
 	})
 }
+
+// ── Backup Admin Handlers ──
+
+// handleAdminBackupStatus returns the latest backup status for the admin panel.
+func (a *appServer) handleAdminBackupStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	status, err := a.backupService.GetStatus(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "获取备份状态失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+// handleAdminBackupHistory returns recent backup log entries.
+func (a *appServer) handleAdminBackupHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	limit := parseLimit(r.URL.Query().Get("limit"), 7)
+	items, err := a.backupService.GetHistory(limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "获取备份历史失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+	})
+}
+
+// handleAdminBackupTrigger manually triggers a backup run.
+func (a *appServer) handleAdminBackupTrigger(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	result, err := a.backupService.Run(r.Context(), "manual")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "手动备份失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"status": result.Status,
+		"result": result,
+	})
+}
+
+// handleAdminBackupStats returns storage usage statistics (local + cloud).
+func (a *appServer) handleAdminBackupStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	stats, err := a.backupService.GetStorageStats(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "获取存储统计失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}

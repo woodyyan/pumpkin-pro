@@ -16,6 +16,22 @@ type Config struct {
 	Auth               AuthConfig
 	AdminSeed          AdminSeedConfig
 	AI                 AIConfig
+	Backup             BackupConfig
+}
+
+// BackupConfig holds database backup settings.
+type BackupConfig struct {
+	DBPath          string // path to pumpkin.db for hot backup
+	BackupDir       string // local backup output directory
+	CacheADir       string // directory with quadrant_cache.db
+	CacheHKDir      string // directory with quadrant_cache_hk.db
+	RetentionDays   int    // local retention days (default 7)
+	CooldownMinutes int    // minimum minutes between backups (default 120)
+	COSBucket       string // Tencent Cloud COS bucket name
+	COSRegion       string // COS region, e.g. ap-guangzhou
+	COSPrefix       string // COS object key prefix
+	COSSecretID     string // CAM SecretId (from env)
+	COSSecretKey    string // CAM SecretKey (from env)
 }
 
 type AIConfig struct {
@@ -71,11 +87,24 @@ func Load() Config {
 			AccessTokenTTLMinutes: getEnvAsInt("AUTH_ACCESS_TOKEN_TTL_MINUTES", 1440),
 			RefreshTokenTTLHours:  getEnvAsInt("AUTH_REFRESH_TOKEN_TTL_HOURS", 168),
 		},
-		AI: AIConfig{
-			APIKey:  getEnv("AI_API_KEY", ""),
-			BaseURL: trimTrailingSlash(getEnv("AI_BASE_URL", "https://api.openai.com/v1")),
-			Model:   getEnv("AI_MODEL", "gpt-4o-mini"),
-		},
+	AI: AIConfig{
+		APIKey:  getEnv("AI_API_KEY", ""),
+		BaseURL: trimTrailingSlash(getEnv("AI_BASE_URL", "https://api.openai.com/v1")),
+		Model:   getEnv("AI_MODEL", "gpt-4o-mini"),
+	},
+		Backup: BackupConfig{
+		DBPath:          getEnv("DB_PATH", "data/pumpkin.db"),
+		BackupDir:       getEnv("BACKUP_DIR", "data/backups"),
+		CacheADir:       getEnv("CACHE_A_DIR", "data/quant"),
+		CacheHKDir:      getEnv("CACHE_HK_DIR", "data/quant"),
+		RetentionDays:   getEnvAsInt("BACKUP_RETENTION_DAYS", 7),
+		CooldownMinutes: getEnvAsInt("BACKUP_COOLDOWN_MINUTES", 120),
+		COSBucket:       getEnv("COS_BUCKET", ""),
+		COSRegion:       getEnv("COS_REGION", ""),
+		COSPrefix:       getEnv("COS_BACKUP_PREFIX", "pumpkin-pro-backups/"),
+		COSSecretID:     getEnv("COS_SECRET_ID", ""),
+		COSSecretKey:    getEnv("COS_SECRET_KEY", ""),
+	},
 	}
 }
 

@@ -16,11 +16,12 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/config"
 	"github.com/woodyyan/pumpkin-pro/backend/store"
 	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
+	"github.com/woodyyan/pumpkin-pro/backend/store/analysis_history"
+	"github.com/woodyyan/pumpkin-pro/backend/store/backup"
 	"github.com/woodyyan/pumpkin-pro/backend/store/analytics"
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
-	"github.com/woodyyan/pumpkin-pro/backend/store/analysis_history"
 	"github.com/woodyyan/pumpkin-pro/backend/store/fundcache"
 
 	"gorm.io/gorm"
@@ -43,6 +44,8 @@ type appServer struct {
 	portfolioService *portfolio.Service
 	quadrantService  *quadrant.Service
 	adminService     *admin.Service
+	backupService    *backup.Service
+	backupWorker     *backup.Worker
 	backtestService  *backtest.Service
 	screenerService  *screener.Service
 	analyticsRepo    *analytics.Repository
@@ -2564,6 +2567,24 @@ func main() {
 	}, nil)
 	quadrantWorker.Start(context.Background())
 
+	// ── Backup Worker (dual-trigger) ──
+	backupRepo := backup.NewRepository(storeInstance.DB)
+	backupService := backup.NewService(backupRepo, storeInstance.DB, backup.ServiceConfig{
+		DBPath:          cfg.Backup.DBPath,
+		BackupDir:       cfg.Backup.BackupDir,
+		CacheADir:       cfg.Backup.CacheADir,
+		CacheHKDir:      cfg.Backup.CacheHKDir,
+		RetentionDays:   cfg.Backup.RetentionDays,
+		CooldownMinutes: cfg.Backup.CooldownMinutes,
+		COSBucket:       cfg.Backup.COSBucket,
+		COSRegion:       cfg.Backup.COSRegion,
+		COSPrefix:       cfg.Backup.COSPrefix,
+		COSSecretID:     cfg.Backup.COSSecretID,
+		COSSecretKey:    cfg.Backup.COSSecretKey,
+	})
+	backupWorker := backup.NewWorker(backupService)
+	backupWorker.Start(context.Background())
+
 	signalEvaluator := signal.NewEvaluator(signalService, liveService, strategyService, signal.EvaluatorConfig{
 		QuantServiceURL: cfg.QuantServiceURL,
 	})
@@ -2598,6 +2619,8 @@ func main() {
 		portfolioService: portfolioService,
 		quadrantService:  quadrantService,
 		adminService:     adminService,
+		backupService:    backupService,
+		backupWorker:     backupWorker,
 		backtestService:  backtestService,
 		screenerService:  screenerService,
 		analyticsRepo:    analyticsRepo,
@@ -2668,6 +2691,12 @@ func main() {
 	mux.HandleFunc("/api/feedback", server.withRequiredAuth(server.handleFeedback))
 	mux.HandleFunc("/api/admin/feedback", server.withSuperAdminAuth(server.handleAdminFeedback))
 	mux.HandleFunc("/api/admin/feedback/", server.withSuperAdminAuth(server.handleAdminFeedbackSubroutes))
+
+	// ── Backup Admin (super-admin only) ──
+	mux.HandleFunc("/api/admin/backup-status", server.withSuperAdminAuth(server.handleAdminBackupStatus))
+	mux.HandleFunc("/api/admin/backup-history", server.withSuperAdminAuth(server.handleAdminBackupHistory))
+	mux.HandleFunc("/api/admin/backup-trigger", server.withSuperAdminAuth(server.handleAdminBackupTrigger))
+	mux.HandleFunc("/api/admin/backup-stats", server.withSuperAdminAuth(server.handleAdminBackupStats))
 
 	mux.HandleFunc("/api/screener/scan", server.withOptionalAuth(server.handleScreenerScan))
 	mux.HandleFunc("/api/screener/ai-parse", server.withRequiredAuth(server.handleScreenerAIParse))

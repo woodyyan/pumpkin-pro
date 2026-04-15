@@ -19,6 +19,8 @@ jobs:
   backend:
     name: Backend (Go)
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     defaults:
       run:
         working-directory: backend
@@ -66,6 +68,8 @@ jobs:
   quant:
     name: Quant (Python)
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     defaults:
       run:
         working-directory: quant
@@ -95,6 +99,8 @@ jobs:
   frontend:
     name: Frontend (Node.js)
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     defaults:
       run:
         working-directory: frontend

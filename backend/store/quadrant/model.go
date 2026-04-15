@@ -128,19 +128,38 @@ type QuadrantStatusResponse struct {
 
 // RankingItem is a single stock in the ranking list.
 type RankingItem struct {
-	Rank        int     `json:"rank"`
-	Code        string  `json:"code"`
-	Name        string  `json:"name"`
-	Exchange    string  `json:"exchange"`
-	Opportunity float64 `json:"opportunity"`
-	Risk        float64 `json:"risk"`
-	Quadrant    string  `json:"quadrant"`
-	Trend       float64 `json:"trend"`
-	Flow        float64 `json:"flow"`
-	Revision    float64 `json:"revision"`
-	Liquidity   float64 `json:"liquidity"`
-	AvgAmount5d float64 `json:"avg_amount_5d"` // 近5日均成交额（万元）
+	Rank           int     `json:"rank"`
+	Code           string  `json:"code"`
+	Name           string  `json:"name"`
+	Exchange       string  `json:"exchange"`
+	Opportunity    float64 `json:"opportunity"`
+	Risk           float64 `json:"risk"`
+	Quadrant       string  `json:"quadrant"`
+	Trend          float64 `json:"trend"`
+	Flow           float64 `json:"flow"`
+	Revision       float64 `json:"revision"`
+	Liquidity      float64 `json:"liquidity"`
+	AvgAmount5d    float64 `json:"avg_amount_5d"` // 近5日均成交额（万元）
+	ConsecutiveDays int    `json:"consecutive_days"` // 连续上榜天数
+	ReturnPct      float64 `json:"return_pct"`      // 首次上榜至今涨幅(%)
 }
+
+// RankingSnapshot captures a daily snapshot of top opportunity-zone stocks.
+// Used to compute consecutive appearance days and cumulative returns.
+type RankingSnapshot struct {
+	ID           int64  `gorm:"primaryKey;autoIncrement"`
+	Code         string `gorm:"size:10;not null;uniqueIndex:udx_snap_date_code"`
+	Name         string `gorm:"size:128;not null;default:''"`
+	Exchange     string `gorm:"size:8;not null;default:'SZSE'"`
+	Rank         int    `gorm:"not null"`
+	Opportunity  float64 `gorm:"not null"`
+	Risk         float64 `gorm:"not null"`
+	ClosePrice   float64 `gorm:"not null;default:0"` // 当日收盘价（元/HKD）
+	SnapshotDate string `gorm:"size:10;not null;uniqueIndex:udx_snap_date_code"` // 格式 "2026-04-15"
+	CreatedAt    time.Time `gorm:"not null"`
+}
+
+func (RankingSnapshot) TableName() string { return "quadrant_ranking_snapshots" }
 
 // RankingMeta holds ranking metadata.
 type RankingMeta struct {

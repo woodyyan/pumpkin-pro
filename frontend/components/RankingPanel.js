@@ -158,6 +158,31 @@ function RankRow({ item, onClick }) {
         <ScoreBar label="趋势" value={item.trend} max={100} width="w-16" />
         <ScoreBar label="资金" value={item.flow} max={100} width="w-14" />
         <ScoreBar label="流动" value={item.liquidity ?? 50} max={100} width="w-14" amount={item.avg_amount_5d} />
+
+        {/* Consecutive days */}
+        <div className="text-right w-12">
+          <div className={item.consecutive_days > 0 ? (item.consecutive_days >= 7 ? 'font-semibold text-emerald-300' : 'text-white/70') : 'text-white/25'}>
+            {item.consecutive_days > 0 ? `${item.consecutive_days}日` : '--'}
+          </div>
+          <div className="text-[10px] text-white/30">连续</div>
+        </div>
+
+        {/* Return since first appearance */}
+        <div className="text-right w-16">
+          {(() => {
+            const pct = item.return_pct ?? 0
+            const cls = pct >= 0 ? 'text-red-400' : 'text-green-400'
+            const prefix = pct > 0 ? '+' : ''
+            return (
+              <>
+                <div className={`${cls} font-semibold tabular-nums`}>
+                  {pct !== 0 ? `${prefix}${pct.toFixed(1)}%` : '--'}
+                </div>
+                <div className="text-[10px] text-white/30">涨幅</div>
+              </>
+            )
+          })()}
+        </div>
       </div>
 
       {/* Arrow */}
@@ -221,6 +246,18 @@ function RankCard({ item, onClick }) {
       <div className="mt-1.5 text-[10px] text-white/25">
         趋势{item.trend.toFixed(0)} · 资金{item.flow.toFixed(0)}
       </div>
+      {(() => {
+        const days = item.consecutive_days ?? 0
+        const pct = item.return_pct ?? 0
+        if (!days && !pct) return null
+        const pctCls = pct >= 0 ? 'text-red-400/70' : 'text-green-400/70'
+        const pctPrefix = pct > 0 ? '+' : ''
+        return (
+          <div className="mt-1 text-[10px] text-white/30">
+            {days > 0 ? `🔥连续${days}日` : ''} {pct !== 0 ? `· 涨幅${pctPrefix}${pct.toFixed(1)}%` : ''}
+          </div>
+        )
+      })()}
     </div>
   )
 }

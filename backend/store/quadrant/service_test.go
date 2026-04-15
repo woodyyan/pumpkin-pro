@@ -14,6 +14,7 @@ func setupQuadrantTest(t *testing.T) (*Repository, func()) {
 	testutil.AutoMigrateModels(t, db,
 		&QuadrantScoreRecord{},
 		&ComputeLogRecord{},
+		&RankingSnapshot{},
 	)
 	return NewRepository(db), func() {}
 }

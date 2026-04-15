@@ -2,6 +2,7 @@ package quadrant
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -216,4 +217,124 @@ func (r *Repository) FindOpportunityZone(ctx context.Context, exchanges []string
 		return nil, 0, err
 	}
 	return records, totalInZone, nil
+}
+
+// ── Ranking Snapshot ──
+
+// UpsertSnapshot inserts or updates a ranking snapshot record.
+// Unique constraint: (snapshot_date, code)
+func (r *Repository) UpsertSnapshot(ctx context.Context, snap RankingSnapshot) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "snapshot_date"},
+			{Name: "code"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"name", "rank", "opportunity", "risk", "close_price",
+		}),
+	}).Create(&snap).Error
+}
+
+// UpsertSnapshots batch-upserts ranking snapshots in one transaction.
+func (r *Repository) UpsertSnapshots(ctx context.Context, snaps []RankingSnapshot) error {
+	if len(snaps) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		batchSize := 200
+		for i := 0; i < len(snaps); i += batchSize {
+			end := i + batchSize
+			if end > len(snaps) {
+				end = len(snaps)
+			}
+			batch := snaps[i:end]
+			if err := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{
+					{Name: "snapshot_date"},
+					{Name: "code"},
+				},
+				DoUpdates: clause.AssignmentColumns([]string{
+					"name", "rank", "opportunity", "risk", "close_price",
+				}),
+			}).Create(&batch).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// GetConsecutiveDays returns how many consecutive days (including today) a stock has appeared
+// in ranking snapshots, counting backward from the most recent snapshot date.
+// Returns 0 if no snapshots exist for this stock/exchange.
+func (r *Repository) GetConsecutiveDays(ctx context.Context, code string, exchanges []string) (int, error) {
+	var snapDates []string
+
+	query := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
+		Select("DISTINCT snapshot_date").
+		Where("code = ?", code).
+		Order("snapshot_date DESC")
+
+	if len(exchanges) > 0 {
+		query = query.Where("exchange IN ?", exchanges)
+	}
+
+	if err := query.Find(&snapDates).Error; err != nil || len(snapDates) == 0 {
+		return 0, err
+	}
+
+	// Count consecutive days starting from the most recent date
+	consecutive := 0
+	refDate, _ := time.Parse("2006-01-02", snapDates[0])
+	for _, dStr := range snapDates {
+		d, err := time.Parse("2006-01-02", dStr)
+		if err != nil {
+			continue
+		}
+		diff := refDate.Sub(d).Hours() / 24
+		if diff <= float64(consecutive)+0.5 { // allow same-day tolerance
+			consecutive++
+		} else {
+			break // gap found — stop counting
+		}
+	}
+	return consecutive, nil
+}
+
+// GetFirstAppearedDate returns the earliest snapshot_date for a given stock.
+// Used to compute cumulative return since first appearance.
+// Returns a date string in "2006-01-02" format, or empty if not found.
+func (r *Repository) GetFirstAppearedDate(ctx context.Context, code string, exchanges []string) (string, error) {
+	var snap RankingSnapshot
+	query := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
+		Select("snapshot_date").
+		Where("code = ?", code).
+		Order("snapshot_date ASC")
+	if len(exchanges) > 0 {
+		query = query.Where("exchange IN ?", exchanges)
+	}
+	err := query.First(&snap).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	return snap.SnapshotDate, nil
+}
+
+// GetClosePriceOnDate returns the close_price stored in a snapshot for a specific stock+date.
+func (r *Repository) GetClosePriceOnDate(ctx context.Context, code string, dateStr string) (float64, error) {
+	var snap RankingSnapshot
+	err := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
+		Select("close_price").
+		Where("code = ? AND snapshot_date = ?", code, dateStr).
+		First(&snap).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return snap.ClosePrice, nil
 }

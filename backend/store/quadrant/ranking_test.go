@@ -740,3 +740,160 @@ func TestHasNonZeroLiquidity(t *testing.T) {
 		t.Error("at least one non-zero amount should return true")
 	}
 }
+
+// ── Ranking Snapshot Tests ──
+
+func makeSnapshot(code, exchange string, rank int, opp float64, date time.Time) RankingSnapshot {
+	return RankingSnapshot{
+		Code:         code,
+		Name:         "股票" + code,
+		Exchange:     exchange,
+		Rank:         rank,
+		Opportunity:  opp,
+		Risk:         20.0,
+		ClosePrice:   float64(rank*10 + 5), // fake price for testing
+		SnapshotDate: date.Format("2006-01-02"),
+		CreatedAt:    time.Now().UTC(),
+	}
+}
+
+func TestSnapshot_UpsertAndRetrieve(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	date := time.Date(2026, 4, 14, 0, 0, 0, 0, time.UTC)
+
+	snap := makeSnapshot("600519", "SSE", 1, 98.5, date)
+
+	err := repo.UpsertSnapshot(ctx, snap)
+	if err != nil {
+		t.Fatalf("UpsertSnapshot failed: %v", err)
+	}
+
+	// Upsert again with updated rank (should not duplicate)
+	snap.Rank = 2
+	err = repo.UpsertSnapshot(ctx, snap)
+	if err != nil {
+		t.Fatalf("second UpsertSnapshot failed: %v", err)
+	}
+
+	// Verify only one record exists
+	var count int64
+	repo.db.WithContext(ctx).Model(&RankingSnapshot{}).Count(&count)
+	if count != 1 {
+		t.Errorf("expected 1 snapshot after upsert, got %d", count)
+	}
+}
+
+func TestSnapshot_ConsecutiveDays(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	snaps := []RankingSnapshot{
+		makeSnapshot("000001", "SZSE", 1, 95.0, time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC)),
+		makeSnapshot("000001", "SZSE", 2, 94.0, time.Date(2026, 4, 14, 2, 30, 0, 0, time.UTC)),
+		makeSnapshot("000001", "SZSE", 3, 93.0, time.Date(2026, 4, 13, 9, 15, 0, 0, time.UTC)),
+		// Gap here: April 12 is missing → break consecutive chain
+	}
+	for _, s := range snaps {
+		if err := repo.UpsertSnapshot(ctx, s); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	days, err := repo.GetConsecutiveDays(ctx, "000001", []string{"SZSE"})
+	if err != nil {
+		t.Fatalf("GetConsecutiveDays failed: %v", err)
+	}
+	if days != 3 {
+		t.Errorf("expected 3 consecutive days, got %d", days)
+	}
+}
+
+func TestSnapshot_ConsecutiveDays_WithGap(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	snaps := []RankingSnapshot{
+		makeSnapshot("600519", "SSE", 1, 99.0, time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC)),
+		// Missing April 14
+		makeSnapshot("600519", "SSE", 3, 97.0, time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)),
+	}
+	for _, s := range snaps {
+		if err := repo.UpsertSnapshot(ctx, s); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	days, _ := repo.GetConsecutiveDays(ctx, "600519", []string{"SSE"})
+	// Should be 1 (only the most recent day; gap breaks the chain)
+	if days != 1 {
+		t.Errorf("expected 1 consecutive day (gap breaks chain), got %d", days)
+	}
+}
+
+func TestSnapshot_ConsecutiveDays_EmptyTable(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	days, err := repo.GetConsecutiveDays(ctx, "999999", []string{"SSE"})
+	if err != nil {
+		t.Fatalf("GetConsecutiveDays on empty table error: %v", err)
+	}
+	if days != 0 {
+		t.Errorf("expected 0 for empty table, got %d", days)
+	}
+}
+
+func TestSnapshot_FirstAppearedDate(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	snaps := []RankingSnapshot{
+		makeSnapshot("00700", "HKEX", 5, 88.0, time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)),
+		makeSnapshot("00700", "HKEX", 3, 92.0, time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC)),
+	}
+	for _, s := range snaps {
+		if err := repo.UpsertSnapshot(ctx, s); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	firstDateStr, err := repo.GetFirstAppearedDate(ctx, "00700", []string{"HKEX"})
+	if err != nil {
+		t.Fatalf("GetFirstAppearedDate failed: %v", err)
+	}
+	if firstDateStr == "" {
+		t.Fatal("expected a first-appeared date, got empty")
+	}
+	expected := "2026-04-13"
+	if firstDateStr != expected {
+		t.Errorf("expected first appeared at %s, got %s", expected, firstDateStr)
+	}
+}
+
+func TestSnapshot_ClosePriceOnDate(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	date := time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC)
+	dateStr := date.Format("2006-01-02")
+
+	snap := makeSnapshot("601318", "SSE", 1, 90.0, date)
+	snap.ClosePrice = 185.50
+	if err := repo.UpsertSnapshot(ctx, snap); err != nil {
+		t.Fatalf("seed snapshot failed: %v", err)
+	}
+
+	price, err := repo.GetClosePriceOnDate(ctx, "601318", dateStr)
+	if err != nil {
+		t.Fatalf("GetClosePriceOnDate failed: %v", err)
+	}
+	if price != 185.50 {
+		t.Errorf("expected close_price=185.50, got %.2f", price)
+	}
+}

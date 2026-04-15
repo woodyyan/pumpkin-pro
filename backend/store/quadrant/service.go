@@ -4,17 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
 
+// PriceResolver resolves the latest closing price for a given stock code.
+// Implemented by the live-store module; returns 0 if unavailable.
+type PriceResolver func(ctx context.Context, code string) float64
+
 // Service provides business logic for quadrant scores.
 type Service struct {
-	repo *Repository
+	repo          *Repository
+	priceResolver PriceResolver // optional, for snapshot close_price
 }
 
 func NewService(repo *Repository) *Service {
 	return &Service{repo: repo}
+}
+
+// SetPriceResolver injects the price resolution callback (called during init).
+func (s *Service) SetPriceResolver(r PriceResolver) {
+	s.priceResolver = r
 }
 
 // BulkSave writes all quadrant scores from the Quant callback.
@@ -69,7 +80,57 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 		s.saveComputeLog(ctx, computedAt, input.Report, len(records))
 	}
 
+	// Save ranking snapshots (best-effort; failure does not affect BulkSave result)
+	s.saveRankingSnapshotsBestEffort(ctx, records, computedAt)
+
 	return len(records), nil
+}
+
+// saveRankingSnapshotsBestEffort saves top-50 opportunity-zone records as daily ranking snapshots.
+// This is best-effort: errors are logged but not propagated to the caller.
+func (s *Service) saveRankingSnapshotsBestEffort(ctx context.Context, records []QuadrantScoreRecord, computedAt time.Time) {
+	// Extract opportunity-zone records only
+	var oppRecords []QuadrantScoreRecord
+	for _, r := range records {
+		if r.Quadrant == "机会" && r.Opportunity > 0 {
+			oppRecords = append(oppRecords, r)
+		}
+	}
+	if len(oppRecords) == 0 {
+		return
+	}
+
+	// Sort by opportunity DESC (same as ranking order)
+	sort.Slice(oppRecords, func(i, j int) bool {
+		return oppRecords[i].Opportunity > oppRecords[j].Opportunity
+	})
+	if len(oppRecords) > 50 {
+		oppRecords = oppRecords[:50]
+	}
+
+	now := time.Now().UTC()
+	dateStr := computedAt.Truncate(24 * time.Hour).Format("2006-01-02")
+	snaps := make([]RankingSnapshot, 0, len(oppRecords))
+	for i, r := range oppRecords {
+		closePrice := 0.0
+		if s.priceResolver != nil {
+			closePrice = s.priceResolver(ctx, r.Code)
+		}
+		snaps = append(snaps, RankingSnapshot{
+			Code:         r.Code,
+			Name:         r.Name,
+			Exchange:     r.Exchange,
+			Rank:         i + 1,
+			Opportunity:  r.Opportunity,
+			Risk:         r.Risk,
+			ClosePrice:   closePrice,
+			SnapshotDate: dateStr,
+			CreatedAt:    now,
+		})
+	}
+	if err := s.repo.UpsertSnapshots(ctx, snaps); err != nil {
+		fmt.Printf("[quadrant] WARNING: failed to save ranking snapshots: %v\n", err)
+	}
 }
 
 func (s *Service) saveComputeLog(ctx context.Context, computedAt time.Time, report map[string]any, stockCount int) {
@@ -346,7 +407,7 @@ func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*
 	var latestComputedAt time.Time
 
 	for i, r := range records {
-		items = append(items, RankingItem{
+		item := RankingItem{
 			Rank:        i + 1,
 			Code:        r.Code,
 			Name:        r.Name,
@@ -359,10 +420,26 @@ func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*
 			Revision:    r.Revision,
 			Liquidity:   r.Liquidity,
 			AvgAmount5d: r.AvgAmount5d,
-		})
+		}
 		if r.ComputedAt.After(latestComputedAt) {
 			latestComputedAt = r.ComputedAt
 		}
+
+		// Enrich with consecutive days and return since first appearance
+		days, _ := s.repo.GetConsecutiveDays(ctx, r.Code, exchanges)
+		item.ConsecutiveDays = days
+
+		firstDateStr, _ := s.repo.GetFirstAppearedDate(ctx, r.Code, exchanges)
+		if firstDateStr != "" {
+			currentDateStr := latestComputedAt.Truncate(24 * time.Hour).Format("2006-01-02")
+			startPrice, _ := s.repo.GetClosePriceOnDate(ctx, r.Code, firstDateStr)
+			currentPrice, _ := s.repo.GetClosePriceOnDate(ctx, r.Code, currentDateStr)
+			if startPrice > 0 && currentPrice > 0 {
+				item.ReturnPct = (currentPrice - startPrice) / startPrice * 100
+			}
+		}
+
+		items = append(items, item)
 	}
 
 	computedAtStr := ""

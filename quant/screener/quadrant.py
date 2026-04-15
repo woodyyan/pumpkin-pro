@@ -825,9 +825,12 @@ def compute_all_quadrant_scores(
     for _, row in merged.iterrows():
         code = str(row.get("code", ""))
         name = str(row.get("name", "")) if pd.notna(row.get("name")) else code
+        # Determine exchange from A-share code prefix: 6xxxxx→SSE, 0/3xxxxx→SZSE
+        _exchange = "SSE" if code.startswith("6") else "SZSE"
         result_items.append({
             "code": code,
             "name": name,
+            "exchange": _exchange,
             "opportunity": float(row["opportunity"]),
             "risk": float(row["risk"]),
             "quadrant": row["quadrant"],
@@ -869,6 +872,7 @@ def compute_all_quadrant_scores(
     compute_report = {
         "computed_at": pd.Timestamp.now(tz="UTC").isoformat(),
         "mode": mode_label,
+        "exchange": "ASHARE",
         "duration_seconds": round(elapsed, 1),
         "stock_count": len(result_items),
         "daily_bars": {

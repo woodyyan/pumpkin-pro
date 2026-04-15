@@ -351,3 +351,174 @@ func TestResolveRankingExchanges(t *testing.T) {
 		}
 	}
 }
+
+// ── Regression: AShare ranking when all records are SZSE (legacy data) ──
+
+func TestGetRanking_AShareAllSZSE(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	// Simulates legacy data where ALL A-share stocks have exchange="SZSE"
+	// (before fix: compute_all_quadrant_scores didn't set exchange → Go defaulted to SZSE)
+	records := make([]QuadrantScoreRecord, 0, 15)
+	for i := 1; i <= 15; i++ {
+		code := padCode(i, 6) // 000001 ~ 000015
+		records = append(records, makeRankingRecord(code, "SZSE",
+			float64(99-i), float64(10+i)))
+	}
+
+	seedOpportunityRecords(t, repo, records)
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking(ASHARE) with all-SZSE data failed: %v", err)
+	}
+	if len(resp.Items) == 0 {
+		t.Error("expected non-empty ranking for ASHARE when all records are SZSE — this is the legacy-data regression case")
+	}
+	if resp.Meta.TotalInZone == 0 {
+		t.Error("expected TotalInZone > 0")
+	}
+	if resp.Meta.Exchange != "ASHARE" {
+		t.Errorf("expected Exchange=ASHARE, got %s", resp.Meta.Exchange)
+	}
+}
+
+// ── Regression: AShare ranking with mixed SSE + SZSE (after fix) ──
+
+func TestGetRanking_AShareMixedExchange(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	records := []QuadrantScoreRecord{
+		makeRankingRecord("600519", "SSE", 98, 12),
+		makeRankingRecord("600000", "SSE", 95, 25),
+		makeRankingRecord("601318", "SSE", 93, 18),
+		makeRankingRecord("000001", "SZSE", 97, 15),
+		makeRankingRecord("000002", "SZSE", 96, 20),
+		makeRankingRecord("300750", "SZSE", 94, 22),
+	}
+	seedOpportunityRecords(t, repo, records)
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 10)
+	if err != nil {
+		t.Fatalf("GetRanking(ASHARE) mixed exchange failed: %v", err)
+	}
+
+	if len(resp.Items) != 6 {
+		t.Errorf("expected 6 items (SSE+SZSE combined), got %d", len(resp.Items))
+	}
+
+	sseCount := 0
+	szseCount := 0
+	for _, item := range resp.Items {
+		switch item.Exchange {
+		case "SSE":
+			sseCount++
+		case "SZSE":
+			szseCount++
+		default:
+			t.Errorf("unexpected exchange in ASHARE ranking: %s (%s)", item.Exchange, item.Code)
+		}
+	}
+	if sseCount != 3 {
+		t.Errorf("expected 3 SSE items, got %d", sseCount)
+	}
+	if szseCount != 3 {
+		t.Errorf("expected 3 SZSE items, got %d", szseCount)
+	}
+}
+
+// ── Regression: HKEX ranking must never include SSE/SZSE records ──
+
+func TestGetRanking_HKEXStrictIsolation(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	records := []QuadrantScoreRecord{
+		makeRankingRecord("00700", "HKEX", 92, 20),
+		makeRankingRecord("00005", "HKEX", 88, 25),
+		// These SSE/SZSE records should NEVER appear in HKEX results
+		makeRankingRecord("600519", "SSE", 99, 5),   // high opportunity but wrong exchange!
+		makeRankingRecord("000001", "SZSE", 98, 10),
+	}
+	seedOpportunityRecords(t, repo, records)
+
+	resp, err := svc.GetRanking(ctx, "HKEX", 50)
+	if err != nil {
+		t.Fatalf("GetRanking(HKEX) failed: %v", err)
+	}
+
+	for _, item := range resp.Items {
+		if item.Exchange != "HKEX" {
+			t.Errorf("HKEX ranking leaked non-HK stock: code=%s exchange=%s", item.Code, item.Exchange)
+		}
+	}
+	if len(resp.Items) != 2 {
+		t.Errorf("HKEX ranking should return only 2 HK items, got %d", len(resp.Items))
+	}
+}
+
+// ── Regression: BulkSave preserves explicit exchange field ──
+
+func TestBulkSave_ExchangePreservation(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	input := BulkSaveInput{
+		Items: []BulkSaveItem{
+			{Code: "600519", Name: "贵州茅台", Opportunity: 90, Risk: 20,
+				Quadrant: "机会", Trend: 85, Flow: 80, Revision: 75,
+				Volatility: 30, Drawdown: 15, Crowding: 40, Exchange: "SSE"},
+			{Code: "000001", Name: "平安银行", Opportunity: 85, Risk: 25,
+				Quadrant: "机会", Trend: 80, Flow: 75, Revision: 70,
+				Volatility: 35, Drawdown: 18, Crowding: 45, Exchange: "SZSE"},
+			{Code: "00700", Name: "腾讯控股", Opportunity: 92, Risk: 18,
+				Quadrant: "机会", Trend: 88, Flow: 82, Revision: 78,
+				Volatility: 28, Drawdown: 12, Crowding: 35, Exchange: "HKEX"},
+			// No exchange field → should default to SZSE
+			{Code: "300750", Name: "宁德时代", Opportunity: 88, Risk: 22,
+				Quadrant: "机会", Trend: 83, Flow: 78, Revision: 72,
+				Volatility: 32, Drawdown: 14, Crowding: 38},
+		},
+		ComputedAt: "2026-04-15T02:30:00Z",
+	}
+
+	count, err := svc.BulkSave(ctx, input)
+	if err != nil {
+		t.Fatalf("BulkSave failed: %v", err)
+	}
+	if count != 4 {
+		t.Errorf("expected 4 saved, got %d", count)
+	}
+
+	// Verify each record's exchange was preserved or defaulted correctly
+	all, err := repo.FindByExchange(ctx, []string{"SSE", "SZSE", "HKEX"})
+	if err != nil {
+		t.Fatalf("FindByExchange failed: %v", err)
+	}
+	exchangeMap := map[string]string{}
+	for _, r := range all {
+		exchangeMap[r.Code] = r.Exchange
+	}
+	if exchangeMap["600519"] != "SSE" {
+		t.Errorf("600519 exchange should be SSE, got %s", exchangeMap["600519"])
+	}
+	if exchangeMap["000001"] != "SZSE" {
+		t.Errorf("000001 exchange should be SZSE, got %s", exchangeMap["000001"])
+	}
+	if exchangeMap["00700"] != "HKEX" {
+		t.Errorf("00700 exchange should be HKEX, got %s", exchangeMap["00700"])
+	}
+	if exchangeMap["300750"] != "SZSE" {
+		t.Errorf("300750 (no exchange) should default to SZSE, got %s", exchangeMap["300750"])
+	}
+}

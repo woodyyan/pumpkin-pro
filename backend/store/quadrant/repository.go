@@ -37,7 +37,8 @@ func (r *Repository) BulkUpsert(ctx context.Context, records []QuadrantScoreReco
 				Columns: []clause.Column{{Name: "code"}},
 				DoUpdates: clause.AssignmentColumns([]string{
 					"name", "opportunity", "risk", "quadrant",
-					"trend", "flow", "revision", "volatility", "drawdown", "crowding",
+					"trend", "flow", "revision", "liquidity",
+					"volatility", "drawdown", "crowding", "avg_amount5d",
 					"computed_at",
 				}),
 			}).Create(&batch).Error; err != nil {
@@ -160,7 +161,8 @@ func (r *Repository) GetLatestComputeLog(ctx context.Context) (*ComputeLogRecord
 
 // FindOpportunityZone returns records in the "机会" (opportunity) zone,
 // ordered by opportunity DESC, risk ASC, limited to `limit`.
-func (r *Repository) FindOpportunityZone(ctx context.Context, exchanges []string, limit int) ([]QuadrantScoreRecord, int64, error) {
+// minAmount is a liquidity hard-filter: only stocks with avg_amount_5d >= threshold are returned.
+func (r *Repository) FindOpportunityZone(ctx context.Context, exchanges []string, limit int, minAmount float64) ([]QuadrantScoreRecord, int64, error) {
 	var records []QuadrantScoreRecord
 
 	query := r.db.WithContext(ctx).
@@ -170,7 +172,12 @@ func (r *Repository) FindOpportunityZone(ctx context.Context, exchanges []string
 		query = query.Where("exchange IN ?", exchanges)
 	}
 
-	// Get total count in zone before limit
+	// Liquidity hard filter: exclude illiquid stocks from ranking
+	if minAmount > 0 {
+		query = query.Where("avg_amount5d >= ?", minAmount)
+	}
+
+	// Get total count in zone (pre-filter for meta display)
 	var totalInZone int64
 	countQuery := r.db.WithContext(ctx).
 		Model(&QuadrantScoreRecord{}).

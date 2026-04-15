@@ -47,9 +47,11 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 			Trend:       item.Trend,
 			Flow:        item.Flow,
 			Revision:    item.Revision,
+			Liquidity:   item.Liquidity,
 			Volatility:  item.Volatility,
 			Drawdown:    item.Drawdown,
 			Crowding:    item.Crowding,
+			AvgAmount5d: item.AvgAmount5d,
 			ComputedAt:  computedAt,
 		})
 	}
@@ -304,13 +306,23 @@ func resolveRankingExchanges(exchange string) []string {
 
 // GetRanking returns the top-N stocks from the opportunity zone (机会区),
 // ordered by opportunity DESC + risk ASC.
+// Applies a minimum liquidity filter (avg_amount_5d threshold) per market:
+//   A-share: 5000 万元, HKEX: 2000 万 HKD.
 func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*RankingResponse, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
 	exchanges := resolveRankingExchanges(exchange)
 
-	records, totalInZone, err := s.repo.FindOpportunityZone(ctx, exchanges, limit)
+	// Liquidity hard-filter thresholds (万元 / 万HKD)
+	minAmount := 5000.0 // A-share default
+	for _, ex := range exchanges {
+		if ex == "HKEX" {
+			minAmount = 2000.0
+		}
+	}
+
+	records, totalInZone, err := s.repo.FindOpportunityZone(ctx, exchanges, limit, minAmount)
 	if err != nil {
 		return nil, err
 	}
@@ -320,16 +332,18 @@ func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*
 
 	for i, r := range records {
 		items = append(items, RankingItem{
-			Rank:       i + 1,
-			Code:       r.Code,
-			Name:       r.Name,
-			Exchange:   r.Exchange,
+			Rank:        i + 1,
+			Code:        r.Code,
+			Name:        r.Name,
+			Exchange:    r.Exchange,
 			Opportunity: r.Opportunity,
-			Risk:       r.Risk,
-			Quadrant:   r.Quadrant,
-			Trend:      r.Trend,
-			Flow:       r.Flow,
-			Revision:   r.Revision,
+			Risk:        r.Risk,
+			Quadrant:    r.Quadrant,
+			Trend:       r.Trend,
+			Flow:        r.Flow,
+			Revision:    r.Revision,
+			Liquidity:   r.Liquidity,
+			AvgAmount5d: r.AvgAmount5d,
 		})
 		if r.ComputedAt.After(latestComputedAt) {
 			latestComputedAt = r.ComputedAt

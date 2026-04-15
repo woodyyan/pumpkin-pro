@@ -157,7 +157,8 @@ function RankRow({ item, onClick }) {
         {/* Sub-scores bars */}
         <ScoreBar label="趋势" value={item.trend} max={100} width="w-16" />
         <ScoreBar label="资金" value={item.flow} max={100} width="w-14" />
-        <ScoreBar label="修正" value={item.revision} max={100} width="w-14" />
+        <ScoreBar label="流动" value={item.liquidity ?? 50} max={100} width="w-14" amount={item.avg_amount_5d} />
+      </div>
       </div>
 
       {/* Arrow */}
@@ -189,7 +190,7 @@ function RankCard({ item, onClick }) {
         </div>
       </div>
 
-      <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1 text-xs tabular-nums">
+      <div className="mt-2.5 grid grid-cols-3 gap-x-3 gap-y-1 text-xs tabular-nums">
         <div>
           <span className="text-white/35">机会</span>
           <span className={`ml-1.5 font-semibold ${item.opportunity >= 90 ? 'text-emerald-300' : 'text-white'}`}>
@@ -200,6 +201,12 @@ function RankCard({ item, onClick }) {
           <span className="text-white/35">风险</span>
           <span className={`ml-1.5 ${item.risk < 30 ? 'text-emerald-300' : 'text-white/60'}`}>
             {item.risk.toFixed(1)}
+          </span>
+        </div>
+        <div>
+          <span className="text-white/35">流动</span>
+          <span className={`ml-1.5 ${item.avg_amount_5d ? 'text-white' : 'text-white/40'}`} title={item.avg_amount_5d ? `均额${formatAmount(item.avg_amount_5d)}` : undefined}>
+            {item.avg_amount_5d ? formatAmount(item.avg_amount_5d) : '--'}
           </span>
         </div>
       </div>
@@ -219,7 +226,7 @@ function RankCard({ item, onClick }) {
   )
 }
 
-function ScoreBar({ label, value, max, width }) {
+function ScoreBar({ label, value, max, width, amount = null }) {
   const pct = Math.min(100, Math.max(0, (value / max) * 100))
   return (
     <div className={`${width} hidden lg:block`}>
@@ -231,10 +238,22 @@ function ScoreBar({ label, value, max, width }) {
             style={{ width: `${pct}%` }}
           />
         </div>
-        <span className="w-5 text-right text-[10px] text-white/45 tabular-nums">{value.toFixed(0)}</span>
+        {amount != null && amount > 0 ? (
+          <span className="text-[9px] text-white/35 tabular-nums" title={`近5日均成交额 ${formatAmount(amount)}`}>
+            {formatAmount(amount)}
+          </span>
+        ) : (
+          <span className="w-5 text-right text-[10px] text-white/45 tabular-nums">{value.toFixed(0)}</span>
+        )}
       </div>
     </div>
   )
+}
+
+function formatAmount(val) {
+  if (!val || val <= 0) return '--'
+  if (val >= 10000) return `${(val / 10000).toFixed(1)}亿`
+  return `${val.toFixed(0)}万`
 }
 
 // ── Pure helpers ──

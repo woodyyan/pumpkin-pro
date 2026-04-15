@@ -29,9 +29,11 @@ func makeRankingRecord(code, exchange string, opportunity, risk float64) Quadran
 		Trend:       opportunity * 0.95,
 		Flow:        opportunity * 0.88,
 		Revision:    opportunity * 0.80,
+		Liquidity:   opportunity * 0.9, // 流动性分数
 		Volatility:  risk * 1.2,
 		Drawdown:    risk * 0.6,
 		Crowding:    risk * 0.9,
+		AvgAmount5d: 10000.0, // 1 亿元，满足硬过滤门槛
 		ComputedAt:  time.Date(2026, 4, 15, 2, 30, 0, 0, time.UTC),
 	}
 }
@@ -47,6 +49,8 @@ func makeNonOpportunityRecord(code, exchange string, quadrant string) QuadrantSc
 		Trend:      25,
 		Flow:       20,
 		Revision:   18,
+		Liquidity:  40,
+		AvgAmount5d: 5000.0,
 		ComputedAt: time.Date(2026, 4, 15, 2, 30, 0, 0, time.UTC),
 	}
 }
@@ -70,6 +74,8 @@ func TestRankingItem_JSONRoundTrip(t *testing.T) {
 		Trend:       94.2,
 		Flow:        88.7,
 		Revision:    85.1,
+		Liquidity:   92.0,
+		AvgAmount5d: 150000.0,
 	}
 
 	data, err := json.Marshal(item)
@@ -520,5 +526,109 @@ func TestBulkSave_ExchangePreservation(t *testing.T) {
 	}
 	if exchangeMap["300750"] != "SZSE" {
 		t.Errorf("300750 (no exchange) should default to SZSE, got %s", exchangeMap["300750"])
+	}
+}
+
+// ── Liquidity hard-filter regression tests ──
+
+func makeLowLiquidityRecord(code, exchange string, opportunity float64) QuadrantScoreRecord {
+	r := makeRankingRecord(code, exchange, opportunity, 20.0)
+	r.AvgAmount5d = 1000.0 // 1000 万，低于 A 股门槛 5000 万
+	return r
+}
+
+func makeHighLiquidityRecord(code, exchange string, opportunity float64) QuadrantScoreRecord {
+	r := makeRankingRecord(code, exchange, opportunity, 20.0)
+	r.AvgAmount5d = 50000.0 // 5 亿元，满足门槛
+	return r
+}
+
+// TestGetRanking_LiquidityFilter_ExcludesIlliquid: low avg_amount_5d stocks must be excluded from ASHARE ranking
+func TestGetRanking_LiquidityFilter_ExcludesIlliquid(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	records := []QuadrantScoreRecord{
+		makeHighLiquidityRecord("600519", "SSE", 98),   // passes filter
+		makeHighLiquidityRecord("000001", "SZSE", 95),   // passes filter
+		makeLowLiquidityRecord("300123", "SZSE", 99),    // high opp but illiquid → excluded!
+		makeLowLiquidityRecord("600888", "SSE", 96),     // excluded
+	}
+	seedOpportunityRecords(t, repo, records)
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking(ASHARE) with liquidity filter failed: %v", err)
+	}
+
+	if len(resp.Items) != 2 {
+		t.Errorf("expected only 2 items (high-liquidity passed), got %d", len(resp.Items))
+	}
+	for _, item := range resp.Items {
+		if item.AvgAmount5d < 5000 {
+			t.Errorf("stock %s has avg_amount_5d=%.1f below threshold but appeared in results", item.Code, item.AvgAmount5d)
+		}
+		if item.Code == "300123" || item.Code == "600888" {
+			t.Errorf("illiquid stock %s leaked into ranking", item.Code)
+		}
+	}
+}
+
+// TestGetRanking_LiquidityFilter_HKEXThreshold: HKEX uses 2000M threshold (lower than ASHARE's 5000M)
+func TestGetRanking_LiquidityFilter_HKEXThreshold(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	hkPass := makeHighLiquidityRecord("00700", "HKEX", 95)
+	hkPass.AvgAmount5d = 3000.0 // 3000 万 > HKEX 门槛 2000 → 通过
+
+	hkFail := makeLowLiquidityRecord("00005", "HKEX", 97)
+	hkFail.AvgAmount5d = 1500.0 // 1500 万 < HKEX 门槛 2000 → 被过滤
+
+	records := []QuadrantScoreRecord{hkPass, hkFail}
+	seedOpportunityRecords(t, repo, records)
+
+	resp, err := svc.GetRanking(ctx, "HKEX", 20)
+	if err != nil {
+		t.Fatalf("GetRanking(HKEX) failed: %v", err)
+	}
+
+	if len(resp.Items) != 1 {
+		t.Errorf("expected 1 HK item passing liquidity filter, got %d", len(resp.Items))
+	}
+	if len(resp.Items) > 0 && resp.Items[0].Code != "00700" {
+		t.Errorf("expected 00700 to pass HKEX liquidity filter, got %s", resp.Items[0].Code)
+	}
+}
+
+// TestGetRanking_RankingItemHasLiquidityFields: every returned RankingItem must have Liquidity and AvgAmount5d
+func TestGetRanking_RankingItemHasLiquidityFields(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	records := []QuadrantScoreRecord{
+		makeHighLiquidityRecord("601318", "SSE", 90),
+		makeHighLiquidityRecord("000858", "SZSE", 88),
+	}
+	seedOpportunityRecords(t, repo, records)
+
+	resp, _ := svc.GetRanking(ctx, "ASHARE", 10)
+
+	for i, item := range resp.Items {
+		if item.Liquidity == 0 && i < len(records) { // allow zero only if test data is zero
+			// check original data had non-zero liquidity
+			if records[i].Liquidity != 0 {
+				t.Errorf("item[%d] (%s): Liquidity=0 but expected %.1f", i, item.Code, records[i].Liquidity)
+			}
+		}
+		if item.AvgAmount5d == 0 {
+			t.Errorf("item[%d] (%s): AvgAmount5d=0, expected non-zero", i, item.Code)
+		}
 	}
 }

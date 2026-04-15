@@ -15,9 +15,11 @@ type QuadrantScoreRecord struct {
 	Trend       float64   `gorm:"not null;default:0"`
 	Flow        float64   `gorm:"not null;default:0"`
 	Revision    float64   `gorm:"not null;default:0"`
+	Liquidity   float64   `gorm:"not null;default:0"`  // 流动性：近5日均成交额 percentile rank
 	Volatility  float64   `gorm:"not null;default:0"`
 	Drawdown    float64   `gorm:"not null;default:0"`
 	Crowding    float64   `gorm:"not null;default:0"`
+	AvgAmount5d float64   `gorm:"not null;default:0"` // 近5日均成交额（万元）
 	ComputedAt  time.Time `gorm:"not null"`
 }
 
@@ -44,9 +46,11 @@ type QuadrantScoreDetail struct {
 	Trend       float64 `json:"trend"`
 	Flow        float64 `json:"flow"`
 	Revision    float64 `json:"revision"`
+	Liquidity   float64 `json:"liquidity"`
 	Volatility  float64 `json:"volatility"`
 	Drawdown    float64 `json:"drawdown"`
 	Crowding    float64 `json:"crowding"`
+	AvgAmount5d float64 `json:"avg_amount_5d"` // 近5日均成交额（万元）
 }
 
 // QuadrantSummary holds per-quadrant counts.
@@ -88,9 +92,11 @@ type BulkSaveItem struct {
 	Trend       float64 `json:"trend"`
 	Flow        float64 `json:"flow"`
 	Revision    float64 `json:"revision"`
+	Liquidity   float64 `json:"liquidity"`
 	Volatility  float64 `json:"volatility"`
 	Drawdown    float64 `json:"drawdown"`
 	Crowding    float64 `json:"crowding"`
+	AvgAmount5d float64 `json:"avg_amount_5d"` // 近5日均成交额（万元）
 	Exchange    string  `json:"exchange,omitempty"` // "SSE"/"SZSE"(默认)/"HKEX"
 }
 
@@ -122,16 +128,18 @@ type QuadrantStatusResponse struct {
 
 // RankingItem is a single stock in the ranking list.
 type RankingItem struct {
-	Rank       int     `json:"rank"`
-	Code       string  `json:"code"`
-	Name       string  `json:"name"`
-	Exchange   string  `json:"exchange"`
+	Rank        int     `json:"rank"`
+	Code        string  `json:"code"`
+	Name        string  `json:"name"`
+	Exchange    string  `json:"exchange"`
 	Opportunity float64 `json:"opportunity"`
-	Risk       float64 `json:"risk"`
-	Quadrant   string  `json:"quadrant"`
-	Trend      float64 `json:"trend"`
-	Flow       float64 `json:"flow"`
-	Revision   float64 `json:"revision"`
+	Risk        float64 `json:"risk"`
+	Quadrant    string  `json:"quadrant"`
+	Trend       float64 `json:"trend"`
+	Flow        float64 `json:"flow"`
+	Revision    float64 `json:"revision"`
+	Liquidity   float64 `json:"liquidity"`
+	AvgAmount5d float64 `json:"avg_amount_5d"` // 近5日均成交额（万元）
 }
 
 // RankingMeta holds ranking metadata.
@@ -168,8 +176,10 @@ func (r QuadrantScoreRecord) ToDetail() QuadrantScoreDetail {
 		Trend:       r.Trend,
 		Flow:        r.Flow,
 		Revision:    r.Revision,
+		Liquidity:   r.Liquidity,
 		Volatility:  r.Volatility,
 		Drawdown:    r.Drawdown,
 		Crowding:    r.Crowding,
+		AvgAmount5d: r.AvgAmount5d,
 	}
 }

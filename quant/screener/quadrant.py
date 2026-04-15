@@ -1,10 +1,11 @@
 """
 四象限模型 — 全市场预计算模块（支持 A 股 / 港股）
 
-Opportunity Score = 0.5 * Trend + 0.3 * Flow + 0.2 * Revision
+Opportunity Score = 0.4 * Trend + 0.25 * Flow + 0.15 * Revision + 0.20 * Liquidity
 Risk Score        = 0.4 * Volatility + 0.3 * Drawdown + 0.3 * Crowding
 
 所有子指标先做 percentile rank (0~100)，加权组合后最终分数也在 0~100。
+Liquidity = percentile_rank(近5日均成交额)，用于衡量标的可交易性。
 
 数据源策略：腾讯财经优先，东财 AKShare 降级。
 缓存策略：本地 JSON 文件缓存日线数据，每日增量更新。
@@ -514,6 +515,7 @@ def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
         "cumulative_turnover_20d": np.nan,
         "change_pct_60d_calc": np.nan,
         "volume_ratio_calc": np.nan,
+        "avg_amount_5d": np.nan,  # 近 5 日平均成交额（万元）
     }
     if daily_df is None or daily_df.empty or "close" not in daily_df.columns:
         return result
@@ -547,6 +549,15 @@ def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
             avg_5d = volumes.iloc[-6:-1].mean()
             if avg_5d > 0:
                 result["volume_ratio_calc"] = float(today_vol / avg_5d)
+
+    # 近 5 日平均成交额（万元）：每日 volume × close 取均值
+    # 用于流动性硬过滤 + Liquidity 子指标
+    if vol_col and "close" in daily_df.columns:
+        df_amount = daily_df[[vol_col, "close"]].dropna()
+        if len(df_amount) >= 1:
+            lookback = min(5, len(df_amount))
+            amounts = (df_amount[vol_col].tail(lookback) * df_amount["close"].tail(lookback)) / 10000  # 转万元
+            result["avg_amount_5d"] = float(amounts.mean())
 
     turnover_col = "turnover" if "turnover" in daily_df.columns else ("volume" if "volume" in daily_df.columns else None)
     if turnover_col:
@@ -755,6 +766,9 @@ def compute_all_quadrant_scores(
     # ── Revision (NaN-tolerant) ──
     merged["revision"] = _percentile_rank(merged["profit_growth_rate"]).fillna(50)
 
+    # ── Liquidity (流动性：近 5 日均成交额 percentile rank) ──
+    merged["liquidity_raw"] = _percentile_rank(merged["avg_amount_5d"]).fillna(50)
+
     # ── Volatility (NaN-tolerant) ──
     merged["volatility_raw"] = _percentile_rank(merged["std_20d"]).fillna(50)
 
@@ -782,12 +796,15 @@ def compute_all_quadrant_scores(
     t_score = merged["trend"].fillna(50)
     f_score = merged["flow"].fillna(50)
     r_score = merged["revision"].fillna(50)
+    l_score = merged["liquidity_raw"].fillna(50)
 
-    merged["opportunity"] = 0.5 * t_score + 0.3 * f_score + 0.2 * r_score
+    # Opportunity = 0.4×Trend + 0.25×Flow + 0.15×Revision + 0.20×Liquidity
+    merged["opportunity"] = 0.4 * t_score + 0.25 * f_score + 0.15 * r_score + 0.20 * l_score
     merged["risk"] = 0.4 * v_raw + 0.3 * d_raw + 0.3 * c_raw
 
     # ── Diagnostic: sub-score and final score stats ──
-    for col in ["trend", "flow", "revision", "volatility_raw", "drawdown_raw", "crowding_raw", "opportunity", "risk"]:
+    for col in ["trend", "flow", "revision", "liquidity_raw",
+                "volatility_raw", "drawdown_raw", "crowding_raw", "opportunity", "risk"]:
         s = merged[col]
         valid = int(s.notna().sum())
         if valid > 0:
@@ -803,7 +820,8 @@ def compute_all_quadrant_scores(
 
     merged["opportunity"] = merged["opportunity"].fillna(50).clip(0, 100).round(2)
     merged["risk"] = merged["risk"].fillna(50).clip(0, 100).round(2)
-    for col in ["trend", "flow", "revision", "volatility_raw", "drawdown_raw", "crowding_raw"]:
+    for col in ["trend", "flow", "revision", "liquidity_raw",
+                "volatility_raw", "drawdown_raw", "crowding_raw"]:
         merged[col] = merged[col].fillna(50).clip(0, 100).round(2)
 
     # ── Step 6: 分配象限 ──
@@ -837,9 +855,11 @@ def compute_all_quadrant_scores(
             "trend": float(row["trend"]),
             "flow": float(row["flow"]),
             "revision": float(row["revision"]),
+            "liquidity": float(row["liquidity_raw"]),
             "volatility": float(row["volatility_raw"]),
             "drawdown": float(row["drawdown_raw"]),
             "crowding": float(row["crowding_raw"]),
+            "avg_amount_5d": round(float(row.get("avg_amount_5d", 0) or 0), 2),
         })
 
     elapsed = time.time() - start_time
@@ -1116,6 +1136,9 @@ def compute_hk_quadrant_scores(
     logger.info("[hk-quadrant] Crowding: %d 只用 PE+换手率, %d 只仅用 PE",
                 int(has_cum_turnover.sum()), int((~has_cum_turnover).sum()))
 
+    # ── Liquidity (流动性：近 5 日均成交额 percentile rank) ──
+    merged["liquidity_raw"] = _percentile_rank(merged.get("avg_amount_5d", pd.Series(dtype=float))).fillna(50)
+
     # ── Final scores ──
     v_raw = merged["volatility_raw"].fillna(50)
     d_raw = merged["drawdown_raw"].fillna(50)
@@ -1123,8 +1146,10 @@ def compute_hk_quadrant_scores(
     t_score = merged["trend"].fillna(50)
     f_score = merged["flow"].fillna(50)
     r_score = merged["revision"].fillna(50)
+    l_score = merged["liquidity_raw"].fillna(50)
 
-    merged["opportunity"] = 0.5 * t_score + 0.3 * f_score + 0.2 * r_score
+    # Opportunity = 0.4×Trend + 0.25×Flow + 0.15×Revision + 0.20×Liquidity
+    merged["opportunity"] = 0.4 * t_score + 0.25 * f_score + 0.15 * r_score + 0.20 * l_score
     merged["risk"] = 0.4 * v_raw + 0.3 * d_raw + 0.3 * c_raw
 
     # Re-normalize
@@ -1133,7 +1158,8 @@ def compute_hk_quadrant_scores(
 
     merged["opportunity"] = merged["opportunity"].fillna(50).clip(0, 100).round(2)
     merged["risk"] = merged["risk"].fillna(50).clip(0, 100).round(2)
-    for col in ["trend", "flow", "revision", "volatility_raw", "drawdown_raw", "crowding_raw"]:
+    for col in ["trend", "flow", "revision", "liquidity_raw",
+                "volatility_raw", "drawdown_raw", "crowding_raw"]:
         merged[col] = merged[col].fillna(50).clip(0, 100).round(2)
 
     # ── Step 6: 分配象限 ──
@@ -1158,16 +1184,18 @@ def compute_hk_quadrant_scores(
         result_items.append({
             "code": code,
             "name": name,
-            "exchange": "HKEX",  # 标记为港股
+            "exchange": "HKEX",
             "opportunity": float(row["opportunity"]),
             "risk": float(row["risk"]),
             "quadrant": row["quadrant"],
             "trend": float(row["trend"]),
             "flow": float(row["flow"]),
             "revision": float(row["revision"]),
+            "liquidity": float(row["liquidity_raw"]),
             "volatility": float(row["volatility_raw"]),
             "drawdown": float(row["drawdown_raw"]),
             "crowding": float(row["crowding_raw"]),
+            "avg_amount_5d": round(float(row.get("avg_amount_5d", 0) or 0), 2),
         })
 
     elapsed = time.time() - start_time

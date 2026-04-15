@@ -159,7 +159,6 @@ function RankRow({ item, onClick }) {
         <ScoreBar label="资金" value={item.flow} max={100} width="w-14" />
         <ScoreBar label="流动" value={item.liquidity ?? 50} max={100} width="w-14" amount={item.avg_amount_5d} />
       </div>
-      </div>
 
       {/* Arrow */}
       <span className="shrink-0 text-white/20 transition group-hover:text-primary group-hover:translate-x-0.5">→</span>

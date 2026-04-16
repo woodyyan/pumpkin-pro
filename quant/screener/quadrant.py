@@ -107,15 +107,26 @@ class DailyBarCache:
             )
             try:
                 self._delete_corrupted_files(db_path=self.db_path)
-                # 删除后重新连接
-                self._conn = sqlite3.connect(self.db_path, timeout=30)
-                self._conn.execute("PRAGMA journal_mode=WAL")
-                self._conn.execute("PRAGMA synchronous=NORMAL")
-                self._conn.execute("SELECT 1")
+                # 短暂等待确保文件系统完成清理（尤其 CI / NFS 环境）
+                time.sleep(0.2)
+                # 删除后重新连接（带轻量重试，应对文件系统延迟）
+                self._conn = None
+                for _rebuild_attempt in range(2):
+                    try:
+                        self._conn = sqlite3.connect(self.db_path, timeout=30)
+                        self._conn.execute("PRAGMA journal_mode=WAL")
+                        self._conn.execute("PRAGMA synchronous=NORMAL")
+                        self._conn.execute("SELECT 1")
+                        break
+                    except (sqlite3.DatabaseError, sqlite3.OperationalError):
+                        self._conn = None
+                        time.sleep(0.15)
+                if self._conn is None:
+                    raise RuntimeError(f"重建后仍无法连接数据库: {self.db_path}")
                 logger.info("[quadrant-cache] ✅ 数据库已重建: %s", self.db_path)
             except Exception as rebuild_exc:
                 logger.error("[quadrant-cache] ❌ 数据库重建也失败了: %s", rebuild_exc)
-                raise RuntimeError(f"无法初始化缓存数据库 ({self.db_path}): {rebuild_exc}")
+                raise
 
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS daily_bars (

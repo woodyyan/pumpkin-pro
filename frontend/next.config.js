@@ -6,17 +6,15 @@ const nextConfig = {
   // ── Test-file exclusion for webpack builds ────────────────────────
   //
   // Test files under lib/__tests__/ and components/__tests__/ import
-  // from 'node:test' / 'node:assert/strict' which webpack 5 cannot
-  // resolve ("UnhandledSchemeError").  Since no production code imports
-  // test files, we safely map those protocols to empty modules so that
-  // webpack's static analysis pass doesn't choke on them.
+  // from 'node:test' / 'node:assert/strict' which triggers Webpack 5's
+  // UnhandledSchemeError at the *resource-reading* stage (before resolve).
+  // resolve.alias cannot catch this — we must use IgnorePlugin instead.
   webpack: (config) => {
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      // Map node: protocol imports to safe fallbacks
-      'node:assert/strict': require.resolve('assert'),
-      'node:test': false,
-    };
+    config.plugins.push(
+      new (require('webpack').IgnorePlugin)({
+        resourceRegExp: /^node:/,
+      }),
+    );
     return config;
   },
 };

@@ -91,6 +91,7 @@ class DailyBarCache:
                 break
             except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError) as exc:
                 last_exc = exc
+                self._conn = None  # ← 清理失效连接，确保后续判断准确
                 logger.warning(
                     "[quadrant-cache] SQLite 连接失败 (第 %d/%d 次): %s",
                     attempt, self._CONNECT_RETRIES, exc,
@@ -108,10 +109,10 @@ class DailyBarCache:
             try:
                 self._delete_corrupted_files(db_path=self.db_path)
                 # 短暂等待确保文件系统完成清理（尤其 CI / NFS 环境）
-                time.sleep(0.2)
+                time.sleep(0.5)
                 # 删除后重新连接（带轻量重试，应对文件系统延迟）
                 self._conn = None
-                for _rebuild_attempt in range(2):
+                for _rebuild_attempt in range(3):
                     try:
                         self._conn = sqlite3.connect(self.db_path, timeout=30)
                         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -120,7 +121,7 @@ class DailyBarCache:
                         break
                     except (sqlite3.DatabaseError, sqlite3.OperationalError):
                         self._conn = None
-                        time.sleep(0.15)
+                        time.sleep(0.3)
                 if self._conn is None:
                     raise RuntimeError(f"重建后仍无法连接数据库: {self.db_path}")
                 logger.info("[quadrant-cache] ✅ 数据库已重建: %s", self.db_path)
@@ -128,6 +129,25 @@ class DailyBarCache:
                 logger.error("[quadrant-cache] ❌ 数据库重建也失败了: %s", rebuild_exc)
                 raise
 
+        # ── 建表（安全网：如果连接因文件系统延迟而不稳定，重试一次）──
+        for _schema_attempt in range(2):
+            try:
+                self._init_schema()
+                return
+            except sqlite3.DatabaseError:
+                # 连接可能已经失效，尝试重新打开
+                self._conn.close() if self._conn else None
+                self._conn = None
+                time.sleep(0.3)
+                self._conn = sqlite3.connect(self.db_path, timeout=30)
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA synchronous=NORMAL")
+
+        # 如果两次都失败，抛出最后的异常
+        self._init_schema()
+
+    def _init_schema(self):
+        """创建必要的表结构。"""
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS daily_bars (
                 code TEXT NOT NULL,

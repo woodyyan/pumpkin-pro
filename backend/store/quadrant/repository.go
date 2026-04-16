@@ -193,6 +193,9 @@ func (r *Repository) FindOpportunityZone(ctx context.Context, exchanges []string
 		query = query.Where("avg_amount5d >= ?", minAmount)
 	}
 
+	// Exclude ST/*ST stocks (退市风险) from ranking — 排行榜面向小白用户，不应推荐 ST 股票
+	query = query.Where("name NOT LIKE ?", "%ST%")
+
 	// Get total count in zone (pre-filter for meta display)
 	var totalInZone int64
 	countQuery := r.db.WithContext(ctx).
@@ -201,6 +204,11 @@ func (r *Repository) FindOpportunityZone(ctx context.Context, exchanges []string
 	if len(exchanges) > 0 {
 		countQuery = countQuery.Where("exchange IN ?", exchanges)
 	}
+	if minAmount > 0 {
+		countQuery = countQuery.Where("avg_amount5d >= ?", minAmount)
+	}
+	// 同步排除 ST，确保 totalInZone 与实际返回一致
+	countQuery = countQuery.Where("name NOT LIKE ?", "%ST%")
 	if err := countQuery.Count(&totalInZone).Error; err != nil {
 		return nil, 0, err
 	}

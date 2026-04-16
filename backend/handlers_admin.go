@@ -1,10 +1,14 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
+	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 )
 
 // handleAdminSystemHealth returns aggregated error monitoring data.
@@ -164,7 +168,6 @@ func (a *appServer) handleAdminBackupTrigger(w http.ResponseWriter, r *http.Requ
 func (a *appServer) handleAdminBackupStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
-		return
 	}
 	stats, err := a.backupService.GetStorageStats(r.Context())
 	if err != nil {
@@ -172,4 +175,99 @@ func (a *appServer) handleAdminBackupStats(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, stats)
+}
+
+// ── Quadrant Monitoring Admin Handlers ──
+
+// handleQuadrantProgress receives progress callbacks from Quant during computation.
+// POST /api/quadrant/progress (internal, called by Quant)
+func (a *appServer) handleQuadrantProgress(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+
+	var p struct {
+		Exchange string `json:"exchange"`
+		Current  int    `json:"current"`
+		Total    int    `json:"total"`
+		Status   string `json:"status"`
+		ErrorMsg string `json:"error_msg,omitempty"`
+		Message  string `json:"message,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			writeJSON(w, http.StatusOK, map[string]string{"ok": "1"}) //宽容：解析失败不阻塞 Quant
+		return
+	}
+
+	quadrant.UpdateProgress(p.Exchange, quadrant.ComputeProgress{
+		Exchange: p.Exchange,
+		Status:   p.Status,
+		Current:  p.Current,
+		Total:    p.Total,
+		ErrorMsg: p.ErrorMsg,
+		Message:  p.Message,
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+}
+
+// handleAdminComputeStatus returns current computation progress for both exchanges.
+// GET /api/admin/compute-status (super admin only)
+func (a *appServer) handleAdminComputeStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	result := quadrant.GetProgress()
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleAdminQuadrantTrigger manually triggers a quadrant recomputation.
+// POST /api/admin/quadrant-trigger (super admin only)
+func (a *appServer) handleAdminQuadrantTrigger(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+
+	var req struct {
+		Exchange string `json:"exchange"` // "ASHARE", "HKEX", or "ALL"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+
+	exchange := strings.ToUpper(strings.TrimSpace(req.Exchange))
+	if exchange == "" {
+		exchange = "ALL"
+	}
+
+	var triggered []string
+	switch exchange {
+	case "HKEX":
+		triggered = []string{"HKEX"}
+	case "ASHARE", "ALL":
+		triggered = []string{"ASHARE"}
+	default:
+		writeError(w, http.StatusBadRequest, "无效的 exchange 参数")
+		return
+	}
+
+	results := make(map[string]any)
+	for _, ex := range triggered {
+		if ex == "ASHARE" {
+			go a.quadrantService.TriggerComputeAShare()
+			results["ASHARE"] = "A股四象限计算已触发，请查看进度"
+		} else if ex == "HKEX" {
+			go a.quadrantService.TriggerComputeHK()
+			results["HKEX"] = "港股四象限计算已触发，请查看进度"
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"results": results,
+		"message": fmt.Sprintf("已触发 %d 个市场的四象限计算", len(triggered)),
+	})
 }

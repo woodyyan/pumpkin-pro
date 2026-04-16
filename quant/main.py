@@ -705,6 +705,11 @@ def quadrant_compute_all(req: QuadrantComputeRequest):
             compute_all_quadrant_scores(callback_url=callback, force_full=force_full)
         except Exception as exc:
             logger.exception("[quadrant] compute-all 后台任务失败: %s", exc)
+            # 上报终态：让前端知道任务失败了
+            from screener.quadrant import _derive_progress_url, _send_progress
+            _progress_url = _derive_progress_url(callback)
+            _send_progress(_progress_url, "ASHARE", 0, 0, "failed",
+                           f"计算异常：{exc}")
 
     _threading.Thread(target=_run, daemon=True).start()
     return {"status": "accepted", "message": "A 股四象限计算已在后台启动"}
@@ -735,6 +740,11 @@ def quadrant_hk_compute_all(req: HkQuadrantComputeRequest):
             compute_hk_quadrant_scores(callback_url=callback, force_full=force_full)
         except Exception as exc:
             logger.exception("[hk-quadrant] compute-hk-all 后台任务失败: %s", exc)
+            # 上报终态：让前端知道任务失败了
+            from screener.quadrant import _derive_progress_url, _send_progress
+            _progress_url = _derive_progress_url(callback)
+            _send_progress(_progress_url, "HKEX", 0, 0, "failed",
+                           f"港股计算异常：{exc}")
 
     _threading.Thread(target=_run, daemon=True).start()
     return {"status": "accepted", "message": "港股四象限计算已在后台启动"}

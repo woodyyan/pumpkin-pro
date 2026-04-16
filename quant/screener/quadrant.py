@@ -61,6 +61,10 @@ _QUADRANT_CACHE_TTL = 6 * 3600  # 6 hours
 class DailyBarCache:
     """管理本地日线缓存，存储在 SQLite 中。"""
 
+    # SQLite 连接重试次数和间隔（秒）
+    _CONNECT_RETRIES = 3
+    _CONNECT_RETRY_DELAY = 1
+
     def __init__(self, db_path: str = CACHE_DB_PATH):
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
@@ -68,10 +72,51 @@ class DailyBarCache:
         self._maybe_migrate_from_json()
 
     def _ensure_db(self):
+        """创建/打开 SQLite 数据库，带自动恢复能力。
+
+        遇到磁盘 I/O 错误时：
+        1. 重试连接（最多 N 次）
+        2. 如果仍失败，尝试删除损坏的数据库文件并重建
+        """
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path, timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
+
+        last_exc = None
+        for attempt in range(1, self._CONNECT_RETRIES + 1):
+            try:
+                self._conn = sqlite3.connect(self.db_path, timeout=30)
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA synchronous=NORMAL")
+                # 验证连接可用性——执行一个简单查询
+                self._conn.execute("SELECT 1")
+                break
+            except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError) as exc:
+                last_exc = exc
+                logger.warning(
+                    "[quadrant-cache] SQLite 连接失败 (第 %d/%d 次): %s",
+                    attempt, self._CONNECT_RETRIES, exc,
+                )
+                if attempt < self._CONNECT_RETRIES:
+                    time.sleep(self._CONNECT_RETRY_DELAY)
+                    continue
+
+        if self._conn is None or not self._is_connection_alive():
+            # 所有重试都失败了 → 尝试删除损坏的文件并重建
+            logger.error(
+                "[quadrant-cache] SQLite 连接持续失败 (%s)，尝试删除损坏的数据库文件并重建",
+                last_exc,
+            )
+            try:
+                self._delete_corrupted_files(db_path=self.db_path)
+                # 删除后重新连接
+                self._conn = sqlite3.connect(self.db_path, timeout=30)
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA synchronous=NORMAL")
+                self._conn.execute("SELECT 1")
+                logger.info("[quadrant-cache] ✅ 数据库已重建: %s", self.db_path)
+            except Exception as rebuild_exc:
+                logger.error("[quadrant-cache] ❌ 数据库重建也失败了: %s", rebuild_exc)
+                raise RuntimeError(f"无法初始化缓存数据库 ({self.db_path}): {rebuild_exc}")
+
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS daily_bars (
                 code TEXT NOT NULL,
@@ -92,6 +137,32 @@ class DailyBarCache:
             )
         """)
         self._conn.commit()
+
+    def _is_connection_alive(self) -> bool:
+        """快速检查连接是否可用。"""
+        if self._conn is None:
+            return False
+        try:
+            self._conn.execute("SELECT 1")
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _delete_corrupted_files(db_path=None):
+        """删除可能损坏的 SQLite 数据库及其 WAL/SHM 文件。"""
+        if db_path is None:
+            db_path = CACHE_DB_PATH
+        import glob as _glob
+        base = db_path.replace(".db", "")
+        patterns = [db_path, f"{base}.db-wal", f"{base}.db-shm", f"{base}.db-journal"]
+        for p in patterns:
+            for f in _glob.glob(p):
+                try:
+                    os.remove(f)
+                    logger.info("[quadrant-cache] 已删除损坏文件: %s", f)
+                except OSError:
+                    pass  # 忽略删除失败的次要错误
 
     def _maybe_migrate_from_json(self):
         """首次启动时，如果旧 JSON 缓存存在且 SQLite 为空，自动迁移。"""
@@ -507,6 +578,34 @@ def _percentile_rank(series: pd.Series) -> pd.Series:
     return series.rank(pct=True, na_option="keep") * 100
 
 
+# ── Float sanitization for JSON compliance ──────────────────────
+# Python's standard json.dumps rejects NaN / Inf / -Inf (RFC 7159).
+# Some stocks may have missing or degenerate daily-bar data that
+# produce non-finite values even after fillna/clip.  This guard
+# replaces them *before* serialization so the bulk-save callback
+# never fails with "Out of range float values are not JSON compliant".
+import math
+
+def _finite(v: float, fallback: float = 0.0) -> float:
+    """Return fallback when v is NaN or Inf; otherwise return v."""
+    if math.isnan(v) or math.isinf(v):
+        return fallback
+    return v
+
+
+def _sanitize_item(d: dict) -> dict:
+    """Replace every non-finite float in dict with 0.0 (in-place)."""
+    FLOAT_KEYS = {
+        "opportunity", "risk", "trend", "flow", "revision",
+        "liquidity", "volatility", "drawdown", "crowding",
+        "avg_amount_5d",
+    }
+    for k in FLOAT_KEYS:
+        if k in d and isinstance(d[k], float):
+            d[k] = _finite(d[k], 0.0)
+    return d
+
+
 def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
     result: Dict[str, float] = {
         "std_20d": np.nan,
@@ -594,12 +693,37 @@ def compute_all_quadrant_scores(
         List of dicts with code, name, opportunity, risk, quadrant, sub-scores
     """
     start_time = time.time()
-    cache = DailyBarCache()
+    # ── 进度上报 URL（从 callback_url 派生）──
+    _progress_url = _derive_progress_url(callback_url)
+
+    # 上报：即将开始（让前端立刻知道任务已启动）
+    _send_progress(_progress_url, "ASHARE", 0, 0, "running", error_msg=None,
+                   message="正在初始化缓存数据库...")
+
+    # ── 初始化缓存（带自动恢复）──
+    logger.info("[quadrant] 初始化日线缓存...")
+    try:
+        cache = DailyBarCache()
+    except Exception as exc:
+        _send_progress(_progress_url, "ASHARE", 0, 0, "failed",
+                       f"缓存初始化失败（磁盘 I/O 错误）：{exc}")
+        raise
+
+    _send_progress(_progress_url, "ASHARE", 0, 0, "running", error_msg=None,
+                   message="正在拉取全市场快照...")
 
     # ── Step 1: 全市场快照 ──
     logger.info("[quadrant] Step 1: 拉取全市场快照...")
-    snapshot_df = get_a_share_snapshot()
+    try:
+        snapshot_df = get_a_share_snapshot()
+    except Exception as exc:
+        _send_progress(_progress_url, "ASHARE", 0, 0, "failed",
+                       f"拉取快照失败：{exc}")
+        raise
+
     if snapshot_df is None or snapshot_df.empty:
+        _send_progress(_progress_url, "ASHARE", 0, 0, "failed",
+                       "全市场快照数据为空")
         raise RuntimeError("全市场快照数据为空")
 
     snapshot_df = snapshot_df[
@@ -611,314 +735,374 @@ def compute_all_quadrant_scores(
     total_stocks = len(all_codes)
     logger.info("[quadrant] 有效股票: %d 只", total_stocks)
 
-    # ── Step 2: 决定全量 vs 增量 ──
-    is_full = cache.needs_full_refresh(force_full=force_full)
-    if is_full:
-        fetch_days = DAILY_LOOKBACK_DAYS
-        logger.info("[quadrant] Step 2: 全量刷新模式 (拉取 %d 天日线)...", fetch_days)
-    else:
-        fetch_days = 3  # 只拉最近 3 天（覆盖周末 + 当天）
-        logger.info("[quadrant] Step 2: 增量更新模式 (拉取 %d 天日线)...", fetch_days)
+    # 上报：快照完成，更新真实总数
+    _send_progress(_progress_url, "ASHARE", 0, total_stocks, "running",
+                   message=f"快照加载完成（{total_stocks}只），准备拉取日线...")
 
-    # ── Step 3: 并发拉日线 ──
-    logger.info("[quadrant] 并发拉取 %d 只股票 (workers=%d, interval=%dms)...",
-                total_stocks, MAX_WORKERS, REQUEST_INTERVAL_MS)
-    success_count = 0
-    failed_codes: List[str] = []
+    # ── Main computation: ensure failure path also writes log via callback ──
+    result_items: list = []
+    _compute_error: Optional[str] = None
+    try:
+        # ── Step 2: 决定全量 vs 增量 ──
+        is_full = cache.needs_full_refresh(force_full=force_full)
+        # ── Step 2: 决定全量 vs 增量 ──
+        is_full = cache.needs_full_refresh(force_full=force_full)
+        if is_full:
+            fetch_days = DAILY_LOOKBACK_DAYS
+            logger.info("[quadrant] Step 2: 全量刷新模式 (拉取 %d 天日线)...", fetch_days)
+        else:
+            fetch_days = 3  # 只拉最近 3 天（覆盖周末 + 当天）
+            logger.info("[quadrant] Step 2: 增量更新模式 (拉取 %d 天日线)...", fetch_days)
 
-    def fetch_with_interval(code: str) -> Tuple[str, Optional[List[Dict]]]:
-        bars = _fetch_daily_bars(code, fetch_days)
-        if REQUEST_INTERVAL_MS > 0:
-            time.sleep(REQUEST_INTERVAL_MS / 1000.0)
-        return code, bars
+        # ── Step 3: 并发拉日线 ──
+        logger.info("[quadrant] 并发拉取 %d 只股票 (workers=%d, interval=%dms)...",
+                    total_stocks, MAX_WORKERS, REQUEST_INTERVAL_MS)
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(fetch_with_interval, code): code for code in all_codes}
-        done_count = 0
-        for future in as_completed(futures):
-            code = futures[future]
-            try:
-                result_code, result_bars = future.result()
-                if result_bars:
-                    if is_full:
-                        cache.set_stock_bars(result_code, result_bars)
+        # 上报：开始拉日线
+        _send_progress(_progress_url, "ASHARE", 0, total_stocks, "running")
+
+        success_count = 0
+        failed_codes: List[str] = []
+
+        def fetch_with_interval(code: str) -> Tuple[str, Optional[List[Dict]]]:
+            bars = _fetch_daily_bars(code, fetch_days)
+            if REQUEST_INTERVAL_MS > 0:
+                time.sleep(REQUEST_INTERVAL_MS / 1000.0)
+            return code, bars
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {executor.submit(fetch_with_interval, code): code for code in all_codes}
+            done_count = 0
+            for future in as_completed(futures):
+                code = futures[future]
+                try:
+                    result_code, result_bars = future.result()
+                    if result_bars:
+                        if is_full:
+                            cache.set_stock_bars(result_code, result_bars)
+                        else:
+                            cache.merge_incremental(result_code, result_bars)
+                        success_count += 1
                     else:
-                        cache.merge_incremental(result_code, result_bars)
-                    success_count += 1
-                else:
-                    failed_codes.append(result_code)
-            except Exception:
-                failed_codes.append(code)
+                        failed_codes.append(result_code)
+                except Exception:
+                    failed_codes.append(code)
 
-            done_count += 1
-            if done_count % 500 == 0:
-                logger.info("[quadrant] 日线进度: %d/%d (成功 %d)", done_count, total_stocks, success_count)
+                done_count += 1
+                if done_count % _PROGRESS_REPORT_INTERVAL == 0:
+                    logger.info("[quadrant] 日线进度: %d/%d (成功 %d)", done_count, total_stocks, success_count)
+                    _send_progress(_progress_url, "ASHARE", done_count, total_stocks, "running")
 
-    fetch_ratio = success_count / total_stocks if total_stocks > 0 else 0
-    logger.info("[quadrant] 日线完成: 成功 %d / 总 %d (%.1f%%)",
-                success_count, total_stocks, fetch_ratio * 100)
+        fetch_ratio = success_count / total_stocks if total_stocks > 0 else 0
+        logger.info("[quadrant] 日线完成: 成功 %d / 总 %d (%.1f%%)",
+                    success_count, total_stocks, fetch_ratio * 100)
 
-    # For full mode, check success ratio strictly
-    if is_full and fetch_ratio < MIN_SUCCESS_RATIO:
-        raise RuntimeError(
-            f"日线拉取成功率过低: {success_count}/{total_stocks} ({fetch_ratio:.1%})，"
-            f"阈值 {MIN_SUCCESS_RATIO:.0%}"
-        )
+        # For full mode, check success ratio strictly
+        if is_full and fetch_ratio < MIN_SUCCESS_RATIO:
+            raise RuntimeError(
+                f"日线拉取成功率过低: {success_count}/{total_stocks} ({fetch_ratio:.1%})，"
+                f"阈值 {MIN_SUCCESS_RATIO:.0%}"
+            )
 
-    # For incremental mode, even if many fail, we still have cached data
-    if not is_full:
-        cached_count = cache.stock_count()
-        cached_ratio = cached_count / total_stocks if total_stocks > 0 else 0
-        logger.info("[quadrant] 缓存覆盖: %d / %d (%.1f%%)", cached_count, total_stocks, cached_ratio * 100)
-        if cached_ratio < MIN_SUCCESS_RATIO:
-            logger.warning("[quadrant] 缓存覆盖率不足，尝试全量刷新...")
-            # Fallback: trigger full refresh
-            return compute_all_quadrant_scores(callback_url=callback_url, force_full=True)
+        # For incremental mode, even if many fail, we still have cached data
+        if not is_full:
+            cached_count = cache.stock_count()
+            cached_ratio = cached_count / total_stocks if total_stocks > 0 else 0
+            logger.info("[quadrant] 缓存覆盖: %d / %d (%.1f%%)", cached_count, total_stocks, cached_ratio * 100)
+            if cached_ratio < MIN_SUCCESS_RATIO:
+                logger.warning("[quadrant] 缓存覆盖率不足，尝试全量刷新...")
+                # Fallback: trigger full refresh
+                return compute_all_quadrant_scores(callback_url=callback_url, force_full=True)
 
-    # Update cache metadata
-    if is_full:
-        cache.mark_full_refresh()
-    else:
-        cache.mark_incremental()
-    cache.save()
+        # Update cache metadata
+        if is_full:
+            cache.mark_full_refresh()
+        else:
+            cache.mark_incremental()
+        cache.save()
 
-    # ── Step 4: 上证指数 60 日收益 ──
-    logger.info("[quadrant] Step 4: 拉取上证指数 60 日收益...")
-    bench_60d = _fetch_benchmark_60d_return()
-    logger.info("[quadrant] 上证 60 日收益: %.2f%%", bench_60d)
+        # ── Step 4: 上证指数 60 日收益 ──
+        logger.info("[quadrant] Step 4: 拉取上证指数 60 日收益...")
+        bench_60d = _fetch_benchmark_60d_return()
+        logger.info("[quadrant] 上证 60 日收益: %.2f%%", bench_60d)
 
-    # ── Step 4.5: 将快照 turnover_rate 注入日线缓存 ──
-    # 快照（东财/腾讯）都包含当天换手率，但日线缓存（腾讯源）缺少该字段。
-    # 注入后 _compute_daily_metrics 能计算 cumulative_turnover_20d。
-    injected_count = 0
-    for _, row in snapshot_df.iterrows():
-        code = row.get("code")
-        tr = row.get("turnover_rate")
-        if code and pd.notna(tr) and tr > 0:
-            bars = cache.get_stock_bars(code)
-            if bars and len(bars) > 0:
-                bars[-1]["turnover_rate"] = float(tr)
+        # ── Step 4.5: 将快照 turnover_rate 注入日线缓存 ──
+        # 快照（东财/腾讯）都包含当天换手率，但日线缓存（腾讯源）缺少该字段。
+        # 注入后 _compute_daily_metrics 能计算 cumulative_turnover_20d。
+        injected_count = 0
+        for _, row in snapshot_df.iterrows():
+            code = row.get("code")
+            tr = row.get("turnover_rate")
+            if code and pd.notna(tr) and tr > 0:
+                bars = cache.get_stock_bars(code)
+                if bars and len(bars) > 0:
+                    bars[-1]["turnover_rate"] = float(tr)
                 injected_count += 1
-    logger.info("[quadrant] 快照换手率注入日线缓存: %d 只股票", injected_count)
+        logger.info("[quadrant] 快照换手率注入日线缓存: %d 只股票", injected_count)
 
-    # ── Step 5: 计算子指标 ──
-    logger.info("[quadrant] Step 5: 计算子指标...")
+        # ── Step 5: 计算子指标 ──
+        logger.info("[quadrant] Step 5: 计算子指标...")
 
-    daily_metrics_rows = []
-    for code in all_codes:
-        daily_df = cache.bars_to_dataframe(code)
-        metrics = _compute_daily_metrics(daily_df)
-        metrics["code"] = code
-        daily_metrics_rows.append(metrics)
+        daily_metrics_rows = []
+        for code in all_codes:
+            daily_df = cache.bars_to_dataframe(code)
+            metrics = _compute_daily_metrics(daily_df)
+            metrics["code"] = code
+            daily_metrics_rows.append(metrics)
 
-    daily_metrics_df = pd.DataFrame(daily_metrics_rows)
-    merged = snapshot_df.merge(daily_metrics_df, on="code", how="left")
+        daily_metrics_df = pd.DataFrame(daily_metrics_rows)
+        merged = snapshot_df.merge(daily_metrics_df, on="code", how="left")
 
-    # ── Diagnostic: log non-null rates for all key columns ──
-    total = len(merged)
-    diag_cols = ["std_20d", "max_drawdown_60d", "turnover_20d_avg", "cumulative_turnover_20d",
-                 "change_pct_60d_calc", "volume_ratio_calc", "change_pct_60d", "volume_ratio",
-                 "turnover_rate", "turnover", "pe", "profit_growth_rate"]
-    for col in diag_cols:
-        if col in merged.columns:
-            valid = int(merged[col].notna().sum())
-            logger.info("[quadrant-diag] %s: %d/%d (%.1f%%)", col, valid, total, valid/total*100 if total else 0)
+        # ── Diagnostic: log non-null rates for all key columns ──
+        total = len(merged)
+        diag_cols = ["std_20d", "max_drawdown_60d", "turnover_20d_avg", "cumulative_turnover_20d",
+                     "change_pct_60d_calc", "volume_ratio_calc", "change_pct_60d", "volume_ratio",
+                     "turnover_rate", "turnover", "pe", "profit_growth_rate"]
+        for col in diag_cols:
+            if col in merged.columns:
+                valid = int(merged[col].notna().sum())
+                logger.info("[quadrant-diag] %s: %d/%d (%.1f%%)", col, valid, total, valid/total*100 if total else 0)
+            else:
+                logger.info("[quadrant-diag] %s: COLUMN MISSING", col)
+
+        # Also check daily_metrics_df independently
+        dm_total = len(daily_metrics_df)
+        for col in ["std_20d", "max_drawdown_60d", "change_pct_60d_calc", "volume_ratio_calc"]:
+            if col in daily_metrics_df.columns:
+                valid = int(daily_metrics_df[col].notna().sum())
+                logger.info("[quadrant-diag] daily_metrics_df.%s: %d/%d (%.1f%%)", col, valid, dm_total, valid/dm_total*100 if dm_total else 0)
+
+        # ── Backfill missing snapshot fields from daily-bar calculations ──
+        # change_pct_60d: prefer snapshot (东财), fallback to daily-bar calc
+        if "change_pct_60d" in merged.columns:
+            merged["change_pct_60d"] = merged["change_pct_60d"].fillna(merged["change_pct_60d_calc"])
         else:
-            logger.info("[quadrant-diag] %s: COLUMN MISSING", col)
-
-    # Also check daily_metrics_df independently
-    dm_total = len(daily_metrics_df)
-    for col in ["std_20d", "max_drawdown_60d", "change_pct_60d_calc", "volume_ratio_calc"]:
-        if col in daily_metrics_df.columns:
-            valid = int(daily_metrics_df[col].notna().sum())
-            logger.info("[quadrant-diag] daily_metrics_df.%s: %d/%d (%.1f%%)", col, valid, dm_total, valid/dm_total*100 if dm_total else 0)
-
-    # ── Backfill missing snapshot fields from daily-bar calculations ──
-    # change_pct_60d: prefer snapshot (东财), fallback to daily-bar calc
-    if "change_pct_60d" in merged.columns:
-        merged["change_pct_60d"] = merged["change_pct_60d"].fillna(merged["change_pct_60d_calc"])
-    else:
-        merged["change_pct_60d"] = merged["change_pct_60d_calc"]
-    # volume_ratio: prefer snapshot (东财), fallback to daily-bar simplified calc
-    if "volume_ratio" in merged.columns:
-        merged["volume_ratio"] = merged["volume_ratio"].fillna(merged["volume_ratio_calc"])
-    else:
-        merged["volume_ratio"] = merged["volume_ratio_calc"]
-
-    backfill_60d = int(merged["change_pct_60d"].notna().sum())
-    backfill_vr = int(merged["volume_ratio"].notna().sum())
-    logger.info("[quadrant] 数据补齐: change_pct_60d 有效 %d/%d, volume_ratio 有效 %d/%d",
-                backfill_60d, len(merged), backfill_vr, len(merged))
-
-    # ── Trend (NaN-tolerant) ──
-    change_60d_rank = _percentile_rank(merged["change_pct_60d"]).fillna(50)
-    excess_return = merged["change_pct_60d"] - bench_60d
-    excess_rank = _percentile_rank(excess_return).fillna(50)
-    merged["trend"] = 0.5 * change_60d_rank + 0.5 * excess_rank
-
-    # ── Flow (NaN-tolerant) ──
-    volume_ratio_rank = _percentile_rank(merged["volume_ratio"]).fillna(50)
-    turnover_rate_rank = _percentile_rank(merged["turnover_rate"]).fillna(50)
-    turnover_ratio = merged["turnover"] / merged["turnover_20d_avg"]
-    turnover_ratio_rank = _percentile_rank(turnover_ratio).fillna(50)
-    merged["flow"] = 0.4 * volume_ratio_rank + 0.3 * turnover_rate_rank + 0.3 * turnover_ratio_rank
-
-    # ── Revision (NaN-tolerant) ──
-    merged["revision"] = _percentile_rank(merged["profit_growth_rate"]).fillna(50)
-
-    # ── Liquidity (流动性：近 5 日均成交额 percentile rank) ──
-    merged["liquidity_raw"] = _percentile_rank(merged["avg_amount_5d"]).fillna(50)
-
-    # ── Volatility (NaN-tolerant) ──
-    merged["volatility_raw"] = _percentile_rank(merged["std_20d"]).fillna(50)
-
-    # ── Drawdown (NaN-tolerant) ──
-    merged["drawdown_raw"] = _percentile_rank(merged["max_drawdown_60d"]).fillna(50)
-
-    # ── Crowding ──
-    # cumulative_turnover_20d requires 5+ days of turnover_rate in daily bars,
-    # which Tencent source doesn't provide. Use pe_rank alone as fallback.
-    pe_rank = _percentile_rank(merged["pe"])
-    cum_turnover_rank = _percentile_rank(merged["cumulative_turnover_20d"])
-    has_cum_turnover = merged["cumulative_turnover_20d"].notna()
-    merged["crowding_raw"] = pd.Series(np.where(
-        has_cum_turnover,
-        0.5 * pe_rank + 0.5 * cum_turnover_rank,
-        pe_rank,  # fallback: crowding = PE rank only
-    ), index=merged.index)
-    logger.info("[quadrant] Crowding: %d 只用 PE+换手率, %d 只仅用 PE",
-                int(has_cum_turnover.sum()), int((~has_cum_turnover).sum()))
-
-    # ── Final scores (NaN-tolerant: fillna sub-scores with 50 before combining) ──
-    v_raw = merged["volatility_raw"].fillna(50)
-    d_raw = merged["drawdown_raw"].fillna(50)
-    c_raw = merged["crowding_raw"].fillna(50)
-    t_score = merged["trend"].fillna(50)
-    f_score = merged["flow"].fillna(50)
-    r_score = merged["revision"].fillna(50)
-    l_score = merged["liquidity_raw"].fillna(50)
-
-    # Opportunity = 0.4×Trend + 0.25×Flow + 0.15×Revision + 0.20×Liquidity
-    merged["opportunity"] = 0.4 * t_score + 0.25 * f_score + 0.15 * r_score + 0.20 * l_score
-    merged["risk"] = 0.4 * v_raw + 0.3 * d_raw + 0.3 * c_raw
-
-    # ── Diagnostic: sub-score and final score stats ──
-    for col in ["trend", "flow", "revision", "liquidity_raw",
-                "volatility_raw", "drawdown_raw", "crowding_raw", "opportunity", "risk"]:
-        s = merged[col]
-        valid = int(s.notna().sum())
-        if valid > 0:
-            logger.info("[quadrant-diag] %s: valid=%d/%d, min=%.2f, max=%.2f, mean=%.2f, std=%.2f",
-                        col, valid, len(merged), s.min(), s.max(), s.mean(), s.std())
+            merged["change_pct_60d"] = merged["change_pct_60d_calc"]
+        # volume_ratio: prefer snapshot (东财), fallback to daily-bar simplified calc
+        if "volume_ratio" in merged.columns:
+            merged["volume_ratio"] = merged["volume_ratio"].fillna(merged["volume_ratio_calc"])
         else:
-            logger.info("[quadrant-diag] %s: ALL NaN (%d rows)", col, len(merged))
+            merged["volume_ratio"] = merged["volume_ratio_calc"]
 
-    # ── Re-normalize: percentile rank the final scores to counteract
-    #    variance collapse from multi-layer weighted averaging ──
-    merged["opportunity"] = _percentile_rank(merged["opportunity"].fillna(50))
-    merged["risk"] = _percentile_rank(merged["risk"].fillna(50))
+        backfill_60d = int(merged["change_pct_60d"].notna().sum())
+        backfill_vr = int(merged["volume_ratio"].notna().sum())
+        logger.info("[quadrant] 数据补齐: change_pct_60d 有效 %d/%d, volume_ratio 有效 %d/%d",
+                    backfill_60d, len(merged), backfill_vr, len(merged))
 
-    merged["opportunity"] = merged["opportunity"].fillna(50).clip(0, 100).round(2)
-    merged["risk"] = merged["risk"].fillna(50).clip(0, 100).round(2)
-    for col in ["trend", "flow", "revision", "liquidity_raw",
-                "volatility_raw", "drawdown_raw", "crowding_raw"]:
-        merged[col] = merged[col].fillna(50).clip(0, 100).round(2)
+        # ── Trend (NaN-tolerant) ──
+        change_60d_rank = _percentile_rank(merged["change_pct_60d"]).fillna(50)
+        excess_return = merged["change_pct_60d"] - bench_60d
+        excess_rank = _percentile_rank(excess_return).fillna(50)
+        merged["trend"] = 0.5 * change_60d_rank + 0.5 * excess_rank
 
-    # ── Step 6: 分配象限 ──
-    def assign_quadrant(row):
-        opp, rsk = row["opportunity"], row["risk"]
-        if opp > OPPORTUNITY_HIGH and rsk < RISK_LOW:
-            return "机会"
-        if opp > OPPORTUNITY_HIGH and rsk > RISK_HIGH:
-            return "拥挤"
-        if opp < OPPORTUNITY_LOW and rsk > RISK_HIGH:
-            return "泡沫"
-        if opp < OPPORTUNITY_LOW and rsk < RISK_LOW:
-            return "防御"
-        return "中性"
+        # ── Flow (NaN-tolerant) ──
+        volume_ratio_rank = _percentile_rank(merged["volume_ratio"]).fillna(50)
+        turnover_rate_rank = _percentile_rank(merged["turnover_rate"]).fillna(50)
+        turnover_ratio = merged["turnover"] / merged["turnover_20d_avg"]
+        turnover_ratio_rank = _percentile_rank(turnover_ratio).fillna(50)
+        merged["flow"] = 0.4 * volume_ratio_rank + 0.3 * turnover_rate_rank + 0.3 * turnover_ratio_rank
 
-    merged["quadrant"] = merged.apply(assign_quadrant, axis=1)
+        # ── Revision (NaN-tolerant, field-missing-safe) ──
+        # A股快照(scanner.py COLUMN_MAP)可能不包含 profit_growth_rate，
+        # 此时用 PE 倒推质量信号（低 PE → 高 revision score）。
+        if "profit_growth_rate" not in merged.columns or merged["profit_growth_rate"].isna().all():
+            logger.info("[quadrant] 快照无利润增速字段，使用 PE 作为 Revision 替代信号")
+            pe_for_rev = merged.get("pe", pd.Series(999.0, index=merged.index))
+            merged["revision"] = _percentile_rank(-pe_for_rev.fillna(999)).fillna(50)
+        else:
+            merged["revision"] = _percentile_rank(merged["profit_growth_rate"]).fillna(50)
 
-    result_items = []
-    for _, row in merged.iterrows():
-        code = str(row.get("code", ""))
-        name = str(row.get("name", "")) if pd.notna(row.get("name")) else code
-        # Determine exchange from A-share code prefix: 6xxxxx→SSE, 0/3xxxxx→SZSE
-        _exchange = "SSE" if code.startswith("6") else "SZSE"
-        result_items.append({
-            "code": code,
-            "name": name,
-            "exchange": _exchange,
-            "opportunity": float(row["opportunity"]),
-            "risk": float(row["risk"]),
-            "quadrant": row["quadrant"],
-            "trend": float(row["trend"]),
-            "flow": float(row["flow"]),
-            "revision": float(row["revision"]),
-            "liquidity": float(row["liquidity_raw"]),
-            "volatility": float(row["volatility_raw"]),
-            "drawdown": float(row["drawdown_raw"]),
-            "crowding": float(row["crowding_raw"]),
-            "avg_amount_5d": round(float(row.get("avg_amount_5d", 0) or 0), 2),
-        })
+        # ── Liquidity (流动性：近 5 日均成交额 percentile rank) ──
+        merged["liquidity_raw"] = _percentile_rank(merged["avg_amount_5d"]).fillna(50)
 
-    elapsed = time.time() - start_time
-    mode_label = "全量" if is_full else "增量"
-    logger.info("[quadrant] ✅ 计算完成 (%s): %d 只股票, 耗时 %.1f 秒", mode_label, len(result_items), elapsed)
+        # ── Volatility (NaN-tolerant) ──
+        merged["volatility_raw"] = _percentile_rank(merged["std_20d"]).fillna(50)
 
-    # ── Build structured compute report ──
-    quadrant_counts = {}
-    for item in result_items:
-        q = item["quadrant"]
-        quadrant_counts[q] = quadrant_counts.get(q, 0) + 1
+        # ── Drawdown (NaN-tolerant) ──
+        merged["drawdown_raw"] = _percentile_rank(merged["max_drawdown_60d"]).fillna(50)
 
-    data_quality = {}
-    for col in diag_cols:
-        if col in merged.columns:
-            valid = int(merged[col].notna().sum())
-            data_quality[col] = round(valid / total * 100, 1) if total else 0
+        # ── Crowding ──
+        # cumulative_turnover_20d requires 5+ days of turnover_rate in daily bars,
+        # which Tencent source doesn't provide. Use pe_rank alone as fallback.
+        pe_rank = _percentile_rank(merged["pe"])
+        cum_turnover_rank = _percentile_rank(merged["cumulative_turnover_20d"])
+        has_cum_turnover = merged["cumulative_turnover_20d"].notna()
+        merged["crowding_raw"] = pd.Series(np.where(
+            has_cum_turnover,
+            0.5 * pe_rank + 0.5 * cum_turnover_rank,
+            pe_rank,  # fallback: crowding = PE rank only
+        ), index=merged.index)
+        logger.info("[quadrant] Crowding: %d 只用 PE+换手率, %d 只仅用 PE",
+                    int(has_cum_turnover.sum()), int((~has_cum_turnover).sum()))
 
-    score_stats = {}
-    for col in ["opportunity", "risk"]:
-        s = merged[col]
-        if s.notna().sum() > 0:
-            score_stats[col] = {
-                "min": round(float(s.min()), 2),
-                "max": round(float(s.max()), 2),
-                "mean": round(float(s.mean()), 2),
-                "std": round(float(s.std()), 2),
+        # ── Final scores (NaN-tolerant: fillna sub-scores with 50 before combining) ──
+        v_raw = merged["volatility_raw"].fillna(50)
+        d_raw = merged["drawdown_raw"].fillna(50)
+        c_raw = merged["crowding_raw"].fillna(50)
+        t_score = merged["trend"].fillna(50)
+        f_score = merged["flow"].fillna(50)
+        r_score = merged["revision"].fillna(50)
+        l_score = merged["liquidity_raw"].fillna(50)
+
+        # Opportunity = 0.4×Trend + 0.25×Flow + 0.15×Revision + 0.20×Liquidity
+        merged["opportunity"] = 0.4 * t_score + 0.25 * f_score + 0.15 * r_score + 0.20 * l_score
+        merged["risk"] = 0.4 * v_raw + 0.3 * d_raw + 0.3 * c_raw
+
+        # ── Diagnostic: sub-score and final score stats ──
+        for col in ["trend", "flow", "revision", "liquidity_raw",
+                    "volatility_raw", "drawdown_raw", "crowding_raw", "opportunity", "risk"]:
+            s = merged[col]
+            valid = int(s.notna().sum())
+            if valid > 0:
+                logger.info("[quadrant-diag] %s: valid=%d/%d, min=%.2f, max=%.2f, mean=%.2f, std=%.2f",
+                            col, valid, len(merged), s.min(), s.max(), s.mean(), s.std())
+            else:
+                logger.info("[quadrant-diag] %s: ALL NaN (%d rows)", col, len(merged))
+
+        # ── Re-normalize: percentile rank the final scores to counteract
+        #    variance collapse from multi-layer weighted averaging ──
+        merged["opportunity"] = _percentile_rank(merged["opportunity"].fillna(50))
+        merged["risk"] = _percentile_rank(merged["risk"].fillna(50))
+
+        merged["opportunity"] = merged["opportunity"].fillna(50).clip(0, 100).round(2)
+        merged["risk"] = merged["risk"].fillna(50).clip(0, 100).round(2)
+        for col in ["trend", "flow", "revision", "liquidity_raw",
+                    "volatility_raw", "drawdown_raw", "crowding_raw"]:
+            merged[col] = merged[col].fillna(50).clip(0, 100).round(2)
+
+        # ── Step 6: 分配象限 ──
+        def assign_quadrant(row):
+            opp, rsk = row["opportunity"], row["risk"]
+            if opp > OPPORTUNITY_HIGH and rsk < RISK_LOW:
+                return "机会"
+            if opp > OPPORTUNITY_HIGH and rsk > RISK_HIGH:
+                return "拥挤"
+            if opp < OPPORTUNITY_LOW and rsk > RISK_HIGH:
+                return "泡沫"
+            if opp < OPPORTUNITY_LOW and rsk < RISK_LOW:
+                return "防御"
+            return "中性"
+
+        merged["quadrant"] = merged.apply(assign_quadrant, axis=1)
+
+        result_items = []
+        for _, row in merged.iterrows():
+            code = str(row.get("code", ""))
+            name = str(row.get("name", "")) if pd.notna(row.get("name")) else code
+            # Determine exchange from A-share code prefix: 6xxxxx→SSE, 0/3xxxxx→SZSE
+            _exchange = "SSE" if code.startswith("6") else "SZSE"
+            item = {
+                "code": code,
+                "name": name,
+                "exchange": _exchange,
+                "opportunity": float(row["opportunity"]),
+                "risk": float(row["risk"]),
+                "quadrant": row["quadrant"],
+                "trend": float(row["trend"]),
+                "flow": float(row["flow"]),
+                "revision": float(row["revision"]),
+                "liquidity": float(row["liquidity_raw"]),
+                "volatility": float(row["volatility_raw"]),
+                "drawdown": float(row["drawdown_raw"]),
+                "crowding": float(row["crowding_raw"]),
+                "avg_amount_5d": round(float(row.get("avg_amount_5d", 0) or 0), 2),
             }
+            result_items.append(_sanitize_item(item))
 
-    compute_report = {
-        "computed_at": pd.Timestamp.now(tz="UTC").isoformat(),
-        "mode": mode_label,
-        "exchange": "ASHARE",
-        "duration_seconds": round(elapsed, 1),
-        "stock_count": len(result_items),
-        "daily_bars": {
-            "success": success_count,
-            "failed": len(failed_codes),
-            "total": total_stocks,
-        },
-        "data_quality": data_quality,
-        "score_distribution": score_stats,
-        "quadrant_counts": quadrant_counts,
-        "status": "success",
-        "error": "",
-    }
-    logger.info("[quadrant] 计算报告: %s", _json.dumps(compute_report, ensure_ascii=False))
+        elapsed = time.time() - start_time
+        mode_label = "全量" if is_full else "增量"
+        logger.info("[quadrant] ✅ 计算完成 (%s): %d 只股票, 耗时 %.1f 秒", mode_label, len(result_items), elapsed)
 
-    # Update in-memory cache
-    with _quadrant_cache_lock:
-        global _quadrant_cache_data, _quadrant_cache_ts
-        _quadrant_cache_data = result_items
-        _quadrant_cache_ts = time.time()
+        # ── Pre-flight JSON validation ──
+        try:
+            _json.dumps({"items": result_items[:1]}, ensure_ascii=False)
+        except (ValueError, TypeError) as exc:
+            logger.error("[quadrant] ❌ 结果数据包含非法 JSON 值 (NaN/Inf): %s — 将尝试自动修复", exc)
+            for it in result_items:
+                _sanitize_item(it)
 
-    # Callback to Go backend (include report)
-    if callback_url:
-        _send_callback(callback_url, result_items, compute_report)
+        # ── Build structured compute report ──
+        quadrant_counts = {}
+        for item in result_items:
+            q = item["quadrant"]
+            quadrant_counts[q] = quadrant_counts.get(q, 0) + 1
 
-    return result_items
+        data_quality = {}
+        for col in diag_cols:
+            if col in merged.columns:
+                valid = int(merged[col].notna().sum())
+                data_quality[col] = round(valid / total * 100, 1) if total else 0
+
+        score_stats = {}
+        for col in ["opportunity", "risk"]:
+            s = merged[col]
+            if s.notna().sum() > 0:
+                score_stats[col] = {
+                    "min": round(float(s.min()), 2),
+                    "max": round(float(s.max()), 2),
+                    "mean": round(float(s.mean()), 2),
+                    "std": round(float(s.std()), 2),
+                }
+
+        compute_report = {
+            "computed_at": pd.Timestamp.now(tz="UTC").isoformat(),
+            "mode": mode_label,
+            "exchange": "ASHARE",
+            "duration_seconds": round(elapsed, 1),
+            "stock_count": len(result_items),
+            "daily_bars": {
+                "success": success_count,
+                "failed": len(failed_codes),
+                "total": total_stocks,
+            },
+            "data_quality": data_quality,
+            "score_distribution": score_stats,
+            "quadrant_counts": quadrant_counts,
+            "status": "success",
+            "error": "",
+        }
+        logger.info("[quadrant] 计算报告: %s", _json.dumps(compute_report, ensure_ascii=False))
+
+        # Update in-memory cache
+        with _quadrant_cache_lock:
+            global _quadrant_cache_data, _quadrant_cache_ts
+            _quadrant_cache_data = result_items
+            _quadrant_cache_ts = time.time()
+
+        # Callback to Go backend (include report)
+        callback_ok, callback_err = _send_callback(callback_url, result_items, compute_report)
+
+        # 上报终态：仅回调成功才报 success，失败时附带具体原因
+        _send_progress(_progress_url, "ASHARE", total_stocks, total_stocks,
+                       "success" if callback_ok else "failed",
+                       None if callback_ok else f"数据未写入后端（回调失败）：{callback_err}")
+
+        return result_items
+
+    except Exception as exc:
+        _compute_error = str(exc)
+        logger.error("[quadrant] ❌ 计算异常: %s", _compute_error)
+        import traceback
+        traceback.print_exc()
+
+        # ── 失败回调：确保计算历史记录这次失败的尝试 ──
+        failed_report = {
+            "computed_at": pd.Timestamp.now(tz="UTC").isoformat(),
+            "mode": "全量" if is_full else "增量",
+            "exchange": "ASHARE",
+            "duration_seconds": round(time.time() - start_time, 1),
+            "stock_count": 0,
+            "status": "failed",
+            "error": _compute_error,
+        }
+        _send_callback(callback_url, [], failed_report)
+
+        # 进度终态：显示具体错误信息
+        _send_progress(_progress_url, "ASHARE", total_stocks or 0,
+                       total_stocks or 0, "failed",
+                       f"计算异常：{_compute_error}")
+
+        raise
 
 
 def get_cached_scores() -> Optional[List[Dict[str, Any]]]:
@@ -965,12 +1149,38 @@ def compute_hk_quadrant_scores(
 
     # Import here to avoid circular dependency at module level
     from screener.scanner import get_hk_snapshot
-    cache = HkDailyBarCache()
+
+    # ── 进度上报 URL（从 callback_url 派生）──
+    _hk_progress_url = _derive_progress_url(callback_url)
+
+    # 上报：即将开始（缓存初始化前）
+    _send_progress(_hk_progress_url, "HKEX", 0, 0, "running",
+                   message="正在初始化港股缓存数据库...")
+
+    # ── 初始化缓存（带自动恢复）──
+    logger.info("[hk-quadrant] 初始化港股日线缓存...")
+    try:
+        cache = HkDailyBarCache()
+    except Exception as exc:
+        _send_progress(_hk_progress_url, "HKEX", 0, 0, "failed",
+                       f"港股缓存初始化失败（磁盘 I/O 错误）：{exc}")
+        raise
+
+    _send_progress(_hk_progress_url, "HKEX", 0, 0, "running",
+                   message="正在拉取港股全市场快照...")
 
     # ── Step 1: 港股全市场快照 ──
     logger.info("[hk-quadrant] Step 1: 拉取港股全市场快照...")
-    snapshot_df = get_hk_snapshot()
+    try:
+        snapshot_df = get_hk_snapshot()
+    except Exception as exc:
+        _send_progress(_hk_progress_url, "HKEX", 0, 0, "failed",
+                       f"拉取港股快照失败：{exc}")
+        raise
+
     if snapshot_df is None or snapshot_df.empty:
+        _send_progress(_hk_progress_url, "HKEX", 0, 0, "failed",
+                       "港股全市场快照数据为空")
         raise RuntimeError("港股全市场快照数据为空")
 
     # 过滤有效股票：有价格且 > 0
@@ -982,6 +1192,10 @@ def compute_hk_quadrant_scores(
     all_codes = snapshot_df["code"].tolist()
     total_stocks = len(all_codes)
     logger.info("[hk-quadrant] 有效股票: %d 只", total_stocks)
+
+    # 上报：快照完成，更新真实总数
+    _send_progress(_hk_progress_url, "HKEX", 0, total_stocks, "running",
+                   message=f"港股快照加载完成（{total_stocks}只），准备拉取日线...")
 
     # ── Step 2: 决定全量 vs 增量 ──
     is_full = cache.needs_full_refresh(force_full=force_full)
@@ -995,6 +1209,10 @@ def compute_hk_quadrant_scores(
     # ── Step 3: 并发拉日线（港股用 _fetch_daily_bars_hk） ──
     logger.info("[hk-quadrant] 并发拉取 %d 只港股 (workers=%d, interval=%dms)...",
                 total_stocks, MAX_WORKERS, REQUEST_INTERVAL_MS)
+
+    # 上报：开始拉日线
+    _send_progress(_hk_progress_url, "HKEX", 0, total_stocks, "running")
+
     success_count = 0
     failed_codes: List[str] = []
 
@@ -1023,8 +1241,9 @@ def compute_hk_quadrant_scores(
                 failed_codes.append(code)
 
             done_count += 1
-            if done_count % 200 == 0:
+            if done_count % _PROGRESS_REPORT_INTERVAL == 0:
                 logger.info("[hk-quadrant] 日线进度: %d/%d (成功 %d)", done_count, total_stocks, success_count)
+                _send_progress(_hk_progress_url, "HKEX", done_count, total_stocks, "running")
 
     fetch_ratio = success_count / total_stocks if total_stocks > 0 else 0
     logger.info("[hk-quadrant] 日线完成: 成功 %d / 总 %d (%.1f%%)",
@@ -1181,7 +1400,7 @@ def compute_hk_quadrant_scores(
     for _, row in merged.iterrows():
         code = str(row.get("code", ""))
         name = str(row.get("name", "")) if pd.notna(row.get("name")) else code
-        result_items.append({
+        item = {
             "code": code,
             "name": name,
             "exchange": "HKEX",
@@ -1196,11 +1415,20 @@ def compute_hk_quadrant_scores(
             "drawdown": float(row["drawdown_raw"]),
             "crowding": float(row["crowding_raw"]),
             "avg_amount_5d": round(float(row.get("avg_amount_5d", 0) or 0), 2),
-        })
+        }
+        result_items.append(_sanitize_item(item))
 
     elapsed = time.time() - start_time
     mode_label = "全量" if is_full else "增量"
     logger.info("[hk-quadrant] ✅ 计算完成 (%s): %d 只港股, 耗时 %.1f 秒", mode_label, len(result_items), elapsed)
+
+    # ── Pre-flight JSON validation (same guard as A-share) ──
+    try:
+        _json.dumps({"items": result_items[:1]}, ensure_ascii=False)
+    except (ValueError, TypeError) as exc:
+        logger.error("[hk-quadrant] ❌ 结果数据包含非法 JSON 值 (NaN/Inf): %s — 将尝试自动修复", exc)
+        for it in result_items:
+            _sanitize_item(it)
 
     # Build report
     quadrant_counts = {}
@@ -1231,9 +1459,13 @@ def compute_hk_quadrant_scores(
         _hk_quadrant_cache_data = result_items
         _hk_quadrant_cache_ts = time.time()
 
-    # Callback to Go backend
-    if callback_url:
-        _send_callback(callback_url, result_items, compute_report)
+    # Callback to Go backend (include report)
+    callback_ok, callback_err = _send_callback(callback_url, result_items, compute_report)
+
+    # 上报终态：仅回调成功才报 success，失败时附带具体原因
+    _send_progress(_hk_progress_url, "HKEX", total_stocks, total_stocks,
+                   "success" if callback_ok else "failed",
+                   None if callback_ok else f"数据未写入后端（回调失败）：{callback_err}")
 
     return result_items
 
@@ -1245,7 +1477,13 @@ def get_cached_hk_scores() -> Optional[List[Dict[str, Any]]]:
     return None
 
 
-def _send_callback(callback_url: str, items: List[Dict[str, Any]], report: Optional[Dict] = None):
+def _send_callback(callback_url: str, items: List[Dict[str, Any]], report: Optional[Dict] = None) -> tuple:
+    """向 Go 后端 POST bulk-save 数据。返回 (ok: bool, error_msg: str)。
+    
+    返回值：
+      (True, "")          — 回调成功
+      (False, "具体原因")  — 回调失败（含 HTTP 状态码/异常信息）
+    """
     try:
         payload = {
             "items": items,
@@ -1254,12 +1492,80 @@ def _send_callback(callback_url: str, items: List[Dict[str, Any]], report: Optio
         if report:
             payload["report"] = report
         resp = requests.post(
-            callback_url, json=payload, timeout=60,
+            callback_url, json=payload, timeout=120,
             headers={"Content-Type": "application/json"},
         )
         if resp.status_code < 200 or resp.status_code >= 300:
-            logger.warning("[quadrant] 回调失败: HTTP %d, body=%s", resp.status_code, resp.text[:200])
+            body_preview = resp.text[:300] if resp.text else "(empty)"
+            err_msg = f"HTTP {resp.status_code}: {body_preview}"
+            logger.warning("[quadrant] ❌ 回调失败: %s", err_msg)
+            return False, err_msg
         else:
-            logger.info("[quadrant] 回调成功: HTTP %d, 写入 %d 条", resp.status_code, len(items))
+            logger.info("[quadrant] ✅ 回调成功: HTTP %d, 写入 %d 条", resp.status_code, len(items))
+            return True, ""
+    except requests.exceptions.Timeout as exc:
+        err_msg = f"请求超时(120s): {exc}"
+        logger.error("[quadrant] ❌ 回调超时: %s", exc)
+        return False, err_msg
+    except requests.exceptions.ConnectionError as exc:
+        err_msg = f"连接失败: {exc}"
+        logger.error("[quadrant] ❌ 回调连接错误: %s", exc)
+        return False, err_msg
     except Exception as exc:
-        logger.error("[quadrant] 回调异常: %s", exc)
+        err_msg = f"异常: {exc}"
+        logger.error("[quadrant] ❌ 回调异常: %s (数据未写入后端)", exc)
+        return False, err_msg
+
+
+# ── Progress reporting to Go backend ──────────────────────────────
+
+_PROGRESS_REPORT_INTERVAL = 100  # 每 N 只股票上报一次进度
+
+
+def _derive_progress_url(callback_url: Optional[str]) -> Optional[str]:
+    """从 bulk-save callback URL 推导出 progress URL。
+    
+    例如: http://backend:8080/api/quadrant/bulk-save
+       → http://backend:8080/api/quadrant/progress
+    """
+    if not callback_url:
+        return None
+    return callback_url.rstrip("/").removesuffix("/bulk-save") + "/progress"
+
+
+def _send_progress(progress_url: Optional[str], exchange: str,
+                   current: int, total: int, status: str,
+                   error_msg: Optional[str] = None,
+                   message: Optional[str] = None):
+    """向 Go 后端上报计算进度（fire-and-forget，失败不阻塞主流程）。
+    
+    Args:
+        progress_url: POST 目标 URL（由 callback_url 派生）
+        exchange:     "ASHARE" 或 "HKEX"
+        current:      已完成数量
+        total:        总数量（可能为 0 表示未知）
+        status:       "running" / "success" / "failed"
+        error_msg:    失败时的具体原因（仅 status="failed" 时有意义）
+        message:      阶段描述信息，如「正在拉取全市场快照...」
+    """
+    if not progress_url:
+        return
+    try:
+        payload = {
+            "exchange": exchange,
+            "current": current,
+            "total": total,
+            "status": status,
+        }
+        if error_msg:
+            payload["error_msg"] = error_msg
+        if message:
+            payload["message"] = message
+        resp = requests.post(
+            progress_url, json=payload, timeout=5,
+            headers={"Content-Type": "application/json"},
+        )
+        if resp.status_code < 200 or resp.status_code >= 300:
+            logger.debug("[progress] 上报异常: HTTP %d (%s)", resp.status_code, exchange)
+    except Exception:
+        pass  # 静默：进度上报不可用不应影响主计算

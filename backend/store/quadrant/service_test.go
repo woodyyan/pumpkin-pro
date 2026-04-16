@@ -376,3 +376,220 @@ func mapCodeToQuadrant(code string) string {
 		return "防御"
 	}
 }
+
+// ── Full-path logging tests ──
+
+func TestBulkSave_LogWrittenOnSuccess(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	s := NewService(repo)
+	ctx := context.Background()
+
+	input := BulkSaveInput{
+		Items: []BulkSaveItem{
+			{Code: "000001", Name: "平安银行", Exchange: "SZSE", Opportunity: 65, Risk: 35, Quadrant: "机会"},
+			{Code: "600036", Name: "招商银行", Exchange: "SSE", Opportunity: 55, Risk: 45, Quadrant: "中性"},
+		},
+		ComputedAt: "2026-04-16T10:00:00Z",
+	}
+
+	count, err := s.BulkSave(ctx, input)
+	if err != nil {
+		t.Fatalf("BulkSave failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 saved, got %d", count)
+	}
+
+	// Verify compute log was written
+	logs, lErr := repo.ListComputeLogs(ctx, 10)
+	if lErr != nil {
+		t.Fatalf("ListComputeLogs failed: %v", lErr)
+	}
+	if len(logs) == 0 {
+		t.Fatal("expected at least 1 compute log after successful BulkSave")
+	}
+	log := logs[0]
+	if log.Status != "success" {
+		t.Errorf("expected log status=success, got %s", log.Status)
+	}
+	if log.TotalCount != 2 {
+		t.Errorf("expected log TotalCount=2, got %d", log.TotalCount)
+	}
+	if log.Exchange != "SZSE" { // first item's exchange
+		t.Errorf("expected log Exchange=SZSE, got %s", log.Exchange)
+	}
+}
+
+func TestBulkSave_LogWrittenOnEmptyItems(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	s := NewService(repo)
+	ctx := context.Background()
+
+	input := BulkSaveInput{
+		Items:      []BulkSaveItem{{Code: "", Name: "Empty"}},
+		ComputedAt: "",
+	}
+
+	_, err := s.BulkSave(ctx, input)
+	if err == nil {
+		t.Fatal("expected error for empty items")
+	}
+
+	logs, _ := repo.ListComputeLogs(ctx, 10)
+	if len(logs) == 0 {
+		t.Fatal("expected failed log written even when items are empty")
+	}
+	log := logs[0]
+	if log.Status != "failed" {
+		t.Errorf("expected status=failed, got %s", log.Status)
+	}
+	if log.ErrorMsg == "" {
+		t.Error("expected non-empty ErrorMsg for empty-items failure")
+	}
+}
+
+func TestBulkSave_ReportFieldsParsed(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	s := NewService(repo)
+	ctx := context.Background()
+
+	report := map[string]any{
+		"mode":             "全量",
+		"exchange":         "ASHARE",
+		"duration_seconds": 123.5,
+		"stock_count":      float64(3),
+		"daily_bars":       map[string]any{"success": float64(500), "failed": float64(12)},
+		"status":           "success",
+		"quadrant_counts":  map[string]any{"机会": 100, "拥挤": 80},
+	}
+
+	input := BulkSaveInput{
+		Items: []BulkSaveItem{
+			{Code: "A1", Exchange: "SSE", Opportunity: 70, Risk: 30, Quadrant: "机会"},
+			{Code: "A2", Exchange: "SSE", Opportunity: 75, Risk: 25, Quadrant: "机会"},
+			{Code: "A3", Exchange: "SZSE", Opportunity: 40, Risk: 60, Quadrant: "防御"},
+		},
+		ComputedAt: "2026-04-16T11:00:00Z",
+		Report:     report,
+	}
+
+	count, err := s.BulkSave(ctx, input)
+	if err != nil {
+		t.Fatalf("BulkSave failed: %v", err)
+	}
+	if count != 3 {
+		t.Fatalf("expected 3 saved, got %d", count)
+	}
+
+	logs, _ := repo.ListComputeLogs(ctx, 10)
+	if len(logs) == 0 {
+		t.Fatal("no logs found")
+	}
+	log := logs[0]
+	if log.Mode != "全量" {
+		t.Errorf("expected Mode=全量, got %s", log.Mode)
+	}
+	if log.DurationSec != 123.5 {
+		t.Errorf("expected DurationSec=123.5, got %.1f", log.DurationSec)
+	}
+	if log.SuccessCount != 3 {
+		t.Errorf("expected SuccessCount=3 (from stock_count in report), got %d", log.SuccessCount)
+	}
+	if log.FailedCount != 12 {
+		t.Errorf("expected FailedCount=12 (from daily_bars.failed), got %d", log.FailedCount)
+	}
+}
+
+func TestBulkSave_HKEXProgressTerminalSet(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	s := NewService(repo)
+
+	// Set running state first so we can verify terminal transition
+	UpdateProgress("HKEX", ComputeProgress{
+		Exchange: "HKEX", Status: "running", Current: 50, Total: 100,
+	})
+
+	input := BulkSaveInput{
+		Items: []BulkSaveItem{
+			{Code: "00700", Name: "腾讯", Exchange: "HKEX", Opportunity: 72, Risk: 28, Quadrant: "机会"},
+			{Code: "09988", Name: "阿里", Exchange: "HKEX", Opportunity: 60, Risk: 40, Quadrant: "中性"},
+		},
+		ComputedAt: "2026-04-16T12:00:00Z",
+	}
+
+	_, err := s.BulkSave(context.Background(), input)
+	if err != nil {
+		t.Fatalf("BulkSave failed: %v", err)
+	}
+
+	// Verify progress was set to terminal (success clamps Current=Total from prior state)
+	p := GetProgress()["HKEX"]
+	if p.Status != "success" {
+		t.Errorf("expected HKEX progress=status=success after BulkSave, got %s", p.Status)
+	}
+	if p.Current != p.Total || p.Total != 100 {
+		t.Errorf("expected HKEX progress clamped to prior Total (100/100), got (%d/%d)", p.Current, p.Total)
+	}
+}
+
+func TestBulkSave_ProgressTerminalOnError(t *testing.T) {
+	// This test verifies that when BulkSave fails at DB level,
+	// the progress is still set to terminal "failed".
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	s := NewService(repo)
+
+	// We can't easily force a DB error with sqlite :memory:, but we can test
+	// the empty-items path which also calls SetProgressTerminal with "failed"
+	input := BulkSaveInput{
+		Items:      []BulkSaveItem{{Code: "", Name: "EmptyOnly"}},
+		ComputedAt: "",
+	}
+
+	_, _ = s.BulkSave(context.Background(), input) // expected to return error
+
+	p := GetProgress()["SZSE"] // default fallback for unknown exchange
+	if p.Status == "running" {
+		t.Error("progress should NOT remain running after BulkSave failure")
+	}
+}
+
+func TestDetectExchange_Fallback(t *testing.T) {
+	tests := []struct {
+		name     string
+		items    []BulkSaveItem
+		expected string
+	}{
+		{"empty items", []BulkSaveItem{}, "SZSE"},
+		{"no exchange field", []BulkSaveItem{{Code: "A"}}, "SZSE"},
+		{"HKEX items", []BulkSaveItem{{Code: "00700", Exchange: "HKEX"}}, "HKEX"},
+		{"mixed, first wins", []BulkSaveItem{
+			{Code: "000001", Exchange: "SZSE"}, {Code: "00700", Exchange: "HKEX"},
+		}, "SZSE"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectExchange(tt.items)
+			if got != tt.expected {
+				t.Errorf("detectExchange() = %s, want %s", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestAllEmpty_VariousCases(t *testing.T) {
+	if !allEmpty([]BulkSaveItem{{Code: ""}, {Code: "  "}}) {
+		t.Error("expected allEmpty=true for whitespace-only codes")
+	}
+	if allEmpty([]BulkSaveItem{{Code: "X"}}) {
+		t.Error("expected allEmpty=false for non-empty code")
+	}
+	if !allEmpty([]BulkSaveItem{}) {
+		t.Error("expected allEmpty=true for empty slice")
+	}
+}

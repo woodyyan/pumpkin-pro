@@ -569,23 +569,187 @@ function formatLastComputed(s) {
   } catch { return '--' }
 }
 
+function formatTimeAgo(s) {
+  if (!s) return ''
+  try {
+    const d = new Date(s)
+    const diffSec = Math.floor((Date.now() - d.getTime()) / 1000)
+    if (diffSec < 10) return '刚刚'
+    if (diffSec < 60) return `${diffSec}秒前`
+    const diffMin = Math.floor(diffSec / 60)
+    if (diffMin < 60) return `${diffMin}分钟前`
+    return `${Math.floor(diffMin / 60)}小时前`
+  } catch { return '' }
+}
+
 function QuadrantAdminPanel() {
   const [overview, setOverview] = useState(null)
   const [logs, setLogs] = useState(null)
   const [expandedLog, setExpandedLog] = useState(null)
+  const [progress, setProgress] = useState(null)          // { ASHARE: {...}, HKEX: {...} }
+  const [triggering, setTriggering] = useState(false)
 
+  // ── Progress polling ──
   useEffect(() => {
-    Promise.all([
-      adminFetch('/api/admin/quadrant-overview').catch(() => null),
-      adminFetch('/api/admin/quadrant-logs').then((d) => d.items || []).catch(() => []),
-    ]).then(([ov, lg]) => { setOverview(ov); setLogs(lg) })
+    let timer = null
+    const fetchProgress = async () => {
+      try {
+        const data = await adminFetch('/api/admin/compute-status')
+        const prevStatus = progress ? { ASHARE: progress.ASHARE?.status, HKEX: progress.HKEX?.status } : null
+
+        setProgress(data)
+
+        // Auto-refresh overview + logs on terminal state transition
+        if (prevStatus && data) {
+          for (const ex of ['ASHARE', 'HKEX']) {
+            const wasRunning = prevStatus[ex] === 'running'
+            const isTerminal = data[ex]?.status === 'success' || data[ex]?.status === 'failed' || data[ex]?.status === 'timeout'
+            if (wasRunning && isTerminal) {
+              refreshAll()
+              break  // only need one refreshAll call
+            }
+          }
+        }
+      } catch { /* silent */ }
+    }
+    fetchProgress()
+    // Auto-poll every 5s when any exchange is running
+    timer = setInterval(() => {
+      if (progress) {
+        const anyRunning = Object.values(progress).some(p => p.status === 'running')
+        if (anyRunning) fetchProgress()
+      }
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [progress?.ASHARE?.status, progress?.HKEX?.status])
+
+  const refreshAll = useCallback(async () => {
+    try {
+      const [ov, lg, pr] = await Promise.all([
+        adminFetch('/api/admin/quadrant-overview').catch(() => null),
+        adminFetch('/api/admin/quadrant-logs').then((d) => d.items || []).catch(() => []),
+        adminFetch('/api/admin/compute-status').catch(() => null),
+      ])
+      setOverview(ov)
+      setLogs(lg)
+      if (pr) setProgress(pr)
+    } catch { /* silent */ }
   }, [])
 
+  // ── Load initial data ──
+  useEffect(() => { refreshAll() }, [refreshAll])
+
+  // ── Manual trigger ──
+  const handleTrigger = async (exchange) => {
+    setTriggering(true)
+    try {
+      await adminFetch('/api/admin/quadrant-trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exchange }),
+      })
+      // Immediately refresh progress
+      const pr = await adminFetch('/api/admin/compute-status').catch(() => null)
+      if (pr) setProgress(pr)
+    } catch (err) {
+      alert('触发失败: ' + err.message)
+    } finally {
+      setTriggering(false)
+    }
+  }
+
   if (!overview && !logs) return null
+
+  // Helper: render a single exchange progress bar
+  const renderProgressBar = (exKey, label) => {
+    const p = progress?.[exKey]
+    if (!p) return null
+
+    const isRunning = p.status === 'running'
+    const isSuccess = p.status === 'success'
+    const isFailed = p.status === 'failed'
+    const isTimeout = p.status === 'timeout'
+    const pct = Math.min(p.percent || 0, 100).toFixed(1)
+    const statusIcon = isSuccess ? '✅' : isFailed ? '❌' : isTimeout ? '⏰' : isRunning ? '🔄' : '💤'
+    const statusLabel = isSuccess ? '已完成' : isFailed ? '失败' : isTimeout ? '超时' : isRunning ? '计算中...' : '空闲'
+    const elapsed = p.updated_at ? formatTimeAgo(p.updated_at) : ''
+    const barColor = isSuccess ? 'bg-emerald-500' : isFailed ? 'bg-rose-500' : isTimeout ? 'bg-amber-500' : 'bg-blue-500'
+    const barPulse = isRunning ? 'animate-pulse' : ''
+
+    return (
+      <div className="rounded-xl border border-white/8 bg-[#15171e] p-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-semibold text-white/80">{label} 四象限</span>
+          <span className="flex items-center gap-1.5 text-xs font-medium">
+            <span>{statusIcon}</span>
+            <span className={isSuccess ? 'text-emerald-400' : isFailed ? 'text-rose-400' : isTimeout ? 'text-amber-400' : isRunning ? 'text-blue-400' : 'text-white/40'}>
+              {statusLabel}
+            </span>
+          </span>
+        </div>
+        {/* Progress bar */}
+        <div className="w-full h-2 bg-white/8 rounded-full overflow-hidden mb-2">
+          <div
+            className={`h-full rounded-full transition-all duration-700 ease-out ${barColor} ${barPulse}`}
+            style={{ width: `${isRunning ? Math.max(pct, 2) : (isSuccess ? 100 : 0)}%` }}
+          />
+        </div>
+        {/* 阶段消息（running + 有 message 时显示） */}
+        {isRunning && p.message && (
+          <div className="text-[11px] text-blue-300/70 mb-1 truncate" title={p.message}>
+            {p.message}
+          </div>
+        )}
+        <div className="flex items-center justify-between text-[11px] text-white/35">
+          <span>
+            {isRunning && p.total > 0 ? `${p.current.toLocaleString()} / ${p.total.toLocaleString()} (${pct}%)` :
+             isRunning && !p.message ? '准备中...' :
+             isSuccess && p.total > 0 ? `${p.total.toLocaleString()} 只 · 已落库` :
+             isFailed ? (p.error_msg || '数据未写入后端（回调失败）') :
+             isTimeout ? '计算超时' :
+             '--'}
+          </span>
+          <span>{elapsed}</span>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <section>
       <h2 className="text-base font-semibold text-white/80 mb-3">🔲 四象限数据总览</h2>
+
+      {/* ════════════════ PROGRESS PANEL ════════════════ */}
+      {progress && (
+        <div className="mb-5 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {renderProgressBar('ASHARE', 'A 股')}
+            {renderProgressBar('HKEX', '港股')}
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => handleTrigger('ASHARE')}
+              disabled={triggering || progress.ASHARE?.status === 'running'}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900/50 disabled:text-white/30 text-white transition cursor-pointer disabled:cursor-not-allowed"
+            >
+              🔄 立即计算 A 股
+            </button>
+            <button
+              onClick={() => handleTrigger('HKEX')}
+              disabled={triggering || progress.HKEX?.status === 'running'}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-600 hover:bg-purple-500 disabled:bg-purple-900/50 disabled:text-white/30 text-white transition cursor-pointer disabled:cursor-not-allowed"
+            >
+              🔄 立即计算港股
+            </button>
+            <button
+              onClick={refreshAll}
+              className="ml-auto px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 hover:border-white/20 text-white/45 hover:text-white/65 transition"
+            >
+              刷新
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Overview Cards */}
       {overview && (

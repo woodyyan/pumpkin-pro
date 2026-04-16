@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ type PriceResolver func(ctx context.Context, code string) float64
 type Service struct {
 	repo          *Repository
 	priceResolver PriceResolver // optional, for snapshot close_price
+	worker        *Worker       // optional, injected for manual trigger
 }
 
 func NewService(repo *Repository) *Service {
@@ -29,6 +31,7 @@ func (s *Service) SetPriceResolver(r PriceResolver) {
 }
 
 // BulkSave writes all quadrant scores from the Quant callback.
+// It guarantees a compute log is written regardless of success or failure.
 func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error) {
 	computedAt := time.Now().UTC()
 	if input.ComputedAt != "" {
@@ -37,53 +40,202 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 		}
 	}
 
+	// Determine exchange from items
+	exchange := detectExchange(input.Items)
+
+	log.Printf("[quadrant] BulkSave start: exchange=%s, items=%d", exchange, len(input.Items))
+
+	// ── Input validation: always write a log ──
+	if len(input.Items) == 0 || allEmpty(input.Items) {
+		log.Printf("[quadrant] BulkSave REJECT: no valid items (received %d)", len(input.Items))
+		s.saveTaskLog(ctx, ComputeLogRecord{
+			ID:        fmt.Sprintf("qcl-%d", computedAt.UnixMilli()),
+			ComputedAt: computedAt,
+			Mode:      "unknown",
+			Status:    "failed",
+			ErrorMsg:  "no valid items to save",
+			Exchange:  exchange,
+			StartedAt: &computedAt,
+			FinishedAt: &computedAt,
+		})
+		SetProgressTerminal(exchange, "failed", "收到空数据（0条有效股票）")
+		return 0, fmt.Errorf("no valid items to save")
+	}
+
 	records := make([]QuadrantScoreRecord, 0, len(input.Items))
 	for _, item := range input.Items {
 		code := strings.TrimSpace(item.Code)
 		if code == "" {
 			continue
 		}
-		// Determine exchange: use item's explicit exchange, or default to SZSE (A-share)
-		exchange := strings.TrimSpace(item.Exchange)
-		if exchange == "" {
-			exchange = "SZSE"
+		itemExchange := strings.TrimSpace(item.Exchange)
+		if itemExchange == "" {
+			itemExchange = "SZSE"
 		}
 		records = append(records, QuadrantScoreRecord{
-			Code:        code,
-			Name:        strings.TrimSpace(item.Name),
-			Exchange:    exchange,
-			Opportunity: item.Opportunity,
-			Risk:        item.Risk,
-			Quadrant:    strings.TrimSpace(item.Quadrant),
-			Trend:       item.Trend,
-			Flow:        item.Flow,
-			Revision:    item.Revision,
-			Liquidity:   item.Liquidity,
-			Volatility:  item.Volatility,
-			Drawdown:    item.Drawdown,
-			Crowding:    item.Crowding,
-			AvgAmount5d: item.AvgAmount5d,
-			ComputedAt:  computedAt,
+			Code: code, Name: strings.TrimSpace(item.Name), Exchange: itemExchange,
+			Opportunity: item.Opportunity, Risk: item.Risk, Quadrant: strings.TrimSpace(item.Quadrant),
+			Trend: item.Trend, Flow: item.Flow, Revision: item.Revision,
+			Liquidity: item.Liquidity, Volatility: item.Volatility,
+			Drawdown: item.Drawdown, Crowding: item.Crowding,
+			AvgAmount5d: item.AvgAmount5d, ComputedAt: computedAt,
 		})
 	}
 
-	if len(records) == 0 {
-		return 0, fmt.Errorf("no valid items to save")
-	}
+	totalCount := len(records)
 
+	// ── BulkUpsert (DB write) ──
 	if err := s.repo.BulkUpsert(ctx, records); err != nil {
+		// DB failure — write failed log and return
+		now := time.Now().UTC()
+		log.Printf("[quadrant] BulkSave DB ERROR: %v (exchange=%s)", err, exchange)
+		s.saveTaskLog(ctx, ComputeLogRecord{
+			ID:          fmt.Sprintf("qcl-%d", computedAt.UnixMilli()),
+			ComputedAt:  computedAt,
+			Mode:        "unknown",
+			Status:      "failed",
+			ErrorMsg:     fmt.Sprintf("DB写入错误: %v", err),
+			Exchange:    exchange,
+			StartedAt:   &computedAt,
+			FinishedAt:   &now,
+			TotalCount:   totalCount,
+		})
+		SetProgressTerminal(exchange, "failed", fmt.Sprintf("DB写入错误: %v", err))
 		return 0, err
 	}
 
-	// Save compute log if report is present
+	log.Printf("[quadrant] BulkSave OK: wrote %d records (exchange=%s)", totalCount, exchange)
+
+	// ── BulkUpsert succeeded — parse report and write final log ──
+	status := "success"
+	errorMsg := ""
+	mode := "unknown"
+	var totalSec float64
+	var successCount, failedCount int
+
 	if input.Report != nil {
-		s.saveComputeLog(ctx, computedAt, input.Report, len(records))
+		if m, ok := input.Report["mode"].(string); ok {
+			mode = m
+		}
+		if st, ok := input.Report["status"].(string); ok && st != "" {
+			status = st
+		}
+		if e, ok := input.Report["error"].(string); ok {
+			errorMsg = e
+		}
+		if d, ok := input.Report["duration_seconds"].(float64); ok {
+			totalSec = d
+		}
+		if sc, ok := input.Report["stock_count"].(float64); ok {
+			successCount = int(sc)
+		}
+		if fc, ok := input.Report["daily_bars"].(map[string]any); ok {
+			if f, ok := fc["failed"].(float64); ok {
+				failedCount = int(f)
+			}
+		}
+	} else {
+		successCount = totalCount
 	}
+
+	finishedAt := time.Now().UTC()
+
+	// Try to reuse an existing "running" log for this exchange (avoids orphan records)
+	var logID string
+	if runningLog, err := s.repo.FindLatestRunningLog(ctx, exchange); err == nil && runningLog != nil {
+		logID = runningLog.ID
+	} else {
+		logID = fmt.Sprintf("qcl-%d", computedAt.UnixMilli())
+	}
+
+	taskLog := ComputeLogRecord{
+		ID:           logID,
+		ComputedAt:   computedAt,
+		Mode:         mode,
+		DurationSec:  totalSec,
+		StockCount:   totalCount,
+		ReportJSON:   mustMarshal(input.Report),
+		Status:       status,
+		ErrorMsg:     errorMsg,
+		Exchange:     exchange,
+		StartedAt:    &computedAt,
+		FinishedAt:    &finishedAt,
+		TotalCount:    totalCount,
+		SuccessCount:  successCount,
+		FailedCount:   failedCount,
+	}
+
+	_ = s.repo.InsertComputeLog(ctx, taskLog)
+
+	// Update progress to terminal state
+	SetProgressTerminal(exchange, status, errorMsg)
+	log.Printf("[quadrant] BulkSave COMPLETE: exchange=%s status=%s log_id=%s", exchange, status, logID)
 
 	// Save ranking snapshots (best-effort; failure does not affect BulkSave result)
 	s.saveRankingSnapshotsBestEffort(ctx, records, computedAt)
 
-	return len(records), nil
+	return totalCount, nil
+}
+
+// SaveTaskLog is a convenience wrapper that writes a compute log record.
+func (s *Service) SaveTaskLog(ctx context.Context, log ComputeLogRecord) error {
+	return s.repo.InsertComputeLog(ctx, log)
+}
+
+// saveTaskLog is an internal convenience that discards errors (best-effort).
+func (s *Service) saveTaskLog(ctx context.Context, log ComputeLogRecord) {
+	_ = s.repo.InsertComputeLog(ctx, log)
+}
+
+// TriggerComputeAShare manually triggers A-share quadrant computation.
+// It delegates to the worker's triggerCompute logic (writes running log + progress).
+func (s *Service) TriggerComputeAShare() {
+	if s.worker == nil {
+		return
+	}
+	s.worker.TriggerComputeAShare()
+}
+
+// TriggerComputeHK manually triggers HK quadrant computation.
+func (s *Service) TriggerComputeHK() {
+	if s.worker == nil {
+		return
+	}
+	s.worker.TriggerComputeHK()
+}
+
+// SetWorker injects the worker reference for manual trigger support.
+func (s *Service) SetWorker(w *Worker) {
+	s.worker = w
+}
+
+// allEmpty returns true if every item has an empty code.
+func allEmpty(items []BulkSaveItem) bool {
+	for _, it := range items {
+		if strings.TrimSpace(it.Code) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// detectExchange infers the exchange from the first non-empty item's exchange field.
+func detectExchange(items []BulkSaveItem) string {
+	for _, it := range items {
+		if ex := strings.TrimSpace(it.Exchange); ex != "" {
+			return ex
+		}
+	}
+	return "SZSE" // default fallback
+}
+
+// mustMarshal JSON-encodes a value; returns "{}" on error (never panics).
+func mustMarshal(v any) string {
+	b, _ := json.Marshal(v)
+	if len(b) == 0 {
+		return "{}"
+	}
+	return string(b)
 }
 
 // saveRankingSnapshotsBestEffort saves top-50 opportunity-zone records as daily ranking snapshots.

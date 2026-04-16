@@ -126,12 +126,15 @@ func (w *Worker) runWithRetry(ctx context.Context) {
 				err = waitErr
 			}
 		} else {
-			log.Printf("[quadrant-worker] ⚠️ A-share trigger failed on attempt %d: %v", attempt, err)
-		}
+		log.Printf("[quadrant-worker] ⚠️ A-share trigger failed on attempt %d: %v", attempt, err)
+	}
 
 		w.mu.Lock()
 		w.lastError = err.Error()
 		w.mu.Unlock()
+
+		// Update progress to failed on trigger/wait failure
+		SetProgressTerminal("ASHARE", "failed", err.Error())
 
 		if attempt < workerMaxAttempts {
 			backoff := workerBackoffs[0]
@@ -150,6 +153,7 @@ func (w *Worker) runWithRetry(ctx context.Context) {
 	// All attempts failed — send notification
 	errMsg := fmt.Sprintf("四象限数据计算失败：已重试 %d 次均失败。最后错误：%s", workerMaxAttempts, w.lastError)
 	log.Printf("[quadrant-worker] ❌ %s", errMsg)
+	SetProgressTerminal("ASHARE", "failed", errMsg)
 	if w.signalService != nil {
 		notifyMsg := fmt.Sprintf(
 			"⚠️ 四象限数据计算失败\n时间：%s\n重试：已重试 %d 次均失败\n原因：%s\n影响：四象限图数据可能已过期",
@@ -163,7 +167,37 @@ func (w *Worker) runWithRetry(ctx context.Context) {
 	}
 }
 
+// TriggerComputeAShare publicly exposes A-share compute triggering for admin manual use.
+func (w *Worker) TriggerComputeAShare() {
+	ctx := context.Background()
+	err := w.triggerCompute(ctx)
+	if err != nil {
+		log.Printf("[quadrant-worker] [manual] A-share trigger failed: %v", err)
+		SetProgressTerminal("ASHARE", "failed", err.Error())
+	}
+}
+
+// TriggerComputeHK publicly exposes HK compute triggering for admin manual use.
+func (w *Worker) TriggerComputeHK() {
+	w.triggerHKCompute(context.Background())
+}
+
 func (w *Worker) triggerCompute(ctx context.Context) error {
+	// Initialize progress to running state before triggering Quant
+	exchange := "ASHARE"
+	now := time.Now()
+	UpdateProgress(exchange, ComputeProgress{
+		Exchange:  exchange,
+		Status:    "running",
+		Current:   0,
+		Total:     5000, // estimated A-share total
+		TaskLogID:  fmt.Sprintf("qcl-%d", now.UnixMilli()),
+		UpdatedAt: now,
+	})
+	// NOTE: We do NOT write a "running" task log here. BulkSave() is responsible
+	// for writing the final terminal log. Writing a premature "running" log here
+	// creates an orphan record that never gets updated if the callback succeeds.
+
 	url := w.quantURL + "/api/quadrant/compute-all"
 	payload := map[string]string{"callback_url": w.callbackURL}
 	body, _ := json.Marshal(payload)
@@ -192,6 +226,18 @@ func (w *Worker) triggerCompute(ctx context.Context) error {
 // triggerHKCompute triggers the HK quadrant computation as a best-effort fire-and-forget operation.
 // Failure here does NOT affect the overall A-share compute cycle success status.
 func (w *Worker) triggerHKCompute(ctx context.Context) {
+	exchange := "HKEX"
+	now := time.Now()
+	UpdateProgress(exchange, ComputeProgress{
+		Exchange:  exchange,
+		Status:    "running",
+		Current:   0,
+		Total:     2600, // estimated HK total
+		TaskLogID:  fmt.Sprintf("qcl-%d", now.UnixMilli()),
+		UpdatedAt: now,
+	})
+	// NOTE: No "running" task log here — BulkSave() handles the final terminal log.
+
 	url := w.quantURL + "/api/quadrant/compute-hk-all"
 	payload := map[string]string{"callback_url": w.callbackURL}
 	body, _ := json.Marshal(payload)
@@ -245,8 +291,9 @@ func (w *Worker) waitForCompletion(ctx context.Context) error {
 				return nil
 			}
 			if time.Now().After(deadline) {
-				return fmt.Errorf("callback timeout after %s", workerCallbackTimeout)
-			}
+			SetProgressTerminal("ASHARE", "timeout", "回调超时（30min），数据可能已在后台完成")
+			return fmt.Errorf("callback timeout after %s", workerCallbackTimeout)
+		}
 		}
 	}
 }

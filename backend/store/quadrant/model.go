@@ -101,6 +101,8 @@ type BulkSaveItem struct {
 }
 
 // ComputeLogRecord stores quadrant compute history for observability.
+// Supports both task-level logs (one per compute run) and detail-level
+// logs (per-stock failure details, linked via TaskLogID).
 type ComputeLogRecord struct {
 	ID             string    `gorm:"primaryKey;size:36"`
 	ComputedAt     time.Time `gorm:"not null;index"`
@@ -110,6 +112,19 @@ type ComputeLogRecord struct {
 	ReportJSON     string    `gorm:"type:text;not null;default:'{}'"`
 	Status         string    `gorm:"size:16;not null;default:'success'"`
 	ErrorMsg       string    `gorm:"type:text;default:''"`
+
+	// ── Enhanced fields for monitoring (v2) ──
+	Exchange      string    `gorm:"size:8;index"`                        // "ASHARE" / "HKEX"
+	StartedAt      *time.Time                                         // 计算开始时间
+	FinishedAt     *time.Time                                         // 计算结束时间
+	TotalCount     int       `gorm:"not null;default:0"`                 // 本批总股票数
+	SuccessCount   int       `gorm:"not null;default:0"`                 // 成功数
+	FailedCount    int       `gorm:"not null;default:0"`                 // 失败数
+
+	// ── Detail-level fields (NULL for task-level logs) ──
+	TaskLogID      *string   `gorm:"size:36;index"`                     // 关联的任务级 log ID
+	TsCode         *string   `gorm:"size:16"`                            // 失败的股票代码
+	Name           *string   `gorm:"size:64"`                            // 失败的股票名称
 }
 
 func (ComputeLogRecord) TableName() string {

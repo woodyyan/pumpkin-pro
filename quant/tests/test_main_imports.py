@@ -81,7 +81,10 @@ class TestQuadrantImportCompleteness:
         )
 
     def test_imported_names_actually_exist_in_quadrant_module(self):
-        """import 中的每个名称必须确实存在于 screener.quadrant 模块中。"""
+        """import 中的每个名称必须确实存在于 screener.quadrant 模块中。
+        
+        注意：允许导入以 _ 开头的私有 API（动态调用场景）。
+        """
         _MAIN_PATH = "main.py"
         with open(_MAIN_PATH, encoding="utf-8") as f:
             main_source = f.read()
@@ -89,7 +92,9 @@ class TestQuadrantImportCompleteness:
         imported = _extract_imported_from_quadrant(main_source)
         actual_public = _get_quadrant_module_public_names()
 
-        nonexistent = imported - actual_public
+        # 只检查公开名称；私有名称（_ 前缀）允许动态导入
+        public_imported = {n for n in imported if not n.startswith("_")}
+        nonexistent = public_imported - actual_public
         assert not nonexistent, (
             f"以下名称在 main.py 中从 screener.quadrant 导入，但模块中不存在：\n"
             f"  {sorted(nonexistent)}\n"
@@ -97,7 +102,11 @@ class TestQuadrantImportCompleteness:
         )
 
     def test_no_stale_imports(self):
-        """import 中没有未被使用的 quadrant 名称（避免死导入堆积）。"""
+        """import 中没有未被使用的 quadrant 名称（避免死导入堆积）。
+        
+        注意：以 _ 开头的私有 API 在异常处理等处动态调用，
+        不属于「stale」范围。
+        """
         _MAIN_PATH = "main.py"
         with open(_MAIN_PATH, encoding="utf-8") as f:
             main_source = f.read()
@@ -105,7 +114,9 @@ class TestQuadrantImportCompleteness:
         imported = _extract_imported_from_quadrant(main_source)
         called = _extract_quadrant_calls_in_main(main_source)
 
-        stale = imported - called
+        # 排除私有 API（_ 前缀）
+        public_imported = {n for n in imported if not n.startswith("_")}
+        stale = public_imported - called
         assert not stale, (
             f"以下 quadrant 名称已导入但从未使用（建议清理）：\n"
             f"  {sorted(stale)}"

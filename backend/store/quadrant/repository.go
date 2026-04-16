@@ -152,8 +152,34 @@ func (r *Repository) GetLatestComputedAt(ctx context.Context) (*time.Time, error
 
 // ── Compute logs ──
 
+// InsertComputeLog inserts or updates a compute log entry (upsert by ID).
 func (r *Repository) InsertComputeLog(ctx context.Context, log ComputeLogRecord) error {
-	return r.db.WithContext(ctx).Create(&log).Error
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"computed_at", "mode", "duration_sec", "stock_count",
+			"report_json", "status", "error_msg", "exchange",
+			"started_at", "finished_at", "total_count",
+			"success_count", "failed_count",
+		}),
+	}).Create(&log).Error
+}
+
+// FindLatestRunningLog returns the most recent "running" compute log for the given exchange,
+// or nil if none exists. Used by BulkSave to promote a running log to terminal state.
+func (r *Repository) FindLatestRunningLog(ctx context.Context, exchange string) (*ComputeLogRecord, error) {
+	var log ComputeLogRecord
+	err := r.db.WithContext(ctx).
+		Where("exchange = ? AND status = ?", exchange, "running").
+		Order("computed_at DESC").
+		First(&log).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &log, nil
 }
 
 func (r *Repository) ListComputeLogs(ctx context.Context, limit int) ([]ComputeLogRecord, error) {
@@ -162,6 +188,18 @@ func (r *Repository) ListComputeLogs(ctx context.Context, limit int) ([]ComputeL
 		return nil, err
 	}
 	return logs, nil
+}
+
+// ListComputeLogDetails returns failure detail logs for a given task log ID.
+func (r *Repository) ListComputeLogDetails(ctx context.Context, taskLogID string) ([]ComputeLogRecord, error) {
+	var details []ComputeLogRecord
+	if err := r.db.WithContext(ctx).
+		Where("task_log_id = ?", taskLogID).
+		Order("id ASC").
+		Find(&details).Error; err != nil {
+		return nil, err
+	}
+	return details, nil
 }
 
 func (r *Repository) GetLatestComputeLog(ctx context.Context) (*ComputeLogRecord, error) {

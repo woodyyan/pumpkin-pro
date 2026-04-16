@@ -2304,18 +2304,37 @@ func (a *appServer) handleQuadrantBulkSave(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Diagnostic: log request size for debugging large payload failures
+	bodyBytes, _ := io.ReadAll(r.Body)
+	log.Printf("[quadrant] bulk-save: received %d bytes (%.1f KB)", len(bodyBytes), float64(len(bodyBytes))/1024)
+
 	var input quadrant.BulkSaveInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if err := json.Unmarshal(bodyBytes, &input); err != nil {
+		// JSON 解析失败 — 写入 failed 日志（否则计算历史永远为空）
+		errMsg := fmt.Sprintf("JSON解析失败: %v", err)
+		log.Printf("[quadrant] bulk-save DECODE ERROR: %s", errMsg)
+		a.quadrantService.SaveTaskLog(r.Context(), quadrant.ComputeLogRecord{
+			ID:        fmt.Sprintf("qcl-%d", time.Now().UnixMilli()),
+			ComputedAt: time.Now().UTC(),
+			Mode:      "unknown",
+			Status:    "failed",
+			ErrorMsg:  errMsg,
+			Exchange:  "UNKNOWN",
+		})
+		// Return a more specific error so Quant can surface it to the user
+		writeError(w, http.StatusBadRequest, errMsg)
 		return
 	}
 
+	t0 := time.Now()
 	count, err := a.quadrantService.BulkSave(r.Context(), input)
+	elapsed := time.Since(t0)
 	if err != nil {
+		log.Printf("[quadrant] bulk-save ERROR after %v: %v", elapsed, err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	log.Printf("[quadrant] bulk-save: wrote %d scores", count)
+	log.Printf("[quadrant] bulk-save: wrote %d scores in %v", count, elapsed)
 	writeJSON(w, http.StatusOK, map[string]any{"saved": count})
 }
 
@@ -2565,6 +2584,7 @@ func main() {
 		QuantServiceURL: cfg.QuantServiceURL,
 		BackendBaseURL:  cfg.BackendCallbackURL,
 	}, nil)
+	quadrantService.SetWorker(quadrantWorker)
 	quadrantWorker.Start(context.Background())
 
 	// ── Backup Worker (dual-trigger) ──
@@ -2687,6 +2707,11 @@ func main() {
 
 	mux.HandleFunc("/api/admin/quadrant-logs", server.withSuperAdminAuth(server.handleAdminQuadrantLogs))
 	mux.HandleFunc("/api/admin/quadrant-overview", server.withSuperAdminAuth(server.handleAdminQuadrantOverview))
+
+	// ── Quadrant Monitoring (progress + manual trigger) ──
+	mux.HandleFunc("/api/quadrant/progress", server.handleQuadrantProgress)
+	mux.HandleFunc("/api/admin/compute-status", server.withSuperAdminAuth(server.handleAdminComputeStatus))
+	mux.HandleFunc("/api/admin/quadrant-trigger", server.withSuperAdminAuth(server.handleAdminQuadrantTrigger))
 
 	mux.HandleFunc("/api/feedback", server.withRequiredAuth(server.handleFeedback))
 	mux.HandleFunc("/api/admin/feedback", server.withSuperAdminAuth(server.handleAdminFeedback))

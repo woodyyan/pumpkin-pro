@@ -39,14 +39,23 @@ function isHookCall(line) {
 
 /**
  * Check if a line is an early/conditional return statement at the top level of the component.
+ *
+ * Excludes:
+ *   - useEffect / useMemo cleanup returns: `return () => { ... }` or `return function(){`
+ *   - Nested closures deeper than component body level
  */
 function isEarlyReturn(line, depth) {
   const trimmed = line.trim()
-  // Only consider returns at component body level (depth === 0 or 1 depending on formatting)
+  // Only consider returns at component body level
   if (!trimmed.startsWith('return ')) return false
-  // Ignore returns inside callbacks/nested functions (they have deeper indentation)
-  // A simple heuristic: early returns in components usually have low indentation
-  if (depth > 2) return false
+  // Ignore returns inside callbacks/nested functions / hook closures.
+  // Component-level early returns live at the shallowest depth (= 1).
+  // Anything deeper (>= 2) is inside a nested block such as
+  // useEffect(() => { ... return cleanup }), useCallback, try/catch, etc.
+  if (depth > 1) return false
+  // Exclude effect-cleanup style returns: `return () => ...` or `return function(...)`.
+  // These appear inside hook callbacks, not as component-level guards.
+  if (/^return\s*(?:\(|(?:async\s+)?function)/.test(trimmed)) return false
   return true
 }
 

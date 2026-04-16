@@ -16,9 +16,18 @@
 
 import json
 import math
+import sys
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+
+
+# ── Mock heavy dependencies so quadrant can be imported in CI ─────────
+# screener.quadrant top-level imports 'requests', which may be absent.
+for _mod in ('requests',):
+    if _mod not in sys.modules:
+        sys.modules[_mod] = MagicMock()
 
 
 # ── Import target functions from quadrant module ──────────────────

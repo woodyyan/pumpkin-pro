@@ -658,9 +658,7 @@ function QuadrantAdminPanel() {
     }
   }
 
-  if (!overview && !logs) return null
-
-  // Helper: render a single exchange progress bar
+  // Helper: render a single exchange progress bar (defined before any conditional return — Rules of Hooks)
   const renderProgressBar = (exKey, label) => {
     const p = progress?.[exKey]
     if (!p) return null
@@ -714,6 +712,8 @@ function QuadrantAdminPanel() {
       </div>
     )
   }
+
+  if (!overview && !logs) return null
 
   return (
     <section>

@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --test lib/__tests__/*.test.js components/__tests__/*.test.js",
+    "test": "node --test __tests__/pages/*.test.js lib/__tests__/*.test.js components/__tests__/*.test.js",
     "test:watch": "node --test --watch lib/__tests__/*.test.js components/__tests__/*.test.js"
   },
   "dependencies": {

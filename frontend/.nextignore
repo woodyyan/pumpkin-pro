@@ -1,0 +1,5 @@
+# Exclude test directories from Next.js build
+# Test files import node:test / node:assert/strict which don't exist at build time
+__tests__
+*.test.js
+*.spec.js

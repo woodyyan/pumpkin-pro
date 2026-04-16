@@ -3,12 +3,14 @@ const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
 
+  // Only treat .js / .jsx as page routes — never .test.js / .spec.js
+  // This prevents Next.js from building test files as server-rendered pages.
+  pageExtensions: ['js', 'jsx'],
+
   // ── Test-file exclusion for webpack builds ────────────────────────
   //
-  // Test files under lib/__tests__/ and components/__tests__/ import
-  // from 'node:test' / 'node:assert/strict' which triggers Webpack 5's
-  // UnhandledSchemeError at the *resource-reading* stage (before resolve).
-  // resolve.alias cannot catch this — we must use IgnorePlugin instead.
+  // Test files import from 'node:test' / 'node:assert/strict'.
+  // Webpack IgnorePlugin blocks them at compile time (resource stage).
   webpack: (config) => {
     config.plugins.push(
       new (require('webpack').IgnorePlugin)({

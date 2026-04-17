@@ -17,40 +17,85 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store"
 	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
 	"github.com/woodyyan/pumpkin-pro/backend/store/analysis_history"
-	"github.com/woodyyan/pumpkin-pro/backend/store/backup"
 	"github.com/woodyyan/pumpkin-pro/backend/store/analytics"
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
-	"github.com/woodyyan/pumpkin-pro/backend/store/live"
+	"github.com/woodyyan/pumpkin-pro/backend/store/backup"
 	"github.com/woodyyan/pumpkin-pro/backend/store/fundcache"
+	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 
-	"gorm.io/gorm"
 	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 	"github.com/woodyyan/pumpkin-pro/backend/store/screener"
 	"github.com/woodyyan/pumpkin-pro/backend/store/signal"
 	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
+	"gorm.io/gorm"
 )
 
 var supportedDataSources = []string{"online", "csv", "sample"}
 
+func buildQuadrantSnapshotSymbol(code, exchange string) string {
+	normalizedCode := strings.ToUpper(strings.TrimSpace(code))
+	if normalizedCode == "" {
+		return ""
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(exchange)) {
+	case "HKEX":
+		if len(normalizedCode) < 5 {
+			normalizedCode = strings.Repeat("0", 5-len(normalizedCode)) + normalizedCode
+		}
+		return normalizedCode + ".HK"
+	case "SSE":
+		return normalizedCode + ".SH"
+	case "SZSE", "":
+		return normalizedCode + ".SZ"
+	default:
+		return ""
+	}
+}
+
+func newQuadrantPriceResolver(liveRepo *live.Repository) quadrant.PriceResolver {
+	return func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
+		if liveRepo == nil || strings.TrimSpace(tradeDate) == "" {
+			return 0
+		}
+		symbol := buildQuadrantSnapshotSymbol(code, exchange)
+		if symbol == "" {
+			return 0
+		}
+		record, err := liveRepo.GetClosingSnapshot(ctx, symbol, tradeDate)
+		if err != nil || record == nil || strings.TrimSpace(record.SnapshotJSON) == "" {
+			return 0
+		}
+		var snapshot live.SymbolSnapshot
+		if err := json.Unmarshal([]byte(record.SnapshotJSON), &snapshot); err != nil {
+			return 0
+		}
+		if snapshot.LastPrice <= 0 {
+			return 0
+		}
+		return snapshot.LastPrice
+	}
+}
+
 type appServer struct {
-	cfg              config.Config
-	authService      *auth.Service
-	strategyService  *strategy.Service
-	liveService      *live.Service
-	signalService    *signal.Service
-	portfolioService *portfolio.Service
-	quadrantService  *quadrant.Service
-	adminService     *admin.Service
-	backupService    *backup.Service
-	backupWorker     *backup.Worker
-	backtestService  *backtest.Service
-	screenerService  *screener.Service
-	analyticsRepo    *analytics.Repository
-	feedbackRepo     *feedback.Repository
-	aiRateLimiter    *strategy.AIRateLimiter
+	cfg                 config.Config
+	authService         *auth.Service
+	strategyService     *strategy.Service
+	liveService         *live.Service
+	signalService       *signal.Service
+	portfolioService    *portfolio.Service
+	quadrantService     *quadrant.Service
+	adminService        *admin.Service
+	backupService       *backup.Service
+	backupWorker        *backup.Worker
+	backtestService     *backtest.Service
+	screenerService     *screener.Service
+	analyticsRepo       *analytics.Repository
+	feedbackRepo        *feedback.Repository
+	aiRateLimiter       *strategy.AIRateLimiter
 	fundCacheRepo       *fundcache.Repository
 	analysisHistoryRepo *analysis_history.Repository
 }
@@ -2314,12 +2359,12 @@ func (a *appServer) handleQuadrantBulkSave(w http.ResponseWriter, r *http.Reques
 		errMsg := fmt.Sprintf("JSON解析失败: %v", err)
 		log.Printf("[quadrant] bulk-save DECODE ERROR: %s", errMsg)
 		a.quadrantService.SaveTaskLog(r.Context(), quadrant.ComputeLogRecord{
-			ID:        fmt.Sprintf("qcl-%d", time.Now().UnixMilli()),
+			ID:         fmt.Sprintf("qcl-%d", time.Now().UnixMilli()),
 			ComputedAt: time.Now().UTC(),
-			Mode:      "unknown",
-			Status:    "failed",
-			ErrorMsg:  errMsg,
-			Exchange:  "UNKNOWN",
+			Mode:       "unknown",
+			Status:     "failed",
+			ErrorMsg:   errMsg,
+			Exchange:   "UNKNOWN",
 		})
 		// Return a more specific error so Quant can surface it to the user
 		writeError(w, http.StatusBadRequest, errMsg)
@@ -2580,6 +2625,7 @@ func main() {
 
 	quadrantRepo := quadrant.NewRepository(storeInstance.DB)
 	quadrantService := quadrant.NewService(quadrantRepo)
+	quadrantService.SetPriceResolver(newQuadrantPriceResolver(liveRepo))
 	quadrantWorker := quadrant.NewWorker(quadrantService, quadrant.WorkerConfig{
 		QuantServiceURL: cfg.QuantServiceURL,
 		BackendBaseURL:  cfg.BackendCallbackURL,
@@ -2631,21 +2677,21 @@ func main() {
 	analysisHistoryRepo := analysis_history.NewRepository(storeInstance.DB)
 
 	server := &appServer{
-		cfg:              cfg,
-		authService:      authService,
-		strategyService:  strategyService,
-		liveService:      liveService,
-		signalService:    signalService,
-		portfolioService: portfolioService,
-		quadrantService:  quadrantService,
-		adminService:     adminService,
-		backupService:    backupService,
-		backupWorker:     backupWorker,
-		backtestService:  backtestService,
-		screenerService:  screenerService,
-		analyticsRepo:    analyticsRepo,
-		feedbackRepo:     feedbackRepo,
-		aiRateLimiter:    strategy.NewAIRateLimiter(20),
+		cfg:                 cfg,
+		authService:         authService,
+		strategyService:     strategyService,
+		liveService:         liveService,
+		signalService:       signalService,
+		portfolioService:    portfolioService,
+		quadrantService:     quadrantService,
+		adminService:        adminService,
+		backupService:       backupService,
+		backupWorker:        backupWorker,
+		backtestService:     backtestService,
+		screenerService:     screenerService,
+		analyticsRepo:       analyticsRepo,
+		feedbackRepo:        feedbackRepo,
+		aiRateLimiter:       strategy.NewAIRateLimiter(20),
 		fundCacheRepo:       fundCacheRepo,
 		analysisHistoryRepo: analysisHistoryRepo,
 	}

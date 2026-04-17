@@ -27,6 +27,25 @@ function exchangeLabel(ex) {
   return labels[ex] || ex
 }
 
+function hasReturnPct(value) {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function formatReturnPctDisplay(value) {
+  if (!hasReturnPct(value)) return '--'
+  const prefix = value > 0 ? '+' : ''
+  return `${prefix}${value.toFixed(1)}%`
+}
+
+function buildMobileReturnSummary(days, pct) {
+  const hasPct = hasReturnPct(pct)
+  if (!days && !hasPct) return null
+  const parts = []
+  if (days > 0) parts.push(`🔥连续${days}日`)
+  if (hasPct) parts.push(`涨幅${formatReturnPctDisplay(pct)}`)
+  return parts.join(' · ')
+}
+
 // Mock sample ranking items for testing
 const SAMPLE_ASHARE_ITEMS = [
   {
@@ -135,6 +154,42 @@ describe('exchangeLabel (market label)', () => {
 
   it('returns raw value for unknown exchange', () => {
     assert.equal(exchangeLabel('NYSE'), 'NYSE')
+  })
+})
+
+describe('return_pct display helpers', () => {
+
+  it('treats null and undefined as no data', () => {
+    assert.equal(hasReturnPct(null), false)
+    assert.equal(hasReturnPct(undefined), false)
+    assert.equal(formatReturnPctDisplay(null), '--')
+    assert.equal(formatReturnPctDisplay(undefined), '--')
+  })
+
+  it('preserves real 0.0% return', () => {
+    assert.equal(hasReturnPct(0), true)
+    assert.equal(formatReturnPctDisplay(0), '0.0%')
+  })
+
+  it('formats positive and negative returns', () => {
+    assert.equal(formatReturnPctDisplay(1.26), '+1.3%')
+    assert.equal(formatReturnPctDisplay(-2.04), '-2.0%')
+  })
+})
+
+describe('mobile return summary', () => {
+
+  it('returns null when both consecutive days and return are absent', () => {
+    assert.equal(buildMobileReturnSummary(0, null), null)
+  })
+
+  it('keeps consecutive days without return value', () => {
+    assert.equal(buildMobileReturnSummary(3, null), '🔥连续3日')
+  })
+
+  it('shows real 0.0% return instead of hiding it', () => {
+    assert.equal(buildMobileReturnSummary(2, 0), '🔥连续2日 · 涨幅0.0%')
+    assert.equal(buildMobileReturnSummary(0, 0), '涨幅0.0%')
   })
 })
 

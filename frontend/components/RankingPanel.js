@@ -170,13 +170,14 @@ function RankRow({ item, onClick }) {
         {/* Return since first appearance */}
         <div className="text-right w-16">
           {(() => {
-            const pct = item.return_pct ?? 0
-            const cls = pct >= 0 ? 'text-red-400' : 'text-green-400'
-            const prefix = pct > 0 ? '+' : ''
+            const hasPct = hasReturnPct(item.return_pct)
+            const cls = hasPct
+              ? (item.return_pct >= 0 ? 'text-red-400' : 'text-green-400')
+              : 'text-white/25'
             return (
               <>
                 <div className={`${cls} font-semibold tabular-nums`}>
-                  {pct !== 0 ? `${prefix}${pct.toFixed(1)}%` : '--'}
+                  {formatReturnPctDisplay(item.return_pct)}
                 </div>
                 <div className="text-[10px] text-white/30">涨幅</div>
               </>
@@ -248,13 +249,16 @@ function RankCard({ item, onClick }) {
       </div>
       {(() => {
         const days = item.consecutive_days ?? 0
-        const pct = item.return_pct ?? 0
-        if (!days && !pct) return null
-        const pctCls = pct >= 0 ? 'text-red-400/70' : 'text-green-400/70'
-        const pctPrefix = pct > 0 ? '+' : ''
+        const hasPct = hasReturnPct(item.return_pct)
+        if (!days && !hasPct) return null
         return (
           <div className="mt-1 text-[10px] text-white/30">
-            {days > 0 ? `🔥连续${days}日` : ''} {pct !== 0 ? `· 涨幅${pctPrefix}${pct.toFixed(1)}%` : ''}
+            {days > 0 ? <span>{`🔥连续${days}日`}</span> : null}
+            {hasPct ? (
+              <span className={`${days > 0 ? 'ml-1' : ''} ${item.return_pct >= 0 ? 'text-red-400/70' : 'text-green-400/70'}`}>
+                {`${days > 0 ? '· ' : ''}涨幅${formatReturnPctDisplay(item.return_pct)}`}
+              </span>
+            ) : null}
           </div>
         )
       })()}
@@ -290,6 +294,16 @@ function formatAmount(val) {
   if (!val || val <= 0) return '--'
   if (val >= 10000) return `${(val / 10000).toFixed(1)}亿`
   return `${val.toFixed(0)}万`
+}
+
+function hasReturnPct(value) {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function formatReturnPctDisplay(value) {
+  if (!hasReturnPct(value)) return '--'
+  const prefix = value > 0 ? '+' : ''
+  return `${prefix}${value.toFixed(1)}%`
 }
 
 // ── Pure helpers ──

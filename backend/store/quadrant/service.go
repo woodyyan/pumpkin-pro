@@ -10,9 +10,9 @@ import (
 	"time"
 )
 
-// PriceResolver resolves the latest closing price for a given stock code.
+// PriceResolver resolves a stock's closing price for the given trade date.
 // Implemented by the live-store module; returns 0 if unavailable.
-type PriceResolver func(ctx context.Context, code string) float64
+type PriceResolver func(ctx context.Context, code string, exchange string, tradeDate string) float64
 
 // Service provides business logic for quadrant scores.
 type Service struct {
@@ -28,6 +28,15 @@ func NewService(repo *Repository) *Service {
 // SetPriceResolver injects the price resolution callback (called during init).
 func (s *Service) SetPriceResolver(r PriceResolver) {
 	s.priceResolver = r
+}
+
+var rankingSnapshotLocation = time.FixedZone("CST", 8*60*60)
+
+func rankingSnapshotDate(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.In(rankingSnapshotLocation).Format("2006-01-02")
 }
 
 // BulkSave writes all quadrant scores from the Quant callback.
@@ -49,13 +58,13 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 	if len(input.Items) == 0 || allEmpty(input.Items) {
 		log.Printf("[quadrant] BulkSave REJECT: no valid items (received %d)", len(input.Items))
 		s.saveTaskLog(ctx, ComputeLogRecord{
-			ID:        fmt.Sprintf("qcl-%d", computedAt.UnixMilli()),
+			ID:         fmt.Sprintf("qcl-%d", computedAt.UnixMilli()),
 			ComputedAt: computedAt,
-			Mode:      "unknown",
-			Status:    "failed",
-			ErrorMsg:  "no valid items to save",
-			Exchange:  exchange,
-			StartedAt: &computedAt,
+			Mode:       "unknown",
+			Status:     "failed",
+			ErrorMsg:   "no valid items to save",
+			Exchange:   exchange,
+			StartedAt:  &computedAt,
 			FinishedAt: &computedAt,
 		})
 		SetProgressTerminal(exchange, "failed", "收到空数据（0条有效股票）")
@@ -90,15 +99,15 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 		now := time.Now().UTC()
 		log.Printf("[quadrant] BulkSave DB ERROR: %v (exchange=%s)", err, exchange)
 		s.saveTaskLog(ctx, ComputeLogRecord{
-			ID:          fmt.Sprintf("qcl-%d", computedAt.UnixMilli()),
-			ComputedAt:  computedAt,
-			Mode:        "unknown",
-			Status:      "failed",
-			ErrorMsg:     fmt.Sprintf("DB写入错误: %v", err),
-			Exchange:    exchange,
-			StartedAt:   &computedAt,
-			FinishedAt:   &now,
-			TotalCount:   totalCount,
+			ID:         fmt.Sprintf("qcl-%d", computedAt.UnixMilli()),
+			ComputedAt: computedAt,
+			Mode:       "unknown",
+			Status:     "failed",
+			ErrorMsg:   fmt.Sprintf("DB写入错误: %v", err),
+			Exchange:   exchange,
+			StartedAt:  &computedAt,
+			FinishedAt: &now,
+			TotalCount: totalCount,
 		})
 		SetProgressTerminal(exchange, "failed", fmt.Sprintf("DB写入错误: %v", err))
 		return 0, err
@@ -159,10 +168,10 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 		ErrorMsg:     errorMsg,
 		Exchange:     exchange,
 		StartedAt:    &computedAt,
-		FinishedAt:    &finishedAt,
-		TotalCount:    totalCount,
-		SuccessCount:  successCount,
-		FailedCount:   failedCount,
+		FinishedAt:   &finishedAt,
+		TotalCount:   totalCount,
+		SuccessCount: successCount,
+		FailedCount:  failedCount,
 	}
 
 	_ = s.repo.InsertComputeLog(ctx, taskLog)
@@ -261,12 +270,12 @@ func (s *Service) saveRankingSnapshotsBestEffort(ctx context.Context, records []
 	}
 
 	now := time.Now().UTC()
-	dateStr := computedAt.Truncate(24 * time.Hour).Format("2006-01-02")
+	dateStr := rankingSnapshotDate(computedAt)
 	snaps := make([]RankingSnapshot, 0, len(oppRecords))
 	for i, r := range oppRecords {
 		closePrice := 0.0
 		if s.priceResolver != nil {
-			closePrice = s.priceResolver(ctx, r.Code)
+			closePrice = s.priceResolver(ctx, r.Code, r.Exchange, dateStr)
 		}
 		snaps = append(snaps, RankingSnapshot{
 			Code:         r.Code,
@@ -432,7 +441,7 @@ func (s *Service) Search(ctx context.Context, q string, limit int) ([]SearchResu
 
 // ExchangeOverview holds per-exchange quadrant statistics.
 type ExchangeOverview struct {
-	Exchange     string          `json:"exchange"`      // "ASHARE", "HKEX"
+	Exchange     string          `json:"exchange"` // "ASHARE", "HKEX"
 	TotalCount   int64           `json:"total_count"`
 	LastComputed string          `json:"last_computed"`
 	Summary      QuadrantSummary `json:"summary"`
@@ -441,8 +450,8 @@ type ExchangeOverview struct {
 // QuadrantOverviewResponse is the response for GET /api/admin/quadrant-overview.
 type QuadrantOverviewResponse struct {
 	Exchanges    []ExchangeOverview `json:"exchanges"`
-	GrandTotal   int64             `json:"grand_total"`
-	GrandSummary QuadrantSummary   `json:"grand_summary"`
+	GrandTotal   int64              `json:"grand_total"`
+	GrandSummary QuadrantSummary    `json:"grand_summary"`
 }
 
 // GetAdminOverview returns quadrant statistics grouped by exchange for the admin dashboard.
@@ -520,7 +529,8 @@ func resolveRankingExchanges(exchange string) []string {
 // GetRanking returns the top-N stocks from the opportunity zone (机会区),
 // ordered by opportunity DESC + risk ASC.
 // Applies a minimum liquidity filter (avg_amount_5d threshold) per market:
-//   A-share: 5000 万元, HKEX: 2000 万 HKD.
+//
+//	A-share: 5000 万元, HKEX: 2000 万 HKD.
 //
 // Backward compatibility: if no records have non-zero avg_amount5d (i.e.
 // data was computed before the liquidity field was introduced), the filter is
@@ -583,11 +593,12 @@ func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*
 
 		firstDateStr, _ := s.repo.GetFirstAppearedDate(ctx, r.Code, exchanges)
 		if firstDateStr != "" {
-			currentDateStr := latestComputedAt.Truncate(24 * time.Hour).Format("2006-01-02")
+			currentDateStr := rankingSnapshotDate(latestComputedAt)
 			startPrice, _ := s.repo.GetClosePriceOnDate(ctx, r.Code, firstDateStr)
 			currentPrice, _ := s.repo.GetClosePriceOnDate(ctx, r.Code, currentDateStr)
 			if startPrice > 0 && currentPrice > 0 {
-				item.ReturnPct = (currentPrice - startPrice) / startPrice * 100
+				pct := (currentPrice - startPrice) / startPrice * 100
+				item.ReturnPct = &pct
 			}
 		}
 

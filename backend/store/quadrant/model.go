@@ -15,7 +15,7 @@ type QuadrantScoreRecord struct {
 	Trend       float64   `gorm:"not null;default:0"`
 	Flow        float64   `gorm:"not null;default:0"`
 	Revision    float64   `gorm:"not null;default:0"`
-	Liquidity   float64   `gorm:"not null;default:0"`  // 流动性：近5日均成交额 percentile rank
+	Liquidity   float64   `gorm:"not null;default:0"` // 流动性：近5日均成交额 percentile rank
 	Volatility  float64   `gorm:"not null;default:0"`
 	Drawdown    float64   `gorm:"not null;default:0"`
 	Crowding    float64   `gorm:"not null;default:0"`
@@ -70,7 +70,7 @@ type QuadrantMeta struct {
 
 // QuadrantResponse is the API response for GET /api/quadrant.
 type QuadrantResponse struct {
-	Meta             QuadrantMeta          `json:"meta"`
+	Meta             QuadrantMeta           `json:"meta"`
 	AllStocks        []QuadrantScoreCompact `json:"all_stocks"`
 	WatchlistDetails []QuadrantScoreDetail  `json:"watchlist_details"`
 	Summary          QuadrantSummary        `json:"summary"`
@@ -78,9 +78,9 @@ type QuadrantResponse struct {
 
 // BulkSaveInput is the input from Quant callback.
 type BulkSaveInput struct {
-	Items      []BulkSaveItem         `json:"items"`
-	ComputedAt string                 `json:"computed_at"`
-	Report     map[string]any         `json:"report,omitempty"`
+	Items      []BulkSaveItem `json:"items"`
+	ComputedAt string         `json:"computed_at"`
+	Report     map[string]any `json:"report,omitempty"`
 }
 
 type BulkSaveItem struct {
@@ -96,7 +96,7 @@ type BulkSaveItem struct {
 	Volatility  float64 `json:"volatility"`
 	Drawdown    float64 `json:"drawdown"`
 	Crowding    float64 `json:"crowding"`
-	AvgAmount5d float64 `json:"avg_amount_5d"` // 近5日均成交额（万元）
+	AvgAmount5d float64 `json:"avg_amount_5d"`      // 近5日均成交额（万元）
 	Exchange    string  `json:"exchange,omitempty"` // "SSE"/"SZSE"(默认)/"HKEX"
 }
 
@@ -104,27 +104,27 @@ type BulkSaveItem struct {
 // Supports both task-level logs (one per compute run) and detail-level
 // logs (per-stock failure details, linked via TaskLogID).
 type ComputeLogRecord struct {
-	ID             string    `gorm:"primaryKey;size:36"`
-	ComputedAt     time.Time `gorm:"not null;index"`
-	Mode           string    `gorm:"size:16;not null"`
-	DurationSec    float64   `gorm:"not null;default:0"`
-	StockCount     int       `gorm:"not null;default:0"`
-	ReportJSON     string    `gorm:"type:text;not null;default:'{}'"`
-	Status         string    `gorm:"size:16;not null;default:'success'"`
-	ErrorMsg       string    `gorm:"type:text;default:''"`
+	ID          string    `gorm:"primaryKey;size:36"`
+	ComputedAt  time.Time `gorm:"not null;index"`
+	Mode        string    `gorm:"size:16;not null"`
+	DurationSec float64   `gorm:"not null;default:0"`
+	StockCount  int       `gorm:"not null;default:0"`
+	ReportJSON  string    `gorm:"type:text;not null;default:'{}'"`
+	Status      string    `gorm:"size:16;not null;default:'success'"`
+	ErrorMsg    string    `gorm:"type:text;default:''"`
 
 	// ── Enhanced fields for monitoring (v2) ──
-	Exchange      string    `gorm:"size:8;index"`                        // "ASHARE" / "HKEX"
-	StartedAt      *time.Time                                         // 计算开始时间
-	FinishedAt     *time.Time                                         // 计算结束时间
-	TotalCount     int       `gorm:"not null;default:0"`                 // 本批总股票数
-	SuccessCount   int       `gorm:"not null;default:0"`                 // 成功数
-	FailedCount    int       `gorm:"not null;default:0"`                 // 失败数
+	Exchange     string     `gorm:"size:8;index"` // "ASHARE" / "HKEX"
+	StartedAt    *time.Time // 计算开始时间
+	FinishedAt   *time.Time // 计算结束时间
+	TotalCount   int        `gorm:"not null;default:0"` // 本批总股票数
+	SuccessCount int        `gorm:"not null;default:0"` // 成功数
+	FailedCount  int        `gorm:"not null;default:0"` // 失败数
 
 	// ── Detail-level fields (NULL for task-level logs) ──
-	TaskLogID      *string   `gorm:"size:36;index"`                     // 关联的任务级 log ID
-	TsCode         *string   `gorm:"size:16"`                            // 失败的股票代码
-	Name           *string   `gorm:"size:64"`                            // 失败的股票名称
+	TaskLogID *string `gorm:"size:36;index"` // 关联的任务级 log ID
+	TsCode    *string `gorm:"size:16"`       // 失败的股票代码
+	Name      *string `gorm:"size:64"`       // 失败的股票名称
 }
 
 func (ComputeLogRecord) TableName() string {
@@ -143,34 +143,34 @@ type QuadrantStatusResponse struct {
 
 // RankingItem is a single stock in the ranking list.
 type RankingItem struct {
-	Rank           int     `json:"rank"`
-	Code           string  `json:"code"`
-	Name           string  `json:"name"`
-	Exchange       string  `json:"exchange"`
-	Opportunity    float64 `json:"opportunity"`
-	Risk           float64 `json:"risk"`
-	Quadrant       string  `json:"quadrant"`
-	Trend          float64 `json:"trend"`
-	Flow           float64 `json:"flow"`
-	Revision       float64 `json:"revision"`
-	Liquidity      float64 `json:"liquidity"`
-	AvgAmount5d    float64 `json:"avg_amount_5d"` // 近5日均成交额（万元）
-	ConsecutiveDays int    `json:"consecutive_days"` // 连续上榜天数
-	ReturnPct      float64 `json:"return_pct"`      // 首次上榜至今涨幅(%)
+	Rank            int      `json:"rank"`
+	Code            string   `json:"code"`
+	Name            string   `json:"name"`
+	Exchange        string   `json:"exchange"`
+	Opportunity     float64  `json:"opportunity"`
+	Risk            float64  `json:"risk"`
+	Quadrant        string   `json:"quadrant"`
+	Trend           float64  `json:"trend"`
+	Flow            float64  `json:"flow"`
+	Revision        float64  `json:"revision"`
+	Liquidity       float64  `json:"liquidity"`
+	AvgAmount5d     float64  `json:"avg_amount_5d"`    // 近5日均成交额（万元）
+	ConsecutiveDays int      `json:"consecutive_days"` // 连续上榜天数
+	ReturnPct       *float64 `json:"return_pct"`       // 首次上榜至今涨幅(%)；nil 表示暂无可用快照价格
 }
 
 // RankingSnapshot captures a daily snapshot of top opportunity-zone stocks.
 // Used to compute consecutive appearance days and cumulative returns.
 type RankingSnapshot struct {
-	ID           int64  `gorm:"primaryKey;autoIncrement"`
-	Code         string `gorm:"size:10;not null;uniqueIndex:udx_snap_date_code"`
-	Name         string `gorm:"size:128;not null;default:''"`
-	Exchange     string `gorm:"size:8;not null;default:'SZSE'"`
-	Rank         int    `gorm:"not null"`
-	Opportunity  float64 `gorm:"not null"`
-	Risk         float64 `gorm:"not null"`
-	ClosePrice   float64 `gorm:"not null;default:0"` // 当日收盘价（元/HKD）
-	SnapshotDate string `gorm:"size:10;not null;uniqueIndex:udx_snap_date_code"` // 格式 "2026-04-15"
+	ID           int64     `gorm:"primaryKey;autoIncrement"`
+	Code         string    `gorm:"size:10;not null;uniqueIndex:udx_snap_date_code"`
+	Name         string    `gorm:"size:128;not null;default:''"`
+	Exchange     string    `gorm:"size:8;not null;default:'SZSE'"`
+	Rank         int       `gorm:"not null"`
+	Opportunity  float64   `gorm:"not null"`
+	Risk         float64   `gorm:"not null"`
+	ClosePrice   float64   `gorm:"not null;default:0"`                              // 当日收盘价（元/HKD）
+	SnapshotDate string    `gorm:"size:10;not null;uniqueIndex:udx_snap_date_code"` // 格式 "2026-04-15"
 	CreatedAt    time.Time `gorm:"not null"`
 }
 

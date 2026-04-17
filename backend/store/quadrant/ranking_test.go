@@ -40,18 +40,18 @@ func makeRankingRecord(code, exchange string, opportunity, risk float64) Quadran
 
 func makeNonOpportunityRecord(code, exchange string, quadrant string) QuadrantScoreRecord {
 	return QuadrantScoreRecord{
-		Code:       code,
-		Name:       "股票" + code,
-		Exchange:   exchange,
+		Code:        code,
+		Name:        "股票" + code,
+		Exchange:    exchange,
 		Opportunity: 30,
-		Risk:       70,
-		Quadrant:   quadrant,
-		Trend:      25,
-		Flow:       20,
-		Revision:   18,
-		Liquidity:  40,
+		Risk:        70,
+		Quadrant:    quadrant,
+		Trend:       25,
+		Flow:        20,
+		Revision:    18,
+		Liquidity:   40,
 		AvgAmount5d: 5000.0,
-		ComputedAt: time.Date(2026, 4, 15, 2, 30, 0, 0, time.UTC),
+		ComputedAt:  time.Date(2026, 4, 15, 2, 30, 0, 0, time.UTC),
 	}
 }
 
@@ -63,19 +63,22 @@ func padCode(n int, digits int) string {
 // ── T-R1: Model / Struct Tests ──
 
 func TestRankingItem_JSONRoundTrip(t *testing.T) {
+	pct := 5.6
 	item := RankingItem{
-		Rank:        1,
-		Code:        "600519",
-		Name:        "贵州茅台",
-		Exchange:    "SSE",
-		Opportunity: 96.5,
-		Risk:        22.3,
-		Quadrant:    "机会",
-		Trend:       94.2,
-		Flow:        88.7,
-		Revision:    85.1,
-		Liquidity:   92.0,
-		AvgAmount5d: 150000.0,
+		Rank:            1,
+		Code:            "600519",
+		Name:            "贵州茅台",
+		Exchange:        "SSE",
+		Opportunity:     96.5,
+		Risk:            22.3,
+		Quadrant:        "机会",
+		Trend:           94.2,
+		Flow:            88.7,
+		Revision:        85.1,
+		Liquidity:       92.0,
+		AvgAmount5d:     150000.0,
+		ConsecutiveDays: 3,
+		ReturnPct:       &pct,
 	}
 
 	data, err := json.Marshal(item)
@@ -90,6 +93,9 @@ func TestRankingItem_JSONRoundTrip(t *testing.T) {
 
 	if got.Rank != item.Rank || got.Code != item.Code || got.Opportunity != item.Opportunity {
 		t.Errorf("roundtrip mismatch: got %+v", got)
+	}
+	if got.ReturnPct == nil || *got.ReturnPct != pct {
+		t.Errorf("expected return_pct %.1f, got %+v", pct, got.ReturnPct)
 	}
 
 	// Verify JSON keys are correct (not Go struct names)
@@ -307,7 +313,7 @@ func TestGetRanking_RiskAsSecondarySort(t *testing.T) {
 	ctx := context.Background()
 
 	records := []QuadrantScoreRecord{
-		makeRankingRecord("600000", "SSE", 95, 35), // higher risk → rank lower
+		makeRankingRecord("600000", "SSE", 95, 35),  // higher risk → rank lower
 		makeRankingRecord("000001", "SZSE", 95, 15), // lower risk → rank higher
 		makeRankingRecord("601318", "SSE", 93, 10),
 	}
@@ -451,7 +457,7 @@ func TestGetRanking_HKEXStrictIsolation(t *testing.T) {
 		makeRankingRecord("00700", "HKEX", 92, 20),
 		makeRankingRecord("00005", "HKEX", 88, 25),
 		// These SSE/SZSE records should NEVER appear in HKEX results
-		makeRankingRecord("600519", "SSE", 99, 5),   // high opportunity but wrong exchange!
+		makeRankingRecord("600519", "SSE", 99, 5), // high opportunity but wrong exchange!
 		makeRankingRecord("000001", "SZSE", 98, 10),
 	}
 	seedOpportunityRecords(t, repo, records)
@@ -551,10 +557,10 @@ func TestGetRanking_LiquidityFilter_ExcludesIlliquid(t *testing.T) {
 	ctx := context.Background()
 
 	records := []QuadrantScoreRecord{
-		makeHighLiquidityRecord("600519", "SSE", 98),   // passes filter
-		makeHighLiquidityRecord("000001", "SZSE", 95),   // passes filter
-		makeLowLiquidityRecord("300123", "SZSE", 99),    // high opp but illiquid → excluded!
-		makeLowLiquidityRecord("600888", "SSE", 96),     // excluded
+		makeHighLiquidityRecord("600519", "SSE", 98),  // passes filter
+		makeHighLiquidityRecord("000001", "SZSE", 95), // passes filter
+		makeLowLiquidityRecord("300123", "SZSE", 99),  // high opp but illiquid → excluded!
+		makeLowLiquidityRecord("600888", "SSE", 96),   // excluded
 	}
 	seedOpportunityRecords(t, repo, records)
 
@@ -895,5 +901,141 @@ func TestSnapshot_ClosePriceOnDate(t *testing.T) {
 	}
 	if price != 185.50 {
 		t.Errorf("expected close_price=185.50, got %.2f", price)
+	}
+}
+
+func TestSaveRankingSnapshotsBestEffort_UsesResolverAndShanghaiDate(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	var calledCode, calledExchange, calledDate string
+	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
+		calledCode = code
+		calledExchange = exchange
+		calledDate = tradeDate
+		return 123.45
+	})
+
+	record := makeRankingRecord("600519", "SSE", 95, 20)
+	computedAt := time.Date(2026, 4, 16, 18, 46, 37, 0, time.UTC) // 上海时间 2026-04-17 02:46:37
+	svc.saveRankingSnapshotsBestEffort(ctx, []QuadrantScoreRecord{record}, computedAt)
+
+	if calledCode != "600519" || calledExchange != "SSE" {
+		t.Fatalf("resolver called with unexpected args: code=%s exchange=%s", calledCode, calledExchange)
+	}
+	if calledDate != "2026-04-17" {
+		t.Fatalf("resolver trade date = %s; want 2026-04-17", calledDate)
+	}
+
+	var snap RankingSnapshot
+	if err := repo.db.WithContext(ctx).Where("code = ?", "600519").First(&snap).Error; err != nil {
+		t.Fatalf("query snapshot failed: %v", err)
+	}
+	if snap.SnapshotDate != "2026-04-17" {
+		t.Fatalf("snapshot_date = %s; want 2026-04-17", snap.SnapshotDate)
+	}
+	if snap.ClosePrice != 123.45 {
+		t.Fatalf("close_price = %.2f; want 123.45", snap.ClosePrice)
+	}
+}
+
+func TestGetRanking_ReturnPct_ComputedWhenPricesAvailable(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	record := makeRankingRecord("600519", "SSE", 95, 20)
+	record.ComputedAt = time.Date(2026, 4, 16, 18, 46, 37, 0, time.UTC)
+	seedOpportunityRecords(t, repo, []QuadrantScoreRecord{record})
+
+	for _, snap := range []RankingSnapshot{
+		{Code: "600519", Name: "贵州茅台", Exchange: "SSE", Rank: 1, Opportunity: 95, Risk: 20, ClosePrice: 10, SnapshotDate: "2026-04-16", CreatedAt: time.Now().UTC()},
+		{Code: "600519", Name: "贵州茅台", Exchange: "SSE", Rank: 1, Opportunity: 95, Risk: 20, ClosePrice: 11, SnapshotDate: "2026-04-17", CreatedAt: time.Now().UTC()},
+	} {
+		if err := repo.UpsertSnapshot(ctx, snap); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking failed: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(resp.Items))
+	}
+	if resp.Items[0].ReturnPct == nil {
+		t.Fatal("expected non-nil return_pct")
+	}
+	if *resp.Items[0].ReturnPct != 10 {
+		t.Fatalf("return_pct = %.2f; want 10.00", *resp.Items[0].ReturnPct)
+	}
+}
+
+func TestGetRanking_ReturnPct_NilWhenPriceMissing(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	record := makeRankingRecord("000001", "SZSE", 96, 18)
+	record.ComputedAt = time.Date(2026, 4, 16, 18, 46, 37, 0, time.UTC)
+	seedOpportunityRecords(t, repo, []QuadrantScoreRecord{record})
+
+	for _, snap := range []RankingSnapshot{
+		{Code: "000001", Name: "平安银行", Exchange: "SZSE", Rank: 1, Opportunity: 96, Risk: 18, ClosePrice: 0, SnapshotDate: "2026-04-16", CreatedAt: time.Now().UTC()},
+		{Code: "000001", Name: "平安银行", Exchange: "SZSE", Rank: 1, Opportunity: 96, Risk: 18, ClosePrice: 10, SnapshotDate: "2026-04-17", CreatedAt: time.Now().UTC()},
+	} {
+		if err := repo.UpsertSnapshot(ctx, snap); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking failed: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(resp.Items))
+	}
+	if resp.Items[0].ReturnPct != nil {
+		t.Fatalf("expected nil return_pct when start price missing, got %.2f", *resp.Items[0].ReturnPct)
+	}
+}
+
+func TestGetRanking_ReturnPct_ZeroPercentIsPreserved(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	record := makeRankingRecord("601318", "SSE", 94, 16)
+	record.ComputedAt = time.Date(2026, 4, 16, 18, 46, 37, 0, time.UTC)
+	seedOpportunityRecords(t, repo, []QuadrantScoreRecord{record})
+
+	for _, snap := range []RankingSnapshot{
+		{Code: "601318", Name: "中国平安", Exchange: "SSE", Rank: 1, Opportunity: 94, Risk: 16, ClosePrice: 10, SnapshotDate: "2026-04-16", CreatedAt: time.Now().UTC()},
+		{Code: "601318", Name: "中国平安", Exchange: "SSE", Rank: 1, Opportunity: 94, Risk: 16, ClosePrice: 10, SnapshotDate: "2026-04-17", CreatedAt: time.Now().UTC()},
+	} {
+		if err := repo.UpsertSnapshot(ctx, snap); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking failed: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(resp.Items))
+	}
+	if resp.Items[0].ReturnPct == nil {
+		t.Fatal("expected non-nil return_pct for real 0% move")
+	}
+	if *resp.Items[0].ReturnPct != 0 {
+		t.Fatalf("return_pct = %.2f; want 0.00", *resp.Items[0].ReturnPct)
 	}
 }

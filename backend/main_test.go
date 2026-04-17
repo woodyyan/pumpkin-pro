@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/woodyyan/pumpkin-pro/backend/store/live"
+	"github.com/woodyyan/pumpkin-pro/backend/tests/testutil"
 )
 
 // ── parseBearerToken ──
@@ -118,8 +122,8 @@ func TestParseSince(t *testing.T) {
 
 func TestParseLookbackDays(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
+		name     string
+		input    string
 		fallback int
 		wantVal  int
 		wantErr  bool
@@ -583,4 +587,59 @@ func TestDecodeBodyAsMap(t *testing.T) {
 			t.Error("expected error for empty body")
 		}
 	})
+}
+
+func TestBuildQuadrantSnapshotSymbol(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		exchange string
+		want     string
+	}{
+		{name: "SSE code", code: "600519", exchange: "SSE", want: "600519.SH"},
+		{name: "SZSE code", code: "000001", exchange: "SZSE", want: "000001.SZ"},
+		{name: "HKEX short code padded", code: "700", exchange: "HKEX", want: "00700.HK"},
+		{name: "HKEX full code", code: "00700", exchange: "HKEX", want: "00700.HK"},
+		{name: "blank code", code: "", exchange: "SSE", want: ""},
+		{name: "unknown exchange", code: "600519", exchange: "NYSE", want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := buildQuadrantSnapshotSymbol(tc.code, tc.exchange); got != tc.want {
+				t.Errorf("buildQuadrantSnapshotSymbol(%q, %q) = %q; want %q", tc.code, tc.exchange, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNewQuadrantPriceResolver(t *testing.T) {
+	db := testutil.InMemoryDB(t)
+	testutil.AutoMigrateModels(t, db, &live.ClosingSnapshotRecord{})
+	liveRepo := live.NewRepository(db)
+	resolver := newQuadrantPriceResolver(liveRepo)
+	ctx := context.Background()
+
+	snapshot := live.SymbolSnapshot{Symbol: "600519.SH", LastPrice: 123.45}
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal snapshot failed: %v", err)
+	}
+	if err := liveRepo.UpsertClosingSnapshot(ctx, live.ClosingSnapshotRecord{
+		Symbol:       "600519.SH",
+		TradeDate:    "2026-04-17",
+		SnapshotJSON: string(payload),
+		UpdatedAt:    time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed closing snapshot failed: %v", err)
+	}
+
+	if got := resolver(ctx, "600519", "SSE", "2026-04-17"); got != 123.45 {
+		t.Fatalf("resolver returned %.2f; want 123.45", got)
+	}
+	if got := resolver(ctx, "600519", "SSE", "2026-04-16"); got != 0 {
+		t.Fatalf("resolver on missing trade date returned %.2f; want 0", got)
+	}
+	if got := resolver(ctx, "600519", "NYSE", "2026-04-17"); got != 0 {
+		t.Fatalf("resolver on unsupported exchange returned %.2f; want 0", got)
+	}
 }

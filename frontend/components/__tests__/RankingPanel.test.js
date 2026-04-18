@@ -31,6 +31,24 @@ function hasReturnPct(value) {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+function formatMetaDateTime(value) {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function buildRankingMetaSummary(meta) {
+  const parts = ['精选股票来自机会区']
+  if (meta?.computed_at) {
+    parts.push(`数据日期：${formatMetaDateTime(meta.computed_at)}`)
+  }
+  if (meta?.returned_count != null) {
+    parts.push(`当前展示 TOP${meta.returned_count} 只`)
+  }
+  return parts.join(' · ')
+}
+
 function formatReturnPctDisplay(value) {
   if (!hasReturnPct(value)) return '--'
   const prefix = value > 0 ? '+' : ''
@@ -41,8 +59,8 @@ function buildMobileReturnSummary(days, pct) {
   const hasPct = hasReturnPct(pct)
   if (!days && !hasPct) return null
   const parts = []
-  if (days > 0) parts.push(`🔥连续${days}日`)
-  if (hasPct) parts.push(`涨幅${formatReturnPctDisplay(pct)}`)
+  if (days > 0) parts.push(`🔥已连续上榜 ${days} 日`)
+  if (hasPct) parts.push(`上榜以来 ${formatReturnPctDisplay(pct)}`)
   return parts.join(' · ')
 }
 
@@ -157,6 +175,21 @@ describe('exchangeLabel (market label)', () => {
   })
 })
 
+describe('ranking meta summary', () => {
+
+  it('builds concise header copy with data date and TOP count', () => {
+    const summary = buildRankingMetaSummary(SAMPLE_META)
+    assert.ok(summary.includes('精选股票来自机会区'))
+    assert.ok(summary.includes('数据日期：'))
+    assert.ok(summary.includes('当前展示 TOP20 只'))
+    assert.ok(!summary.includes('机会区共'))
+  })
+
+  it('falls back to source description when meta is missing', () => {
+    assert.equal(buildRankingMetaSummary(null), '精选股票来自机会区')
+  })
+})
+
 describe('return_pct display helpers', () => {
 
   it('treats null and undefined as no data', () => {
@@ -184,12 +217,12 @@ describe('mobile return summary', () => {
   })
 
   it('keeps consecutive days without return value', () => {
-    assert.equal(buildMobileReturnSummary(3, null), '🔥连续3日')
+    assert.equal(buildMobileReturnSummary(3, null), '🔥已连续上榜 3 日')
   })
 
   it('shows real 0.0% return instead of hiding it', () => {
-    assert.equal(buildMobileReturnSummary(2, 0), '🔥连续2日 · 涨幅0.0%')
-    assert.equal(buildMobileReturnSummary(0, 0), '涨幅0.0%')
+    assert.equal(buildMobileReturnSummary(2, 0), '🔥已连续上榜 2 日 · 上榜以来 0.0%')
+    assert.equal(buildMobileReturnSummary(0, 0), '上榜以来 0.0%')
   })
 })
 

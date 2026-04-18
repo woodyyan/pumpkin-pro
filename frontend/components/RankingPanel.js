@@ -78,6 +78,7 @@ function RankingHeader({ exchange, onExchangeChange, meta }) {
     { key: 'ASHARE', label: 'A股精选' },
     { key: 'HKEX', label: '港股精选' },
   ]
+  const metaSummary = buildRankingMetaSummary(meta)
 
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -86,13 +87,9 @@ function RankingHeader({ exchange, onExchangeChange, meta }) {
           ★ 卧龙AI精选
           <span className="ml-2 text-[11px] font-normal text-white/40">基于卧龙AI模型每日分析</span>
         </h3>
-        {meta?.computed_at && (
-          <div className="mt-1 text-xs text-white/50">
-            机会区共 <span className="font-medium text-emerald-300">{meta.total_in_zone ?? '--'} 只</span>
-            {' · 展示 Top '}
-            <span className="font-medium">{meta.returned_count ?? '--'}</span>
-          </div>
-        )}
+        <div className="mt-1 max-w-2xl text-xs leading-5 text-white/50">
+          {metaSummary}
+        </div>
       </div>
 
       {/* Tab Switch */}
@@ -160,11 +157,11 @@ function RankRow({ item, onClick }) {
         <ScoreBar label="流动" value={item.liquidity ?? 50} max={100} width="w-14" amount={item.avg_amount_5d} />
 
         {/* Consecutive days */}
-        <div className="text-right w-12">
+        <div className="text-right w-14">
           <div className={item.consecutive_days > 0 ? (item.consecutive_days >= 7 ? 'font-semibold text-emerald-300' : 'text-white/70') : 'text-white/25'}>
             {item.consecutive_days > 0 ? `${item.consecutive_days}日` : '--'}
           </div>
-          <div className="text-[10px] text-white/30">连续</div>
+          <div className="text-[10px] text-white/30">连续上榜</div>
         </div>
 
         {/* Return since first appearance */}
@@ -179,7 +176,7 @@ function RankRow({ item, onClick }) {
                 <div className={`${cls} font-semibold tabular-nums`}>
                   {formatReturnPctDisplay(item.return_pct)}
                 </div>
-                <div className="text-[10px] text-white/30">涨幅</div>
+                <div className="text-[10px] text-white/30">上榜以来</div>
               </>
             )
           })()}
@@ -252,11 +249,11 @@ function RankCard({ item, onClick }) {
         const hasPct = hasReturnPct(item.return_pct)
         if (!days && !hasPct) return null
         return (
-          <div className="mt-1 text-[10px] text-white/30">
-            {days > 0 ? <span>{`🔥连续${days}日`}</span> : null}
+          <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-1 text-[10px] text-white/30">
+            {days > 0 ? <span>{`🔥已连续上榜 ${days} 日`}</span> : null}
             {hasPct ? (
-              <span className={`${days > 0 ? 'ml-1' : ''} ${item.return_pct >= 0 ? 'text-red-400/70' : 'text-green-400/70'}`}>
-                {`${days > 0 ? '· ' : ''}涨幅${formatReturnPctDisplay(item.return_pct)}`}
+              <span className={item.return_pct >= 0 ? 'text-red-400/70' : 'text-green-400/70'}>
+                {`上榜以来 ${formatReturnPctDisplay(item.return_pct)}`}
               </span>
             ) : null}
           </div>
@@ -294,6 +291,24 @@ function formatAmount(val) {
   if (!val || val <= 0) return '--'
   if (val >= 10000) return `${(val / 10000).toFixed(1)}亿`
   return `${val.toFixed(0)}万`
+}
+
+function formatMetaDateTime(value) {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function buildRankingMetaSummary(meta) {
+  const parts = ['精选股票来自机会区']
+  if (meta?.computed_at) {
+    parts.push(`数据日期：${formatMetaDateTime(meta.computed_at)}`)
+  }
+  if (meta?.returned_count != null) {
+    parts.push(`当前展示 TOP${meta.returned_count} 只`)
+  }
+  return parts.join(' · ')
 }
 
 function hasReturnPct(value) {

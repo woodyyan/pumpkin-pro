@@ -904,6 +904,30 @@ func TestSnapshot_ClosePriceOnDate(t *testing.T) {
 	}
 }
 
+func TestSnapshot_GetLatestAvailableClosePrice(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	for _, snap := range []RankingSnapshot{
+		{Code: "601318", Name: "中国平安", Exchange: "SSE", Rank: 1, Opportunity: 90, Risk: 20, ClosePrice: 10, SnapshotDate: "2026-04-16", CreatedAt: time.Now().UTC()},
+		{Code: "601318", Name: "中国平安", Exchange: "SSE", Rank: 1, Opportunity: 90, Risk: 20, ClosePrice: 0, SnapshotDate: "2026-04-18", CreatedAt: time.Now().UTC()},
+		{Code: "601318", Name: "中国平安", Exchange: "SSE", Rank: 1, Opportunity: 90, Risk: 20, ClosePrice: 11, SnapshotDate: "2026-04-17", CreatedAt: time.Now().UTC()},
+	} {
+		if err := repo.UpsertSnapshot(ctx, snap); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	price, dateStr, err := repo.GetLatestAvailableClosePrice(ctx, "601318", []string{"SSE"})
+	if err != nil {
+		t.Fatalf("GetLatestAvailableClosePrice failed: %v", err)
+	}
+	if dateStr != "2026-04-17" || price != 11 {
+		t.Fatalf("latest available = (%s, %.2f), want (2026-04-17, 11.00)", dateStr, price)
+	}
+}
+
 func TestSaveRankingSnapshotsBestEffort_UsesResolverAndShanghaiDate(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
@@ -969,6 +993,41 @@ func TestGetRanking_ReturnPct_ComputedWhenPricesAvailable(t *testing.T) {
 	}
 	if resp.Items[0].ReturnPct == nil {
 		t.Fatal("expected non-nil return_pct")
+	}
+	if *resp.Items[0].ReturnPct != 10 {
+		t.Fatalf("return_pct = %.2f; want 10.00", *resp.Items[0].ReturnPct)
+	}
+}
+
+func TestGetRanking_ReturnPct_UsesLatestPricedSnapshotFallback(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	record := makeRankingRecord("600519", "SSE", 95, 20)
+	record.ComputedAt = time.Date(2026, 4, 17, 18, 46, 37, 0, time.UTC) // 上海时间 2026-04-18
+	seedOpportunityRecords(t, repo, []QuadrantScoreRecord{record})
+
+	for _, snap := range []RankingSnapshot{
+		{Code: "600519", Name: "贵州茅台", Exchange: "SSE", Rank: 1, Opportunity: 95, Risk: 20, ClosePrice: 10, SnapshotDate: "2026-04-16", CreatedAt: time.Now().UTC()},
+		{Code: "600519", Name: "贵州茅台", Exchange: "SSE", Rank: 1, Opportunity: 95, Risk: 20, ClosePrice: 11, SnapshotDate: "2026-04-17", CreatedAt: time.Now().UTC()},
+		{Code: "600519", Name: "贵州茅台", Exchange: "SSE", Rank: 1, Opportunity: 95, Risk: 20, ClosePrice: 0, SnapshotDate: "2026-04-18", CreatedAt: time.Now().UTC()},
+	} {
+		if err := repo.UpsertSnapshot(ctx, snap); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking failed: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(resp.Items))
+	}
+	if resp.Items[0].ReturnPct == nil {
+		t.Fatal("expected non-nil return_pct when latest priced snapshot exists")
 	}
 	if *resp.Items[0].ReturnPct != 10 {
 		t.Fatalf("return_pct = %.2f; want 10.00", *resp.Items[0].ReturnPct)

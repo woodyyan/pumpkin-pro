@@ -384,3 +384,23 @@ func (r *Repository) GetClosePriceOnDate(ctx context.Context, code string, dateS
 	}
 	return snap.ClosePrice, nil
 }
+
+// GetLatestAvailableClosePrice returns the most recent positive close_price for a stock.
+// Used as the "current price" when the latest ranking date itself has no valid close price yet.
+func (r *Repository) GetLatestAvailableClosePrice(ctx context.Context, code string, exchanges []string) (float64, string, error) {
+	var snap RankingSnapshot
+	query := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
+		Select("snapshot_date", "close_price").
+		Where("code = ? AND close_price > ?", code, 0).
+		Order("snapshot_date DESC")
+	if len(exchanges) > 0 {
+		query = query.Where("exchange IN ?", exchanges)
+	}
+	if err := query.First(&snap).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, "", nil
+		}
+		return 0, "", err
+	}
+	return snap.ClosePrice, snap.SnapshotDate, nil
+}

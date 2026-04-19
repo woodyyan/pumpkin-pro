@@ -1416,7 +1416,7 @@ func (a *appServer) handleAnalysisHistorySubroutes(w http.ResponseWriter, r *htt
 			writeError(w, http.StatusInternalServerError, "查询分析历史失败")
 			return
 		}
-		performanceByID := a.buildAnalysisHistoryPerformanceMap(r.Context(), symbol, records)
+		performanceByID, qualityByID := a.buildAnalysisHistoryMetrics(r.Context(), symbol, records)
 
 		// 如果有 id 参数 → 返回单条详情（含完整 analysis）
 		id := strings.TrimSpace(r.URL.Query().Get("id"))
@@ -1436,6 +1436,7 @@ func (a *appServer) handleAnalysisHistorySubroutes(w http.ResponseWriter, r *htt
 				return
 			}
 			detail.SignalPerformance = performanceByID[rec.ID]
+			detail.QualityValidation = qualityByID[rec.ID]
 			writeLiveJSON(w, http.StatusOK, detail)
 			return
 		}
@@ -1448,6 +1449,7 @@ func (a *appServer) handleAnalysisHistorySubroutes(w http.ResponseWriter, r *htt
 		for i, rec := range records {
 			item := rec.ToListItem()
 			item.SignalPerformance = performanceByID[rec.ID]
+			item.QualityValidation = qualityByID[rec.ID].SummaryOnly()
 			items[i] = item
 		}
 		writeLiveJSON(w, http.StatusOK, map[string]any{"items": items})
@@ -1468,51 +1470,54 @@ func (a *appServer) handleAnalysisHistorySubroutes(w http.ResponseWriter, r *htt
 	}
 }
 
-func (a *appServer) buildAnalysisHistoryPerformanceMap(ctx context.Context, symbol string, records []analysis_history.AnalysisHistoryRecord) map[string]*analysis_history.HistorySignalPerformance {
+func (a *appServer) buildAnalysisHistoryMetrics(ctx context.Context, symbol string, records []analysis_history.AnalysisHistoryRecord) (map[string]*analysis_history.HistorySignalPerformance, map[string]*analysis_history.HistoryQualityValidation) {
 	if len(records) == 0 {
-		return map[string]*analysis_history.HistorySignalPerformance{}
+		return map[string]*analysis_history.HistorySignalPerformance{}, map[string]*analysis_history.HistoryQualityValidation{}
 	}
-	resolved := resolveAnalysisHistoryPrices(ctx, a.liveService, symbol, records)
-	return analysis_history.BuildSignalPerformances(records, resolved)
+	bars := loadAnalysisHistoryDailyBars(ctx, a.liveService, symbol, records)
+	resolved := resolveAnalysisHistoryPricesFromBars(records, bars)
+	performance := analysis_history.BuildSignalPerformances(records, resolved)
+	quality := analysis_history.BuildQualityValidations(records, resolved, bars)
+	return performance, quality
 }
 
-func resolveAnalysisHistoryPrices(ctx context.Context, liveService *live.Service, symbol string, records []analysis_history.AnalysisHistoryRecord) map[string]analysis_history.ResolvedPrice {
-	prices := make(map[string]analysis_history.ResolvedPrice, len(records))
-	if len(records) == 0 {
-		return prices
+func loadAnalysisHistoryDailyBars(ctx context.Context, liveService *live.Service, symbol string, records []analysis_history.AnalysisHistoryRecord) []live.DailyBar {
+	if len(records) == 0 || liveService == nil {
+		return nil
 	}
+	lookbackDays := analysisHistoryLookbackDays(records, 20)
+	bars, err := liveService.GetDailyBars(ctx, symbol, lookbackDays)
+	if err != nil {
+		return nil
+	}
+	return bars
+}
 
-	needEstimate := false
+func analysisHistoryLookbackDays(records []analysis_history.AnalysisHistoryRecord, bufferDays int) int {
+	lookbackDays := 60
+	if bufferDays < 0 {
+		bufferDays = 0
+	}
 	earliestAt := time.Time{}
 	for _, record := range records {
-		if record.AnalysisPrice > 0 {
-			prices[record.ID] = analysis_history.ResolvedPrice{Price: record.AnalysisPrice, Basis: analysis_history.PriceBasisAnalysis}
-			continue
-		}
-		needEstimate = true
 		if earliestAt.IsZero() || record.CreatedAt.Before(earliestAt) {
 			earliestAt = record.CreatedAt
 		}
 	}
-	if !needEstimate || liveService == nil {
-		return prices
-	}
-
-	lookbackDays := 60
 	if !earliestAt.IsZero() {
-		days := int(time.Since(earliestAt).Hours()/24) + 10
+		days := int(time.Since(earliestAt).Hours()/24) + bufferDays
 		if days > lookbackDays {
 			lookbackDays = days
 		}
 	}
+	return lookbackDays
+}
 
-	bars, err := liveService.GetDailyBars(ctx, symbol, lookbackDays)
-	if err != nil || len(bars) == 0 {
-		return prices
-	}
-
+func resolveAnalysisHistoryPricesFromBars(records []analysis_history.AnalysisHistoryRecord, bars []live.DailyBar) map[string]analysis_history.ResolvedPrice {
+	prices := make(map[string]analysis_history.ResolvedPrice, len(records))
 	for _, record := range records {
-		if _, ok := prices[record.ID]; ok {
+		if record.AnalysisPrice > 0 {
+			prices[record.ID] = analysis_history.ResolvedPrice{Price: record.AnalysisPrice, Basis: analysis_history.PriceBasisAnalysis}
 			continue
 		}
 		price, ok := estimateAnalysisPriceFromDailyBars(record.CreatedAt, bars)

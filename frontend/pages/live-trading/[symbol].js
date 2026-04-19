@@ -1748,6 +1748,72 @@ function formatSignalPerformanceBasis(perf) {
   return '实时价 + 收盘价估算'
 }
 
+function hasQualityValidationReturn(validation) {
+  return typeof validation?.primary_return_pct === 'number' && Number.isFinite(validation.primary_return_pct)
+}
+
+function buildQualityValidationHeadline(validation) {
+  if (!validation) return ''
+  const days = Math.max(1, validation.primary_window_days || 5)
+  const availableDays = Math.max(0, validation.available_days || 0)
+  if (validation.summary_status === 'pending') {
+    return `${days}日验证中（${Math.min(availableDays, days)}/${days}）`
+  }
+  if (hasQualityValidationReturn(validation)) {
+    return `${days}日验证：${formatSignalPerformancePct(validation.primary_return_pct)}`
+  }
+  return `${days}日验证`
+}
+
+function buildQualityValidationStatusLabel(validation) {
+  return validation?.summary_label || ''
+}
+
+function getQualityValidationReturnClass(validation) {
+  if (!hasQualityValidationReturn(validation)) return 'text-white/55'
+  return getSignalPerformanceReturnClass(validation.primary_return_pct)
+}
+
+function getQualityValidationStatusClass(validation) {
+  switch (validation?.summary_status) {
+    case 'hit':
+      return 'text-sky-200 bg-sky-500/10 border-sky-400/25'
+    case 'miss':
+      return 'text-rose-200 bg-rose-500/10 border-rose-400/25'
+    case 'pending':
+      return 'text-amber-200 bg-amber-500/10 border-amber-400/25'
+    default:
+      return 'text-white/55 bg-white/[0.05] border-white/10'
+  }
+}
+
+function isQualityValidationEstimated(validation) {
+  return validation?.price_basis === 'estimated_close' || validation?.price_basis === 'mixed'
+}
+
+function buildQualityWindowStatusLabel(window) {
+  if (!window?.ready) return '验证中'
+  if (window.direction_status === 'hit') return '命中'
+  if (window.direction_status === 'miss') return '失准'
+  return '区间变动'
+}
+
+function getQualityWindowStatusClass(window) {
+  if (!window?.ready) return 'text-amber-200 bg-amber-500/10 border-amber-400/25'
+  if (window.direction_status === 'hit') return 'text-sky-200 bg-sky-500/10 border-sky-400/25'
+  if (window.direction_status === 'miss') return 'text-rose-200 bg-rose-500/10 border-rose-400/25'
+  return 'text-white/55 bg-white/[0.05] border-white/10'
+}
+
+function buildQualityWindowValue(window, validation) {
+  if (window?.ready && typeof window?.return_pct === 'number' && Number.isFinite(window.return_pct)) {
+    return formatSignalPerformancePct(window.return_pct)
+  }
+  const horizon = Math.max(1, window?.horizon_days || 0)
+  const available = Math.max(0, validation?.available_days || 0)
+  return `已完成 ${Math.min(available, horizon)}/${horizon}`
+}
+
 function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, onDelete }) {
   const [expandedId, setExpandedId] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -1823,6 +1889,11 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
             const analysis = detailData?.analysis || {}
             const meta = detailData?.meta || {}
             const signalPerformance = (isExpanded ? detailData?.signal_performance : null) || item.signal_performance || null
+            const qualityValidation = (isExpanded ? detailData?.quality_validation : null) || item.quality_validation || null
+            const qualityHeadline = buildQualityValidationHeadline(qualityValidation)
+            const qualityStatusLabel = buildQualityValidationStatusLabel(qualityValidation)
+            const qualityReturnClass = getQualityValidationReturnClass(qualityValidation)
+            const qualityEstimated = isQualityValidationEstimated(qualityValidation)
             const performanceSummary = buildSignalPerformanceSummary(item.signal, signalPerformance)
             const performanceStatus = buildSignalPerformanceStatus(item.signal, signalPerformance)
             const performanceReturnClass = getSignalPerformanceReturnClass(signalPerformance?.return_pct)
@@ -1853,9 +1924,25 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                       </div>
                     </div>
 
-                    {performanceSummary ? (
+                    {qualityHeadline ? (
                       <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 pl-6">
-                        <span className={`rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[10px] font-medium ${performanceReturnClass}`}>
+                        <span className={`rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[10px] font-semibold ${qualityReturnClass}`}>
+                          {qualityHeadline}
+                        </span>
+                        {qualityStatusLabel ? (
+                          <span className={`rounded-full border px-2 py-0.5 text-[9px] ${getQualityValidationStatusClass(qualityValidation)}`}>
+                            {qualityStatusLabel}
+                          </span>
+                        ) : null}
+                        {qualityEstimated ? (
+                          <span className="text-[9px] text-white/28">按收盘价估算</span>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {performanceSummary ? (
+                      <div className="mt-1 hidden flex-wrap items-center gap-x-1.5 gap-y-1 pl-6 md:flex">
+                        <span className={`rounded-full border border-white/10 bg-black/15 px-2 py-0.5 text-[9px] font-medium ${performanceReturnClass}`}>
                           {performanceSummary}
                         </span>
                         {performanceStatus ? (
@@ -1863,7 +1950,7 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                             {performanceStatus}
                           </span>
                         ) : null}
-                        {performanceEstimated ? (
+                        {!qualityEstimated && performanceEstimated ? (
                           <span className="text-[9px] text-white/28">按收盘价估算</span>
                         ) : null}
                       </div>
@@ -1904,6 +1991,83 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                               <span>行情 {dc.market === 'complete' ? '实时' : '缺失'}</span>
                               <span>· 技术 {dc.technical === 'complete' ? '可用' : '部分缺失'}</span>
                               <span>· 基础面 {dc.fundamentals === 'complete' ? '昨日收盘' : '不可用'}</span>
+                            </div>
+                          )
+                        })()}
+
+                        {/* 质量验证 */}
+                        {(() => {
+                          const validation = qualityValidation
+                          const perf = signalPerformance
+                          if (!validation) return null
+                          const estimatedText = validation?.price_basis === 'analysis'
+                            ? '分析时实时报价'
+                            : validation?.price_basis === 'estimated_close'
+                              ? '按收盘价估算'
+                              : validation?.price_basis === 'mixed'
+                                ? '实时价 + 收盘价估算'
+                                : '--'
+                          return (
+                            <div className="rounded-lg border border-white/8 bg-black/20 px-3.5 py-3">
+                              <div className="flex flex-wrap items-start justify-between gap-2">
+                                <div>
+                                  <div className="text-[11px] font-semibold text-white/70">🎯 质量验证</div>
+                                  <p className={`mt-1 text-[12px] font-semibold ${getQualityValidationReturnClass(validation)}`}>
+                                    {buildQualityValidationHeadline(validation)}
+                                  </p>
+                                </div>
+                                {qualityStatusLabel ? (
+                                  <span className={`rounded-full border px-2 py-0.5 text-[10px] ${getQualityValidationStatusClass(validation)}`}>
+                                    {qualityStatusLabel}
+                                  </span>
+                                ) : null}
+                              </div>
+
+                              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 md:grid-cols-4">
+                                <div>
+                                  <div className="text-[9px] text-white/30">本次分析价</div>
+                                  <div className="text-[11px] font-medium text-white/75">{formatAnalysisHistoryPrice(perf?.analysis_price, item.symbol)}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[9px] text-white/30">验证周期</div>
+                                  <div className="text-[11px] font-medium text-white/75">{`${validation.primary_window_days || 5} 个交易日`}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[9px] text-white/30">已完成交易日</div>
+                                  <div className="text-[11px] font-medium text-white/75">{validation.available_days ?? 0}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[9px] text-white/30">价格口径</div>
+                                  <div className="text-[11px] font-medium text-white/60">{estimatedText}</div>
+                                </div>
+                              </div>
+
+                              {Array.isArray(validation.windows) && validation.windows.length > 0 ? (
+                                <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+                                  {validation.windows.map((window) => (
+                                    <div key={window.horizon_days} className="rounded-lg border border-white/8 bg-white/[0.03] px-2.5 py-2">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="text-[10px] text-white/45">{`${window.horizon_days}日验证`}</span>
+                                        <span className={`rounded-full border px-1.5 py-0.5 text-[8px] ${getQualityWindowStatusClass(window)}`}>
+                                          {buildQualityWindowStatusLabel(window)}
+                                        </span>
+                                      </div>
+                                      <div className={`mt-1 text-[12px] font-semibold ${window.ready ? getSignalPerformanceReturnClass(window.return_pct) : 'text-white/55'}`}>
+                                        {buildQualityWindowValue(window, validation)}
+                                      </div>
+                                      <div className="mt-1 text-[9px] text-white/30">
+                                        {window.ready
+                                          ? `收盘价 ${formatAnalysisHistoryPrice(window.close_price, item.symbol)}`
+                                          : `截至 ${validation.available_days ?? 0} 个交易日`}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+
+                              {qualityEstimated ? (
+                                <div className="mt-2 text-[10px] text-white/28">说明：历史记录缺少分析时价格时，系统会回退到对应交易日最近收盘价做估算。</div>
+                              ) : null}
                             </div>
                           )
                         })()}

@@ -30,6 +30,36 @@ type HistorySignalPerformance struct {
 	PriceBasis            string   `json:"price_basis,omitempty"`
 }
 
+type HistoryQualityWindow struct {
+	HorizonDays     int      `json:"horizon_days"`
+	Ready           bool     `json:"ready"`
+	EndDate         string   `json:"end_date,omitempty"`
+	ClosePrice      *float64 `json:"close_price,omitempty"`
+	ReturnPct       *float64 `json:"return_pct,omitempty"`
+	MaxUpPct        *float64 `json:"max_up_pct,omitempty"`
+	MaxDownPct      *float64 `json:"max_down_pct,omitempty"`
+	DirectionStatus string   `json:"direction_status,omitempty"`
+}
+
+type HistoryQualityValidation struct {
+	PrimaryWindowDays int                    `json:"primary_window_days"`
+	AvailableDays     int                    `json:"available_days"`
+	SummaryStatus     string                 `json:"summary_status,omitempty"`
+	SummaryLabel      string                 `json:"summary_label,omitempty"`
+	PrimaryReturnPct  *float64               `json:"primary_return_pct,omitempty"`
+	PriceBasis        string                 `json:"price_basis,omitempty"`
+	Windows           []HistoryQualityWindow `json:"windows,omitempty"`
+}
+
+func (v *HistoryQualityValidation) SummaryOnly() *HistoryQualityValidation {
+	if v == nil {
+		return nil
+	}
+	clone := *v
+	clone.Windows = nil
+	return &clone
+}
+
 // API 输出：列表轻量项
 type HistoryListItem struct {
 	ID                string                    `json:"id"`
@@ -38,6 +68,7 @@ type HistoryListItem struct {
 	Signal            string                    `json:"signal"`
 	ConfidenceScore   int                       `json:"confidence_score"`
 	SignalPerformance *HistorySignalPerformance `json:"signal_performance,omitempty"`
+	QualityValidation *HistoryQualityValidation `json:"quality_validation,omitempty"`
 	CreatedAt         string                    `json:"created_at"`
 }
 
@@ -49,6 +80,7 @@ type HistoryDetail struct {
 	Signal            string                    `json:"signal"`
 	ConfidenceScore   int                       `json:"confidence_score"`
 	SignalPerformance *HistorySignalPerformance `json:"signal_performance,omitempty"`
+	QualityValidation *HistoryQualityValidation `json:"quality_validation,omitempty"`
 	Result            map[string]any            `json:"analysis"`
 	Meta              map[string]any            `json:"meta"`
 	CreatedAt         string                    `json:"created_at"`

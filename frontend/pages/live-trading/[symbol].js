@@ -1692,6 +1692,62 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
 
 // ── AI 分析历史面板（可折叠，默认收起）──
 
+function hasSignalPerformanceReturn(perf) {
+  return typeof perf?.return_pct === 'number' && Number.isFinite(perf.return_pct)
+}
+
+function formatSignalPerformancePct(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '--'
+  const prefix = value > 0 ? '+' : ''
+  return `${prefix}${value.toFixed(1)}%`
+}
+
+function getSignalPerformanceReturnClass(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'text-white/40'
+  return value >= 0 ? 'text-red-300' : 'text-emerald-300'
+}
+
+function getSignalLabel(signal) {
+  return signal === 'buy' ? '看多' : signal === 'sell' ? '看空' : '观望'
+}
+
+function buildSignalPerformanceSummary(signal, perf) {
+  if (!hasSignalPerformanceReturn(perf)) return ''
+  const pct = formatSignalPerformancePct(perf.return_pct)
+  if (signal === 'buy') return `自上次看多以来，涨幅 ${pct}`
+  if (signal === 'sell') return `自上次看空以来，区间表现 ${pct}`
+  return `自上次观望以来，区间变动 ${pct}`
+}
+
+function buildSignalPerformanceStatus(signal, perf) {
+  if (!perf?.direction_status || signal === 'hold') return ''
+  return perf.direction_status === 'aligned' ? '与观点一致' : '与观点相反'
+}
+
+function getSignalPerformanceStatusClass(signal, perf) {
+  if (!perf?.direction_status || signal === 'hold') return 'text-white/35 bg-white/[0.05] border-white/10'
+  return perf.direction_status === 'aligned'
+    ? 'text-sky-200 bg-sky-500/10 border-sky-400/25'
+    : 'text-rose-200 bg-rose-500/10 border-rose-400/25'
+}
+
+function isSignalPerformanceEstimated(perf) {
+  return perf?.price_basis === 'estimated_close' || perf?.price_basis === 'mixed'
+}
+
+function formatAnalysisHistoryPrice(value, symbol) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '--'
+  const prefix = String(symbol || '').endsWith('.HK') ? 'HK$' : '¥'
+  return `${prefix}${value.toFixed(2)}`
+}
+
+function formatSignalPerformanceBasis(perf) {
+  if (!perf?.price_basis) return '--'
+  if (perf.price_basis === 'analysis') return '分析时实时报价'
+  if (perf.price_basis === 'estimated_close') return '按收盘价估算'
+  return '实时价 + 收盘价估算'
+}
+
 function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, onDelete }) {
   const [expandedId, setExpandedId] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -1766,6 +1822,11 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
             const isExpanded = expandedId === item.id
             const analysis = detailData?.analysis || {}
             const meta = detailData?.meta || {}
+            const signalPerformance = (isExpanded ? detailData?.signal_performance : null) || item.signal_performance || null
+            const performanceSummary = buildSignalPerformanceSummary(item.signal, signalPerformance)
+            const performanceStatus = buildSignalPerformanceStatus(item.signal, signalPerformance)
+            const performanceReturnClass = getSignalPerformanceReturnClass(signalPerformance?.return_pct)
+            const performanceEstimated = isSignalPerformanceEstimated(signalPerformance)
 
             return (
               <div key={item.id}>
@@ -1775,22 +1836,40 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                   } ${isExpanded ? `${sig.border} ${sig.bg} ring-1 ring-inset ring-white/8` : ''}`}
                   onClick={() => handleToggleDetail(item.id)}
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="shrink-0 text-sm">{sig.dot}</span>
-                    <div className="min-w-0">
-                      <div className={`text-xs font-medium ${sig.color}`}>
-                        {sig.label} {sig.arrow}
-                        <span className={`ml-1.5 text-[10px] ${stale ? 'text-white/25' : 'text-white/45'}`}>
-                          置信度 {item.confidence_score ?? '--'}%
-                        </span>
-                      </div>
-                      <div className={`mt-0.5 text-[11px] truncate ${stale ? 'text-white/20' : 'text-white/35'}`}>
-                        {formatTimeAgo(item.created_at)}
-                        {stale && <span className="ml-1.5 text-amber-400/50">⚠️ 可能已过时</span>}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="shrink-0 text-sm">{sig.dot}</span>
+                      <div className="min-w-0">
+                        <div className={`text-xs font-medium ${sig.color}`}>
+                          {sig.label} {sig.arrow}
+                          <span className={`ml-1.5 text-[10px] ${stale ? 'text-white/25' : 'text-white/45'}`}>
+                            置信度 {item.confidence_score ?? '--'}%
+                          </span>
+                        </div>
+                        <div className={`mt-0.5 text-[11px] truncate ${stale ? 'text-white/20' : 'text-white/35'}`}>
+                          {formatTimeAgo(item.created_at)}
+                          {stale && <span className="ml-1.5 text-amber-400/50">⚠️ 可能已过时</span>}
+                        </div>
                       </div>
                     </div>
+
+                    {performanceSummary ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 pl-6">
+                        <span className={`rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[10px] font-medium ${performanceReturnClass}`}>
+                          {performanceSummary}
+                        </span>
+                        {performanceStatus ? (
+                          <span className={`rounded-full border px-2 py-0.5 text-[9px] ${getSignalPerformanceStatusClass(item.signal, signalPerformance)}`}>
+                            {performanceStatus}
+                          </span>
+                        ) : null}
+                        {performanceEstimated ? (
+                          <span className="text-[9px] text-white/28">按收盘价估算</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex items-center gap-1 shrink-0 self-start">
                     {/* 展开/收起箭头 */}
                     <span className={`text-[10px] text-white/25 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
                     {/* 删除按钮 */}
@@ -1825,6 +1904,60 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                               <span>行情 {dc.market === 'complete' ? '实时' : '缺失'}</span>
                               <span>· 技术 {dc.technical === 'complete' ? '可用' : '部分缺失'}</span>
                               <span>· 基础面 {dc.fundamentals === 'complete' ? '昨日收盘' : '不可用'}</span>
+                            </div>
+                          )
+                        })()}
+
+                        {/* 同观点表现 */}
+                        {(() => {
+                          const perf = signalPerformance
+                          if (!perf?.analysis_price) return null
+                          const detailSummary = buildSignalPerformanceSummary(item.signal, perf)
+                          const detailStatus = buildSignalPerformanceStatus(item.signal, perf)
+                          const detailReturnClass = getSignalPerformanceReturnClass(perf.return_pct)
+                          const estimatedText = formatSignalPerformanceBasis(perf)
+                          return (
+                            <div className="rounded-lg border border-white/8 bg-black/20 px-3.5 py-3">
+                              <div className="flex flex-wrap items-start justify-between gap-2">
+                                <div>
+                                  <div className="text-[11px] font-semibold text-white/70">📏 同观点表现</div>
+                                  {detailSummary ? (
+                                    <p className={`mt-1 text-[12px] font-medium ${detailReturnClass}`}>{detailSummary}</p>
+                                  ) : (
+                                    <p className="mt-1 text-[11px] text-white/45">首次出现该观点，暂时还没有上一条同观点可对比。</p>
+                                  )}
+                                </div>
+                                {detailStatus ? (
+                                  <span className={`rounded-full border px-2 py-0.5 text-[10px] ${getSignalPerformanceStatusClass(item.signal, perf)}`}>
+                                    {detailStatus}
+                                  </span>
+                                ) : null}
+                              </div>
+
+                              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 md:grid-cols-4">
+                                <div>
+                                  <div className="text-[9px] text-white/30">本次分析价</div>
+                                  <div className="text-[11px] font-medium text-white/75">{formatAnalysisHistoryPrice(perf.analysis_price, item.symbol)}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[9px] text-white/30">上次同观点时间</div>
+                                  <div className="text-[11px] font-medium text-white/75">
+                                    {perf.previous_analysis_at ? new Date(perf.previous_analysis_at).toLocaleString('zh-CN', { hour12: false }) : '--'}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[9px] text-white/30">上次分析价</div>
+                                  <div className="text-[11px] font-medium text-white/75">{formatAnalysisHistoryPrice(perf.previous_analysis_price, item.symbol)}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[9px] text-white/30">价格口径</div>
+                                  <div className="text-[11px] font-medium text-white/60">{estimatedText}</div>
+                                </div>
+                              </div>
+
+                              {performanceEstimated ? (
+                                <div className="mt-2 text-[10px] text-white/28">说明：历史记录缺少分析时价格时，系统会回退到对应交易日最近收盘价做估算。</div>
+                              ) : null}
                             </div>
                           )
                         })()}

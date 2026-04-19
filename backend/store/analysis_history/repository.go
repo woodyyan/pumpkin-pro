@@ -124,8 +124,8 @@ func (r AnalysisHistoryRecord) ToDetail() (HistoryDetail, error) {
 }
 
 // SaveFromAPIResponse 从 AI 分析 API 响应中构造并保存记录。
-// symbol / symbolName 由调用方显式传入，不依赖响应体中的 symbol_meta。
-func (r *Repository) SaveFromAPIResponse(ctx context.Context, userID, symbol, symbolName string, respBytes []byte) error {
+// symbol / symbolName / analysisPrice 由调用方显式传入，不依赖响应体中的 symbol_meta。
+func (r *Repository) SaveFromAPIResponse(ctx context.Context, userID, symbol, symbolName string, analysisPrice float64, respBytes []byte) error {
 	// 解析完整响应
 	var apiResp struct {
 		Analysis *json.RawMessage `json:"analysis"`
@@ -154,6 +154,7 @@ func (r *Repository) SaveFromAPIResponse(ctx context.Context, userID, symbol, sy
 		SymbolName:      symbolName,
 		Signal:          analysis.Signal,
 		ConfidenceScore: analysis.ConfidenceScore,
+		AnalysisPrice:   normalizeAnalysisPrice(analysisPrice),
 		ResultJSON:      string(*apiResp.Analysis),
 		MetaJSON:        mustMarshal(apiResp.Meta),
 		CreatedAt:       time.Now().UTC(),
@@ -166,7 +167,7 @@ func (r *Repository) SaveFromAPIResponse(ctx context.Context, userID, symbol, sy
 func generateUUID() string {
 	b := make([]byte, 16)
 	for i := range b {
-		b[i] = byte(time.Now().UnixNano()>>uint(i*7) & 0xff)
+		b[i] = byte(time.Now().UnixNano() >> uint(i*7) & 0xff)
 	}
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
@@ -177,4 +178,11 @@ func generateUUID() string {
 func mustMarshal(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+func normalizeAnalysisPrice(value float64) float64 {
+	if value > 0 {
+		return value
+	}
+	return 0
 }

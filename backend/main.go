@@ -1410,6 +1410,14 @@ func (a *appServer) handleAnalysisHistorySubroutes(w http.ResponseWriter, r *htt
 
 	switch r.Method {
 	case http.MethodGet:
+		limit := parseLimit(r.URL.Query().Get("limit"), 20)
+		records, err := a.analysisHistoryRepo.ListBySymbol(r.Context(), userID, symbol, analysis_history.MaxRecordsPerUser)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "查询分析历史失败")
+			return
+		}
+		performanceByID := a.buildAnalysisHistoryPerformanceMap(r.Context(), symbol, records)
+
 		// 如果有 id 参数 → 返回单条详情（含完整 analysis）
 		id := strings.TrimSpace(r.URL.Query().Get("id"))
 		if id != "" {
@@ -1427,20 +1435,20 @@ func (a *appServer) handleAnalysisHistorySubroutes(w http.ResponseWriter, r *htt
 				writeError(w, http.StatusInternalServerError, "解析数据失败")
 				return
 			}
+			detail.SignalPerformance = performanceByID[rec.ID]
 			writeLiveJSON(w, http.StatusOK, detail)
 			return
 		}
 
 		// 无 id → 返回列表
-		limit := parseLimit(r.URL.Query().Get("limit"), 20)
-		records, err := a.analysisHistoryRepo.ListBySymbol(r.Context(), userID, symbol, limit)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "查询分析历史失败")
-			return
+		if len(records) > limit {
+			records = records[:limit]
 		}
 		items := make([]analysis_history.HistoryListItem, len(records))
 		for i, rec := range records {
-			items[i] = rec.ToListItem()
+			item := rec.ToListItem()
+			item.SignalPerformance = performanceByID[rec.ID]
+			items[i] = item
 		}
 		writeLiveJSON(w, http.StatusOK, map[string]any{"items": items})
 	case http.MethodDelete:
@@ -1458,6 +1466,88 @@ func (a *appServer) handleAnalysisHistorySubroutes(w http.ResponseWriter, r *htt
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "Only GET and DELETE methods are allowed")
 	}
+}
+
+func (a *appServer) buildAnalysisHistoryPerformanceMap(ctx context.Context, symbol string, records []analysis_history.AnalysisHistoryRecord) map[string]*analysis_history.HistorySignalPerformance {
+	if len(records) == 0 {
+		return map[string]*analysis_history.HistorySignalPerformance{}
+	}
+	resolved := resolveAnalysisHistoryPrices(ctx, a.liveService, symbol, records)
+	return analysis_history.BuildSignalPerformances(records, resolved)
+}
+
+func resolveAnalysisHistoryPrices(ctx context.Context, liveService *live.Service, symbol string, records []analysis_history.AnalysisHistoryRecord) map[string]analysis_history.ResolvedPrice {
+	prices := make(map[string]analysis_history.ResolvedPrice, len(records))
+	if len(records) == 0 {
+		return prices
+	}
+
+	needEstimate := false
+	earliestAt := time.Time{}
+	for _, record := range records {
+		if record.AnalysisPrice > 0 {
+			prices[record.ID] = analysis_history.ResolvedPrice{Price: record.AnalysisPrice, Basis: analysis_history.PriceBasisAnalysis}
+			continue
+		}
+		needEstimate = true
+		if earliestAt.IsZero() || record.CreatedAt.Before(earliestAt) {
+			earliestAt = record.CreatedAt
+		}
+	}
+	if !needEstimate || liveService == nil {
+		return prices
+	}
+
+	lookbackDays := 60
+	if !earliestAt.IsZero() {
+		days := int(time.Since(earliestAt).Hours()/24) + 10
+		if days > lookbackDays {
+			lookbackDays = days
+		}
+	}
+
+	bars, err := liveService.GetDailyBars(ctx, symbol, lookbackDays)
+	if err != nil || len(bars) == 0 {
+		return prices
+	}
+
+	for _, record := range records {
+		if _, ok := prices[record.ID]; ok {
+			continue
+		}
+		price, ok := estimateAnalysisPriceFromDailyBars(record.CreatedAt, bars)
+		if !ok {
+			continue
+		}
+		prices[record.ID] = analysis_history.ResolvedPrice{Price: price, Basis: analysis_history.PriceBasisEstimatedClose}
+	}
+	return prices
+}
+
+func estimateAnalysisPriceFromDailyBars(createdAt time.Time, bars []live.DailyBar) (float64, bool) {
+	if createdAt.IsZero() || len(bars) == 0 {
+		return 0, false
+	}
+	loc := chinaMarketLocation()
+	targetDate := createdAt.In(loc).Format("2006-01-02")
+	for i := len(bars) - 1; i >= 0; i-- {
+		bar := bars[i]
+		if bar.Close <= 0 || strings.TrimSpace(bar.Date) == "" {
+			continue
+		}
+		if bar.Date <= targetDate {
+			return bar.Close, true
+		}
+	}
+	return 0, false
+}
+
+func chinaMarketLocation() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*3600)
+	}
+	return loc
 }
 
 // handleStockAIAnalysis 处理 AI 个股诊断请求
@@ -1507,15 +1597,18 @@ func (a *appServer) handleStockAIAnalysis(w http.ResponseWriter, r *http.Request
 	respBytes, _ := json.Marshal(result)
 	writeLiveJSON(w, http.StatusOK, result)
 
+	symbolName := asString(input.SymbolMeta["name"])
+	analysisPrice := asPositiveFloat(input.Market["price"])
+
 	// 异步保存分析历史（不阻塞响应）
 	if userID != "" && len(respBytes) > 0 {
-		go func(body []byte, sym string) {
+		go func(body []byte, sym, name string, price float64) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if saveErr := a.analysisHistoryRepo.SaveFromAPIResponse(ctx, userID, sym, "", body); saveErr != nil {
+			if saveErr := a.analysisHistoryRepo.SaveFromAPIResponse(ctx, userID, sym, name, price, body); saveErr != nil {
 				log.Printf("[analysis-history] save failed: %v", saveErr)
 			}
-		}(respBytes, symbol)
+		}(respBytes, symbol, symbolName, analysisPrice)
 	}
 }
 
@@ -1870,6 +1963,38 @@ func asInt(input any) int {
 	default:
 		return 0
 	}
+}
+
+func asPositiveFloat(input any) float64 {
+	switch value := input.(type) {
+	case float64:
+		if value > 0 {
+			return value
+		}
+	case float32:
+		if value > 0 {
+			return float64(value)
+		}
+	case int:
+		if value > 0 {
+			return float64(value)
+		}
+	case int64:
+		if value > 0 {
+			return float64(value)
+		}
+	case json.Number:
+		parsed, err := value.Float64()
+		if err == nil && parsed > 0 {
+			return parsed
+		}
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		if err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return 0
 }
 
 func (a *appServer) writeStrategyError(w http.ResponseWriter, err error) {

@@ -83,11 +83,9 @@ function RankingHeader({ exchange, onExchangeChange, meta }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h3 className="text-base font-semibold text-white">
-          ★ 卧龙AI精选
-          <span className="ml-2 text-[11px] font-normal text-white/40">基于卧龙AI模型每日分析</span>
-        </h3>
-        <div className="mt-1 max-w-2xl text-xs leading-5 text-white/50">
+        <h3 className="text-base font-semibold text-white">★ 卧龙AI精选</h3>
+        <div className="mt-1 text-[11px] text-white/35">基于卧龙AI模型每日分析</div>
+        <div className="mt-1 max-w-2xl text-xs leading-5 text-white/45">
           {metaSummary}
         </div>
       </div>
@@ -102,7 +100,7 @@ function RankingHeader({ exchange, onExchangeChange, meta }) {
             className={`rounded-md px-3 py-1 text-xs font-medium transition ${
               exchange === tab.key
                 ? 'bg-primary text-black'
-                : 'text-white/55 hover:text-white/80 hover:bg-white/[0.05]'
+                : 'text-white/55 hover:bg-white/[0.05] hover:text-white/80'
             }`}
           >
             {tab.label}
@@ -115,8 +113,10 @@ function RankingHeader({ exchange, onExchangeChange, meta }) {
 
 function RankRow({ item, onClick }) {
   const medal = getMedal(item.rank)
-  const oppClass = item.opportunity >= 90 ? 'text-emerald-300' : item.opportunity >= 70 ? 'text-white' : 'text-white/60'
-  const riskClass = item.risk < 30 ? 'text-emerald-300' : item.risk < 50 ? 'text-amber-300' : 'text-white/60'
+  const oppClass = item.opportunity >= 90 ? 'text-emerald-300' : item.opportunity >= 70 ? 'text-white/80' : 'text-white/55'
+  const riskClass = item.risk < 30 ? 'text-emerald-300' : item.risk < 50 ? 'text-amber-300' : 'text-white/55'
+  const returnClass = getReturnTextClass(item.return_pct)
+  const consecutiveClass = getConsecutiveValueClass(item.consecutive_days)
 
   return (
     <div
@@ -124,73 +124,62 @@ function RankRow({ item, onClick }) {
       tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onClick()}
       onClick={onClick}
-      className="group flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/[0.04]"
+      className="group flex cursor-pointer items-center gap-4 rounded-xl px-3 py-3 transition hover:bg-white/[0.04]"
     >
       {/* Rank badge */}
       <span className={`flex w-7 shrink-0 items-center justify-center text-xs font-bold ${medal.className}`}>
         {medal.icon || item.rank}
       </span>
 
-      {/* Name & Code */}
+      {/* Identity */}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold text-white group-hover:text-primary transition">
+        <div className="truncate text-[15px] font-semibold leading-5 text-white transition group-hover:text-primary">
           {item.name}
         </div>
-        <div className="text-[11px] text-white/35">
+        <div className="mt-0.5 text-[11px] text-white/35">
           {formatCode(item.code, item.exchange)} · {exchangeLabel(item.exchange)}
         </div>
       </div>
 
-      {/* Scores */}
-      <div className="flex shrink-0 items-center gap-4 text-xs tabular-nums">
+      {/* Result */}
+      <div className="flex shrink-0 items-center gap-3 lg:gap-5">
         <div className="text-right">
-          <div className={`${oppClass} font-semibold`}>{item.opportunity.toFixed(1)}</div>
-          <div className="text-[10px] text-white/30">机会</div>
-        </div>
-        <div className="text-right w-10">
-          <div className={`${riskClass}`}>{item.risk.toFixed(1)}</div>
-          <div className="text-[10px] text-white/30">风险</div>
-        </div>
-        {/* Sub-scores bars */}
-        <ScoreBar label="趋势" value={item.trend} max={100} width="w-16" />
-        <ScoreBar label="资金" value={item.flow} max={100} width="w-14" />
-        <ScoreBar label="流动" value={item.liquidity ?? 50} max={100} width="w-14" amount={item.avg_amount_5d} />
-
-        {/* Consecutive days */}
-        <div className="text-right w-14">
-          <div className={item.consecutive_days > 0 ? (item.consecutive_days >= 7 ? 'font-semibold text-emerald-300' : 'text-white/70') : 'text-white/25'}>
-            {item.consecutive_days > 0 ? `${item.consecutive_days}日` : '--'}
+          <div className={`text-[18px] font-semibold leading-none tabular-nums ${returnClass}`}>
+            {formatReturnPctDisplay(item.return_pct)}
           </div>
-          <div className="text-[10px] text-white/30">连续上榜</div>
+          <div className="mt-1 text-[10px] text-white/30">上榜以来</div>
         </div>
 
-        {/* Return since first appearance */}
-        <div className="text-right w-16">
-          {(() => {
-            const hasPct = hasReturnPct(item.return_pct)
-            const cls = hasPct
-              ? (item.return_pct >= 0 ? 'text-red-400' : 'text-green-400')
-              : 'text-white/25'
-            return (
-              <>
-                <div className={`${cls} font-semibold tabular-nums`}>
-                  {formatReturnPctDisplay(item.return_pct)}
-                </div>
-                <div className="text-[10px] text-white/30">上榜以来</div>
-              </>
-            )
-          })()}
+        <div className="hidden min-[860px]:inline-flex items-center rounded-full bg-white/[0.05] px-2.5 py-1 text-[11px] font-medium">
+          <span className="text-white/40">连续上榜</span>
+          <span className={`ml-1.5 ${consecutiveClass}`}>{item.consecutive_days > 0 ? `${item.consecutive_days} 日` : '--'}</span>
         </div>
       </div>
 
+      {/* Explanation */}
+      <div className="hidden xl:flex shrink-0 items-center gap-4 text-xs tabular-nums">
+        <MetricStat label="机会评分" value={item.opportunity.toFixed(1)} valueClass={`${oppClass} font-medium`} />
+        <MetricStat label="风险评分" value={item.risk.toFixed(1)} valueClass={riskClass} />
+        <ScoreBar label="趋势" value={item.trend} max={100} width="w-14" />
+        <ScoreBar label="资金" value={item.flow} max={100} width="w-14" />
+        <ScoreBar label="流动" value={item.liquidity ?? 50} max={100} width="w-16" amount={item.avg_amount_5d} />
+      </div>
+
+      <div className="hidden lg:flex xl:hidden shrink-0 flex-col items-end gap-0.5 text-[10px] text-white/30 tabular-nums">
+        <span>{`机会评分 ${item.opportunity.toFixed(1)}`}</span>
+        <span>{`风险评分 ${item.risk.toFixed(1)}`}</span>
+      </div>
+
       {/* Arrow */}
-      <span className="shrink-0 text-white/20 transition group-hover:text-primary group-hover:translate-x-0.5">→</span>
+      <span className="shrink-0 text-white/20 transition group-hover:translate-x-0.5 group-hover:text-primary">→</span>
     </div>
   )
 }
 
 function RankCard({ item, onClick }) {
   const medal = getMedal(item.rank)
+  const returnClass = getReturnTextClass(item.return_pct)
+  const consecutiveClass = getConsecutiveValueClass(item.consecutive_days)
 
   return (
     <div
@@ -200,65 +189,62 @@ function RankCard({ item, onClick }) {
       onClick={onClick}
       className="cursor-pointer rounded-xl border border-border/50 bg-black/15 p-3 transition hover:border-primary/40 active:scale-[0.98]"
     >
-      <div className="flex items-center gap-2">
-        <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${medal.className}`}>
-          {medal.icon || item.rank}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-white">{item.name}</div>
-          <div className="text-[11px] text-white/40">
-            {formatCode(item.code, item.exchange)} · {exchangeLabel(item.exchange)}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${medal.className}`}>
+            {medal.icon || item.rank}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold text-white">{item.name}</div>
+            <div className="mt-0.5 text-[11px] text-white/40">
+              {formatCode(item.code, item.exchange)} · {exchangeLabel(item.exchange)}
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="mt-2.5 grid grid-cols-3 gap-x-3 gap-y-1 text-xs tabular-nums">
-        <div>
-          <span className="text-white/35">机会</span>
-          <span className={`ml-1.5 font-semibold ${item.opportunity >= 90 ? 'text-emerald-300' : 'text-white'}`}>
-            {item.opportunity.toFixed(1)}
-          </span>
-        </div>
-        <div>
-          <span className="text-white/35">风险</span>
-          <span className={`ml-1.5 ${item.risk < 30 ? 'text-emerald-300' : 'text-white/60'}`}>
-            {item.risk.toFixed(1)}
-          </span>
-        </div>
-        <div>
-          <span className="text-white/35">流动</span>
-          <span className={`ml-1.5 ${item.avg_amount_5d ? 'text-white' : 'text-white/40'}`} title={item.avg_amount_5d ? `均额${formatAmount(item.avg_amount_5d)}` : undefined}>
-            {item.avg_amount_5d ? formatAmount(item.avg_amount_5d) : '--'}
-          </span>
-        </div>
-      </div>
-
-      {/* Mini score bar */}
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/5">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-blue-500 transition-all"
-          style={{ width: `${Math.min(100, item.opportunity)}%` }}
-        />
-      </div>
-
-      <div className="mt-1.5 text-[10px] text-white/25">
-        趋势{item.trend.toFixed(0)} · 资金{item.flow.toFixed(0)}
-      </div>
-      {(() => {
-        const days = item.consecutive_days ?? 0
-        const hasPct = hasReturnPct(item.return_pct)
-        if (!days && !hasPct) return null
-        return (
-          <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-1 text-[10px] text-white/30">
-            {days > 0 ? <span>{`🔥已连续上榜 ${days} 日`}</span> : null}
-            {hasPct ? (
-              <span className={item.return_pct >= 0 ? 'text-red-400/70' : 'text-green-400/70'}>
-                {`上榜以来 ${formatReturnPctDisplay(item.return_pct)}`}
-              </span>
-            ) : null}
+        <div className="shrink-0 text-right">
+          <div className={`text-base font-semibold leading-none tabular-nums ${returnClass}`}>
+            {formatReturnPctDisplay(item.return_pct)}
           </div>
-        )
-      })()}
+          <div className="mt-1 text-[10px] text-white/30">上榜以来</div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <div className="inline-flex max-w-full items-center rounded-full bg-white/[0.05] px-2 py-1 text-[10px] font-medium">
+          <span className="text-white/40">连续上榜</span>
+          <span className={`ml-1.5 ${consecutiveClass}`}>{item.consecutive_days > 0 ? `${item.consecutive_days} 日` : '--'}</span>
+        </div>
+        <div className="text-[10px] text-white/30 tabular-nums">
+          {`机会评分 ${item.opportunity.toFixed(1)} · 风险评分 ${item.risk.toFixed(1)}`}
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-lg bg-white/[0.02] px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-white/35 tabular-nums">
+          <span>{`趋势 ${item.trend.toFixed(0)}`}</span>
+          <span>{`资金 ${item.flow.toFixed(0)}`}</span>
+          <span title={item.avg_amount_5d ? `近5日均成交额 ${formatAmount(item.avg_amount_5d)}` : undefined}>
+            {`流动 ${item.avg_amount_5d ? formatAmount(item.avg_amount_5d) : '--'}`}
+          </span>
+        </div>
+
+        <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.05]">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-emerald-400/60 to-cyan-400/40 transition-all"
+            style={{ width: `${Math.min(100, item.opportunity)}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MetricStat({ label, value, valueClass }) {
+  return (
+    <div className="text-right">
+      <div className={`text-[12px] tabular-nums ${valueClass}`}>{value}</div>
+      <div className="mt-0.5 text-[10px] text-white/25">{label}</div>
     </div>
   )
 }
@@ -266,21 +252,21 @@ function RankCard({ item, onClick }) {
 function ScoreBar({ label, value, max, width, amount = null }) {
   const pct = Math.min(100, Math.max(0, (value / max) * 100))
   return (
-    <div className={`${width} hidden lg:block`}>
-      <div className="mb-0.5 text-[10px] text-white/30">{label}</div>
+    <div className={`${width} hidden xl:block`}>
+      <div className="mb-0.5 text-[10px] text-white/25">{label}</div>
       <div className="flex items-center gap-1.5">
-        <div className="h-1 w-full overflow-hidden rounded-full bg-white/[0.06]">
+        <div className="h-1 w-full overflow-hidden rounded-full bg-white/[0.05]">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-emerald-400/70 to-cyan-400/50"
+            className="h-full rounded-full bg-gradient-to-r from-emerald-400/55 to-cyan-400/35"
             style={{ width: `${pct}%` }}
           />
         </div>
         {amount != null && amount > 0 ? (
-          <span className="text-[9px] text-white/35 tabular-nums" title={`近5日均成交额 ${formatAmount(amount)}`}>
+          <span className="text-[9px] text-white/30 tabular-nums" title={`近5日均成交额 ${formatAmount(amount)}`}>
             {formatAmount(amount)}
           </span>
         ) : (
-          <span className="w-5 text-right text-[10px] text-white/45 tabular-nums">{value.toFixed(0)}</span>
+          <span className="w-5 text-right text-[9px] text-white/35 tabular-nums">{value.toFixed(0)}</span>
         )}
       </div>
     </div>
@@ -319,6 +305,16 @@ function formatReturnPctDisplay(value) {
   if (!hasReturnPct(value)) return '--'
   const prefix = value > 0 ? '+' : ''
   return `${prefix}${value.toFixed(1)}%`
+}
+
+function getReturnTextClass(value) {
+  if (!hasReturnPct(value)) return 'text-white/25'
+  return value >= 0 ? 'text-red-400' : 'text-green-400'
+}
+
+function getConsecutiveValueClass(value) {
+  if (!value || value <= 0) return 'text-white/25'
+  return value >= 7 ? 'text-emerald-300' : 'text-white/75'
 }
 
 // ── Pure helpers ──

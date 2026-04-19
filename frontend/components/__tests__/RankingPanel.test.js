@@ -55,11 +55,21 @@ function formatReturnPctDisplay(value) {
   return `${prefix}${value.toFixed(1)}%`
 }
 
-function buildMobileReturnSummary(days, pct) {
+function getReturnTextClass(value) {
+  if (!hasReturnPct(value)) return 'text-white/25'
+  return value >= 0 ? 'text-red-400' : 'text-green-400'
+}
+
+function getConsecutiveValueClass(value) {
+  if (!value || value <= 0) return 'text-white/25'
+  return value >= 7 ? 'text-emerald-300' : 'text-white/75'
+}
+
+function buildMobileKeyFacts(days, pct) {
   const hasPct = hasReturnPct(pct)
   if (!days && !hasPct) return null
   const parts = []
-  if (days > 0) parts.push(`🔥已连续上榜 ${days} 日`)
+  if (days > 0) parts.push(`连续上榜 ${days} 日`)
   if (hasPct) parts.push(`上榜以来 ${formatReturnPctDisplay(pct)}`)
   return parts.join(' · ')
 }
@@ -210,19 +220,35 @@ describe('return_pct display helpers', () => {
   })
 })
 
-describe('mobile return summary', () => {
+describe('result emphasis helpers', () => {
+
+  it('maps return values to the correct emphasis color', () => {
+    assert.equal(getReturnTextClass(null), 'text-white/25')
+    assert.equal(getReturnTextClass(0), 'text-red-400')
+    assert.equal(getReturnTextClass(3.5), 'text-red-400')
+    assert.equal(getReturnTextClass(-1.2), 'text-green-400')
+  })
+
+  it('maps consecutive days to the correct badge color', () => {
+    assert.equal(getConsecutiveValueClass(0), 'text-white/25')
+    assert.equal(getConsecutiveValueClass(3), 'text-white/75')
+    assert.equal(getConsecutiveValueClass(7), 'text-emerald-300')
+  })
+})
+
+describe('mobile key facts summary', () => {
 
   it('returns null when both consecutive days and return are absent', () => {
-    assert.equal(buildMobileReturnSummary(0, null), null)
+    assert.equal(buildMobileKeyFacts(0, null), null)
   })
 
   it('keeps consecutive days without return value', () => {
-    assert.equal(buildMobileReturnSummary(3, null), '🔥已连续上榜 3 日')
+    assert.equal(buildMobileKeyFacts(3, null), '连续上榜 3 日')
   })
 
   it('shows real 0.0% return instead of hiding it', () => {
-    assert.equal(buildMobileReturnSummary(2, 0), '🔥已连续上榜 2 日 · 上榜以来 0.0%')
-    assert.equal(buildMobileReturnSummary(0, 0), '上榜以来 0.0%')
+    assert.equal(buildMobileKeyFacts(2, 0), '连续上榜 2 日 · 上榜以来 0.0%')
+    assert.equal(buildMobileKeyFacts(0, 0), '上榜以来 0.0%')
   })
 })
 

@@ -1138,13 +1138,13 @@ function EquityCurveCard({ series }) {
   )
 }
 
-function EquityCurveSection({ curve }) {
+function EquityCurveSection({ curve, curveRange, setCurveRange }) {
   const series = Array.isArray(curve?.series) ? curve.series.filter((item) => Array.isArray(item?.points) && item.points.length > 0) : []
   if (series.length === 0) return null
 
   return (
     <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
-      <div className="flex items-start justify-between gap-3 mb-4">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h3 className="text-sm font-semibold text-white/80 flex items-center gap-2">
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 17l6-6 4 4 7-8"/></svg>
@@ -1152,7 +1152,25 @@ function EquityCurveSection({ curve }) {
           </h3>
           <p className="mt-1 text-xs text-white/35">基于每日持仓快照生成，当前默认展示市值曲线。</p>
         </div>
-        {curve?.mixed_currency ? <div className="text-[10px] text-white/30">分币种展示，不做汇率折算</div> : null}
+        <div className="flex flex-col items-start gap-2 sm:items-end">
+          <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-white/10 bg-black/20 p-1">
+            {CURVE_RANGE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setCurveRange(opt.value)}
+                className={`rounded-lg px-2.5 py-1 text-[11px] font-medium whitespace-nowrap transition ${
+                  curveRange === opt.value
+                    ? 'bg-primary/[0.14] text-primary'
+                    : 'text-white/45 hover:bg-white/[0.05] hover:text-white/80'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {curve?.mixed_currency ? <div className="text-[10px] text-white/30 sm:text-right">分币种展示，不做汇率折算</div> : null}
+        </div>
       </div>
       <div className={`grid gap-3 ${series.length > 1 ? 'xl:grid-cols-2' : ''}`}>
         {series.map((item) => (
@@ -1208,14 +1226,14 @@ function AllocationBar({ allocationItems }) {
   )
 }
 
-function PortfolioChartsSection({ curve, allocationItems }) {
+function PortfolioChartsSection({ curve, allocationItems, curveRange, setCurveRange }) {
   if ((!curve?.series || curve.series.length === 0) && (!allocationItems || allocationItems.length === 0)) {
     return null
   }
 
   return (
     <section className="grid gap-4 xl:grid-cols-[1.45fr_1fr]">
-      <EquityCurveSection curve={curve} />
+      <EquityCurveSection curve={curve} curveRange={curveRange} setCurveRange={setCurveRange} />
       <AllocationBar allocationItems={allocationItems} />
     </section>
   )
@@ -1232,83 +1250,72 @@ function Toolbar({
   setSortOrder,
   pnlFilter,
   setPnlFilter,
-  curveRange,
-  setCurveRange,
   keyword,
   setKeyword,
 }) {
   return (
-    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-5">
-      {/* Scope tabs */}
-      <div className="flex items-center gap-1 rounded-lg border border-white/10 p-0.5">
-        {SCOPE_OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => setScope(opt.value)}
-            className={`px-3 py-1 rounded-md text-xs font-medium transition ${
-              scope === opt.value
-                ? 'bg-primary/20 text-primary border border-primary/30'
-                : 'text-white/50 hover:text-white/80 hover:bg-white/5'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
+    <section className="mb-5 space-y-3">
+      <div className="-mx-1 overflow-x-auto pb-1 sm:mx-0 sm:overflow-visible sm:pb-0">
+        <div className="inline-flex min-w-full items-center gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1 sm:min-w-0">
+          {SCOPE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setScope(opt.value)}
+              className={`flex-none whitespace-nowrap rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
+                scope === opt.value
+                  ? 'border border-primary/30 bg-primary/20 text-primary'
+                  : 'text-white/50 hover:bg-white/[0.05] hover:text-white/80'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Search */}
-      <input
-        type="text"
-        placeholder="搜索代码或名称..."
-        value={keyword}
-        onChange={(e) => setKeyword(e.target.value)}
-        className="flex-1 sm:max-w-[200px] rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white placeholder-white/25 outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 transition"
-      />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <input
+          type="text"
+          placeholder="搜索代码或名称..."
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2 text-sm text-white placeholder-white/25 outline-none transition focus:border-primary/40 focus:ring-1 focus:ring-primary/20 sm:max-w-[240px] sm:text-xs sm:py-1.5"
+        />
 
-      {/* Sort by */}
-      <select
-        value={sortBy}
-        onChange={(e) => setSortBy(e.target.value)}
-        className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-white/70 outline-none focus:border-primary/40 cursor-pointer"
-      >
-        {SORT_OPTIONS.map((opt) => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
-        ))}
-      </select>
+        <div className="grid grid-cols-[minmax(0,1fr)_42px_minmax(0,1fr)] gap-2 sm:flex sm:items-center sm:gap-2">
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="min-w-0 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/75 outline-none transition focus:border-primary/40 cursor-pointer sm:text-xs sm:py-1.5"
+          >
+            {SORT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
 
-      {/* Sort order toggle */}
-      <button
-        type="button"
-        onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
-        className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-white/60 hover:text-white/90 transition"
-        title={sortOrder === 'desc' ? '降序' : '升序'}
-      >
-        {sortOrder === 'desc' ? '↓' : '↑'}
-      </button>
+          <button
+            type="button"
+            onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
+            className="rounded-xl border border-white/10 bg-white/[0.04] px-0 py-2 text-sm text-white/60 transition hover:text-white/90 sm:w-10 sm:text-xs sm:py-1.5"
+            title={sortOrder === 'desc' ? '当前降序，点击切换为升序' : '当前升序，点击切换为降序'}
+            aria-label={sortOrder === 'desc' ? '切换为升序' : '切换为降序'}
+          >
+            {sortOrder === 'desc' ? '↓' : '↑'}
+          </button>
 
-      {/* PnL filter */}
-      <select
-        value={pnlFilter}
-        onChange={(e) => setPnlFilter(e.target.value)}
-        className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-white/70 outline-none focus:border-primary/40 cursor-pointer"
-      >
-        {PNL_FILTER_OPTIONS.map((opt) => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
-        ))}
-      </select>
-
-      {/* Curve range */}
-      <select
-        value={curveRange}
-        onChange={(e) => setCurveRange(e.target.value)}
-        className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-white/70 outline-none focus:border-primary/40 cursor-pointer"
-      >
-        {CURVE_RANGE_OPTIONS.map((opt) => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
-        ))}
-      </select>
-    </div>
+          <select
+            value={pnlFilter}
+            onChange={(e) => setPnlFilter(e.target.value)}
+            className="min-w-0 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/75 outline-none transition focus:border-primary/40 cursor-pointer sm:text-xs sm:py-1.5"
+          >
+            {PNL_FILTER_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -1656,7 +1663,6 @@ export default function PortfolioPage() {
           sortBy={sortBy} setSortBy={setSortBy}
           sortOrder={sortOrder} setSortOrder={setSortOrder}
           pnlFilter={pnlFilter} setPnlFilter={setPnlFilter}
-          curveRange={curveRange} setCurveRange={setCurveRange}
           keyword={keyword} setKeyword={setKeyword}
         />
 
@@ -1679,6 +1685,8 @@ export default function PortfolioPage() {
           <PortfolioChartsSection
             curve={data?.equity_curve_preview}
             allocationItems={data?.allocation_preview}
+            curveRange={curveRange}
+            setCurveRange={setCurveRange}
           />
         )}
 

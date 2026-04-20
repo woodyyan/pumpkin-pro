@@ -12,6 +12,14 @@ import {
   mergeServerSignalConfig,
   normalizeSignalConfig,
 } from '../../lib/signal-config-ui'
+import {
+  buildPortfolioEventPreview,
+  createPortfolioActionForm,
+  formatPortfolioEventHeadline,
+  formatPortfolioEventSubline,
+  getPortfolioEventAccent,
+  isPortfolioPositionActive,
+} from '../../lib/portfolio-events'
 
 const POLL_MS = 10000
 const POLL_MS_NON_TRADING = 60000  // non-trading: 1 min fallback (data comes from DB cache)
@@ -93,9 +101,13 @@ export default function LiveTradingDetailPage() {
   const [isWatched, setIsWatched] = useState(null) // null=未知, true/false
   const [addingWatch, setAddingWatch] = useState(false)
   const [portfolioData, setPortfolioData] = useState(null)
-  const [portfolioEditing, setPortfolioEditing] = useState(false)
-  const [portfolioForm, setPortfolioForm] = useState({ shares: '', avg_cost_price: '', buy_date: '', note: '' })
+  const [portfolioEvents, setPortfolioEvents] = useState([])
+  const [portfolioAction, setPortfolioAction] = useState('')
+  const [portfolioForm, setPortfolioForm] = useState(() => createPortfolioActionForm('buy'))
   const [portfolioSaving, setPortfolioSaving] = useState(false)
+  const [portfolioHistoryExpanded, setPortfolioHistoryExpanded] = useState(false)
+  const [portfolioTimelineLoading, setPortfolioTimelineLoading] = useState(false)
+  const [portfolioNotice, setPortfolioNotice] = useState('')
 
   const supportRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const resistanceRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
@@ -242,12 +254,113 @@ export default function LiveTradingDetailPage() {
   }
 
   const loadPortfolio = async (sym) => {
-    if (!sym) return
+    if (!sym) {
+      setPortfolioData(null)
+      setPortfolioEvents([])
+      return
+    }
     try {
       const data = await requestJson(`/api/portfolio/${encodeURIComponent(sym)}`)
       setPortfolioData(data?.item || null)
+      setPortfolioEvents(Array.isArray(data?.history_preview) ? data.history_preview : [])
     } catch {
       setPortfolioData(null)
+      setPortfolioEvents([])
+    }
+  }
+
+  const loadPortfolioEvents = async (sym, { limit = 20 } = {}) => {
+    if (!sym) {
+      setPortfolioEvents([])
+      return
+    }
+    setPortfolioTimelineLoading(true)
+    try {
+      const data = await requestJson(`/api/portfolio/${encodeURIComponent(sym)}/events?limit=${limit}`)
+      setPortfolioEvents(Array.isArray(data?.items) ? data.items : [])
+      setPortfolioHistoryExpanded(true)
+    } catch {
+      // non-critical
+    } finally {
+      setPortfolioTimelineLoading(false)
+    }
+  }
+
+  const openPortfolioAction = (action) => {
+    setPortfolioAction(action)
+    setPortfolioForm(createPortfolioActionForm(action, portfolioData))
+    setPortfolioNotice('')
+  }
+
+  const closePortfolioAction = () => {
+    setPortfolioAction('')
+    setPortfolioForm(createPortfolioActionForm('buy'))
+  }
+
+  const submitPortfolioAction = async () => {
+    if (!symbol || !portfolioAction) return
+    const preview = buildPortfolioEventPreview(portfolioAction, portfolioData, portfolioForm)
+    if (!preview.valid) {
+      alert(preview.errors[0] || '请先检查输入内容')
+      return
+    }
+
+    const payload = {
+      event_type: portfolioAction === 'adjust' ? 'adjust_avg_cost' : portfolioAction,
+      trade_date: portfolioForm.trade_date,
+      note: portfolioForm.note || '',
+    }
+    if (portfolioAction === 'adjust') {
+      payload.avg_cost_price = Number(portfolioForm.avg_cost_price)
+    } else {
+      payload.quantity = Number(portfolioForm.quantity)
+      payload.price = Number(portfolioForm.price)
+      payload.fee_amount = Number(portfolioForm.fee_amount || 0)
+    }
+
+    setPortfolioSaving(true)
+    try {
+      await requestJson(`/api/portfolio/${encodeURIComponent(symbol)}/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      setPortfolioNotice(
+        portfolioAction === 'buy'
+          ? '买入记录已保存'
+          : portfolioAction === 'sell'
+            ? '卖出记录已保存'
+            : '均价调整已保存'
+      )
+      closePortfolioAction()
+      await loadPortfolio(symbol)
+      if (portfolioHistoryExpanded) {
+        await loadPortfolioEvents(symbol, { limit: 20 })
+      }
+    } catch (err) {
+      alert(err.message || '保存失败')
+    } finally {
+      setPortfolioSaving(false)
+    }
+  }
+
+  const undoLatestPortfolioEvent = async () => {
+    if (!symbol || !portfolioData?.last_event_id) return
+    if (!confirm('确定撤销最近一条持仓变动记录吗？')) return
+    setPortfolioSaving(true)
+    try {
+      await requestJson(`/api/portfolio/${encodeURIComponent(symbol)}/events/${encodeURIComponent(portfolioData.last_event_id)}/undo`, {
+        method: 'POST',
+      })
+      setPortfolioNotice('已撤销最近一条持仓变动记录')
+      await loadPortfolio(symbol)
+      if (portfolioHistoryExpanded) {
+        await loadPortfolioEvents(symbol, { limit: 20 })
+      }
+    } catch (err) {
+      alert(err.message || '撤销失败')
+    } finally {
+      setPortfolioSaving(false)
     }
   }
 
@@ -377,7 +490,11 @@ export default function LiveTradingDetailPage() {
           has_position: true,
           shares: portfolioData.shares,
           avg_cost_price: portfolioData.avg_cost_price || 0,
+          total_cost_amount: portfolioData.total_cost_amount || 0,
           buy_date: portfolioData.buy_date || '',
+          cost_method: portfolioData.cost_method || 'weighted_avg',
+          cost_source: portfolioData.cost_source || 'system',
+          last_trade_at: portfolioData.last_trade_at || '',
           unrealized_pnl: pnlAmount,
           unrealized_pnl_text: formatYiCurrency(pnlAmount, isAShare ? '¥' : 'HK$'),
           unrealized_pnl_pct: pnlPct,
@@ -591,6 +708,13 @@ export default function LiveTradingDetailPage() {
   }, [ready, symbol, privateAccessReady, authIdentityKey])
 
   useEffect(() => {
+    setPortfolioAction('')
+    setPortfolioForm(createPortfolioActionForm('buy'))
+    setPortfolioHistoryExpanded(false)
+    setPortfolioNotice('')
+  }, [symbol, authIdentityKey])
+
+  useEffect(() => {
     if (!ready || !symbol) return
     const interval = isAShareTradingHours(symbol) ? POLL_MS : POLL_MS_NON_TRADING
     const timer = setInterval(async () => {
@@ -716,6 +840,12 @@ export default function LiveTradingDetailPage() {
   const supportStatusAccent = supportSummary?.status === '跌破支撑' ? 'down' : supportSummary?.status === '临近支撑' || supportSummary?.status === '回踩支撑' ? 'up' : 'normal'
   const resistanceStatusAccent = resistanceSummary?.status === '突破压力' ? 'up' : resistanceSummary?.status === '临近压力' || resistanceSummary?.status === '回踩压力' ? 'down' : 'normal'
   const movingAverageStatusAccent = movingAveragePayload?.status === '双双站上' ? 'up' : movingAveragePayload?.status === '双双跌破' ? 'down' : 'normal'
+  const portfolioHasPosition = isPortfolioPositionActive(portfolioData)
+  const portfolioPreview = portfolioAction ? buildPortfolioEventPreview(portfolioAction, portfolioData, portfolioForm) : null
+  const visiblePortfolioEvents = portfolioHistoryExpanded ? portfolioEvents : portfolioEvents.slice(0, 5)
+  const portfolioLastTradeAtText = portfolioData?.last_trade_at
+    ? new Date(portfolioData.last_trade_at).toLocaleString('zh-CN', { hour12: false })
+    : '--'
 
   if (!symbol) {
     return (
@@ -1009,176 +1139,296 @@ export default function LiveTradingDetailPage() {
         {privateAccessReady && (
           <section className="rounded-2xl border border-border bg-card p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <h3 className="text-base font-semibold text-white">我的持仓</h3>
-              <div className="flex items-center gap-2">
-                {portfolioData && !portfolioEditing && (
+              <div>
+                <h3 className="text-base font-semibold text-white">我的持仓</h3>
+                <p className="mt-1 text-xs text-white/55">买入会自动重算均价，卖出只减少数量；你也可以通过独立事件手动校准当前均价。</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => openPortfolioAction('buy')}
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-primary/85"
+                >
+                  {portfolioHasPosition ? '买入 / 加仓' : '买入建仓'}
+                </button>
+                {portfolioHasPosition && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setPortfolioForm({
-                        shares: String(portfolioData.shares ?? ''),
-                        avg_cost_price: String(portfolioData.avg_cost_price ?? ''),
-                        buy_date: portfolioData.buy_date || '',
-                        note: portfolioData.note || '',
-                      })
-                      setPortfolioEditing(true)
-                    }}
-                    className="rounded-lg border border-border px-2.5 py-1 text-xs text-white/65 transition hover:border-primary hover:text-primary"
+                    onClick={() => openPortfolioAction('sell')}
+                    className="rounded-lg border border-emerald-400/35 bg-emerald-500/8 px-3 py-1.5 text-xs font-medium text-emerald-200 transition hover:border-emerald-300/60"
                   >
-                    编辑
+                    卖出 / 减仓
                   </button>
                 )}
-                {portfolioData && !portfolioEditing && (
+                {portfolioHasPosition && (
                   <button
                     type="button"
-                    onClick={async () => {
-                      if (!confirm('确定清除此股票的持仓记录？')) return
-                      try {
-                        await requestJson(`/api/portfolio/${encodeURIComponent(symbol)}`, { method: 'DELETE' })
-                        setPortfolioData(null)
-                      } catch {}
-                    }}
-                    className="rounded-lg border border-border px-2.5 py-1 text-xs text-white/45 transition hover:border-rose-400/60 hover:text-rose-300"
+                    onClick={() => openPortfolioAction('adjust')}
+                    className="rounded-lg border border-sky-400/35 bg-sky-500/8 px-3 py-1.5 text-xs font-medium text-sky-200 transition hover:border-sky-300/60"
                   >
-                    清除
+                    调整均价
+                  </button>
+                )}
+                {portfolioData?.last_event_id && (
+                  <button
+                    type="button"
+                    disabled={portfolioSaving}
+                    onClick={undoLatestPortfolioEvent}
+                    className="rounded-lg border border-white/12 px-3 py-1.5 text-xs text-white/65 transition hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    撤销最近一条
                   </button>
                 )}
               </div>
             </div>
 
-            {!portfolioData && !portfolioEditing ? (
-              <div className="mt-3 flex items-center justify-between rounded-xl border border-dashed border-border px-4 py-5">
-                <span className="text-sm text-white/50">暂未记录此股票的持仓信息。</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPortfolioForm({ shares: '', avg_cost_price: '', buy_date: '', note: '' })
-                    setPortfolioEditing(true)
-                  }}
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-primary/85"
-                >
-                  添加持仓
-                </button>
+            {portfolioNotice && (
+              <div className="mt-3 rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+                {portfolioNotice}
               </div>
-            ) : portfolioEditing ? (
-              <div className="mt-4 space-y-3">
-                <div className="grid gap-3 md:grid-cols-2">
+            )}
+
+            {portfolioHasPosition ? (
+              <div className="mt-4">
+                <div className="grid gap-3 md:grid-cols-5">
+                  <MetricMini label="持仓数量" value={`${Number(portfolioData?.shares || 0).toLocaleString('zh-CN')} 股`} />
+                  <MetricMini label="买入均价" value={formatNumber(portfolioData?.avg_cost_price, 3)} />
+                  <MetricMini label="持仓成本" value={formatYiCurrency(portfolioData?.total_cost_amount, isAShare ? '¥' : 'HK$')} tooltip="当前剩余持仓的总成本，采用加权平均成本法。" />
+                  <MetricMini
+                    label="持仓市值"
+                    value={snapshot?.last_price ? formatYiCurrency((portfolioData?.shares || 0) * snapshot.last_price, isAShare ? '¥' : 'HK$') : '--'}
+                    emphasis
+                    tooltip="持仓数量 × 最新价。跟随实时行情变动。"
+                  />
+                  <MetricMini
+                    label="浮动盈亏"
+                    value={snapshot?.last_price && portfolioData?.avg_cost_price > 0
+                      ? `${((snapshot.last_price - portfolioData.avg_cost_price) * portfolioData.shares) >= 0 ? '+' : ''}${formatYiCurrency((snapshot.last_price - portfolioData.avg_cost_price) * portfolioData.shares, isAShare ? '¥' : 'HK$')}（${(((snapshot.last_price / portfolioData.avg_cost_price) - 1) * 100).toFixed(2)}%）`
+                      : '--'}
+                    accent={snapshot?.last_price && portfolioData?.avg_cost_price > 0 ? (snapshot.last_price >= portfolioData.avg_cost_price ? 'up' : 'down') : 'normal'}
+                    emphasis
+                    marketAccent
+                    tooltip="（最新价 - 买入均价）× 持仓数量。红色为盈利，绿色为亏损。"
+                  />
+                </div>
+                <div className="mt-2.5 flex flex-wrap gap-4 text-xs text-white/45">
+                  {portfolioData?.buy_date && <span>首次建仓：{portfolioData.buy_date}</span>}
+                  <span>成本口径：加权平均</span>
+                  {portfolioData?.last_trade_at && <span>最近变动：{portfolioLastTradeAtText}</span>}
+                  {portfolioData?.note && <span>备注：{portfolioData.note}</span>}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-white/55">
+                <div>当前未持有该股票。</div>
+                <div className="mt-1 text-xs text-white/40">你仍然可以查看历史变动过程，或直接补一笔新的买入记录重新建仓。</div>
+              </div>
+            )}
+
+            {portfolioAction && (
+              <div className="mt-4 rounded-xl border border-white/8 bg-black/20 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-white">
+                      {portfolioAction === 'buy' ? '买入 / 加仓' : portfolioAction === 'sell' ? '卖出 / 减仓' : '手动调整均价'}
+                    </div>
+                    <div className="mt-1 text-xs text-white/45">
+                      {portfolioAction === 'buy'
+                        ? '系统会按加权平均成本法自动重算最新均价。'
+                        : portfolioAction === 'sell'
+                          ? '卖出后只减少股数，剩余持仓均价保持不变。'
+                          : '该操作不会改动持仓数量，只会校准当前买入均价。'}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closePortfolioAction}
+                    className="rounded-lg border border-white/10 px-2.5 py-1 text-xs text-white/50 transition hover:border-white/20 hover:text-white/70"
+                  >
+                    取消
+                  </button>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
                   <label className="block">
-                    <span className="text-xs text-white/55">持仓数量（股）</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={portfolioForm.shares}
-                      onChange={(e) => setPortfolioForm((f) => ({ ...f, shares: e.target.value }))}
-                      className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
-                      placeholder="例：10000"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="text-xs text-white/55">买入均价</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={portfolioForm.avg_cost_price}
-                      onChange={(e) => setPortfolioForm((f) => ({ ...f, avg_cost_price: e.target.value }))}
-                      className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
-                      placeholder="例：15.80"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="text-xs text-white/55">买入日期</span>
+                    <span className="text-xs text-white/55">成交日期</span>
                     <input
                       type="date"
-                      value={portfolioForm.buy_date}
-                      onChange={(e) => setPortfolioForm((f) => ({ ...f, buy_date: e.target.value }))}
+                      value={portfolioForm.trade_date}
+                      onChange={(e) => setPortfolioForm((f) => ({ ...f, trade_date: e.target.value }))}
                       className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
                     />
                   </label>
-                  <label className="block">
-                    <span className="text-xs text-white/55">备注</span>
+
+                  {portfolioAction !== 'adjust' ? (
+                    <>
+                      <label className="block">
+                        <span className="text-xs text-white/55">{portfolioAction === 'buy' ? '数量（股）' : '卖出数量（股）'}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={portfolioForm.quantity}
+                          onChange={(e) => setPortfolioForm((f) => ({ ...f, quantity: e.target.value }))}
+                          className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                          placeholder={portfolioAction === 'buy' ? '例：200' : '例：100'}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs text-white/55">成交价格</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={portfolioForm.price}
+                          onChange={(e) => setPortfolioForm((f) => ({ ...f, price: e.target.value }))}
+                          className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                          placeholder="例：12.35"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs text-white/55">手续费（选填）</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={portfolioForm.fee_amount}
+                          onChange={(e) => setPortfolioForm((f) => ({ ...f, fee_amount: e.target.value }))}
+                          className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                          placeholder="默认 0"
+                        />
+                      </label>
+                    </>
+                  ) : (
+                    <label className="block md:col-span-2">
+                      <span className="text-xs text-white/55">新的买入均价</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={portfolioForm.avg_cost_price}
+                        onChange={(e) => setPortfolioForm((f) => ({ ...f, avg_cost_price: e.target.value }))}
+                        className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                        placeholder="例：12.15"
+                      />
+                    </label>
+                  )}
+
+                  <label className={`block ${portfolioAction === 'adjust' ? 'md:col-span-2' : ''}`}>
+                    <span className="text-xs text-white/55">{portfolioAction === 'adjust' ? '调整原因（必填）' : '备注'}</span>
                     <input
                       type="text"
                       value={portfolioForm.note}
                       onChange={(e) => setPortfolioForm((f) => ({ ...f, note: e.target.value }))}
                       className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
-                      placeholder="选填，例：二次加仓"
+                      placeholder={portfolioAction === 'adjust' ? '例：补录券商真实成本，已含手续费' : '例：午后加仓'}
                     />
                   </label>
                 </div>
-                <div className="flex items-center gap-2">
+
+                <div className="mt-4 rounded-lg border border-white/8 bg-white/[0.03] px-3 py-3">
+                  <div className="text-xs font-medium text-white/65">结果预览</div>
+                  {portfolioPreview?.errors?.length > 0 ? (
+                    <div className="mt-2 text-xs text-amber-200">{portfolioPreview.errors[0]}</div>
+                  ) : (
+                    <div className="mt-2 grid gap-2 md:grid-cols-4">
+                      <div>
+                        <div className="text-[11px] text-white/35">变动后股数</div>
+                        <div className="text-sm font-semibold text-white">{Number(portfolioPreview?.nextShares || 0).toLocaleString('zh-CN')} 股</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-white/35">变动后均价</div>
+                        <div className="text-sm font-semibold text-white">{formatNumber(portfolioPreview?.nextAvgCostPrice, 3)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-white/35">变动后成本</div>
+                        <div className="text-sm font-semibold text-white">{formatYiCurrency(portfolioPreview?.nextTotalCostAmount, isAShare ? '¥' : 'HK$')}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-white/35">{portfolioAction === 'sell' ? '本次已实现收益' : '口径说明'}</div>
+                        <div className={`text-sm font-semibold ${portfolioAction === 'sell' ? ((portfolioPreview?.realizedPnlAmount || 0) >= 0 ? 'text-rose-300' : 'text-emerald-300') : 'text-white/70'}`}>
+                          {portfolioAction === 'sell'
+                            ? `${(portfolioPreview?.realizedPnlAmount || 0) >= 0 ? '+' : ''}${formatYiCurrency(portfolioPreview?.realizedPnlAmount, isAShare ? '¥' : 'HK$')}`
+                            : portfolioAction === 'buy'
+                              ? '买入后自动重算均价'
+                              : '仅调整均价，不改股数'}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     disabled={portfolioSaving}
-                    onClick={async () => {
-                      const shares = Number(portfolioForm.shares)
-                      const avgCost = Number(portfolioForm.avg_cost_price)
-                      if (Number.isNaN(shares) || shares < 0) { alert('持仓数量不能为负数'); return }
-                      if (Number.isNaN(avgCost) || avgCost < 0) { alert('买入均价不能为负数'); return }
-                      setPortfolioSaving(true)
-                      try {
-                        const result = await requestJson(`/api/portfolio/${encodeURIComponent(symbol)}`, {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            shares,
-                            avg_cost_price: avgCost,
-                            buy_date: portfolioForm.buy_date || '',
-                            note: portfolioForm.note || '',
-                          }),
-                        })
-                        if (result?.item) setPortfolioData(result.item)
-                        setPortfolioEditing(false)
-                      } catch (err) {
-                        alert(err.message || '保存失败')
-                      } finally {
-                        setPortfolioSaving(false)
-                      }
-                    }}
+                    onClick={submitPortfolioAction}
                     className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {portfolioSaving ? '保存中...' : '保存'}
+                    {portfolioSaving ? '保存中...' : portfolioAction === 'buy' ? '确认买入' : portfolioAction === 'sell' ? '确认卖出' : '确认调整'}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setPortfolioEditing(false)}
+                    onClick={closePortfolioAction}
                     className="rounded-lg border border-border px-4 py-1.5 text-xs text-white/65 transition hover:border-white/40"
                   >
                     取消
                   </button>
                 </div>
               </div>
-            ) : portfolioData ? (
-              <div className="mt-4">
-                <div className="grid gap-3 md:grid-cols-4">
-                  <MetricMini label="持仓数量" value={`${Number(portfolioData.shares).toLocaleString('zh-CN')} 股`} />
-                  <MetricMini label="买入均价" value={formatNumber(portfolioData.avg_cost_price, 3)} />
-                  <MetricMini
-                    label="持仓市值"
-                    value={snapshot?.last_price ? formatYiCurrency(portfolioData.shares * snapshot.last_price, isAShare ? '¥' : 'HK$') : '--'}
-                    emphasis
-                    tooltip="持仓数量 × 最新价。跟随实时行情变动。"
-                  />
-                  <MetricMini
-                    label="浮动盈亏"
-                    value={snapshot?.last_price && portfolioData.avg_cost_price > 0
-                      ? `${((snapshot.last_price - portfolioData.avg_cost_price) * portfolioData.shares) >= 0 ? '+' : ''}${formatYiCurrency((snapshot.last_price - portfolioData.avg_cost_price) * portfolioData.shares, isAShare ? '¥' : 'HK$')}（${(((snapshot.last_price / portfolioData.avg_cost_price) - 1) * 100).toFixed(2)}%）`
-                      : '--'}
-                    accent={snapshot?.last_price && portfolioData.avg_cost_price > 0 ? (snapshot.last_price >= portfolioData.avg_cost_price ? 'up' : 'down') : 'normal'}
-                    emphasis
-                    marketAccent
-                    tooltip="（最新价 - 买入均价）× 持仓数量。红色为盈利，绿色为亏损。"
-                  />
-                </div>
-                {(portfolioData.buy_date || portfolioData.note) && (
-                  <div className="mt-2.5 flex flex-wrap gap-4 text-xs text-white/45">
-                    {portfolioData.buy_date && <span>买入日期：{portfolioData.buy_date}</span>}
-                    {portfolioData.note && <span>备注：{portfolioData.note}</span>}
+            )}
+
+            {portfolioEvents.length > 0 && (
+              <div className="mt-4 rounded-xl border border-white/8 bg-black/15 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-semibold text-white">持仓变化过程</div>
+                    <div className="mt-1 text-xs text-white/40">可回看每次买入、卖出和手动均价校准是如何影响当前持仓的。</div>
                   </div>
-                )}
+                  {!portfolioHistoryExpanded && portfolioEvents.length >= 5 && (
+                    <button
+                      type="button"
+                      disabled={portfolioTimelineLoading}
+                      onClick={() => loadPortfolioEvents(symbol, { limit: 20 })}
+                      className="rounded-lg border border-white/10 px-2.5 py-1 text-xs text-white/60 transition hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {portfolioTimelineLoading ? '加载中...' : '查看更多'}
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-3 space-y-2.5">
+                  {visiblePortfolioEvents.map((event) => (
+                    <div key={event.id} className="rounded-lg border border-white/8 bg-white/[0.03] px-3 py-3">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <div className="text-[11px] text-white/35">{event.trade_date}</div>
+                          <div className={`mt-1 text-sm font-semibold ${getPortfolioEventAccent(event)}`}>{formatPortfolioEventHeadline(event, symbol)}</div>
+                          <div className="mt-1 text-[12px] text-white/65">{formatPortfolioEventSubline(event, symbol)}</div>
+                        </div>
+                        <div className="rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[10px] text-white/55">
+                          {event.event_type === 'buy'
+                            ? '买入'
+                            : event.event_type === 'sell'
+                              ? '卖出'
+                              : event.event_type === 'adjust_avg_cost'
+                                ? '均价调整'
+                                : event.event_type === 'init'
+                                  ? '初始化'
+                                  : '校准'}
+                        </div>
+                      </div>
+                      {(event.note || event.fee_amount > 0) && (
+                        <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-white/35">
+                          {event.note && <span>备注：{event.note}</span>}
+                          {event.fee_amount > 0 && <span>手续费：{formatYiCurrency(event.fee_amount, isAShare ? '¥' : 'HK$')}</span>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
-            ) : null}
+            )}
           </section>
         )}
 

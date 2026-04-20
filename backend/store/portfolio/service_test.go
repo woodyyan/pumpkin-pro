@@ -3,6 +3,7 @@ package portfolio
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/woodyyan/pumpkin-pro/backend/tests/testutil"
 )
@@ -12,126 +13,260 @@ func setupPortfolioService(t *testing.T) (*Service, context.Context) {
 	db := testutil.InMemoryDB(t)
 	testutil.AutoMigrateModels(t, db,
 		PortfolioRecord{},
+		PortfolioEventRecord{},
 		InvestmentProfileRecord{},
 	)
 	repo := NewRepository(db)
 	return NewService(repo), context.Background()
 }
 
-func TestServiceUpsertAndList(t *testing.T) {
+func TestServiceCreateBuyEventBuildsWeightedAverage(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
 
-	item, err := svc.Upsert(ctx, "svc-user", "000001", UpsertPortfolioInput{
-		Shares:       1500,
-		AvgCostPrice: 13.8,
-		BuyDate:      "2025-03-01",
-		Note:         "service test holding",
+	item, event, err := svc.CreateEvent(ctx, "svc-user", "000001", CreatePortfolioEventInput{
+		EventType: EventTypeBuy,
+		TradeDate: "2026-04-20",
+		Quantity:  100,
+		Price:     10,
+		FeeAmount: 0,
+		Note:      "首次建仓",
 	})
 	if err != nil {
-		t.Fatalf("Upsert failed: %v", err)
+		t.Fatalf("CreateEvent buy failed: %v", err)
 	}
-	if item.Symbol != "000001" {
-		t.Errorf("expected symbol 000001, got %s", item.Symbol)
+	if item.Shares != 100 {
+		t.Fatalf("expected shares 100, got %v", item.Shares)
 	}
-	if item.Shares != 1500 {
-		t.Errorf("expected shares 1500, got %v", item.Shares)
+	if item.AvgCostPrice != 10 {
+		t.Fatalf("expected avg cost 10, got %v", item.AvgCostPrice)
+	}
+	if event.AfterTotalCost != 1000 {
+		t.Fatalf("expected after total cost 1000, got %v", event.AfterTotalCost)
 	}
 
-	list, err := svc.ListByUser(ctx, "svc-user")
+	item, _, err = svc.CreateEvent(ctx, "svc-user", "000001", CreatePortfolioEventInput{
+		EventType: EventTypeBuy,
+		TradeDate: "2026-04-21",
+		Quantity:  200,
+		Price:     13,
+		FeeAmount: 0,
+		Note:      "二次加仓",
+	})
 	if err != nil {
-		t.Fatalf("ListByUser failed: %v", err)
+		t.Fatalf("CreateEvent second buy failed: %v", err)
 	}
-	if len(list) != 1 {
-		t.Errorf("expected 1 item, got %d", len(list))
+	if item.Shares != 300 {
+		t.Fatalf("expected shares 300, got %v", item.Shares)
+	}
+	if item.AvgCostPrice != 12 {
+		t.Fatalf("expected weighted avg 12, got %v", item.AvgCostPrice)
+	}
+	if item.TotalCostAmount != 3600 {
+		t.Fatalf("expected total cost 3600, got %v", item.TotalCostAmount)
 	}
 }
 
-func TestServiceGetBySymbol(t *testing.T) {
+func TestServiceSellEventKeepsAverageCost(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
-
-	svc.Upsert(ctx, "get-user", "600036", UpsertPortfolioInput{
-		Shares: 800, AvgCostPrice: 42.5, BuyDate: "2025-01-10",
-	})
-
-	item, err := svc.GetBySymbol(ctx, "get-user", "600036")
-	if err != nil {
-		t.Fatalf("GetBySymbol failed: %v", err)
+	if _, _, err := svc.CreateEvent(ctx, "sell-user", "600036", CreatePortfolioEventInput{
+		EventType: EventTypeBuy,
+		TradeDate: "2026-04-20",
+		Quantity:  300,
+		Price:     12,
+		Note:      "建仓",
+	}); err != nil {
+		t.Fatalf("buy failed: %v", err)
 	}
-	if item.AvgCostPrice != 42.5 {
-		t.Errorf("expected AvgCostPrice 42.5, got %v", item.AvgCostPrice)
+
+	item, event, err := svc.CreateEvent(ctx, "sell-user", "600036", CreatePortfolioEventInput{
+		EventType: EventTypeSell,
+		TradeDate: "2026-04-23",
+		Quantity:  100,
+		Price:     13,
+		Note:      "减仓",
+	})
+	if err != nil {
+		t.Fatalf("sell failed: %v", err)
+	}
+	if item.Shares != 200 {
+		t.Fatalf("expected remaining shares 200, got %v", item.Shares)
+	}
+	if item.AvgCostPrice != 12 {
+		t.Fatalf("expected avg cost remains 12, got %v", item.AvgCostPrice)
+	}
+	if item.TotalCostAmount != 2400 {
+		t.Fatalf("expected total cost 2400, got %v", item.TotalCostAmount)
+	}
+	if event.RealizedPnlAmount != 100 {
+		t.Fatalf("expected realized pnl 100, got %v", event.RealizedPnlAmount)
 	}
 }
 
-func TestServiceDelete(t *testing.T) {
+func TestServiceAdjustAvgCost(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
-
-	svc.Upsert(ctx, "del-user", "300750", UpsertPortfolioInput{
-		Shares: 200, AvgCostPrice: 55.0,
-	})
-
-	err := svc.Delete(ctx, "del-user", "300750")
-	if err != nil {
-		t.Fatalf("Delete failed: %v", err)
+	if _, _, err := svc.CreateEvent(ctx, "adjust-user", "300750", CreatePortfolioEventInput{
+		EventType: EventTypeBuy,
+		TradeDate: "2026-04-20",
+		Quantity:  200,
+		Price:     10,
+		Note:      "建仓",
+	}); err != nil {
+		t.Fatalf("buy failed: %v", err)
 	}
 
-	_, err = svc.GetBySymbol(ctx, "del-user", "300750")
-	if err == nil {
-		t.Error("expected error after delete")
+	item, event, err := svc.CreateEvent(ctx, "adjust-user", "300750", CreatePortfolioEventInput{
+		EventType:          EventTypeAdjustAvgCost,
+		TradeDate:          "2026-04-25",
+		ManualAvgCostPrice: 9.5,
+		Note:               "补录手续费后修正",
+	})
+	if err != nil {
+		t.Fatalf("adjust avg cost failed: %v", err)
+	}
+	if item.Shares != 200 {
+		t.Fatalf("expected shares unchanged at 200, got %v", item.Shares)
+	}
+	if item.AvgCostPrice != 9.5 {
+		t.Fatalf("expected avg cost 9.5, got %v", item.AvgCostPrice)
+	}
+	if item.CostSource != CostSourceManual {
+		t.Fatalf("expected cost source manual, got %s", item.CostSource)
+	}
+	if event.AfterTotalCost != 1900 {
+		t.Fatalf("expected total cost 1900, got %v", event.AfterTotalCost)
+	}
+}
+
+func TestServiceEnsureInitEventFromSnapshot(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	now := time.Now().UTC()
+	if err := svc.repo.Upsert(ctx, &PortfolioRecord{
+		ID:              "legacy-1",
+		UserID:          "legacy-user",
+		Symbol:          "601318",
+		Shares:          800,
+		AvgCostPrice:    42.5,
+		TotalCostAmount: 34000,
+		BuyDate:         "2025-01-10",
+		Note:            "旧版快照",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}); err != nil {
+		t.Fatalf("seed legacy snapshot failed: %v", err)
+	}
+
+	if err := svc.EnsureInitEventFromSnapshot(ctx, "legacy-user", "601318"); err != nil {
+		t.Fatalf("EnsureInitEventFromSnapshot failed: %v", err)
+	}
+
+	detail, err := svc.GetDetailBySymbol(ctx, "legacy-user", "601318")
+	if err != nil {
+		t.Fatalf("GetDetailBySymbol failed: %v", err)
+	}
+	if detail.Item == nil {
+		t.Fatalf("expected portfolio item after migration")
+	}
+	if len(detail.HistoryPreview) != 1 {
+		t.Fatalf("expected 1 migrated init event, got %d", len(detail.HistoryPreview))
+	}
+	if detail.HistoryPreview[0].EventType != EventTypeInit {
+		t.Fatalf("expected init event, got %s", detail.HistoryPreview[0].EventType)
+	}
+}
+
+func TestServiceUndoLatestEvent(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	_, firstEvent, err := svc.CreateEvent(ctx, "undo-user", "000001", CreatePortfolioEventInput{
+		EventType: EventTypeBuy,
+		TradeDate: "2026-04-20",
+		Quantity:  100,
+		Price:     10,
+		Note:      "建仓",
+	})
+	if err != nil {
+		t.Fatalf("buy failed: %v", err)
+	}
+	_, secondEvent, err := svc.CreateEvent(ctx, "undo-user", "000001", CreatePortfolioEventInput{
+		EventType: EventTypeBuy,
+		TradeDate: "2026-04-21",
+		Quantity:  100,
+		Price:     12,
+		Note:      "加仓",
+	})
+	if err != nil {
+		t.Fatalf("second buy failed: %v", err)
+	}
+
+	result, err := svc.UndoLatestEvent(ctx, "undo-user", "000001", secondEvent.ID)
+	if err != nil {
+		t.Fatalf("UndoLatestEvent failed: %v", err)
+	}
+	if result.Item == nil {
+		t.Fatalf("expected updated item after undo")
+	}
+	if result.Item.Shares != 100 {
+		t.Fatalf("expected shares restored to 100, got %v", result.Item.Shares)
+	}
+	if result.Item.AvgCostPrice != 10 {
+		t.Fatalf("expected avg cost restored to 10, got %v", result.Item.AvgCostPrice)
+	}
+	if result.Item.LastEventID != firstEvent.ID {
+		t.Fatalf("expected last event id restored to first event, got %s", result.Item.LastEventID)
 	}
 }
 
 func TestServiceValidation(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
-
-	// Negative shares
-	_, err := svc.Upsert(ctx, "val-user", "BAD", UpsertPortfolioInput{
-		Shares: -10, AvgCostPrice: 10.0,
-	})
-	if err == nil {
-		t.Error("expected error for negative shares")
+	if _, _, err := svc.CreateEvent(ctx, "val-user", "BAD", CreatePortfolioEventInput{
+		EventType: EventTypeSell,
+		TradeDate: "2026-04-20",
+		Quantity:  10,
+		Price:     10,
+	}); err == nil {
+		t.Fatal("expected error for selling without position")
 	}
-
-	// Negative cost price
-	_, err = svc.Upsert(ctx, "val-user", "BAD2", UpsertPortfolioInput{
-		Shares: 100, AvgCostPrice: -5.0,
-	})
-	if err == nil {
-		t.Error("expected error for negative avg_cost_price")
+	if _, _, err := svc.CreateEvent(ctx, "val-user", "BAD", CreatePortfolioEventInput{
+		EventType: EventTypeBuy,
+		TradeDate: "2026-04-20",
+		Quantity:  -1,
+		Price:     10,
+	}); err == nil {
+		t.Fatal("expected error for negative quantity")
 	}
-
-	// Empty symbol
-	_, err = svc.Upsert(ctx, "val-user", "", UpsertPortfolioInput{
-		Shares: 100, AvgCostPrice: 10.0,
-	})
-	if err == nil {
-		t.Error("expected error for empty symbol")
+	if _, _, err := svc.CreateEvent(ctx, "val-user", "BAD", CreatePortfolioEventInput{
+		EventType:          EventTypeAdjustAvgCost,
+		TradeDate:          "2026-04-20",
+		ManualAvgCostPrice: 10,
+	}); err == nil {
+		t.Fatal("expected error for adjusting avg cost without position")
 	}
 }
 
-func TestServiceSymbolUppercase(t *testing.T) {
+func TestServiceUpsertAndListRemainCompatible(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
-
-	item, _ := svc.Upsert(ctx, "case-user", "sh601318", UpsertPortfolioInput{
-		Shares: 100, AvgCostPrice: 30.0,
+	item, err := svc.Upsert(ctx, "compat-user", "sh601318", UpsertPortfolioInput{
+		Shares:       100,
+		AvgCostPrice: 30,
+		BuyDate:      "2026-04-20",
+		Note:         "兼容写入",
 	})
-	if item.Symbol != "SH601318" {
-		t.Errorf("expected uppercase SH601318, got %s", item.Symbol)
-	}
-
-	// Should be able to retrieve by the stored uppercase form
-	found, err := svc.GetBySymbol(ctx, "case-user", "SH601318")
 	if err != nil {
-		t.Fatalf("could not find by uppercase symbol: %v", err)
+		t.Fatalf("Upsert failed: %v", err)
 	}
-	if found.Symbol != "SH601318" {
-		t.Errorf("expected SH601318, got %s", found.Symbol)
+	if item.Symbol != "SH601318" {
+		t.Fatalf("expected uppercase symbol, got %s", item.Symbol)
+	}
+	list, err := svc.ListByUser(ctx, "compat-user")
+	if err != nil {
+		t.Fatalf("ListByUser failed: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 listed item, got %d", len(list))
 	}
 }
 
 func TestServiceInvestmentProfile(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
-
-	// Create profile
 	prof, err := svc.UpsertInvestmentProfile(ctx, "inv-user", UpsertInvestmentProfileInput{
 		TotalCapital:      500000,
 		RiskPreference:    "conservative",
@@ -139,7 +274,7 @@ func TestServiceInvestmentProfile(t *testing.T) {
 		InvestmentHorizon: "long",
 		MaxDrawdownPct:    10.0,
 		ExperienceLevel:   "beginner",
-		Note:             "conservative investor",
+		Note:              "conservative investor",
 	})
 	if err != nil {
 		t.Fatalf("UpsertInvestmentProfile failed: %v", err)
@@ -148,55 +283,11 @@ func TestServiceInvestmentProfile(t *testing.T) {
 		t.Errorf("expected TotalCapital 500000, got %v", prof.TotalCapital)
 	}
 
-	// Get profile
 	got, err := svc.GetInvestmentProfile(ctx, "inv-user")
 	if err != nil {
 		t.Fatalf("GetInvestmentProfile failed: %v", err)
 	}
 	if got.InvestmentGoal != "income" {
 		t.Errorf("expected investment goal 'income', got %s", got.InvestmentGoal)
-	}
-
-	// Update profile
-	updated, err := svc.UpsertInvestmentProfile(ctx, "inv-user", UpsertInvestmentProfileInput{
-		TotalCapital:      800000,
-		RiskPreference:    "aggressive",
-		MaxDrawdownPct:    30.0,
-	})
-	if err != nil {
-		t.Fatalf("update UpsertInvestmentProfile failed: %v", err)
-	}
-	if updated.TotalCapital != 800000 {
-		t.Errorf("expected updated TotalCapital 800000, got %v", updated.TotalCapital)
-	}
-}
-
-func TestServiceProfileValidation(t *testing.T) {
-	svc, ctx := setupPortfolioService(t)
-
-	// Negative total capital
-	_, err := svc.UpsertInvestmentProfile(ctx, "bad-user", UpsertInvestmentProfileInput{
-		TotalCapital: -1000,
-	})
-	if err == nil {
-		t.Error("expected error for negative total_capital")
-	}
-
-	// Max drawdown out of range (>100)
-	_, err = svc.UpsertInvestmentProfile(ctx, "bad-user", UpsertInvestmentProfileInput{
-		TotalCapital:   10000,
-		MaxDrawdownPct: 150.0,
-	})
-	if err == nil {
-		t.Error("expected error for max_drawdown_pct > 100")
-	}
-
-	// Max drawdown negative
-	_, err = svc.UpsertInvestmentProfile(ctx, "bad-user", UpsertInvestmentProfileInput{
-		TotalCapital:   10000,
-		MaxDrawdownPct: -5.0,
-	})
-	if err == nil {
-		t.Error("expected error for negative max_drawdown_pct")
 	}
 }

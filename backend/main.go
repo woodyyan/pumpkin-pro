@@ -2335,26 +2335,29 @@ func (a *appServer) handlePortfolioList(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *appServer) handlePortfolioBySymbol(w http.ResponseWriter, r *http.Request) {
-	symbol := strings.TrimPrefix(r.URL.Path, "/api/portfolio/")
-	symbol = strings.TrimSpace(strings.ToUpper(strings.Trim(symbol, "/")))
-	if symbol == "" {
+	suffix := strings.TrimPrefix(r.URL.Path, "/api/portfolio/")
+	suffix = strings.Trim(strings.TrimSpace(suffix), "/")
+	parts := strings.Split(suffix, "/")
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
 		writeError(w, http.StatusBadRequest, "symbol is required")
 		return
 	}
+	symbol := strings.TrimSpace(strings.ToUpper(parts[0]))
 	userID := currentUserID(r)
+
+	if len(parts) >= 2 && parts[1] == "events" {
+		a.handlePortfolioEventSubroutes(w, r, userID, symbol, parts)
+		return
+	}
 
 	switch r.Method {
 	case http.MethodGet:
-		item, err := a.portfolioService.GetBySymbol(r.Context(), userID, symbol)
+		detail, err := a.portfolioService.GetDetailBySymbol(r.Context(), userID, symbol)
 		if err != nil {
-			if errors.Is(err, portfolio.ErrNotFound) {
-				writeJSON(w, http.StatusOK, map[string]any{"item": nil})
-				return
-			}
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"item": item})
+		writeJSON(w, http.StatusOK, detail)
 
 	case http.MethodPut:
 		var input portfolio.UpsertPortfolioInput
@@ -2383,6 +2386,65 @@ func (a *appServer) handlePortfolioBySymbol(w http.ResponseWriter, r *http.Reque
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "Only GET, PUT, DELETE methods are allowed")
 	}
+}
+
+func (a *appServer) handlePortfolioEventSubroutes(w http.ResponseWriter, r *http.Request, userID, symbol string, parts []string) {
+	if len(parts) == 2 {
+		switch r.Method {
+		case http.MethodGet:
+			limit := 20
+			if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+				if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 {
+					limit = parsed
+				}
+			}
+			items, err := a.portfolioService.ListEvents(r.Context(), userID, symbol, limit)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": ""})
+		case http.MethodPost:
+			var input portfolio.CreatePortfolioEventInput
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+			item, event, err := a.portfolioService.CreateEvent(r.Context(), userID, symbol, input)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"item": item, "event": event})
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "Only GET, POST methods are allowed")
+		}
+		return
+	}
+
+	if len(parts) == 4 && parts[3] == "undo" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+			return
+		}
+		result, err := a.portfolioService.UndoLatestEvent(r.Context(), userID, symbol, parts[2])
+		if err != nil {
+			if strings.Contains(err.Error(), "仅支持撤销最后一条持仓变动记录") {
+				writeError(w, http.StatusConflict, err.Error())
+				return
+			}
+			if errors.Is(err, portfolio.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "持仓变动记录不存在")
+				return
+			}
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+
+	writeError(w, http.StatusNotFound, "portfolio events route not found")
 }
 
 func (a *appServer) handleInvestmentProfile(w http.ResponseWriter, r *http.Request) {

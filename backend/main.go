@@ -2481,6 +2481,110 @@ func (a *appServer) handleInvestmentProfile(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// ── Portfolio Dashboard ──
+
+func (a *appServer) handlePortfolioDashboard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	query := portfolio.PortfolioDashboardQuery{
+		Scope:      strings.TrimSpace(r.URL.Query().Get("scope")),
+		SortBy:     strings.TrimSpace(r.URL.Query().Get("sort_by")),
+		SortOrder:  strings.TrimSpace(r.URL.Query().Get("sort_order")),
+		PnlFilter:  strings.TrimSpace(r.URL.Query().Get("pnl_filter")),
+		Keyword:    strings.TrimSpace(r.URL.Query().Get("keyword")),
+		CurveRange: strings.TrimSpace(r.URL.Query().Get("curve_range")),
+	}
+	payload, err := a.portfolioService.GetDashboard(r.Context(), userID, query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (a *appServer) handlePortfolioEquityCurve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	query := portfolio.PortfolioCurveQuery{
+		Scope: strings.TrimSpace(r.URL.Query().Get("scope")),
+		Range: strings.TrimSpace(r.URL.Query().Get("range")),
+	}
+	payload, err := a.portfolioService.GetEquityCurve(r.Context(), userID, query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (a *appServer) handlePortfolioRecentEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	limit := parseLimit(r.URL.Query().Get("limit"), 20)
+	offset := parseOffset(r.URL.Query().Get("offset"), 0)
+	query := portfolio.PortfolioRecentEventsQuery{
+		Scope:   strings.TrimSpace(r.URL.Query().Get("scope")),
+		Keyword: strings.TrimSpace(r.URL.Query().Get("keyword")),
+		Limit:   limit,
+		Offset:  offset,
+	}
+	items, err := a.portfolioService.ListRecentEventsByUser(r.Context(), userID, query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	total := len(items)
+	nextCursor := ""
+	if offset+limit < total {
+		nextCursor = fmt.Sprintf("%d", offset+limit)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "next_cursor": nextCursor})
+}
+
+func (a *appServer) handlePortfolioAllocation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	limit := parseLimit(r.URL.Query().Get("limit"), 10)
+	query := portfolio.PortfolioAllocationQuery{
+		Scope:   strings.TrimSpace(r.URL.Query().Get("scope")),
+		Keyword: strings.TrimSpace(r.URL.Query().Get("keyword")),
+		Limit:   limit,
+	}
+	items, err := a.portfolioService.GetAllocation(r.Context(), userID, query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *appServer) handlePortfolioAIContext(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	scope := strings.TrimSpace(r.URL.Query().Get("scope"))
+	payload, err := a.portfolioService.GetAIContext(r.Context(), userID, scope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
 // ── Quadrant handlers ──
 
 func (a *appServer) handleQuadrant(w http.ResponseWriter, r *http.Request) {
@@ -2918,6 +3022,12 @@ func main() {
 	mux.HandleFunc("/api/portfolio", server.withRequiredAuth(server.handlePortfolioList))
 	mux.HandleFunc("/api/portfolio/", server.withRequiredAuth(server.handlePortfolioBySymbol))
 	mux.HandleFunc("/api/investment-profile", server.withRequiredAuth(server.handleInvestmentProfile))
+	// Portfolio Dashboard
+	mux.HandleFunc("/api/portfolio/dashboard", server.withRequiredAuth(server.handlePortfolioDashboard))
+	mux.HandleFunc("/api/portfolio/equity-curve", server.withRequiredAuth(server.handlePortfolioEquityCurve))
+	mux.HandleFunc("/api/portfolio/events/recent", server.withRequiredAuth(server.handlePortfolioRecentEvents))
+	mux.HandleFunc("/api/portfolio/allocation", server.withRequiredAuth(server.handlePortfolioAllocation))
+	mux.HandleFunc("/api/portfolio/ai-context", server.withRequiredAuth(server.handlePortfolioAIContext))
 	mux.HandleFunc("/api/webhook-deliveries/latest", server.withRequiredAuth(server.handleWebhookDeliveriesLatest))
 
 	mux.HandleFunc("/api/live/watchlist", server.withRequiredAuth(server.handleLiveWatchlist))

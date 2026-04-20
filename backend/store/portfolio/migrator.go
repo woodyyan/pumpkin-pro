@@ -13,5 +13,5 @@ func (Migrator) Name() string {
 }
 
 func (Migrator) AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(&PortfolioRecord{}, &PortfolioEventRecord{}, &InvestmentProfileRecord{})
+	return db.AutoMigrate(&PortfolioRecord{}, &PortfolioEventRecord{}, &PortfolioDailySnapshotRecord{}, &InvestmentProfileRecord{})
 }

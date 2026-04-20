@@ -145,6 +145,15 @@ func (r *Repository) ListAllActiveEventsAsc(ctx context.Context, userID, symbol 
 	return records, err
 }
 
+func (r *Repository) ListActiveEventsByUser(ctx context.Context, userID string) ([]PortfolioEventRecord, error) {
+	var records []PortfolioEventRecord
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND is_voided = ?", userID, false).
+		Order("effective_at DESC, created_at DESC").
+		Find(&records).Error
+	return records, err
+}
+
 func (r *Repository) FindEventByID(ctx context.Context, userID, eventID string) (*PortfolioEventRecord, error) {
 	var record PortfolioEventRecord
 	err := r.db.WithContext(ctx).
@@ -174,6 +183,47 @@ func (r *Repository) VoidEvent(ctx context.Context, userID, eventID, voidedByEve
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (r *Repository) UpsertDailySnapshot(ctx context.Context, record *PortfolioDailySnapshotRecord) error {
+	var existing PortfolioDailySnapshotRecord
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND scope = ? AND snapshot_date = ?", record.UserID, record.Scope, record.SnapshotDate).
+		First(&existing).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return r.db.WithContext(ctx).Create(record).Error
+		}
+		return err
+	}
+	return r.db.WithContext(ctx).
+		Model(&PortfolioDailySnapshotRecord{}).
+		Where("id = ?", existing.ID).
+		Updates(map[string]any{
+			"currency_code":         record.CurrencyCode,
+			"market_value_amount":   record.MarketValueAmount,
+			"total_cost_amount":     record.TotalCostAmount,
+			"unrealized_pnl_amount": record.UnrealizedPnlAmount,
+			"realized_pnl_amount":   record.RealizedPnlAmount,
+			"total_pnl_amount":      record.TotalPnlAmount,
+			"today_pnl_amount":      record.TodayPnlAmount,
+			"position_count":        record.PositionCount,
+			"updated_at":            record.UpdatedAt,
+		}).Error
+}
+
+func (r *Repository) ListDailySnapshots(ctx context.Context, userID string, scopes []string, fromDate string) ([]PortfolioDailySnapshotRecord, error) {
+	query := r.db.WithContext(ctx).
+		Where("user_id = ?", userID)
+	if len(scopes) > 0 {
+		query = query.Where("scope IN ?", scopes)
+	}
+	if fromDate != "" {
+		query = query.Where("snapshot_date >= ?", fromDate)
+	}
+	var records []PortfolioDailySnapshotRecord
+	err := query.Order("snapshot_date ASC, scope ASC").Find(&records).Error
+	return records, err
 }
 
 // ── Investment Profile ──

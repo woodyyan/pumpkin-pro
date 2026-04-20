@@ -2,6 +2,7 @@ import Head from 'next/head'
 import { useRouter } from 'next/router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import InfoTip from '../../components/InfoTip'
 import { requestJson } from '../../lib/api'
 import { useAuth } from '../../lib/auth-context'
 import { isAuthRequiredError } from '../../lib/auth-storage'
@@ -3181,8 +3182,6 @@ function BollingerChart({ series }) {
 }
 
 function MetricMini({ label, value, accent = 'normal', emphasis = false, featured = false, marketAccent = false, tooltip = '' }) {
-  const [showTip, setShowTip] = useState(false)
-  const tipRef = useRef(null)
   const risingColor = marketAccent ? 'text-rose-300' : 'text-emerald-300'
   const fallingColor = marketAccent ? 'text-emerald-300' : 'text-rose-300'
   const color = accent === 'up' ? risingColor : accent === 'down' ? fallingColor : 'text-white'
@@ -3191,35 +3190,18 @@ function MetricMini({ label, value, accent = 'normal', emphasis = false, feature
   const containerTone = featured ? (marketAccent ? featuredTone : 'border-primary/55 bg-primary/12 ring-1 ring-primary/30 shadow-[0_10px_30px_rgba(76,106,255,0.16)]') : emphasis ? emphasisTone : 'border-border bg-black/20'
   const featuredLabelColor = marketAccent ? (accent === 'up' ? 'text-rose-200/90' : accent === 'down' ? 'text-emerald-200/90' : 'text-primary/85') : 'text-primary/85'
 
-  useEffect(() => {
-    if (!showTip) return
-    const onClick = (e) => { if (tipRef.current && !tipRef.current.contains(e.target)) setShowTip(false) }
-    document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
-  }, [showTip])
-
   return (
     <div className={`relative rounded-xl border px-3 py-2 ${featured ? 'px-4 py-3' : ''} ${containerTone}`}>
       <div className={`flex items-center gap-1 text-xs ${featured ? featuredLabelColor : 'text-white/50'}`}>
         <span>{label}</span>
         {tooltip ? (
-          <span
-            ref={tipRef}
-            className="relative cursor-help"
-            onMouseEnter={() => setShowTip(true)}
-            onMouseLeave={() => setShowTip(false)}
-            onClick={(e) => { e.stopPropagation(); setShowTip((v) => !v) }}
-          >
-            <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 opacity-40 hover:opacity-70 transition">
-              <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm-.75 3.5a.75.75 0 0 1 1.5 0v.01a.75.75 0 0 1-1.5 0V4.5ZM7 7a1 1 0 0 1 2 0v4a1 1 0 0 1-2 0V7Z" />
-            </svg>
-            {showTip ? (
-              <div className="absolute bottom-full left-1/2 z-50 mb-2 w-56 -translate-x-1/2 rounded-xl border border-white/10 bg-[#1a1d25]/95 px-3 py-2.5 text-[11px] leading-relaxed text-white/80 shadow-xl backdrop-blur-sm">
-                {tooltip}
-                <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-[#1a1d25]/95" />
-              </div>
-            ) : null}
-          </span>
+          <InfoTip
+            text={tooltip}
+            placement="top"
+            widthClassName="w-56"
+            iconClassName="h-3 w-3 border-0 p-0 text-white/40 hover:text-white/70 focus:ring-0"
+            panelClassName="rounded-xl bg-[#1a1d25]/95 px-3 py-2.5 text-[11px] leading-relaxed text-white/80"
+          />
         ) : null}
       </div>
       <div className={`mt-1 font-semibold ${color} ${featured ? 'text-2xl leading-none tracking-tight' : 'text-sm'}`}>{value}</div>

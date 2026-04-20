@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: '/backtest', label: '回测引擎' },
   { href: '/live-trading', label: '行情看板' },
   { href: '/stock-picker', label: '选股器' },
+  { href: '/portfolio', label: '持仓管理' },
   { href: '/changelog', label: '更新日志', badgeKey: 'changelog' },
 ]
 

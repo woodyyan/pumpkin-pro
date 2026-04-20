@@ -87,6 +87,24 @@ type SymbolSnapshot struct {
 	Source       string  `json:"source"`
 }
 
+type DetailedSymbolSnapshot struct {
+	Symbol         string  `json:"symbol"`
+	Name           string  `json:"name"`
+	Exchange       string  `json:"exchange"`
+	CurrencyCode   string  `json:"currency_code"`
+	CurrencySymbol string  `json:"currency_symbol"`
+	LastPrice      float64 `json:"last_price"`
+	PrevClosePrice float64 `json:"prev_close_price"`
+	ChangeRate     float64 `json:"change_rate"`
+	Volume         float64 `json:"volume"`
+	Turnover       float64 `json:"turnover"`
+	Amplitude      float64 `json:"amplitude"`
+	VolumeRatio    float64 `json:"volume_ratio"`
+	TurnoverRate   float64 `json:"turnover_rate"`
+	TS             string  `json:"ts"`
+	Source         string  `json:"source"`
+}
+
 type PriceVolumeAnomaly struct {
 	EventID           string         `json:"event_id"`
 	Symbol            string         `json:"symbol"`

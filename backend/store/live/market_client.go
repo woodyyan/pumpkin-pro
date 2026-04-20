@@ -127,6 +127,23 @@ func quoteCodeFromBenchmark(benchmark string) string {
 }
 
 func buildSymbolSnapshot(normalized string, quote *quoteData) *SymbolSnapshot {
+	detail := buildDetailedSymbolSnapshot(normalized, quote)
+	return &SymbolSnapshot{
+		Symbol:       detail.Symbol,
+		Name:         detail.Name,
+		LastPrice:    detail.LastPrice,
+		ChangeRate:   detail.ChangeRate,
+		Volume:       detail.Volume,
+		Turnover:     detail.Turnover,
+		Amplitude:    detail.Amplitude,
+		VolumeRatio:  detail.VolumeRatio,
+		TurnoverRate: detail.TurnoverRate,
+		TS:           detail.TS,
+		Source:       detail.Source,
+	}
+}
+
+func buildDetailedSymbolSnapshot(normalized string, quote *quoteData) *DetailedSymbolSnapshot {
 	amplitude := 0.0
 	if quote.PrevClose > 0 {
 		amplitude = (quote.High - quote.Low) / quote.PrevClose
@@ -135,18 +152,29 @@ func buildSymbolSnapshot(normalized string, quote *quoteData) *SymbolSnapshot {
 	if name == "" {
 		name = normalized
 	}
-	return &SymbolSnapshot{
-		Symbol:       normalized,
-		Name:         name,
-		LastPrice:    quote.Last,
-		ChangeRate:   quote.ChangePct / 100,
-		Volume:       quote.Volume,
-		Turnover:     quote.Turnover,
-		Amplitude:    amplitude,
-		VolumeRatio:  quote.VolumeRate,
-		TurnoverRate: quote.TurnoverRate,
-		TS:           quote.TS.UTC().Format(time.RFC3339),
-		Source:       "tencent-qt",
+	exchange := ExchangeFromSymbol(normalized)
+	currencyCode := "HKD"
+	currencySymbol := "HK$"
+	if IsAShare(normalized) {
+		currencyCode = "CNY"
+		currencySymbol = "¥"
+	}
+	return &DetailedSymbolSnapshot{
+		Symbol:         normalized,
+		Name:           name,
+		Exchange:       exchange,
+		CurrencyCode:   currencyCode,
+		CurrencySymbol: currencySymbol,
+		LastPrice:      quote.Last,
+		PrevClosePrice: quote.PrevClose,
+		ChangeRate:     quote.ChangePct / 100,
+		Volume:         quote.Volume,
+		Turnover:       quote.Turnover,
+		Amplitude:      amplitude,
+		VolumeRatio:    quote.VolumeRate,
+		TurnoverRate:   quote.TurnoverRate,
+		TS:             quote.TS.UTC().Format(time.RFC3339),
+		Source:         "tencent-qt",
 	}
 }
 
@@ -169,6 +197,52 @@ func (c *MarketClient) FetchSymbolSnapshot(ctx context.Context, symbol string) (
 		return nil, err
 	}
 	return buildSymbolSnapshot(normalized, quote), nil
+}
+
+func (c *MarketClient) FetchDetailedSymbolSnapshots(ctx context.Context, symbols []string) ([]DetailedSymbolSnapshot, error) {
+	if len(symbols) == 0 {
+		return []DetailedSymbolSnapshot{}, nil
+	}
+	type codeMapping struct {
+		quoteCode  string
+		normalized string
+	}
+	mappings := make([]codeMapping, 0, len(symbols))
+	codeList := make([]string, 0, len(symbols))
+	seenCodes := make(map[string]struct{}, len(symbols))
+	for _, symbol := range symbols {
+		normalized, _, err := NormalizeSymbol(symbol)
+		if err != nil {
+			continue
+		}
+		quoteCode := quoteCodeFromSymbol(normalized)
+		if _, exists := seenCodes[quoteCode]; exists {
+			continue
+		}
+		seenCodes[quoteCode] = struct{}{}
+		mappings = append(mappings, codeMapping{quoteCode: quoteCode, normalized: normalized})
+		codeList = append(codeList, quoteCode)
+	}
+	if len(codeList) == 0 {
+		return []DetailedSymbolSnapshot{}, nil
+	}
+	fields, err := c.fetchFields(ctx, codeList)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]DetailedSymbolSnapshot, 0, len(mappings))
+	for _, mapping := range mappings {
+		raw, ok := fields[mapping.quoteCode]
+		if !ok {
+			continue
+		}
+		quote, err := parseQuote(mapping.quoteCode, raw)
+		if err != nil {
+			continue
+		}
+		items = append(items, *buildDetailedSymbolSnapshot(mapping.normalized, quote))
+	}
+	return items, nil
 }
 
 func (c *MarketClient) FetchOverlaySnapshot(ctx context.Context, symbol, benchmark string) (*SymbolSnapshot, *BenchmarkSnapshot, error) {

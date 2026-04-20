@@ -125,7 +125,7 @@ type IterationRound struct {
 }
 
 type AIGenerateResponse struct {
-	Recommendation AIRecommendation `json:"recommendation"`
+	Recommendation  AIRecommendation `json:"recommendation"`
 	BacktestPreview *BacktestPreview `json:"backtest_preview,omitempty"`
 	Iterations      []IterationRound `json:"iterations,omitempty"`
 	FinalRound      int              `json:"final_round"`
@@ -151,6 +151,7 @@ type aiChatChoice struct {
 
 type aiChatResponse struct {
 	Choices []aiChatChoice `json:"choices"`
+	Usage   AIUsage        `json:"usage"`
 	Error   *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
@@ -251,7 +252,7 @@ const aiGenerateSystemPrompt = `你是一个量化策略顾问。根据以下股
 
 // ── 核心函数 ──
 
-func GenerateStrategy(ctx context.Context, cfg AIConfig, summary MarketSummary) (*AIGenerateResponse, error) {
+func GenerateStrategy(ctx context.Context, cfg AIConfig, userID string, summary MarketSummary) (*AIGenerateResponse, error) {
 	if !cfg.Enabled() {
 		return nil, fmt.Errorf("%w: AI 功能未启用，请联系管理员配置 AI_API_KEY", ErrInvalid)
 	}
@@ -292,6 +293,7 @@ func GenerateStrategy(ctx context.Context, cfg AIConfig, summary MarketSummary) 
 
 	// ── AI 调用日志埋点 ──
 	logEntry := AILogEntry{
+		UserID:      userID,
 		FeatureKey:  "strategy_generate",
 		FeatureName: "AI 策略生成",
 		Model:       cfg.Model,
@@ -310,23 +312,39 @@ func GenerateStrategy(ctx context.Context, cfg AIConfig, summary MarketSummary) 
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logEntry.Status = "error"
+		logEntry.ErrorMessage = err.Error()
+		LogAICall(logEntry)
 		return nil, fmt.Errorf("读取 AI 响应失败: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		logEntry.Status = "error"
+		logEntry.ErrorMessage = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		LogAICall(logEntry)
 		return nil, fmt.Errorf("AI 服务返回错误 (HTTP %d): %s", resp.StatusCode, truncateStr(string(respBody), 200))
 	}
 
 	var chatResp aiChatResponse
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		logEntry.Status = "error"
+		logEntry.ErrorMessage = err.Error()
+		LogAICall(logEntry)
 		return nil, fmt.Errorf("解析 AI 响应失败: %w", err)
 	}
+	logEntry.ApplyUsage(chatResp.Usage)
 
 	if chatResp.Error != nil {
+		logEntry.Status = "error"
+		logEntry.ErrorMessage = chatResp.Error.Message
+		LogAICall(logEntry)
 		return nil, fmt.Errorf("AI 服务报错: %s", chatResp.Error.Message)
 	}
 
 	if len(chatResp.Choices) == 0 {
+		logEntry.Status = "error"
+		logEntry.ErrorMessage = "empty choices"
+		LogAICall(logEntry)
 		return nil, fmt.Errorf("AI 未返回有效结果")
 	}
 
@@ -555,7 +573,7 @@ type llmIterateOutput struct {
 
 // IterateStrategy takes an initial recommendation + backtest preview, and asks AI whether to adjust params.
 // Returns the updated params (or same if keep) and the AI's reasoning.
-func IterateStrategy(ctx context.Context, cfg AIConfig, implKey string, currentParams map[string]any, summary MarketSummary, preview BacktestPreview) (*llmIterateOutput, error) {
+func IterateStrategy(ctx context.Context, cfg AIConfig, userID, implKey string, currentParams map[string]any, summary MarketSummary, preview BacktestPreview) (*llmIterateOutput, error) {
 	if !cfg.Enabled() {
 		return &llmIterateOutput{Action: "keep", Reason: "AI 未启用"}, nil
 	}
@@ -600,6 +618,7 @@ func IterateStrategy(ctx context.Context, cfg AIConfig, implKey string, currentP
 
 	// ── AI 调用日志埋点（迭代调参）──
 	iterLogEntry := AILogEntry{
+		UserID:      userID,
 		FeatureKey:  "strategy_iterate",
 		FeatureName: "AI 迭代调参",
 		Model:       cfg.Model,
@@ -618,19 +637,39 @@ func IterateStrategy(ctx context.Context, cfg AIConfig, implKey string, currentP
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		iterLogEntry.Status = "error"
+		iterLogEntry.ErrorMessage = err.Error()
+		LogAICall(iterLogEntry)
 		return &llmIterateOutput{Action: "keep", Reason: "读取响应失败"}, nil
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		iterLogEntry.Status = "error"
+		iterLogEntry.ErrorMessage = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		LogAICall(iterLogEntry)
 		return &llmIterateOutput{Action: "keep", Reason: "AI 服务返回错误"}, nil
 	}
 
 	var chatResp aiChatResponse
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		iterLogEntry.Status = "error"
+		iterLogEntry.ErrorMessage = err.Error()
+		LogAICall(iterLogEntry)
 		return &llmIterateOutput{Action: "keep", Reason: "解析响应失败"}, nil
+	}
+	iterLogEntry.ApplyUsage(chatResp.Usage)
+
+	if chatResp.Error != nil {
+		iterLogEntry.Status = "error"
+		iterLogEntry.ErrorMessage = chatResp.Error.Message
+		LogAICall(iterLogEntry)
+		return &llmIterateOutput{Action: "keep", Reason: "AI 服务报错"}, nil
 	}
 
 	if len(chatResp.Choices) == 0 {
+		iterLogEntry.Status = "error"
+		iterLogEntry.ErrorMessage = "empty choices"
+		LogAICall(iterLogEntry)
 		return &llmIterateOutput{Action: "keep", Reason: "AI 未返回结果"}, nil
 	}
 
@@ -638,6 +677,9 @@ func IterateStrategy(ctx context.Context, cfg AIConfig, implKey string, currentP
 
 	var output llmIterateOutput
 	if err := json.Unmarshal([]byte(content), &output); err != nil {
+		iterLogEntry.Status = "error"
+		iterLogEntry.ErrorMessage = "JSON parse error"
+		LogAICall(iterLogEntry)
 		return &llmIterateOutput{Action: "keep", Reason: "AI 返回格式不正确，保持当前参数"}, nil
 	}
 
@@ -756,10 +798,10 @@ const aiAnalyzeBacktestPrompt = `你是一个量化回测分析顾问。用户�
 }`
 
 type BacktestAnalysis struct {
-	Diagnosis      string         `json:"diagnosis"`
-	Suggestion     string         `json:"suggestion"`
+	Diagnosis       string         `json:"diagnosis"`
+	Suggestion      string         `json:"suggestion"`
 	SuggestedParams map[string]any `json:"suggested_params"`
-	Confidence     string         `json:"confidence"`
+	Confidence      string         `json:"confidence"`
 }
 
 type AnalyzeBacktestInput struct {
@@ -772,7 +814,7 @@ type AnalyzeBacktestInput struct {
 	Metrics           map[string]any `json:"metrics"`
 }
 
-func AnalyzeBacktest(ctx context.Context, cfg AIConfig, input AnalyzeBacktestInput) (*BacktestAnalysis, error) {
+func AnalyzeBacktest(ctx context.Context, cfg AIConfig, userID string, input AnalyzeBacktestInput) (*BacktestAnalysis, error) {
 	if !cfg.Enabled() {
 		return nil, fmt.Errorf("AI 功能未启用")
 	}
@@ -818,6 +860,7 @@ func AnalyzeBacktest(ctx context.Context, cfg AIConfig, input AnalyzeBacktestInp
 
 	// ── AI 调用日志埋点（回测优化）──
 	btLogEntry := AILogEntry{
+		UserID:      userID,
 		FeatureKey:  "backtest_optimize",
 		FeatureName: "AI 回测优化",
 		Model:       cfg.Model,
@@ -836,19 +879,39 @@ func AnalyzeBacktest(ctx context.Context, cfg AIConfig, input AnalyzeBacktestInp
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		btLogEntry.Status = "error"
+		btLogEntry.ErrorMessage = err.Error()
+		LogAICall(btLogEntry)
 		return nil, fmt.Errorf("读取响应失败: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		btLogEntry.Status = "error"
+		btLogEntry.ErrorMessage = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		LogAICall(btLogEntry)
 		return nil, fmt.Errorf("AI 服务返回错误 (HTTP %d): %s", resp.StatusCode, truncateStr(string(respBody), 200))
 	}
 
 	var chatResp aiChatResponse
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		btLogEntry.Status = "error"
+		btLogEntry.ErrorMessage = err.Error()
+		LogAICall(btLogEntry)
 		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+	btLogEntry.ApplyUsage(chatResp.Usage)
+
+	if chatResp.Error != nil {
+		btLogEntry.Status = "error"
+		btLogEntry.ErrorMessage = chatResp.Error.Message
+		LogAICall(btLogEntry)
+		return nil, fmt.Errorf("AI 服务报错: %s", chatResp.Error.Message)
 	}
 
 	if len(chatResp.Choices) == 0 {
+		btLogEntry.Status = "error"
+		btLogEntry.ErrorMessage = "empty choices"
+		LogAICall(btLogEntry)
 		return nil, fmt.Errorf("AI 未返回有效结果")
 	}
 
@@ -856,6 +919,9 @@ func AnalyzeBacktest(ctx context.Context, cfg AIConfig, input AnalyzeBacktestInp
 
 	var analysis BacktestAnalysis
 	if err := json.Unmarshal([]byte(content), &analysis); err != nil {
+		btLogEntry.Status = "error"
+		btLogEntry.ErrorMessage = "JSON parse error"
+		LogAICall(btLogEntry)
 		return &BacktestAnalysis{
 			Diagnosis:  "AI 返回格式异常，无法解析优化建议。",
 			Suggestion: "建议手动调整参数后重新回测。",

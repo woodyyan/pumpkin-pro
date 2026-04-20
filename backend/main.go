@@ -645,7 +645,7 @@ func (a *appServer) handleStrategyAIGenerate(w http.ResponseWriter, r *http.Requ
 		Model:   a.cfg.AI.Model,
 	}
 
-	result, err := strategy.GenerateStrategy(r.Context(), aiCfg, summary)
+	result, err := strategy.GenerateStrategy(r.Context(), aiCfg, userID, summary)
 	if err != nil {
 		log.Printf("[ai-generate] LLM call failed for %s: %v", ticker, err)
 		writeError(w, http.StatusInternalServerError, "AI 服务暂时不可用，请稍后重试。如持续失败，请检查网络连接。")
@@ -768,7 +768,7 @@ func (a *appServer) handleStrategyAIBacktest(w http.ResponseWriter, r *http.Requ
 			break
 		}
 
-		iterResult, iterErr := strategy.IterateStrategy(r.Context(), aiCfg, implKey, currentParams, summary, preview)
+		iterResult, iterErr := strategy.IterateStrategy(r.Context(), aiCfg, userID, implKey, currentParams, summary, preview)
 		if iterErr != nil || iterResult == nil || iterResult.Action != "adjust" {
 			reason := "AI 建议保持当前参数"
 			if iterResult != nil && iterResult.Reason != "" {
@@ -836,7 +836,7 @@ func (a *appServer) handleBacktestAIOptimize(w http.ResponseWriter, r *http.Requ
 		Model:   a.cfg.AI.Model,
 	}
 
-	analysis, err := strategy.AnalyzeBacktest(r.Context(), aiCfg, input)
+	analysis, err := strategy.AnalyzeBacktest(r.Context(), aiCfg, userID, input)
 	if err != nil {
 		log.Printf("[ai-optimize] analysis failed for %s/%s: %v", input.Ticker, input.ImplementationKey, err)
 		writeError(w, http.StatusInternalServerError, "AI 服务暂时不可用，请稍后重试。如持续失败，请检查网络连接。")
@@ -1592,7 +1592,7 @@ func (a *appServer) handleStockAIAnalysis(w http.ResponseWriter, r *http.Request
 	}
 
 	// 调用 AI 分析
-	result, err := strategy.AnalyzeStock(r.Context(), cfg, &input, profile)
+	result, err := strategy.AnalyzeStock(r.Context(), cfg, userID, &input, profile)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2210,7 +2210,7 @@ func (a *appServer) handleScreenerAIParse(w http.ResponseWriter, r *http.Request
 		Model:   a.cfg.AI.Model,
 	}
 
-	result, err := screener.ParseNaturalLanguage(r.Context(), aiCfg, query, exchange)
+	result, err := screener.ParseNaturalLanguage(r.Context(), aiCfg, userID, query, exchange)
 	if err != nil {
 		a.writeScreenerError(w, err)
 		return
@@ -3043,6 +3043,7 @@ func main() {
 	mux.HandleFunc("/api/admin/system-health/logs", server.withSuperAdminAuth(server.handleAdminSystemHealthLogs))
 	mux.HandleFunc("/api/admin/system-health/purge", server.withSuperAdminAuth(server.handleAdminSystemHealthPurge))
 	mux.HandleFunc("/api/admin/user-funnel", server.withSuperAdminAuth(server.handleAdminUserFunnel))
+	mux.HandleFunc("/api/admin/ai-usage", server.withSuperAdminAuth(server.handleAdminAITokenUsage))
 
 	mux.HandleFunc("/api/analytics/pageview", server.withOptionalAuth(server.handlePageView))
 

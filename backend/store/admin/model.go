@@ -49,17 +49,17 @@ type AdminAccessClaims struct {
 // ── Stats response types ──
 
 type StatsResult struct {
-	Users       UserStats       `json:"users"`
-	Strategies  StrategyStats   `json:"strategies"`
-	Live        LiveStats       `json:"live"`
-	Signals     SignalStats     `json:"signals"`
-	Audit       AuditStats      `json:"audit"`
-	Features    FeatureStats    `json:"features"`
-	Trends      TrendStats      `json:"trends"`
-	Retention   RetentionStats  `json:"retention"`
-	Traffic     TrafficStats    `json:"traffic"`
-	AI          AIStats         `json:"ai"`
-	GeneratedAt string          `json:"generated_at"`
+	Users       UserStats      `json:"users"`
+	Strategies  StrategyStats  `json:"strategies"`
+	Live        LiveStats      `json:"live"`
+	Signals     SignalStats    `json:"signals"`
+	Audit       AuditStats     `json:"audit"`
+	Features    FeatureStats   `json:"features"`
+	Trends      TrendStats     `json:"trends"`
+	Retention   RetentionStats `json:"retention"`
+	Traffic     TrafficStats   `json:"traffic"`
+	AI          AIStats        `json:"ai"`
+	GeneratedAt string         `json:"generated_at"`
 }
 
 type UserStats struct {
@@ -86,14 +86,14 @@ type LiveStats struct {
 }
 
 type SignalStats struct {
-	WebhookUsers        int64   `json:"webhook_users"`
-	WebhookEnabledRate  float64 `json:"webhook_enabled_rate"`
-	SignalConfigs       int64   `json:"signal_configs"`
-	SignalConfigsEnabled int64  `json:"signal_configs_enabled"`
-	TotalEvents         int64   `json:"total_events"`
-	TodayEvents         int64   `json:"today_events"`
-	DeliverySuccessRate float64 `json:"delivery_success_rate"`
-	TodayDeliveries     int64   `json:"today_deliveries"`
+	WebhookUsers         int64   `json:"webhook_users"`
+	WebhookEnabledRate   float64 `json:"webhook_enabled_rate"`
+	SignalConfigs        int64   `json:"signal_configs"`
+	SignalConfigsEnabled int64   `json:"signal_configs_enabled"`
+	TotalEvents          int64   `json:"total_events"`
+	TodayEvents          int64   `json:"today_events"`
+	DeliverySuccessRate  float64 `json:"delivery_success_rate"`
+	TodayDeliveries      int64   `json:"today_deliveries"`
 }
 
 type AuditStats struct {
@@ -131,15 +131,22 @@ type TrafficStats struct {
 // ── AI 调用统计 ──
 
 type AIStats struct {
-	TotalCalls    int64          `json:"total_calls"`
-	TodayCalls    int64          `json:"today_calls"`
-	Last7DCalls   int64          `json:"last_7d_calls"`
-	SuccessRate   float64        `json:"success_rate"`
-	AvgResponseMS float64        `json:"avg_response_ms"`
-	UniqueUsers   int64          `json:"unique_users"`
-	ByFeature     []FeatureCount `json:"by_feature"`
-	DailyTrend    []DailyCount   `json:"daily_trend"`
-	TopUsers      []TopAIUser    `json:"top_users"`
+	TotalCalls       int64               `json:"total_calls"`
+	TodayCalls       int64               `json:"today_calls"`
+	Last7DCalls      int64               `json:"last_7d_calls"`
+	SuccessRate      float64             `json:"success_rate"`
+	AvgResponseMS    float64             `json:"avg_response_ms"`
+	UniqueUsers      int64               `json:"unique_users"`
+	TotalTokens      int64               `json:"total_tokens"`
+	TodayTokens      int64               `json:"today_tokens"`
+	Last7DTokens     int64               `json:"last_7d_tokens"`
+	AvgTokensPerCall float64             `json:"avg_tokens_per_call"`
+	ByFeature        []FeatureCount      `json:"by_feature"`
+	ByFeatureTokens  []FeatureTokenCount `json:"by_feature_tokens"`
+	DailyTrend       []DailyCount        `json:"daily_trend"`
+	DailyTokenTrend  []DailyCount        `json:"daily_token_trend"`
+	TopUsers         []TopAIUser         `json:"top_users"`
+	TopTokenUsers    []TopAIUser         `json:"top_token_users"`
 }
 
 type FeatureCount struct {
@@ -148,25 +155,64 @@ type FeatureCount struct {
 	Count       int64  `json:"count"`
 }
 
+type FeatureTokenCount struct {
+	FeatureKey       string `json:"feature_key"`
+	FeatureName      string `json:"feature_name"`
+	CallCount        int64  `json:"call_count"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	TotalTokens      int64  `json:"total_tokens"`
+}
+
 type TopAIUser struct {
-	UserID       string `json:"user_id"`
-	CallCount    int64  `json:"call_count"`
-	LastCalledAt string `json:"last_called_at"`
+	UserID           string `json:"user_id"`
+	Email            string `json:"email,omitempty"`
+	CallCount        int64  `json:"call_count"`
+	PromptTokens     int64  `json:"prompt_tokens,omitempty"`
+	CompletionTokens int64  `json:"completion_tokens,omitempty"`
+	TotalTokens      int64  `json:"total_tokens,omitempty"`
+	LastCalledAt     string `json:"last_called_at"`
+}
+
+type AITokenUsageSummary struct {
+	PromptTokens     int64   `json:"prompt_tokens"`
+	CompletionTokens int64   `json:"completion_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`
+	CallCount        int64   `json:"call_count"`
+	AvgTokensPerCall float64 `json:"avg_tokens_per_call"`
+}
+
+type DailyUserTokenUsage struct {
+	Date             string `json:"date"`
+	UserID           string `json:"user_id"`
+	Email            string `json:"email,omitempty"`
+	CallCount        int64  `json:"call_count"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	TotalTokens      int64  `json:"total_tokens"`
+	LastCalledAt     string `json:"last_called_at"`
+}
+
+type AITokenUsageResult struct {
+	Days        int                   `json:"days"`
+	Summary     AITokenUsageSummary   `json:"summary"`
+	DailyUsers  []DailyUserTokenUsage `json:"daily_users"`
+	GeneratedAt string                `json:"generated_at"`
 }
 
 // ── User Funnel Stats ──
 
 // FunnelStep represents one layer of the user conversion funnel.
 type FunnelStep struct {
-	Label      string `json:"label"`               // e.g. "注册", "登录"
-	CountAll   int64  `json:"count_all"`           // total (all time)
-	CountToday int64  `json:"count_today"`         // today
-	Count7D    int64  `json:"count_7d"`            // last 7 days
-	Count30D   int64  `json:"count_30d"`           // last 30 days
+	Label      string `json:"label"`       // e.g. "注册", "登录"
+	CountAll   int64  `json:"count_all"`   // total (all time)
+	CountToday int64  `json:"count_today"` // today
+	Count7D    int64  `json:"count_7d"`    // last 7 days
+	Count30D   int64  `json:"count_30d"`   // last 30 days
 }
 
 // FunnelStats is the full funnel response.
 type FunnelStats struct {
-	Steps       []FunnelStep `json:"steps"`                 // ordered 7 steps
+	Steps       []FunnelStep `json:"steps"` // ordered 7 steps
 	GeneratedAt string       `json:"generated_at"`
 }

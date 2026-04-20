@@ -206,50 +206,50 @@ func (s *Service) GetFunnelStats(ctx context.Context) (*FunnelStats, error) {
 
 	steps := []FunnelStep{
 		{
-			Label: "访客",
-			CountAll: since(s.repo.CountUVSince, time.Time{}),
+			Label:      "访客",
+			CountAll:   since(s.repo.CountUVSince, time.Time{}),
 			CountToday: since(s.repo.CountUVSince, today),
 			Count7D:    since(s.repo.CountUVSince, sevenDaysAgo),
 			Count30D:   since(s.repo.CountUVSince, thirtyDaysAgo),
 		},
 		{
-			Label: "注册",
-			CountAll: safeNoArg(s.repo.CountUsers),
+			Label:      "注册",
+			CountAll:   safeNoArg(s.repo.CountUsers),
 			CountToday: since(s.repo.CountUsersSince, today),
 			Count7D:    since(s.repo.CountUsersSince, sevenDaysAgo),
 			Count30D:   since(s.repo.CountUsersSince, thirtyDaysAgo),
 		},
 		{
-			Label: "登录",
-			CountAll: since(s.repo.CountUniqueLoginsSince, time.Time{}),
+			Label:      "登录",
+			CountAll:   since(s.repo.CountUniqueLoginsSince, time.Time{}),
 			CountToday: since(s.repo.CountUniqueLoginsSince, today),
 			Count7D:    since(s.repo.CountUniqueLoginsSince, sevenDaysAgo),
 			Count30D:   since(s.repo.CountUniqueLoginsSince, thirtyDaysAgo),
 		},
 		{
-			Label: "加关注池",
-			CountAll: safeNoArg(s.repo.CountUsersWithWatchlist),
+			Label:      "加关注池",
+			CountAll:   safeNoArg(s.repo.CountUsersWithWatchlist),
 			CountToday: since(s.repo.CountUsersWithWatchlistSince, today),
 			Count7D:    since(s.repo.CountUsersWithWatchlistSince, sevenDaysAgo),
 			Count30D:   since(s.repo.CountUsersWithWatchlistSince, thirtyDaysAgo),
 		},
 		{
-			Label: "配置信号",
-			CountAll: since(s.repo.CountUsersWithSignalConfigsSince, time.Time{}),
+			Label:      "配置信号",
+			CountAll:   since(s.repo.CountUsersWithSignalConfigsSince, time.Time{}),
 			CountToday: since(s.repo.CountUsersWithSignalConfigsSince, today),
 			Count7D:    since(s.repo.CountUsersWithSignalConfigsSince, sevenDaysAgo),
 			Count30D:   since(s.repo.CountUsersWithSignalConfigsSince, thirtyDaysAgo),
 		},
 		{
-			Label: "跑回测",
-			CountAll: safeNoArg(s.repo.CountBacktestUsers),
+			Label:      "跑回测",
+			CountAll:   safeNoArg(s.repo.CountBacktestUsers),
 			CountToday: since(s.repo.CountBacktestUsersSince, today),
 			Count7D:    since(s.repo.CountBacktestUsersSince, sevenDaysAgo),
 			Count30D:   since(s.repo.CountBacktestUsersSince, thirtyDaysAgo),
 		},
 		{
-			Label: "用 AI",
-			CountAll: safeNoArg(s.repo.AIUniqueUsers),
+			Label:      "用 AI",
+			CountAll:   safeNoArg(s.repo.AIUniqueUsers),
 			CountToday: since(s.repo.CountAIUniqueUsersSince, today),
 			Count7D:    since(s.repo.CountAIUniqueUsersSince, sevenDaysAgo),
 			Count30D:   since(s.repo.CountAIUniqueUsersSince, thirtyDaysAgo),
@@ -378,9 +378,15 @@ func (s *Service) collectTrendStats(ctx context.Context) TrendStats {
 	regTrend, _ := s.repo.DailyRegistrations(ctx, 30)
 	dauTrend, _ := s.repo.DailyActiveUsers(ctx, 30)
 	sigTrend, _ := s.repo.DailySignalEvents(ctx, 30)
-	if regTrend == nil { regTrend = []DailyCount{} }
-	if dauTrend == nil { dauTrend = []DailyCount{} }
-	if sigTrend == nil { sigTrend = []DailyCount{} }
+	if regTrend == nil {
+		regTrend = []DailyCount{}
+	}
+	if dauTrend == nil {
+		dauTrend = []DailyCount{}
+	}
+	if sigTrend == nil {
+		sigTrend = []DailyCount{}
+	}
 	return TrendStats{
 		DailyRegistrations: regTrend,
 		DailyActiveUsers:   dauTrend,
@@ -397,25 +403,62 @@ func (s *Service) collectRetentionStats(ctx context.Context) RetentionStats {
 	reg30, ret30, _ := s.repo.RetentionRate(ctx, thirtyDaysAgo, 30)
 
 	rate7 := float64(0)
-	if reg7 > 0 { rate7 = float64(ret7) / float64(reg7) }
+	if reg7 > 0 {
+		rate7 = float64(ret7) / float64(reg7)
+	}
 	rate30 := float64(0)
-	if reg30 > 0 { rate30 = float64(ret30) / float64(reg30) }
+	if reg30 > 0 {
+		rate30 = float64(ret30) / float64(reg30)
+	}
 
 	return RetentionStats{Day7Rate: rate7, Day30Rate: rate30}
 }
 
 func (s *Service) collectTrafficStats(ctx context.Context) TrafficStats {
 	utmSources, _ := s.repo.UTMSourceBreakdown(ctx)
-	if utmSources == nil { utmSources = []SourceCount{} }
+	if utmSources == nil {
+		utmSources = []SourceCount{}
+	}
 
 	thirtyDaysAgo := time.Now().UTC().AddDate(0, 0, -30)
 	referrers, _ := s.repo.ReferrerBreakdown(ctx, thirtyDaysAgo)
-	if referrers == nil { referrers = []SourceCount{} }
+	if referrers == nil {
+		referrers = []SourceCount{}
+	}
 
 	return TrafficStats{
 		UTMSources: utmSources,
 		Referrers:  referrers,
 	}
+}
+
+func (s *Service) GetAITokenUsage(ctx context.Context, days, limit int) (*AITokenUsageResult, error) {
+	if days <= 0 {
+		days = 30
+	}
+	if limit <= 0 {
+		limit = 120
+	}
+
+	since := time.Now().UTC().AddDate(0, 0, -days)
+	summary, err := s.repo.AISumUsage(ctx, since)
+	if err != nil {
+		return nil, fmt.Errorf("query ai token summary: %w", err)
+	}
+	dailyUsers, err := s.repo.AIDailyUserTokenUsage(ctx, days, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query ai daily user token usage: %w", err)
+	}
+	if dailyUsers == nil {
+		dailyUsers = []DailyUserTokenUsage{}
+	}
+
+	return &AITokenUsageResult{
+		Days:        days,
+		Summary:     summary,
+		DailyUsers:  dailyUsers,
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+	}, nil
 }
 
 // ── Helpers ──
@@ -428,23 +471,51 @@ func (s *Service) collectAIStats(ctx context.Context, today, sevenDaysAgo time.T
 	avgMS, _ := s.repo.AIAvgResponseMS(ctx)
 	uniqueUsers, _ := s.repo.AIUniqueUsers(ctx)
 	byFeature, _ := s.repo.AIByFeatureBreakdown(ctx)
+	byFeatureTokens, _ := s.repo.AIByFeatureTokenBreakdown(ctx)
 	dailyTrend, _ := s.repo.AIDailyTrend(ctx, 30)
+	dailyTokenTrend, _ := s.repo.AIDailyTokenTrend(ctx, 30)
 	topUsers, _ := s.repo.AITopUsers(ctx, 10)
+	topTokenUsers, _ := s.repo.AITopUsersByTokens(ctx, 10)
+	totalUsage, _ := s.repo.AISumUsage(ctx, time.Time{})
+	todayUsage, _ := s.repo.AISumUsage(ctx, today)
+	usage7D, _ := s.repo.AISumUsage(ctx, sevenDaysAgo)
 
-	if byFeature == nil { byFeature = []FeatureCount{} }
-	if dailyTrend == nil { dailyTrend = []DailyCount{} }
-	if topUsers == nil { topUsers = []TopAIUser{} }
+	if byFeature == nil {
+		byFeature = []FeatureCount{}
+	}
+	if byFeatureTokens == nil {
+		byFeatureTokens = []FeatureTokenCount{}
+	}
+	if dailyTrend == nil {
+		dailyTrend = []DailyCount{}
+	}
+	if dailyTokenTrend == nil {
+		dailyTokenTrend = []DailyCount{}
+	}
+	if topUsers == nil {
+		topUsers = []TopAIUser{}
+	}
+	if topTokenUsers == nil {
+		topTokenUsers = []TopAIUser{}
+	}
 
 	return AIStats{
-		TotalCalls:    totalCalls,
-		TodayCalls:    todayCalls,
-		Last7DCalls:   calls7D,
-		SuccessRate:   successRate,
-		AvgResponseMS: avgMS,
-		UniqueUsers:   uniqueUsers,
-		ByFeature:     byFeature,
-		DailyTrend:    dailyTrend,
-		TopUsers:      topUsers,
+		TotalCalls:       totalCalls,
+		TodayCalls:       todayCalls,
+		Last7DCalls:      calls7D,
+		SuccessRate:      successRate,
+		AvgResponseMS:    avgMS,
+		UniqueUsers:      uniqueUsers,
+		TotalTokens:      totalUsage.TotalTokens,
+		TodayTokens:      todayUsage.TotalTokens,
+		Last7DTokens:     usage7D.TotalTokens,
+		AvgTokensPerCall: totalUsage.AvgTokensPerCall,
+		ByFeature:        byFeature,
+		ByFeatureTokens:  byFeatureTokens,
+		DailyTrend:       dailyTrend,
+		DailyTokenTrend:  dailyTokenTrend,
+		TopUsers:         topUsers,
+		TopTokenUsers:    topTokenUsers,
 	}
 }
 

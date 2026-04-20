@@ -84,6 +84,33 @@ func (a *appServer) handleAdminUserFunnel(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, stats)
 }
 
+// handleAdminAITokenUsage returns per-day per-user AI token usage details.
+// GET /api/admin/ai-usage?days=30&limit=120
+func (a *appServer) handleAdminAITokenUsage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+
+	days := 30
+	if raw := strings.TrimSpace(r.URL.Query().Get("days")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value <= 0 || value > 180 {
+			writeError(w, http.StatusBadRequest, "days 参数无效")
+			return
+		}
+		days = value
+	}
+	limit := parseLimit(r.URL.Query().Get("limit"), 120)
+
+	result, err := a.adminService.GetAITokenUsage(r.Context(), days, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "获取 AI token 用量失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 // handleAdminSystemHealthPurge triggers cleanup of old error logs (admin-only).
 // POST /api/admin/system-health/purge
 func (a *appServer) handleAdminSystemHealthPurge(w http.ResponseWriter, r *http.Request) {
@@ -107,9 +134,9 @@ func (a *appServer) handleAdminSystemHealthPurge(w http.ResponseWriter, r *http.
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":          true,
-		"deleted":     deleted,
-		"kept_days":   retentionDays,
+		"ok":        true,
+		"deleted":   deleted,
+		"kept_days": retentionDays,
 	})
 }
 
@@ -196,7 +223,7 @@ func (a *appServer) handleQuadrantProgress(w http.ResponseWriter, r *http.Reques
 		Message  string `json:"message,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-			writeJSON(w, http.StatusOK, map[string]string{"ok": "1"}) //宽容：解析失败不阻塞 Quant
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"}) //宽容：解析失败不阻塞 Quant
 		return
 	}
 

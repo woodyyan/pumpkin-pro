@@ -27,30 +27,30 @@ type StockAnalysisInput struct {
 
 // StockAnalysisOutput LLM 返回的结构化分析结果
 type StockAnalysisOutput struct {
-	Signal            string                 `json:"signal"`
-	ConfidenceScore   int                    `json:"confidence_score"`
-	ConfidenceLevel   string                 `json:"confidence_level"`
-	LogicSummary      string                 `json:"logic_summary"`
-	RiskWarnings      []string               `json:"risk_warnings"`
-	TradingSuggestions map[string]any        `json:"trading_suggestions"`
-	DataTimestamp     string                 `json:"data_timestamp"`
+	Signal             string         `json:"signal"`
+	ConfidenceScore    int            `json:"confidence_score"`
+	ConfidenceLevel    string         `json:"confidence_level"`
+	LogicSummary       string         `json:"logic_summary"`
+	RiskWarnings       []string       `json:"risk_warnings"`
+	TradingSuggestions map[string]any `json:"trading_suggestions"`
+	DataTimestamp      string         `json:"data_timestamp"`
 
 	// ── 四层分析框架（第二步新增）──
-	LayerScores       map[string]*LayerScore `json:"layer_scores,omitempty"`
-	TotalScore        float64                `json:"total_score,omitempty"`
-	MarketState       string                 `json:"market_state,omitempty"`
-	MarketStateLabel  string                 `json:"market_state_label,omitempty"`
-	ActionTrigger     *ActionTrigger         `json:"action_trigger,omitempty"`
-	KeyRisks          []string               `json:"key_risks,omitempty"`
-	KeyCatalysts      []string               `json:"key_catalysts,omitempty"`
+	LayerScores      map[string]*LayerScore `json:"layer_scores,omitempty"`
+	TotalScore       float64                `json:"total_score,omitempty"`
+	MarketState      string                 `json:"market_state,omitempty"`
+	MarketStateLabel string                 `json:"market_state_label,omitempty"`
+	ActionTrigger    *ActionTrigger         `json:"action_trigger,omitempty"`
+	KeyRisks         []string               `json:"key_risks,omitempty"`
+	KeyCatalysts     []string               `json:"key_catalysts,omitempty"`
 }
 
 // LayerScore 单层评分结果
 type LayerScore struct {
-	Direction  string  `json:"direction"`   // bullish / neutral / bearish
-	Score      float64 `json:"score"`       // -2 ~ +2
-	Confidence float64 `json:"confidence"`  // 0 ~ 1
-	Reason     string  `json:"reason"`      // 核心逻辑说明
+	Direction  string  `json:"direction"`  // bullish / neutral / bearish
+	Score      float64 `json:"score"`      // -2 ~ +2
+	Confidence float64 `json:"confidence"` // 0 ~ 1
+	Reason     string  `json:"reason"`     // 核心逻辑说明
 }
 
 // ActionTrigger 执行触发条件
@@ -192,7 +192,7 @@ const stockAnalysisSystemPrompt = `你是一个专业的多层框架股票分析
 
 // ── 核心：执行 AI 个股诊断 ──
 
-func AnalyzeStock(ctx context.Context, cfg AIConfig, input *StockAnalysisInput, profile *portfolio.InvestmentProfile) (*AnalysisResponse, error) {
+func AnalyzeStock(ctx context.Context, cfg AIConfig, userID string, input *StockAnalysisInput, profile *portfolio.InvestmentProfile) (*AnalysisResponse, error) {
 	if !cfg.Enabled() {
 		return nil, fmt.Errorf("%w: AI 功能未启用，请联系管理员配置 AI_API_KEY", ErrInvalid)
 	}
@@ -216,12 +216,6 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, input *StockAnalysisInput, 
 	}
 
 	endpoint := cfg.BaseURL + "/chat/completions"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
-	if err != nil {
-		return nil, fmt.Errorf("创建 AI 请求失败: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 
 	// 个股分析是重计算任务（长 prompt → 长推理 → 长 output），
 	// 使用 90s 超时 + 1 次重试覆盖网络抖动 / AI 服务瞬时过载
@@ -248,6 +242,7 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, input *StockAnalysisInput, 
 
 		// ── AI 调用日志埋点 ──
 		logEntry := AILogEntry{
+			UserID:      userID,
 			FeatureKey:  "stock_analysis",
 			FeatureName: "AI 个股诊断",
 			Model:       cfg.Model,
@@ -267,6 +262,9 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, input *StockAnalysisInput, 
 		respBody, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
+			logEntry.Status = "error"
+			logEntry.ErrorMessage = err.Error()
+			LogAICall(logEntry)
 			return nil, fmt.Errorf("读取 AI 响应失败: %w", err)
 		}
 
@@ -280,8 +278,12 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, input *StockAnalysisInput, 
 
 		var chatResp aiChatResponse
 		if err := json.Unmarshal(respBody, &chatResp); err != nil {
+			logEntry.Status = "error"
+			logEntry.ErrorMessage = err.Error()
+			LogAICall(logEntry)
 			return nil, fmt.Errorf("解析 AI 响应失败: %w", err)
 		}
+		logEntry.ApplyUsage(chatResp.Usage)
 
 		if chatResp.Error != nil {
 			lastErr = fmt.Errorf("AI 服务报错: %s", chatResp.Error.Message)
@@ -292,6 +294,9 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, input *StockAnalysisInput, 
 		}
 
 		if len(chatResp.Choices) == 0 {
+			logEntry.Status = "error"
+			logEntry.ErrorMessage = "empty choices"
+			LogAICall(logEntry)
 			return nil, fmt.Errorf("AI 未返回有效结果")
 		}
 
@@ -299,6 +304,9 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, input *StockAnalysisInput, 
 
 		var output StockAnalysisOutput
 		if err := json.Unmarshal([]byte(content), &output); err != nil {
+			logEntry.Status = "error"
+			logEntry.ErrorMessage = "JSON parse error"
+			LogAICall(logEntry)
 			return nil, fmt.Errorf("AI 返回的 JSON 格式不正确: %w", err)
 		}
 

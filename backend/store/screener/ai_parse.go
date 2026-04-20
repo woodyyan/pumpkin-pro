@@ -250,14 +250,15 @@ type chatChoice struct {
 }
 
 type chatResponse struct {
-	Choices []chatChoice `json:"choices"`
+	Choices []chatChoice     `json:"choices"`
+	Usage   strategy.AIUsage `json:"usage"`
 	Error   *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
 }
 
 // ParseNaturalLanguage 调用 LLM 将自然语言翻译为结构化筛选条件
-func ParseNaturalLanguage(ctx context.Context, cfg AIConfig, userInput string, exchange string) (*AIParseResponse, error) {
+func ParseNaturalLanguage(ctx context.Context, cfg AIConfig, userID, userInput string, exchange string) (*AIParseResponse, error) {
 	if !cfg.Enabled() {
 		return nil, fmt.Errorf("%w: AI 选股功能未启用，请联系管理员配置 AI_API_KEY", ErrInvalid)
 	}
@@ -299,6 +300,7 @@ func ParseNaturalLanguage(ctx context.Context, cfg AIConfig, userInput string, e
 
 	// ── AI 调用日志埋点（选股解析）──
 	parseLogEntry := strategy.AILogEntry{
+		UserID:      userID,
 		FeatureKey:  "screener_parse",
 		FeatureName: "AI 选股解析",
 		Model:       cfg.Model,
@@ -316,23 +318,39 @@ func ParseNaturalLanguage(ctx context.Context, cfg AIConfig, userInput string, e
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		parseLogEntry.Status = "error"
+		parseLogEntry.ErrorMessage = err.Error()
+		strategy.LogAICall(parseLogEntry)
 		return nil, fmt.Errorf("读取 AI 响应失败: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		parseLogEntry.Status = "error"
+		parseLogEntry.ErrorMessage = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		strategy.LogAICall(parseLogEntry)
 		return nil, fmt.Errorf("AI 服务返回错误 (HTTP %d): %s", resp.StatusCode, truncate(string(respBody), 200))
 	}
 
 	var chatResp chatResponse
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		parseLogEntry.Status = "error"
+		parseLogEntry.ErrorMessage = err.Error()
+		strategy.LogAICall(parseLogEntry)
 		return nil, fmt.Errorf("解析 AI 响应失败: %w", err)
 	}
+	parseLogEntry.ApplyUsage(chatResp.Usage)
 
 	if chatResp.Error != nil {
+		parseLogEntry.Status = "error"
+		parseLogEntry.ErrorMessage = chatResp.Error.Message
+		strategy.LogAICall(parseLogEntry)
 		return nil, fmt.Errorf("AI 服务报错: %s", chatResp.Error.Message)
 	}
 
 	if len(chatResp.Choices) == 0 {
+		parseLogEntry.Status = "error"
+		parseLogEntry.ErrorMessage = "empty choices"
+		strategy.LogAICall(parseLogEntry)
 		return nil, fmt.Errorf("AI 未返回有效结果")
 	}
 
@@ -342,6 +360,9 @@ func ParseNaturalLanguage(ctx context.Context, cfg AIConfig, userInput string, e
 
 	var result AIParseResult
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		parseLogEntry.Status = "error"
+		parseLogEntry.ErrorMessage = "JSON parse error"
+		strategy.LogAICall(parseLogEntry)
 		return nil, fmt.Errorf("AI 返回内容格式不正确: %w", err)
 	}
 

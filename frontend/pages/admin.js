@@ -155,11 +155,24 @@ function RateCard({ label, value }) {
   return <StatCard label={label} value={pct} />
 }
 
+function formatNumber(value) {
+  if (value == null || Number.isNaN(Number(value))) return '--'
+  return Number(value).toLocaleString('zh-CN')
+}
+
+function formatUserDisplay(user) {
+  if (!user) return '--'
+  if (user.email) return user.email
+  if (user.user_id) return `${user.user_id.slice(0, 12)}…`
+  return '--'
+}
+
 // ── Dashboard ──
 
 function AdminDashboard({ session, onLogout }) {
   const [stats, setStats] = useState(null)
   const [analytics, setAnalytics] = useState(null)
+  const [aiUsage, setAiUsage] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(null)
@@ -168,12 +181,14 @@ function AdminDashboard({ session, onLogout }) {
   const loadAll = useCallback(async () => {
     try {
       setError('')
-      const [statsData, analyticsData] = await Promise.all([
+      const [statsData, analyticsData, aiUsageData] = await Promise.all([
         adminFetch('/api/admin/stats'),
         adminFetch('/api/admin/analytics').catch(() => null),
+        adminFetch('/api/admin/ai-usage?days=30&limit=120').catch(() => null),
       ])
       setStats(statsData)
       setAnalytics(analyticsData)
+      setAiUsage(aiUsageData)
       setLastRefresh(new Date())
     } catch (err) {
       if (err.status === 401) {
@@ -460,6 +475,7 @@ function AdminDashboard({ session, onLogout }) {
             {stats.ai && (
               <section>
                 <h2 className="text-base font-semibold text-white/80 mb-3">🤖 AI 调用统计</h2>
+
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                   <StatCard label="总调用量" value={stats.ai.total_calls} />
                   <StatCard label="今日调用" value={stats.ai.today_calls} />
@@ -473,64 +489,191 @@ function AdminDashboard({ session, onLogout }) {
                   <StatCard label="使用用户数" value={stats.ai.unique_users} />
                 </div>
 
-                {/* 按功能分布 */}
-                {stats.ai.by_feature && stats.ai.by_feature.length > 0 && (
-                  <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-4">
-                    <div className="text-xs text-white/40 mb-3">按功能分布</div>
-                    <div className="space-y-2">
-                      {stats.ai.by_feature.map((f) => {
-                        const maxCount = stats.ai.by_feature[0]?.count || 1
-                        const pct = (f.count / maxCount) * 100
-                        return (
-                          <div key={f.feature_key} className="flex items-center gap-3 text-sm">
-                            <span className="w-28 truncate text-white/60 text-xs">{f.feature_name}</span>
-                            <div className="flex-1 h-4 rounded bg-white/5 overflow-hidden">
-                              <div
-                                className="h-full rounded bg-violet-500/40"
-                                style={{ width: `${pct}%` }}
-                              />
+                <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  <StatCard label="累计 Token" value={fmt(stats.ai.total_tokens)} />
+                  <StatCard label="今日 Token" value={fmt(stats.ai.today_tokens)} />
+                  <StatCard label="近7天 Token" value={fmt(stats.ai.last_7d_tokens)} />
+                  <StatCard
+                    label="平均每次 Token"
+                    value={stats.ai.avg_tokens_per_call != null ? fmt(Math.round(stats.ai.avg_tokens_per_call)) : '--'}
+                    sub="总 Token / 总调用"
+                  />
+                  <StatCard label="近30天输入 Token" value={fmt(aiUsage?.summary?.prompt_tokens)} />
+                  <StatCard label="近30天输出 Token" value={fmt(aiUsage?.summary?.completion_tokens)} />
+                </div>
+
+                <div className="mt-3 rounded-xl border border-amber-400/15 bg-amber-500/[0.06] px-4 py-3 text-xs leading-6 text-amber-100/85">
+                  当前 token 面板基于 `ai_call_logs` 的真实 usage 字段聚合；旧日志或 provider 未返回 usage 的请求会记为 0，所以这部分数据会从本次版本上线后逐步变完整。
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  {/* 调用次数按功能分布 */}
+                  {stats.ai.by_feature && stats.ai.by_feature.length > 0 && (
+                    <div className="rounded-xl border border-white/8 bg-[#15171e] p-4">
+                      <div className="text-xs text-white/40 mb-3">按功能分布（调用次数）</div>
+                      <div className="space-y-2">
+                        {stats.ai.by_feature.map((f) => {
+                          const maxCount = stats.ai.by_feature[0]?.count || 1
+                          const pct = (f.count / maxCount) * 100
+                          return (
+                            <div key={f.feature_key} className="flex items-center gap-3 text-sm">
+                              <span className="w-28 truncate text-white/60 text-xs">{f.feature_name}</span>
+                              <div className="flex-1 h-4 rounded bg-white/5 overflow-hidden">
+                                <div className="h-full rounded bg-violet-500/40" style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className="text-xs text-white/50 tabular-nums w-12 text-right">{fmt(f.count)}</span>
                             </div>
-                            <span className="text-xs text-white/50 tabular-nums w-12 text-right">
-                              {f.count}
-                            </span>
-                          </div>
-                        )
-                      })}
+                          )
+                        })}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* 每日趋势 */}
-                {stats.ai.daily_trend && stats.ai.daily_trend.length > 1 && (
-                  <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-3">
-                    <MiniChart data={stats.ai.daily_trend} label="每日 AI 调用趋势（30天）" width={780} height={130} type="bar" color="#a78bfa" />
-                  </div>
-                )}
+                  {/* Token 按功能分布 */}
+                  {stats.ai.by_feature_tokens && stats.ai.by_feature_tokens.length > 0 && (
+                    <div className="rounded-xl border border-white/8 bg-[#15171e] p-4">
+                      <div className="text-xs text-white/40 mb-3">按功能分布（Token 消耗）</div>
+                      <div className="space-y-2">
+                        {stats.ai.by_feature_tokens.map((f) => {
+                          const maxTokens = stats.ai.by_feature_tokens[0]?.total_tokens || 1
+                          const pct = (f.total_tokens / maxTokens) * 100
+                          return (
+                            <div key={f.feature_key} className="flex items-center gap-3 text-sm">
+                              <span className="w-28 truncate text-white/60 text-xs">{f.feature_name}</span>
+                              <div className="flex-1 h-4 rounded bg-white/5 overflow-hidden">
+                                <div className="h-full rounded bg-fuchsia-500/45" style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className="text-xs text-fuchsia-200/80 tabular-nums w-20 text-right">{fmt(f.total_tokens)}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-                {/* TOP 用户 */}
-                {stats.ai.top_users && stats.ai.top_users.length > 0 && (
+                <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  {stats.ai.daily_trend && stats.ai.daily_trend.length > 1 && (
+                    <div className="rounded-xl border border-white/8 bg-[#15171e] p-3">
+                      <MiniChart data={stats.ai.daily_trend} label="每日 AI 调用趋势（30天）" width={380} height={130} type="bar" color="#a78bfa" />
+                    </div>
+                  )}
+                  {stats.ai.daily_token_trend && stats.ai.daily_token_trend.length > 1 && (
+                    <div className="rounded-xl border border-white/8 bg-[#15171e] p-3">
+                      <MiniChart data={stats.ai.daily_token_trend} label="每日 Token 用量（30天）" width={380} height={130} type="bar" color="#ec4899" />
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  {/* TOP 调用用户 */}
+                  {stats.ai.top_users && stats.ai.top_users.length > 0 && (
+                    <div className="rounded-xl border border-white/8 bg-[#15171e] p-4">
+                      <div className="text-xs text-white/40 mb-3">TOP 调用用户（前 10）</div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs text-left">
+                          <thead>
+                            <tr className="border-b border-white/8 text-white/35">
+                              <th className="pb-2 pr-4 font-medium">排名</th>
+                              <th className="pb-2 pr-4 font-medium">用户</th>
+                              <th className="pb-2 pr-4 font-medium text-right">调用次数</th>
+                              <th className="pb-2 font-medium text-right">最近一次</th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-white/65">
+                            {stats.ai.top_users.map((u, i) => (
+                              <tr key={`${u.user_id}-${i}`} className="border-b border-white/[0.04] last:border-0">
+                                <td className="py-1.5 pr-4 tabular-nums text-white/40">{i + 1}</td>
+                                <td className="py-1.5 pr-4">
+                                  <div className="max-w-[180px] truncate" title={u.email || u.user_id}>{formatUserDisplay(u)}</div>
+                                  <div className="text-[10px] text-white/25 font-mono">{u.user_id?.slice(0, 12)}…</div>
+                                </td>
+                                <td className="py-1.5 pr-4 text-right tabular-nums font-medium text-violet-300">{fmt(u.call_count)}</td>
+                                <td className="py-1.5 text-right text-white/30 whitespace-nowrap">
+                                  {u.last_called_at ? new Date(u.last_called_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TOP Token 用户 */}
+                  {stats.ai.top_token_users && stats.ai.top_token_users.length > 0 && (
+                    <div className="rounded-xl border border-white/8 bg-[#15171e] p-4">
+                      <div className="text-xs text-white/40 mb-3">TOP Token 用户（前 10）</div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs text-left">
+                          <thead>
+                            <tr className="border-b border-white/8 text-white/35">
+                              <th className="pb-2 pr-4 font-medium">排名</th>
+                              <th className="pb-2 pr-4 font-medium">用户</th>
+                              <th className="pb-2 pr-4 font-medium text-right">总 Token</th>
+                              <th className="pb-2 pr-4 font-medium text-right">调用</th>
+                              <th className="pb-2 font-medium text-right">最近一次</th>
+                            </tr>
+                          </thead>
+                          <tbody className="text-white/65">
+                            {stats.ai.top_token_users.map((u, i) => (
+                              <tr key={`${u.user_id}-${i}`} className="border-b border-white/[0.04] last:border-0">
+                                <td className="py-1.5 pr-4 tabular-nums text-white/40">{i + 1}</td>
+                                <td className="py-1.5 pr-4">
+                                  <div className="max-w-[180px] truncate" title={u.email || u.user_id}>{formatUserDisplay(u)}</div>
+                                  <div className="text-[10px] text-white/25 font-mono">{u.user_id?.slice(0, 12)}…</div>
+                                </td>
+                                <td className="py-1.5 pr-4 text-right tabular-nums font-medium text-fuchsia-300">{fmt(u.total_tokens)}</td>
+                                <td className="py-1.5 pr-4 text-right tabular-nums text-white/45">{fmt(u.call_count)}</td>
+                                <td className="py-1.5 text-right text-white/30 whitespace-nowrap">
+                                  {u.last_called_at ? new Date(u.last_called_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 每日每用户 token 明细 */}
+                {aiUsage?.daily_users && aiUsage.daily_users.length > 0 && (
                   <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-4">
-                    <div className="text-xs text-white/40 mb-3">TOP 调用用户（前 10）</div>
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div>
+                        <div className="text-xs text-white/40">每日每用户 Token 用量（近 {aiUsage.days || 30} 天）</div>
+                        <div className="mt-1 text-[11px] text-white/25">按日期倒序、当日 Token 从高到低排序，便于快速识别高消耗用户。</div>
+                      </div>
+                      <div className="text-[11px] text-white/30">共 {fmt(aiUsage.daily_users.length)} 条聚合记录</div>
+                    </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs text-left">
                         <thead>
                           <tr className="border-b border-white/8 text-white/35">
-                            <th className="pb-2 pr-4 font-medium">排名</th>
-                            <th className="pb-2 pr-4 font-medium">用户ID</th>
-                            <th className="pb-2 pr-4 font-medium text-right">调用次数</th>
-                            <th className="pb-2 font-medium text-right">最近一次</th>
+                            <th className="pb-2 pr-4 font-medium">日期</th>
+                            <th className="pb-2 pr-4 font-medium">用户</th>
+                            <th className="pb-2 pr-4 font-medium text-right">总 Token</th>
+                            <th className="pb-2 pr-4 font-medium text-right">输入</th>
+                            <th className="pb-2 pr-4 font-medium text-right">输出</th>
+                            <th className="pb-2 pr-4 font-medium text-right">调用</th>
+                            <th className="pb-2 font-medium text-right">最后一次</th>
                           </tr>
                         </thead>
                         <tbody className="text-white/65">
-                          {stats.ai.top_users.map((u, i) => (
-                            <tr key={u.user_id} className="border-b border-white/[0.04] last:border-0">
-                              <td className="py-1.5 pr-4 tabular-nums text-white/40">{i + 1}</td>
-                              <td className="py-1.5 pr-4 font-mono">{u.user_id.slice(0, 12)}…</td>
-                              <td className="py-1.5 pr-4 text-right tabular-nums font-medium text-violet-300">
-                                {u.call_count}
+                          {aiUsage.daily_users.map((row, i) => (
+                            <tr key={`${row.date}-${row.user_id}-${i}`} className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02]">
+                              <td className="py-2 pr-4 whitespace-nowrap text-white/40 tabular-nums">{row.date}</td>
+                              <td className="py-2 pr-4">
+                                <div className="max-w-[220px] truncate" title={row.email || row.user_id}>{formatUserDisplay(row)}</div>
+                                <div className="text-[10px] text-white/25 font-mono">{row.user_id?.slice(0, 12)}…</div>
                               </td>
-                              <td className="py-1.5 text-right text-white/30 whitespace-nowrap">
-                                {u.last_called_at ? new Date(u.last_called_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                              <td className="py-2 pr-4 text-right tabular-nums font-medium text-fuchsia-300">{fmt(row.total_tokens)}</td>
+                              <td className="py-2 pr-4 text-right tabular-nums text-white/45">{fmt(row.prompt_tokens)}</td>
+                              <td className="py-2 pr-4 text-right tabular-nums text-white/45">{fmt(row.completion_tokens)}</td>
+                              <td className="py-2 pr-4 text-right tabular-nums text-white/45">{fmt(row.call_count)}</td>
+                              <td className="py-2 text-right text-white/30 whitespace-nowrap">
+                                {row.last_called_at ? new Date(row.last_called_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
                               </td>
                             </tr>
                           ))}

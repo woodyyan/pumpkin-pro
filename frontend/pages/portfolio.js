@@ -8,6 +8,7 @@ import {
   fetchPortfolioDashboard,
   fetchPortfolioDetail,
   fetchPortfolioEventTimeline,
+  fetchPortfolioRiskMetrics,
   fetchSymbolSnapshot,
   fetchSymbolDailyBars,
   findClosePriceByDate,
@@ -1251,6 +1252,134 @@ function PortfolioChartsSection({ curve, allocationItems, curveRange, setCurveRa
   )
 }
 
+// ── 风险仪表盘 ──
+
+function RiskSection({ riskMetrics }) {
+  if (!riskMetrics) return null
+
+  const formatPercent = (value) => typeof value === 'number' ? `${(value * 100).toFixed(1)}%` : '--'
+  const formatScore = (value) => typeof value === 'number' ? value.toFixed(1) : '--'
+
+  return (
+    <section className="mb-6">
+      <h3 className="text-sm font-semibold text-white/75 flex items-center gap-2 mb-3">
+        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        组合风险分析
+        <span className="text-[10px] font-normal text-white/30">
+          {riskMetrics.scope === 'ALL' ? '全部市场' : riskMetrics.scope === 'ASHARE' ? 'A股' : '港股'} · 计算于 {new Date(riskMetrics.computed_at).toLocaleString('zh-CN', { hour12: false })}
+        </span>
+      </h3>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mb-4">
+        {/* 集中度风险 */}
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+          <div className="text-[11px] font-medium text-white/45 tracking-wide mb-1">集中度风险</div>
+          <div className="text-lg font-semibold text-white/90 mb-1">HHI: {formatScore(riskMetrics.concentration_risk?.herfindahl_index)}</div>
+          <div className="text-[10px] text-white/35 space-y-0.5">
+            <div>最大单股: {formatPercent(riskMetrics.concentration_risk?.single_stock_max_weight)}</div>
+            <div>前三大: {formatPercent(riskMetrics.concentration_risk?.top3_weight)}</div>
+            <div>前五大: {formatPercent(riskMetrics.concentration_risk?.top5_weight)}</div>
+          </div>
+          {riskMetrics.concentration_risk?.warnings?.length > 0 && (
+            <div className="mt-2 text-[10px] text-amber-400">
+              {riskMetrics.concentration_risk.warnings.map((w, i) => <div key={i}>⚠️ {w}</div>)}
+            </div>
+          )}
+        </div>
+
+        {/* 波动率风险 */}
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+          <div className="text-[11px] font-medium text-white/45 tracking-wide mb-1">波动率风险</div>
+          <div className="text-lg font-semibold text-white/90 mb-1">年化波动: {formatPercent(riskMetrics.volatility_risk?.annualized_volatility)}</div>
+          <div className="text-[10px] text-white/35 space-y-0.5">
+            <div>最大回撤: {formatPercent(riskMetrics.volatility_risk?.max_drawdown)}</div>
+            <div>下跌概率: {formatPercent(riskMetrics.volatility_risk?.downside_probability)}</div>
+            <div>单日VaR(95%): {formatPercent(riskMetrics.volatility_risk?.daily_var_95)}</div>
+          </div>
+          {riskMetrics.volatility_risk?.warnings?.length > 0 && (
+            <div className="mt-2 text-[10px] text-amber-400">
+              {riskMetrics.volatility_risk.warnings.map((w, i) => <div key={i}>⚠️ {w}</div>)}
+            </div>
+          )}
+        </div>
+
+        {/* 流动性风险 */}
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+          <div className="text-[11px] font-medium text-white/45 tracking-wide mb-1">流动性风险</div>
+          <div className="text-lg font-semibold text-white/90 mb-1">评分: {formatScore(riskMetrics.liquidity_risk?.liquidity_score)}</div>
+          <div className="text-[10px] text-white/35 space-y-0.5">
+            <div>日均成交额: {riskMetrics.liquidity_risk?.avg_daily_turnover?.toLocaleString('zh-CN') || '--'}</div>
+            <div>换手率: {formatPercent(riskMetrics.liquidity_risk?.avg_turnover_rate)}</div>
+            <div>低流动性标的: {riskMetrics.liquidity_risk?.illiquid_count || 0} 只</div>
+          </div>
+          {riskMetrics.liquidity_risk?.warnings?.length > 0 && (
+            <div className="mt-2 text-[10px] text-amber-400">
+              {riskMetrics.liquidity_risk.warnings.map((w, i) => <div key={i}>⚠️ {w}</div>)}
+            </div>
+          )}
+        </div>
+
+        {/* 尾部风险 */}
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+          <div className="text-[11px] font-medium text-white/45 tracking-wide mb-1">尾部风险</div>
+          <div className="text-lg font-semibold text-white/90 mb-1">ES(95%): {formatPercent(riskMetrics.tail_risk?.expected_shortfall_95)}</div>
+          <div className="text-[10px] text-white/35 space-y-0.5">
+            <div>单日VaR(95%): {formatPercent(riskMetrics.tail_risk?.var_95_one_day)}</div>
+            <div>周度VaR(95%): {formatPercent(riskMetrics.tail_risk?.var_95_one_week)}</div>
+            <div>最坏情况损失: {formatPercent(riskMetrics.tail_risk?.worst_case_loss)}</div>
+          </div>
+          {riskMetrics.tail_risk?.warnings?.length > 0 && (
+            <div className="mt-2 text-[10px] text-amber-400">
+              {riskMetrics.tail_risk.warnings.map((w, i) => <div key={i}>⚠️ {w}</div>)}
+            </div>
+          )}
+        </div>
+
+        {/* 相关性风险 */}
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
+          <div className="text-[11px] font-medium text-white/45 tracking-wide mb-1">相关性风险</div>
+          <div className="text-lg font-semibold text-white/90 mb-1">平均相关性: {formatScore(riskMetrics.correlation_risk?.avg_correlation)}</div>
+          <div className="text-[10px] text-white/35 space-y-0.5">
+            <div>分散化评分: {formatScore(riskMetrics.correlation_risk?.diversification_score)}</div>
+            <div>高相关性股票对: {riskMetrics.correlation_risk?.high_correlation_pairs?.length || 0} 对</div>
+          </div>
+          {riskMetrics.correlation_risk?.warnings?.length > 0 && (
+            <div className="mt-2 text-[10px] text-amber-400">
+              {riskMetrics.correlation_risk.warnings.map((w, i) => <div key={i}>⚠️ {w}</div>)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 总体风险评分 */}
+      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium text-white/60 mb-1">总体风险评分</div>
+            <div className="text-xl font-semibold text-white/90">{(riskMetrics.overall_risk_score || 0).toFixed(1)} / 10</div>
+            <div className="text-[10px] text-white/35 mt-1">
+              评分越高风险越高，建议保持在 6 分以下
+            </div>
+          </div>
+          <div className="relative">
+            <div className="w-20 h-20 rounded-full border-4 border-white/10 flex items-center justify-center">
+              <div className="text-xl font-semibold text-white/90">{(riskMetrics.overall_risk_score || 0).toFixed(1)}</div>
+            </div>
+            <div 
+              className="absolute inset-0 w-20 h-20 rounded-full border-4 border-primary/60 clip-path-inset-0"
+              style={{
+                clipPath: `inset(0 ${100 - (riskMetrics.overall_risk_score || 0) * 10}% 0 0)`,
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 // ── 工具栏 ──
 
 function Toolbar({
@@ -1338,6 +1467,7 @@ export default function PortfolioPage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [riskMetrics, setRiskMetrics] = useState(null)
 
   const [scope, setScope] = useState('ALL')
   const [sortBy, setSortBy] = useState('market_value')
@@ -1357,15 +1487,22 @@ export default function PortfolioPage() {
     setLoading(true)
     setError(null)
     try {
-      const result = await fetchPortfolioDashboard({
-        scope,
-        sort_by: sortBy,
-        sort_order: sortOrder,
-        pnl_filter: pnlFilter,
-        keyword,
-        curve_range: curveRange,
-      })
+      const [result, riskResult] = await Promise.all([
+        fetchPortfolioDashboard({
+          scope,
+          sort_by: sortBy,
+          sort_order: sortOrder,
+          pnl_filter: pnlFilter,
+          keyword,
+          curve_range: curveRange,
+        }),
+        fetchPortfolioRiskMetrics({ scope }).catch(err => {
+          console.warn('风险指标加载失败:', err)
+          return null
+        }),
+      ])
       setData(result)
+      setRiskMetrics(riskResult)
     } catch (err) {
       setError(err.message || '加载失败')
     } finally {
@@ -1759,6 +1896,8 @@ export default function PortfolioPage() {
             setCurveRange={setCurveRange}
           />
         )}
+
+        {!loading && riskMetrics && <RiskSection riskMetrics={riskMetrics} />}
 
         {!loading && data?.positions && (
           <section>

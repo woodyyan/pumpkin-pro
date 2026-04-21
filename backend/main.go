@@ -2481,6 +2481,68 @@ func (a *appServer) handleInvestmentProfile(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+func (a *appServer) handlePortfolioRiskMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	_ = currentUserID(r) // userID暂未使用
+	scope := strings.TrimSpace(r.URL.Query().Get("scope"))
+	if scope == "" {
+		scope = portfolio.PortfolioScopeAll
+	}
+
+	// TODO: 实现真实的风险计算
+	// 暂时返回模拟数据
+	metrics := map[string]any{
+		"scope": scope,
+		"computed_at": time.Now().UTC().Format(time.RFC3339),
+		"concentration_risk": map[string]any{
+			"single_stock_max_weight": 0.35,
+			"top3_weight": 0.68,
+			"top5_weight": 0.82,
+			"herfindahl_index": 0.18,
+			"warnings": []string{
+				"单股集中度35%超过20%",
+				"前三大持仓占比68%超过60%",
+			},
+		},
+		"volatility_risk": map[string]any{
+			"annualized_volatility": 0.24,
+			"max_drawdown": -0.18,
+			"downside_probability": 0.42,
+			"daily_var_95": -0.04,
+			"weekly_var_95": -0.09,
+			"warnings": []string{"波动率较高"},
+		},
+		"liquidity_risk": map[string]any{
+			"avg_daily_turnover": 1500.5,
+			"avg_turnover_rate": 0.02,
+			"illiquid_count": 2,
+			"low_liquidity_weight": 0.15,
+			"liquidity_score": 80.0,
+			"warnings": []string{"存在2只低流动性股票"},
+		},
+		"tail_risk": map[string]any{
+			"var_95_one_day": -0.04,
+			"var_95_one_week": -0.09,
+			"expected_shortfall_95": -0.06,
+			"worst_case_loss": -0.25,
+			"warnings": []string{"单日最大可能损失超过3%"},
+		},
+		"correlation_risk": map[string]any{
+			"avg_correlation": 0.35,
+			"high_correlation_pairs": []map[string]any{
+				{"symbol1": "000001", "symbol2": "000002", "correlation": 0.82},
+			},
+			"diversification_score": 65.0,
+			"warnings": []string{"存在高相关性股票对"},
+		},
+		"overall_risk_score": 6.5,
+	}
+	writeJSON(w, http.StatusOK, metrics)
+}
+
 // ── Portfolio Dashboard ──
 
 func (a *appServer) handlePortfolioDashboard(w http.ResponseWriter, r *http.Request) {
@@ -3028,6 +3090,7 @@ func main() {
 	mux.HandleFunc("/api/portfolio/events/recent", server.withRequiredAuth(server.handlePortfolioRecentEvents))
 	mux.HandleFunc("/api/portfolio/allocation", server.withRequiredAuth(server.handlePortfolioAllocation))
 	mux.HandleFunc("/api/portfolio/ai-context", server.withRequiredAuth(server.handlePortfolioAIContext))
+	mux.HandleFunc("/api/portfolio/risk-metrics", server.withRequiredAuth(server.handlePortfolioRiskMetrics))
 	mux.HandleFunc("/api/webhook-deliveries/latest", server.withRequiredAuth(server.handleWebhookDeliveriesLatest))
 
 	mux.HandleFunc("/api/live/watchlist", server.withRequiredAuth(server.handleLiveWatchlist))

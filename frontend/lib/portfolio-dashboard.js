@@ -233,3 +233,15 @@ export function findClosePriceByDate(bars, tradeDate) {
   }
   return null
 }
+
+/**
+ * 获取组合风险指标
+ * GET /api/portfolio/risk-metrics?scope={scope}
+ */
+export async function fetchPortfolioRiskMetrics(query = {}) {
+  const qs = new URLSearchParams()
+  if (query.scope) qs.set('scope', query.scope)
+
+  const path = `/api/portfolio/risk-metrics${qs.toString() ? '?' + qs.toString() : ''}`
+  return await requestJson(path, undefined, '加载风险指标失败')
+}

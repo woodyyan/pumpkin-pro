@@ -234,6 +234,13 @@ func (s *Service) GetFunnelStats(ctx context.Context) (*FunnelStats, error) {
 			Count30D:   since(s.repo.CountUsersWithWatchlistSince, thirtyDaysAgo),
 		},
 		{
+			Label:      "持仓管理",
+			CountAll:   safeNoArg(s.repo.CountPortfolioEventUsers),
+			CountToday: since(s.repo.CountPortfolioEventUsersSince, today),
+			Count7D:    since(s.repo.CountPortfolioEventUsersSince, sevenDaysAgo),
+			Count30D:   since(s.repo.CountPortfolioEventUsersSince, thirtyDaysAgo),
+		},
+		{
 			Label:      "配置信号",
 			CountAll:   since(s.repo.CountUsersWithSignalConfigsSince, time.Time{}),
 			CountToday: since(s.repo.CountUsersWithSignalConfigsSince, today),
@@ -346,7 +353,7 @@ func (s *Service) GetStats(ctx context.Context) (*StatsResult, error) {
 			TodayRegistrations: todayRegistrations,
 			FailedLogins7D:     failedLogins7D,
 		},
-		Features:    s.collectFeatureStats(ctx, today),
+		Features:    s.collectFeatureStats(ctx, today, sevenDaysAgo),
 		Trends:      s.collectTrendStats(ctx),
 		Retention:   s.collectRetentionStats(ctx),
 		Traffic:     s.collectTrafficStats(ctx),
@@ -355,22 +362,34 @@ func (s *Service) GetStats(ctx context.Context) (*StatsResult, error) {
 	}, nil
 }
 
-func (s *Service) collectFeatureStats(ctx context.Context, today time.Time) FeatureStats {
+func (s *Service) collectFeatureStats(ctx context.Context, today, sevenDaysAgo time.Time) FeatureStats {
 	btTotal, _ := s.repo.CountBacktestRuns(ctx)
 	btToday, _ := s.repo.CountBacktestRunsSince(ctx, today)
 	btUsers, _ := s.repo.CountBacktestUsers(ctx)
 	pfRecords, _ := s.repo.CountPortfolioRecords(ctx)
 	pfUsers, _ := s.repo.CountPortfolioUsers(ctx)
+	pfActivePositions, _ := s.repo.CountActivePortfolioRecords(ctx)
+	pfActiveUsers, _ := s.repo.CountActivePortfolioUsers(ctx)
+	pfEventTotal, _ := s.repo.CountPortfolioEvents(ctx)
+	pfEventToday, _ := s.repo.CountPortfolioEventsSince(ctx, today)
+	pfEventUsers7D, _ := s.repo.CountPortfolioEventUsersSince(ctx, sevenDaysAgo)
+	pfProfileUsers, _ := s.repo.CountPortfolioProfileUsers(ctx)
 	scLists, _ := s.repo.CountScreenerWatchlists(ctx)
 	scUsers, _ := s.repo.CountScreenerUsers(ctx)
 	return FeatureStats{
-		BacktestTotal:    btTotal,
-		BacktestToday:    btToday,
-		BacktestUsers:    btUsers,
-		PortfolioRecords: pfRecords,
-		PortfolioUsers:   pfUsers,
-		ScreenerLists:    scLists,
-		ScreenerUsers:    scUsers,
+		BacktestTotal:            btTotal,
+		BacktestToday:            btToday,
+		BacktestUsers:            btUsers,
+		PortfolioRecords:         pfRecords,
+		PortfolioUsers:           pfUsers,
+		PortfolioActivePositions: pfActivePositions,
+		PortfolioActiveUsers:     pfActiveUsers,
+		PortfolioEventTotal:      pfEventTotal,
+		PortfolioEventToday:      pfEventToday,
+		PortfolioEventUsers7D:    pfEventUsers7D,
+		PortfolioProfileUsers:    pfProfileUsers,
+		ScreenerLists:            scLists,
+		ScreenerUsers:            scUsers,
 	}
 }
 
@@ -378,6 +397,7 @@ func (s *Service) collectTrendStats(ctx context.Context) TrendStats {
 	regTrend, _ := s.repo.DailyRegistrations(ctx, 30)
 	dauTrend, _ := s.repo.DailyActiveUsers(ctx, 30)
 	sigTrend, _ := s.repo.DailySignalEvents(ctx, 30)
+	pfTrend, _ := s.repo.DailyPortfolioEvents(ctx, 30)
 	if regTrend == nil {
 		regTrend = []DailyCount{}
 	}
@@ -387,10 +407,14 @@ func (s *Service) collectTrendStats(ctx context.Context) TrendStats {
 	if sigTrend == nil {
 		sigTrend = []DailyCount{}
 	}
+	if pfTrend == nil {
+		pfTrend = []DailyCount{}
+	}
 	return TrendStats{
 		DailyRegistrations: regTrend,
 		DailyActiveUsers:   dauTrend,
 		DailySignalEvents:  sigTrend,
+		DailyPortfolioOps:  pfTrend,
 	}
 }
 

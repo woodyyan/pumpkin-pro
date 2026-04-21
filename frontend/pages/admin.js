@@ -287,11 +287,22 @@ function AdminDashboard({ session, onLogout }) {
                 <StatCard label="回测总次数" value={stats.features?.backtest_total} />
                 <StatCard label="今日回测" value={stats.features?.backtest_today} />
                 <StatCard label="回测用户" value={stats.features?.backtest_users} />
-                <StatCard label="持仓记录" value={stats.features?.portfolio_records} />
-                <StatCard label="有持仓的用户" value={stats.features?.portfolio_users} />
+                <StatCard label="持仓快照记录" value={stats.features?.portfolio_records} sub="user_portfolios" />
+                <StatCard label="持仓用户累计" value={stats.features?.portfolio_users} sub="曾写入过持仓快照" />
+                <StatCard label="当前持仓标的" value={stats.features?.portfolio_active_positions} sub="shares > 0" />
+                <StatCard label="当前持仓用户" value={stats.features?.portfolio_active_users} sub="仍有持仓的用户" />
+                <StatCard label="累计持仓操作" value={stats.features?.portfolio_event_total} sub="买入 / 卖出 / 调均价" />
+                <StatCard label="今日持仓操作" value={stats.features?.portfolio_event_today} />
+                <StatCard label="7天持仓活跃用户" value={stats.features?.portfolio_event_users_7d} />
+                <StatCard label="已填投资画像" value={stats.features?.portfolio_profile_users} />
                 <StatCard label="自选表" value={stats.features?.screener_lists} />
                 <StatCard label="选股用户" value={stats.features?.screener_users} />
               </div>
+              {stats.trends?.daily_portfolio_ops && stats.trends.daily_portfolio_ops.length > 0 && (
+                <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-3">
+                  <MiniChart data={stats.trends.daily_portfolio_ops} label="每日持仓操作（30天）" width={780} height={130} type="bar" color="#14b8a6" />
+                </div>
+              )}
             </section>
 
             {/* Panel 3: Strategies */}
@@ -1266,13 +1277,14 @@ function SystemHealthPanel() {
 // ── User Funnel Panel (Conversion Funnel) ──
 
 const FUNNEL_COLORS = [
-  'from-blue-500 to-cyan-400',   // 访客
-  'from-emerald-500 to-green-400', // 注册
-  'from-violet-500 to-purple-400', // 登录
-  'from-orange-500 to-amber-400', // 关注池
-  'from-pink-500 to-rose-400',   // 配置信号
-  'from-indigo-500 to-blue-400',  // 跑回测
-  'from-fuchsia-500 to-pink-400',  // 用 AI
+  'from-blue-500 to-cyan-400',      // 访客
+  'from-emerald-500 to-green-400',  // 注册
+  'from-violet-500 to-purple-400',  // 登录
+  'from-orange-500 to-amber-400',   // 关注池
+  'from-teal-500 to-cyan-400',      // 持仓管理
+  'from-pink-500 to-rose-400',      // 配置信号
+  'from-indigo-500 to-blue-400',    // 跑回测
+  'from-fuchsia-500 to-pink-400',   // 用 AI
 ]
 
 function fmt(n) {

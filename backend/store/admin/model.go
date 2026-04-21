@@ -103,19 +103,26 @@ type AuditStats struct {
 }
 
 type FeatureStats struct {
-	BacktestTotal    int64 `json:"backtest_total"`
-	BacktestToday    int64 `json:"backtest_today"`
-	BacktestUsers    int64 `json:"backtest_users"`
-	PortfolioRecords int64 `json:"portfolio_records"`
-	PortfolioUsers   int64 `json:"portfolio_users"`
-	ScreenerLists    int64 `json:"screener_lists"`
-	ScreenerUsers    int64 `json:"screener_users"`
+	BacktestTotal            int64 `json:"backtest_total"`
+	BacktestToday            int64 `json:"backtest_today"`
+	BacktestUsers            int64 `json:"backtest_users"`
+	PortfolioRecords         int64 `json:"portfolio_records"`
+	PortfolioUsers           int64 `json:"portfolio_users"`
+	PortfolioActivePositions int64 `json:"portfolio_active_positions"`
+	PortfolioActiveUsers     int64 `json:"portfolio_active_users"`
+	PortfolioEventTotal      int64 `json:"portfolio_event_total"`
+	PortfolioEventToday      int64 `json:"portfolio_event_today"`
+	PortfolioEventUsers7D    int64 `json:"portfolio_event_users_7d"`
+	PortfolioProfileUsers    int64 `json:"portfolio_profile_users"`
+	ScreenerLists            int64 `json:"screener_lists"`
+	ScreenerUsers            int64 `json:"screener_users"`
 }
 
 type TrendStats struct {
 	DailyRegistrations []DailyCount `json:"daily_registrations"`
 	DailyActiveUsers   []DailyCount `json:"daily_active_users"`
 	DailySignalEvents  []DailyCount `json:"daily_signal_events"`
+	DailyPortfolioOps  []DailyCount `json:"daily_portfolio_ops"`
 }
 
 type RetentionStats struct {
@@ -213,6 +220,6 @@ type FunnelStep struct {
 
 // FunnelStats is the full funnel response.
 type FunnelStats struct {
-	Steps       []FunnelStep `json:"steps"` // ordered 7 steps
+	Steps       []FunnelStep `json:"steps"` // ordered funnel steps
 	GeneratedAt string       `json:"generated_at"`
 }

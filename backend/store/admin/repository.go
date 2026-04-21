@@ -227,6 +227,17 @@ func (r *Repository) DailySignalEvents(ctx context.Context, days int) ([]DailyCo
 	return results, err
 }
 
+func (r *Repository) DailyPortfolioEvents(ctx context.Context, days int) ([]DailyCount, error) {
+	since := time.Now().UTC().AddDate(0, 0, -days)
+	var results []DailyCount
+	err := r.db.WithContext(ctx).Table("user_portfolio_events").
+		Select("DATE(created_at) as date, COUNT(*) as count").
+		Where("is_voided = ? AND created_at >= ?", false, since).
+		Group("DATE(created_at)").Order("date ASC").
+		Scan(&results).Error
+	return results, err
+}
+
 func (r *Repository) DailyDeliveryRate(ctx context.Context, days int) ([]DailyCount, error) {
 	since := time.Now().UTC().AddDate(0, 0, -days)
 	// Returns delivery success rate * 100 (as integer percentage) per day
@@ -289,6 +300,54 @@ func (r *Repository) CountPortfolioRecords(ctx context.Context) (int64, error) {
 func (r *Repository) CountPortfolioUsers(ctx context.Context) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Table("user_portfolios").Distinct("user_id").Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) CountActivePortfolioRecords(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("user_portfolios").Where("shares > ?", 0).Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) CountActivePortfolioUsers(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("user_portfolios").Where("shares > ?", 0).Distinct("user_id").Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) CountPortfolioEvents(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("user_portfolio_events").Where("is_voided = ?", false).Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) CountPortfolioEventsSince(ctx context.Context, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("user_portfolio_events").
+		Where("is_voided = ? AND created_at >= ?", false, since).
+		Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) CountPortfolioEventUsers(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("user_portfolio_events").
+		Where("is_voided = ?", false).
+		Distinct("user_id").Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) CountPortfolioEventUsersSince(ctx context.Context, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("user_portfolio_events").
+		Where("is_voided = ? AND created_at >= ?", false, since).
+		Distinct("user_id").Count(&count).Error
+	return count, err
+}
+
+func (r *Repository) CountPortfolioProfileUsers(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("user_investment_profiles").Distinct("user_id").Count(&count).Error
 	return count, err
 }
 

@@ -22,6 +22,11 @@ import {
   getPortfolioEventAccent,
   isPortfolioPositionActive,
 } from '../../lib/portfolio-events'
+import {
+  fetchSymbolSnapshot,
+  fetchSymbolDailyBars,
+  findClosePriceByDate,
+} from '../../lib/portfolio-dashboard'
 
 const POLL_MS = 10000
 const POLL_MS_NON_TRADING = 60000  // non-trading: 1 min fallback (data comes from DB cache)
@@ -112,6 +117,10 @@ export default function LiveTradingDetailPage() {
   const [portfolioHistoryExpanded, setPortfolioHistoryExpanded] = useState(false)
   const [portfolioTimelineLoading, setPortfolioTimelineLoading] = useState(false)
   const [portfolioNotice, setPortfolioNotice] = useState('')
+  const [priceAutoFilled, setPriceAutoFilled] = useState(false)
+  const [portfolioDailyBars, setPortfolioDailyBars] = useState([])
+  const portfolioDailyBarsRef = useRef(portfolioDailyBars)
+  portfolioDailyBarsRef.current = portfolioDailyBars
 
   const supportRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const resistanceRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
@@ -735,7 +744,51 @@ export default function LiveTradingDetailPage() {
     setPortfolioForm(createPortfolioActionForm('buy'))
     setPortfolioHistoryExpanded(false)
     setPortfolioNotice('')
+    setPriceAutoFilled(false)
   }, [symbol, authIdentityKey])
+
+  // ── 自动填充成交价格（500ms 防抖）──
+  useEffect(() => {
+    if (!portfolioAction || portfolioAction === 'adjust') return
+    if (!symbol || !portfolioForm.trade_date) return
+
+    const handler = (sym, tradeDate) => {
+      const today = new Date().toISOString().split('T')[0]
+      if (tradeDate >= today) {
+        // 今天：用实时价
+        fetchSymbolSnapshot(sym).then(snapshot => {
+          if (snapshot?.last_price > 0) {
+            setPortfolioForm(prev => ({ ...prev, price: String(Math.round(snapshot.last_price * 100) / 100) }))
+            setPriceAutoFilled(true)
+          }
+        }).catch(() => {})
+      } else {
+        // 历史日期：尝试从历史日线取收盘价
+        const cached = portfolioDailyBarsRef.current
+        const needFetch = !cached || cached.length === 0
+        const promise = needFetch
+          ? fetchSymbolDailyBars(sym, 260).then(bars => {
+              setPortfolioDailyBars(bars)
+              return bars
+            })
+          : Promise.resolve(cached)
+
+        promise.then(bars => {
+          const closePrice = findClosePriceByDate(bars, tradeDate)
+          if (closePrice !== null) {
+            setPortfolioForm(prev => ({ ...prev, price: String(closePrice) }))
+            setPriceAutoFilled(true)
+          }
+        }).catch(() => {})
+      }
+    }
+
+    const timer = setTimeout(() => {
+      handler(symbol, portfolioForm.trade_date)
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [symbol, portfolioAction, portfolioForm.trade_date])
 
   useEffect(() => {
     if (!ready || !symbol) return
@@ -1282,6 +1335,7 @@ export default function LiveTradingDetailPage() {
                     <span className="text-xs text-white/55">成交日期</span>
                     <input
                       type="date"
+                      max={new Date().toISOString().split('T')[0]}
                       value={portfolioForm.trade_date}
                       onChange={(e) => setPortfolioForm((f) => ({ ...f, trade_date: e.target.value }))}
                       className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
@@ -1303,13 +1357,21 @@ export default function LiveTradingDetailPage() {
                         />
                       </label>
                       <label className="block">
-                        <span className="text-xs text-white/55">成交价格</span>
+                        <span className="text-xs text-white/55 inline-flex items-center gap-1.5">
+                          成交价格
+                          {priceAutoFilled ? (
+                            <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">自动</span>
+                          ) : null}
+                        </span>
                         <input
                           type="number"
                           min="0"
                           step="any"
                           value={portfolioForm.price}
-                          onChange={(e) => setPortfolioForm((f) => ({ ...f, price: e.target.value }))}
+                          onChange={(e) => {
+                            setPriceAutoFilled(false)
+                            setPortfolioForm((f) => ({ ...f, price: e.target.value }))
+                          }}
                           className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
                           placeholder="例：12.35"
                         />

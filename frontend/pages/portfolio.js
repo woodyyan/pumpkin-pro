@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import Head from 'next/head'
 import InfoTip, { LabelWithInfo } from '../components/InfoTip'
@@ -8,6 +8,9 @@ import {
   fetchPortfolioDashboard,
   fetchPortfolioDetail,
   fetchPortfolioEventTimeline,
+  fetchSymbolSnapshot,
+  fetchSymbolDailyBars,
+  findClosePriceByDate,
   formatMoney,
   formatCompactNumber,
   inferPortfolioTradeMarket,
@@ -617,6 +620,8 @@ function PortfolioTradeDrawer({
   saving,
   error,
   notice,
+  priceAutoFilled,
+  onPriceAutoFilledChange,
   onClose,
   onActionChange,
   onMarketChange,
@@ -814,6 +819,7 @@ function PortfolioTradeDrawer({
                     <span className="text-xs text-white/55">成交日期</span>
                     <input
                       type="date"
+                      max={new Date().toISOString().split('T')[0]}
                       value={form.trade_date}
                       onChange={(event) => onFormChange?.({ trade_date: event.target.value })}
                       className="mt-1 block w-full rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none transition focus:border-primary/40"
@@ -840,6 +846,9 @@ function PortfolioTradeDrawer({
                       <label className="block">
                         <span className="text-xs text-white/55 inline-flex items-center gap-1.5">
                           成交价格
+                          {priceAutoFilled ? (
+                            <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">自动</span>
+                          ) : null}
                           <InfoTip text={FIELD_TIPS.trade_price} />
                         </span>
                         <input
@@ -847,7 +856,10 @@ function PortfolioTradeDrawer({
                           min="0"
                           step="any"
                           value={form.price}
-                          onChange={(event) => onFormChange?.({ price: event.target.value })}
+                          onChange={(event) => {
+                            onPriceAutoFilledChange?.(false)
+                            onFormChange?.({ price: event.target.value })
+                          }}
                           placeholder="例：12.35"
                           className="mt-1 block w-full rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none transition focus:border-primary/40"
                         />
@@ -1334,6 +1346,10 @@ export default function PortfolioPage() {
   const [curveRange, setCurveRange] = useState('30D')
   const [keyword, setKeyword] = useState('')
   const [tradeDrawer, setTradeDrawer] = useState(() => createTradeDrawerState('ASHARE'))
+  const [priceAutoFilled, setPriceAutoFilled] = useState(false)
+  const [tradeDailyBars, setTradeDailyBars] = useState([])
+  const tradeDailyBarsRef = useRef(tradeDailyBars)
+  tradeDailyBarsRef.current = tradeDailyBars
 
   const defaultTradeMarket = scope === 'HKEX' ? 'HKEX' : 'ASHARE'
 
@@ -1454,8 +1470,58 @@ export default function PortfolioPage() {
     return () => clearTimeout(timer)
   }, [tradeDrawer.open, tradeDrawer.lockedSymbol, currentTradeSymbol, syncTradeContext])
 
+  // ── 自动填充成交价格（500ms 防抖）──
+  useEffect(() => {
+    if (!tradeDrawer.open || !currentTradeSymbol || !tradeDrawer.form.trade_date) return
+    if (tradeDrawer.action === 'adjust') return // 调均价不需要成交价格
+
+    const handler = (symbol, tradeDate) => {
+      const today = new Date().toISOString().split('T')[0]
+      if (tradeDate >= today) {
+        // 今天或之后：用实时价
+        fetchSymbolSnapshot(symbol).then(snapshot => {
+          if (snapshot?.last_price > 0) {
+            setTradeDrawer(prev => {
+              if (!prev.open || resolvePortfolioTradeSymbol(prev.symbolInput, prev.market) !== symbol) return prev
+              return { ...prev, form: { ...prev.form, price: String(Math.round(snapshot.last_price * 100) / 100) } }
+            })
+            setPriceAutoFilled(true)
+          }
+        }).catch(() => {})
+      } else {
+        // 历史日期：尝试从历史日线取收盘价
+        const cached = tradeDailyBarsRef.current
+        const needFetch = !cached || cached.length === 0
+        const promise = needFetch
+          ? fetchSymbolDailyBars(symbol, 260).then(bars => {
+              setTradeDailyBars(bars)
+              return bars
+            })
+          : Promise.resolve(cached)
+
+        promise.then(bars => {
+          const closePrice = findClosePriceByDate(bars, tradeDate)
+          if (closePrice !== null) {
+            setTradeDrawer(prev => {
+              if (!prev.open || resolvePortfolioTradeSymbol(prev.symbolInput, prev.market) !== symbol) return prev
+              return { ...prev, form: { ...prev.form, price: String(closePrice) } }
+            })
+            setPriceAutoFilled(true)
+          }
+        }).catch(() => {})
+      }
+    }
+
+    const timer = setTimeout(() => {
+      handler(currentTradeSymbol, tradeDrawer.form.trade_date)
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [tradeDrawer.open, tradeDrawer.action, currentTradeSymbol, tradeDrawer.form.trade_date])
+
   const openTradeDrawer = useCallback((action = 'buy', position = null) => {
     const market = position?.exchange === 'HKEX' ? 'HKEX' : defaultTradeMarket
+    setPriceAutoFilled(false)
     setTradeDrawer({
       ...createTradeDrawerState(market),
       open: true,
@@ -1508,6 +1574,10 @@ export default function PortfolioPage() {
       error: '',
       notice: '',
     }))
+  }, [])
+
+  const handlePriceAutoFilledChange = useCallback((value) => {
+    setPriceAutoFilled(value)
   }, [])
 
   const handleSubmitTrade = useCallback(async () => {
@@ -1730,6 +1800,8 @@ export default function PortfolioPage() {
         saving={tradeDrawer.saving}
         error={tradeDrawer.error}
         notice={tradeDrawer.notice}
+        priceAutoFilled={priceAutoFilled}
+        onPriceAutoFilledChange={handlePriceAutoFilledChange}
         onClose={closeTradeDrawer}
         onActionChange={handleTradeActionChange}
         onMarketChange={handleTradeMarketChange}

@@ -182,3 +182,54 @@ export function exchangeTag(exchange) {
   }
   return null
 }
+
+// ── 股票价格获取 ──
+
+/**
+ * 获取股票实时快照（含最新价）
+ * GET /api/live/symbols/{symbol}/snapshot
+ */
+export async function fetchSymbolSnapshot(symbol) {
+  const normalized = String(symbol || '').trim().toUpperCase()
+  if (!normalized) return null
+  try {
+    const data = await requestJson(`/api/live/symbols/${encodeURIComponent(normalized)}/snapshot`, undefined, '加载行情快照失败')
+    return data?.snapshot || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 获取股票历史日线数据
+ * GET /api/live/symbols/{symbol}/daily-bars?lookback_days={n}
+ */
+export async function fetchSymbolDailyBars(symbol, lookbackDays = 260) {
+  const normalized = String(symbol || '').trim().toUpperCase()
+  if (!normalized) return []
+  try {
+    const data = await requestJson(
+      `/api/live/symbols/${encodeURIComponent(normalized)}/daily-bars?lookback_days=${lookbackDays}`,
+      undefined,
+      '加载历史日线失败'
+    )
+    return Array.isArray(data?.bars) ? data.bars : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * 根据交易日期获取对应价格
+ * - 今天或过去日期：尝试从历史日线找到对应日期的收盘价
+ * - 如果找不到（节假日等），返回 null 让用户输入
+ */
+export function findClosePriceByDate(bars, tradeDate) {
+  if (!Array.isArray(bars) || !tradeDate) return null
+  const target = String(tradeDate)
+  const found = bars.find(bar => String(bar.date) === target)
+  if (found && typeof found.close === 'number' && found.close > 0) {
+    return Math.round(found.close * 100) / 100 // 保留 2 位小数
+  }
+  return null
+}

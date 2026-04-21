@@ -12,28 +12,28 @@ import (
 	"sync"
 	"time"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
 // Service orchestrates database backups (local + optional COS).
 type Service struct {
-	repo       *Repository
-	db         *gorm.DB // main GORM DB instance for pumpkin.db
+	repo *Repository
+	db   *gorm.DB // main GORM DB instance for pumpkin.db
 
 	// Paths (absolute or relative to CWD)
-	dbPath          string   // path to pumpkin.db (for hot backup)
-	backupDir       string   // local backup output directory
-	cacheADir       string   // directory containing quadrant_cache.db
-	cacheHKDir      string   // directory containing quadrant_cache_hk.db
-	retentionDays   int      // local retention in days
-	cooldownMinutes int      // minimum minutes between backups
+	dbPath          string // path to pumpkin.db (for hot backup)
+	backupDir       string // local backup output directory
+	cacheADir       string // directory containing quadrant_cache.db
+	cacheHKDir      string // directory containing quadrant_cache_hk.db
+	retentionDays   int    // local retention in days
+	cooldownMinutes int    // minimum minutes between backups
 
 	// COS configuration (empty = disabled)
-	cosBucket  string
-	cosRegion  string
-	cosPrefix  string
-	cosSecretID string
+	cosBucket    string
+	cosRegion    string
+	cosPrefix    string
+	cosSecretID  string
 	cosSecretKey string
 
 	mu           sync.Mutex
@@ -50,7 +50,7 @@ type ServiceConfig struct {
 	CooldownMinutes int
 
 	// COS (all empty = skip cloud)
-	COSBucket   string
+	COSBucket    string
 	COSRegion    string
 	COSPrefix    string
 	COSSecretID  string
@@ -166,11 +166,15 @@ func (s *Service) Run(ctx context.Context, triggerType string) (*BackupResult, e
 
 	// 3. Integrity check on pumpkin backup (if succeeded)
 	if result.PumpkinFile != "" {
-		ic, _ := s.integrityCheck(result.PumpkinFile)
+		ic, icErr := s.integrityCheck(result.PumpkinFile)
 		result.IntegrityCheck = ic
 		if ic == "failed" {
 			result.Status = "partial"
-			result.ErrorMessage += "integrity_check failed; "
+			if icErr != nil {
+				result.ErrorMessage += fmt.Sprintf("integrity_check failed: %v; ", icErr)
+			} else {
+				result.ErrorMessage += "integrity_check failed; "
+			}
 		}
 	} else if result.PumpkinFile == "" {
 		result.IntegrityCheck = "skipped"
@@ -208,35 +212,27 @@ func (s *Service) hotBackupPumpkin(timestamp string) (string, int64, error) {
 	destName := fmt.Sprintf("pumpkin_%s.db", timestamp)
 	destPath := filepath.Join(s.backupDir, destName)
 
-	// Safe file copy for hot backup.
-	// At ~3-4 AM CST, write activity on pumpkin.db is essentially zero,
-	// so a direct copy + optional WAL copy is safe and reliable.
-	srcF, err := os.Open(s.dbPath)
-	if err != nil {
-		return "", 0, fmt.Errorf("open source: %w", err)
+	if err := os.Remove(destPath); err != nil && !os.IsNotExist(err) {
+		return "", 0, fmt.Errorf("cleanup existing dest: %w", err)
 	}
-	defer srcF.Close()
+	_ = os.Remove(destPath + "-wal")
+	_ = os.Remove(destPath + "-shm")
 
-	dstF, err := os.Create(destPath)
-	if err != nil {
-		return "", 0, fmt.Errorf("create dest: %w", err)
-	}
-	defer dstF.Close()
-
-	if _, err = io.Copy(dstF, srcF); err != nil {
-		os.Remove(destPath)
-		return "", 0, fmt.Errorf("copy: %w", err)
-	}
-
-	// Also copy WAL file if it exists (ensures consistency)
-	walPath := s.dbPath + "-wal"
-	if walF, walErr := os.Open(walPath); walErr == nil {
-		walDest := destPath + "-wal"
-		if wdf, werr := os.Create(walDest); werr == nil {
-			io.Copy(wdf, walF)
-			wdf.Close()
+	sourceDB := s.db
+	if sourceDB == nil {
+		var err error
+		sourceDB, err = gorm.Open(sqlite.Open(s.dbPath+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)"), &gorm.Config{})
+		if err != nil {
+			return "", 0, fmt.Errorf("open source db: %w", err)
 		}
-		walF.Close()
+		if sqlDB, sqlErr := sourceDB.DB(); sqlErr == nil {
+			defer sqlDB.Close()
+		}
+	}
+
+	if err := sourceDB.Exec("VACUUM INTO ?", destPath).Error; err != nil {
+		_ = os.Remove(destPath)
+		return "", 0, fmt.Errorf("vacuum into: %w", err)
 	}
 
 	info, statErr := os.Stat(destPath)
@@ -329,7 +325,7 @@ func (s *Service) cleanupOldBackups() {
 			continue
 		}
 		if info.ModTime().Before(cutoff) {
-		 fullPath := filepath.Join(s.backupDir, entry.Name())
+			fullPath := filepath.Join(s.backupDir, entry.Name())
 			if err := os.Remove(fullPath); err != nil {
 				log.Printf("[backup] cleanup: failed to remove %s: %v", entry.Name(), err)
 			} else {

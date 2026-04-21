@@ -3,6 +3,7 @@ package backup
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,26 +19,42 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	// AutoMigrate backup_logs table
 	if err := db.AutoMigrate(&BackupLogRecord{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
 }
 
-func newTestService(t *testing.T, db *gorm.DB) *Service {
+func setupSourceDB(t *testing.T) (*gorm.DB, string, string) {
 	t.Helper()
 	dir := t.TempDir()
-	repo := NewRepository(db)
-	svc := NewService(repo, db, ServiceConfig{
-		DBPath:          filepath.Join(dir, "pumpkin.db"),
-		BackupDir:       filepath.Join(dir, "backups"),
-		CacheADir:       dir,
-		CacheHKDir:      dir,
-		RetentionDays:   7,
-		CooldownMinutes: 0, // disabled for tests
-	})
-	return svc
+	dbPath := filepath.Join(dir, "pumpkin.db")
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open source db: %v", err)
+	}
+	if err := db.Exec("PRAGMA journal_mode=WAL;").Error; err != nil {
+		t.Fatalf("enable wal: %v", err)
+	}
+	if err := db.Exec("CREATE TABLE IF NOT EXISTS sample_records (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)").Error; err != nil {
+		t.Fatalf("create sample table: %v", err)
+	}
+	if err := db.Exec("INSERT INTO sample_records(name) VALUES (?)", "seed").Error; err != nil {
+		t.Fatalf("insert sample row: %v", err)
+	}
+	if err := db.AutoMigrate(&BackupLogRecord{}); err != nil {
+		t.Fatalf("migrate backup logs: %v", err)
+	}
+	return db, dir, dbPath
+}
+
+func writeCacheFixtures(t *testing.T, dir string) {
+	t.Helper()
+	for _, name := range []string{"quadrant_cache.db", "quadrant_cache_hk.db"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("cache fixture"), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
 }
 
 func TestRepository_InsertAndGetLatest(t *testing.T) {
@@ -46,12 +63,12 @@ func TestRepository_InsertAndGetLatest(t *testing.T) {
 
 	now := time.Now().Truncate(time.Second)
 	record := BackupLogRecord{
-		TriggeredAt:  now,
-		TriggerType:  "manual",
-		Status:       "success",
+		TriggeredAt: now,
+		TriggerType: "manual",
+		Status:      "success",
 		PumpkinFile: "pumpkin_test.db",
-		PumpkinSize:  3456,
-		CreatedAt:    time.Now(),
+		PumpkinSize: 3456,
+		CreatedAt:   time.Now(),
 	}
 
 	if err := repo.Insert(&record); err != nil {
@@ -96,8 +113,8 @@ func TestRepository_ListRecent(t *testing.T) {
 		repo.Insert(&BackupLogRecord{
 			TriggeredAt: ts,
 			TriggerType: "scheduled_fallback",
-			Status:     "success",
-			CreatedAt:  time.Now(),
+			Status:      "success",
+			CreatedAt:   time.Now(),
 		})
 	}
 
@@ -108,25 +125,17 @@ func TestRepository_ListRecent(t *testing.T) {
 	if len(items) != 3 {
 		t.Errorf("expected 3 items, got %d", len(items))
 	}
-	// Should be ordered by triggered_at DESC (most recent first)
 	if items[0].TriggeredAt.Before(items[1].TriggeredAt) {
 		t.Error("items should be ordered by triggered_at DESC")
 	}
 }
 
 func TestService_Run_CooldownSkips(t *testing.T) {
-	db := setupTestDB(t)
-	dir := t.TempDir()
-
-	// Create a fake pumpkin.db so hot-backup has something to read
-	fakeDB := filepath.Join(dir, "pumpkin.db")
-	if f, err := os.Create(fakeDB); err == nil {
-		f.WriteString("fake sqlite db content for testing")
-		f.Close()
-	}
+	db, dir, dbPath := setupSourceDB(t)
+	writeCacheFixtures(t, dir)
 
 	svc := NewService(NewRepository(db), db, ServiceConfig{
-		DBPath:          fakeDB,
+		DBPath:          dbPath,
 		BackupDir:       filepath.Join(dir, "backups"),
 		CacheADir:       dir,
 		CacheHKDir:      dir,
@@ -134,16 +143,23 @@ func TestService_Run_CooldownSkips(t *testing.T) {
 		CooldownMinutes: 120,
 	})
 
-	// First run should succeed (no cooldown)
 	r1, err := svc.Run(nil, "manual")
 	if err != nil {
 		t.Fatalf("first run: %v", err)
 	}
-	if r1.Status == "skipped" {
-		t.Fatal("first run should not be skipped")
+	if r1.Status != "success" {
+		t.Fatalf("expected first run success, got %s (%s)", r1.Status, r1.ErrorMessage)
+	}
+	if r1.IntegrityCheck != "ok" {
+		t.Fatalf("expected integrity_check ok, got %s (%s)", r1.IntegrityCheck, r1.ErrorMessage)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "backups", r1.PumpkinFile)); err != nil {
+		t.Fatalf("expected backup file to exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "backups", r1.PumpkinFile+"-wal")); !os.IsNotExist(err) {
+		t.Fatalf("expected standalone backup without wal sidecar, err=%v", err)
 	}
 
-	// Second run immediately should be skipped by cooldown
 	r2, err := svc.Run(nil, "manual")
 	if err != nil {
 		t.Fatalf("second run: %v", err)
@@ -154,22 +170,14 @@ func TestService_Run_CooldownSkips(t *testing.T) {
 }
 
 func TestService_Run_CacheNotFound(t *testing.T) {
-	db := setupTestDB(t)
-	dir := t.TempDir()
-
-	// Create pumpkin.db but NOT cache files
-	fakeDB := filepath.Join(dir, "pumpkin.db")
-	if f, err := os.Create(fakeDB); err == nil {
-		f.Write([]byte("fake"))
-		f.Close()
-	}
+	db, dir, dbPath := setupSourceDB(t)
 
 	svc := NewService(NewRepository(db), db, ServiceConfig{
-		DBPath:        fakeDB,
-		BackupDir:     filepath.Join(dir, "backups"),
-		CacheADir:     dir, // no cache files here
-		CacheHKDir:    dir,
-		RetentionDays: 7,
+		DBPath:          dbPath,
+		BackupDir:       filepath.Join(dir, "backups"),
+		CacheADir:       dir,
+		CacheHKDir:      dir,
+		RetentionDays:   7,
 		CooldownMinutes: 0,
 	})
 
@@ -177,12 +185,14 @@ func TestService_Run_CacheNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	// Pumpkin should succeed but cache should fail gracefully → partial or success with empty cache
-	if result.Status == "failed" || result.Status == "skipped" {
-		// If cache is missing, it should still be partial (pumpkin ok + cache failed)
-		// or success if we treat cache as optional
-		t.Logf("status=%s pumpkin_file=%s cache_a=%s error=%s",
-			result.Status, result.PumpkinFile, result.CacheAFile, result.ErrorMessage)
+	if result.Status != "partial" {
+		t.Fatalf("expected partial, got %s", result.Status)
+	}
+	if result.IntegrityCheck != "ok" {
+		t.Fatalf("expected integrity_check ok, got %s (%s)", result.IntegrityCheck, result.ErrorMessage)
+	}
+	if !strings.Contains(result.ErrorMessage, "cache_a") || !strings.Contains(result.ErrorMessage, "cache_hk") {
+		t.Fatalf("expected cache errors in message, got %s", result.ErrorMessage)
 	}
 }
 

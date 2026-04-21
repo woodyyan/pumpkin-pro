@@ -6,6 +6,7 @@ import InfoTip from '../../components/InfoTip'
 import { requestJson } from '../../lib/api'
 import { useAuth } from '../../lib/auth-context'
 import { isAuthRequiredError } from '../../lib/auth-storage'
+import { deriveAIAnalysisWaitState } from '../../lib/ai-analysis-wait'
 import {
   buildSignalConfigPayload,
   canEnableSignal,
@@ -93,6 +94,8 @@ export default function LiveTradingDetailPage() {
   const [aiResult, setAiResult] = useState(null)
   const [aiError, setAiError] = useState('')
   const [showAiPanel, setShowAiPanel] = useState(false)
+  const [aiWaitStartedAt, setAiWaitStartedAt] = useState(0)
+  const [aiWaitElapsedSec, setAiWaitElapsedSec] = useState(0)
 
   // ── AI 分析历史 ──
   const [analysisHistory, setAnalysisHistory] = useState([])
@@ -130,6 +133,12 @@ export default function LiveTradingDetailPage() {
   }, [snapshot, symbol])
 
   const pageTitle = symbolName ? `${symbolName}（${symbol}）- 行情看板` : symbol ? `${symbol} - 行情看板` : '行情看板'
+  const latestAnalysisReference = useMemo(() => (Array.isArray(analysisHistory) && analysisHistory.length > 0 ? analysisHistory[0] : null), [analysisHistory])
+  const aiHasPositionContext = Boolean(portfolioData && Number(portfolioData.shares) > 0)
+  const aiWaitState = useMemo(
+    () => deriveAIAnalysisWaitState(aiWaitElapsedSec, { hasPosition: aiHasPositionContext }),
+    [aiWaitElapsedSec, aiHasPositionContext]
+  )
 
   const signalDirty = useMemo(() => hasSignalConfigChanged(serverSignalConfig, draftSignalConfig), [serverSignalConfig, draftSignalConfig])
 
@@ -140,6 +149,16 @@ export default function LiveTradingDetailPage() {
   useEffect(() => {
     togglingSignalRef.current = isTogglingSignal
   }, [isTogglingSignal])
+
+  useEffect(() => {
+    if (!aiAnalyzing || !aiWaitStartedAt) return undefined
+    const updateElapsed = () => {
+      setAiWaitElapsedSec(Math.max(0, Math.floor((Date.now() - aiWaitStartedAt) / 1000)))
+    }
+    updateElapsed()
+    const timer = setInterval(updateElapsed, 1000)
+    return () => clearInterval(timer)
+  }, [aiAnalyzing, aiWaitStartedAt])
 
   const updateError = (nextError, nextNeedsLogin = false) => {
     setError(nextError)
@@ -383,8 +402,11 @@ export default function LiveTradingDetailPage() {
     if (!snapshotPayload?.snapshot) { setAiError('行情数据尚未加载完成，请稍后再试'); return }
 
     setAiAnalyzing(true)
+    setAiResult(null)
     setAiError('')
     setShowAiPanel(true)
+    setAiWaitStartedAt(Date.now())
+    setAiWaitElapsedSec(0)
 
     try {
       // Level 1: 行情快照已检查（上面）
@@ -922,7 +944,7 @@ export default function LiveTradingDetailPage() {
                 onClick={handleAIAnalysis}
                 className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold transition-all duration-300 ${
                   aiAnalyzing
-                    ? 'cursor-wait bg-gradient-to-r from-indigo-500 to-violet-500 opacity-70'
+                    ? 'cursor-wait bg-gradient-to-r from-indigo-500 to-violet-500 text-white opacity-80'
                     : snapshotPayload?.snapshot
                       ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-[0_0_16px_rgba(99,102,241,0.35)] hover:scale-[1.03] hover:shadow-[0_0_24px_rgba(99,102,241,0.5)] active:scale-[0.98] animate-ai-glow'
                       : 'cursor-not-allowed border border-white/15 bg-white/5 text-white/35 opacity-50'
@@ -932,7 +954,7 @@ export default function LiveTradingDetailPage() {
                 {aiAnalyzing ? (
                   <>
                     <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                    分析中…
+                    分析中 · {formatAIElapsedCompact(aiWaitElapsedSec)}
                   </>
                 ) : '✨ AI 分析'}
               </button>
@@ -1085,6 +1107,11 @@ export default function LiveTradingDetailPage() {
             analyzing={aiAnalyzing}
             result={aiResult}
             error={aiError}
+            symbol={symbol}
+            symbolName={symbolName || symbol}
+            elapsedSec={aiWaitElapsedSec}
+            waitState={aiWaitState}
+            referenceItem={latestAnalysisReference}
             onClose={() => { setShowAiPanel(false); setAiResult(null); setAiError('') }}
             onRetry={handleAIAnalysis}
           />
@@ -1668,24 +1695,166 @@ export default function LiveTradingDetailPage() {
 
 // ── AI 分析结果面板 ──
 
-function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
+function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, referenceItem }) {
+  const signalToneMap = {
+    buy: 'text-red-200 bg-red-500/10 border-red-400/25',
+    sell: 'text-emerald-200 bg-emerald-500/10 border-emerald-400/25',
+    hold: 'text-amber-200 bg-amber-500/10 border-amber-400/25',
+  }
+  const referenceSignalLabel = referenceItem?.signal ? getSignalLabel(referenceItem.signal) : ''
+  const referenceSignalTone = signalToneMap[referenceItem?.signal] || 'text-white/60 bg-white/[0.04] border-white/10'
+  const referenceValidation = referenceItem?.quality_validation || null
+  const referenceQualityHeadline = buildQualityValidationHeadline(referenceValidation)
+  const referenceQualityStatusLabel = buildQualityValidationStatusLabel(referenceValidation)
+
+  return (
+    <section className="rounded-2xl border border-primary/25 bg-card p-4 sm:p-6">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+            <h3 className="text-base font-semibold text-white">AI 正在分析「{symbolName || symbol || '--'}」</h3>
+          </div>
+          <p className="mt-2 text-xs leading-6 text-white/50">
+            正在结合实时行情、技术面、基础面和你的持仓信息生成本次判断。
+          </p>
+        </div>
+        <div className="inline-flex items-center self-start rounded-full border border-indigo-400/25 bg-indigo-500/10 px-3 py-1 text-[11px] font-medium text-indigo-100">
+          分析中 · 已等待 {formatAIElapsedLong(elapsedSec)}
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-white/8 bg-black/20 p-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="text-[11px] font-semibold tracking-wide text-indigo-200/90">{waitState.stage.kicker}</div>
+            <div className="mt-1 text-sm font-medium text-white/85">{waitState.stage.title}</div>
+          </div>
+          <div className="max-w-md text-[11px] leading-5 text-white/38 sm:text-right">{waitState.stage.hint}</div>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/8">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-indigo-400 via-violet-400 to-fuchsia-400 transition-[width] duration-700 ease-out"
+            style={{ width: `${waitState.progress}%` }}
+          />
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-white/35">
+          <span>{waitState.progress}% 进度感</span>
+          <span>结果出来后会自动展示</span>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {waitState.steps.map((step) => {
+          const tone = step.status === 'done'
+            ? {
+                wrapper: 'border-sky-400/25 bg-sky-500/[0.08]',
+                title: 'text-sky-100',
+                text: 'text-sky-100/65',
+                badge: 'border-sky-400/25 bg-sky-500/10 text-sky-100',
+                icon: '✓',
+              }
+            : step.status === 'active'
+              ? {
+                  wrapper: 'border-violet-400/25 bg-violet-500/[0.08]',
+                  title: 'text-violet-100',
+                  text: 'text-violet-100/70',
+                  badge: 'border-violet-400/30 bg-violet-500/12 text-violet-100',
+                  icon: '•',
+                }
+              : {
+                  wrapper: 'border-white/8 bg-white/[0.02]',
+                  title: 'text-white/68',
+                  text: 'text-white/35',
+                  badge: 'border-white/10 bg-black/20 text-white/35',
+                  icon: '·',
+                }
+
+          return (
+            <div key={step.key} className={`rounded-xl border px-3 py-3 ${tone.wrapper}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className={`text-xs font-medium ${tone.title}`}>{step.label}</div>
+                  <div className={`mt-1 text-[11px] leading-5 ${tone.text}`}>{step.description}</div>
+                </div>
+                <span className={`inline-flex min-w-[24px] items-center justify-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${tone.badge}`}>
+                  {tone.icon}
+                </span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+        <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+          <div className="text-xs font-semibold text-white/70">等待时你可以先看</div>
+          {referenceItem ? (
+            <>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {referenceSignalLabel ? (
+                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${referenceSignalTone}`}>
+                    上次观点：{referenceSignalLabel}
+                  </span>
+                ) : null}
+                {referenceQualityHeadline ? (
+                  <span className={`rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] font-medium ${getQualityValidationReturnClass(referenceValidation)}`}>
+                    {referenceQualityHeadline}
+                  </span>
+                ) : null}
+                {referenceQualityStatusLabel ? (
+                  <span className={`rounded-full border px-2.5 py-1 text-[10px] ${getQualityValidationStatusClass(referenceValidation)}`}>
+                    {referenceQualityStatusLabel}
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div>
+                  <div className="text-[10px] text-white/30">上次分析时间</div>
+                  <div className="mt-1 text-[12px] font-medium text-white/75">{formatDateTime(referenceItem.created_at)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-white/30">本次标的</div>
+                  <div className="mt-1 text-[12px] font-medium text-white/75">{referenceItem.symbol || symbol || '--'}</div>
+                </div>
+                <div className="col-span-2 sm:col-span-1">
+                  <div className="text-[10px] text-white/30">本次说明</div>
+                  <div className="mt-1 text-[12px] font-medium leading-5 text-white/65">本次会基于最新行情重新评估，不会直接复用旧结论。</div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="mt-3 rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-3.5 py-3 text-[12px] leading-6 text-white/50">
+              这是你近期的首次 AI 分析。结果生成后会自动进入「AI 分析历史」，之后这里会优先展示最近一次观点与 5 日验证结果。
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+          <div className="text-xs font-semibold text-white/70">本次说明</div>
+          <ul className="mt-3 space-y-2 text-[12px] leading-6 text-white/55">
+            <li>• 这一步会比普通接口更慢，因为需要组合多类数据一起判断。</li>
+            <li>• 市场波动越大、可用上下文越多，分析耗时通常也会更长。</li>
+            <li>• 你可以留在当前页等待，结果出来后会自动替换当前卡片。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolName, elapsedSec, waitState, referenceItem, symbol }) {
   const [logicExpanded, setLogicExpanded] = useState(true)
 
-  // Loading 骨架屏
   if (analyzing) {
     return (
-      <section className="rounded-2xl border border-primary/30 bg-card p-6">
-        <div className="flex items-center gap-3">
-          <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
-          <h3 className="text-base font-semibold text-white">AI 正在分析中…</h3>
-        </div>
-        <p className="mt-2 text-xs text-white/45">正在聚合 6 类数据并调用卧龙AI投研模型，预计 20-50 秒</p>
-        <div className="mt-4 space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="animate-pulse rounded-lg bg-white/5 h-16" />
-          ))}
-        </div>
-      </section>
+      <AIAnalysisLoadingPanel
+        symbolName={symbolName}
+        symbol={symbol}
+        elapsedSec={elapsedSec}
+        waitState={waitState}
+        referenceItem={referenceItem}
+      />
     )
   }
 
@@ -1726,10 +1895,10 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
           <span className="text-xl">{sig.dot}</span>
           <div>
             <div className={`text-lg font-bold ${sig.color}`}>{sig.label} <span className="text-base">{sig.arrow}</span></div>
-            <div className="text-[11px] text-white/40 mt-0.5">{sig.hint}</div>
-            <div className="flex items-center gap-2 mt-1.5">
+            <div className="mt-0.5 text-[11px] text-white/40">{sig.hint}</div>
+            <div className="mt-1.5 flex items-center gap-2">
               <span className="text-xs text-white/50">置信度</span>
-              <div className="h-2 w-32 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-2 w-32 overflow-hidden rounded-full bg-white/10">
                 <div
                   className={`h-full rounded-full transition-all ${
                     confidencePct >= 70 ? 'bg-red-400' : confidencePct >= 40 ? 'bg-amber-400' : 'bg-gray-500'
@@ -1744,10 +1913,10 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={onRetry} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-white/60 hover:text-white hover:border-white/30 transition">
+          <button type="button" onClick={onRetry} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-white/60 transition hover:border-white/30 hover:text-white">
             🔄 重新分析
           </button>
-          <button type="button" onClick={onClose} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-white/40 hover:border-white/30 hover:text-white/70 transition">
+          <button type="button" onClick={onClose} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-white/40 transition hover:border-white/30 hover:text-white/70">
             ✕ 关闭
           </button>
         </div>
@@ -1765,7 +1934,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
       {/* ── 四层分析评分（第二步新增）── */}
       {analysis.layer_scores && Object.keys(analysis.layer_scores).length > 0 && (
         <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-4 py-3.5">
-          <div className="flex items-center gap-2 mb-3">
+          <div className="mb-3 flex items-center gap-2">
             <span className="text-xs font-semibold text-white/70">📊 卧龙模型评分</span>
             {/* 市场状态标签 */}
             {analysis.market_state && (
@@ -1796,7 +1965,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
             const dirColor = ls.direction === 'bullish' ? '#ef4444' : ls.direction === 'bearish' ? '#22c55e' : '#9ca3af'
             return (
               <div key={key} className="mt-2 first:mt-0">
-                <div className="flex items-center justify-between mb-1">
+                <div className="mb-1 flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <span className="text-[13px]">{meta.icon}</span>
                     <span className="text-[12px] font-medium text-white/80">{meta.label}</span>
@@ -1808,7 +1977,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
                     <span className="text-[10px] text-white/30">置信度 {(ls.confidence * 100).toFixed(0)}%</span>
                   </div>
                 </div>
-                <div className="h-1.5 w-full rounded-full bg-white/8 overflow-hidden">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/8">
                   <div
                     className="h-full rounded-full transition-all"
                     style={{ width: `${barPct}%`, backgroundColor: meta.color }}
@@ -1822,7 +1991,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
           })}
           {/* 综合评分 */}
           {analysis.total_score != null && (
-            <div className="mt-3 pt-3 border-t border-white/8 flex items-center justify-between">
+            <div className="mt-3 flex items-center justify-between border-t border-white/8 pt-3">
               <span className="text-[11px] text-white/40">加权综合评分</span>
               <span className={`text-sm font-bold font-mono ${
                 analysis.total_score >= 0.5 ? 'text-red-400' :
@@ -1837,7 +2006,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
       )}
 
       {/* 分析逻辑 */}
-      <div className="mt-4 rounded-xl border border-white/8 bg-black/20 overflow-hidden">
+      <div className="mt-4 overflow-hidden rounded-xl border border-white/8 bg-black/20">
         <button
           type="button"
           onClick={() => setLogicExpanded(!logicExpanded)}
@@ -1860,9 +2029,9 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
       {/* ⚠️ 风险提示 */}
       {Array.isArray(analysis.risk_warnings) && analysis.risk_warnings.length > 0 && (
         <div className="mt-4 rounded-xl border border-rose-400/25 bg-rose-500/8 px-4 py-3">
-          <div className="text-xs font-semibold text-rose-200/90 mb-2">⚠️ 风险提示</div>
+          <div className="mb-2 text-xs font-semibold text-rose-200/90">⚠️ 风险提示</div>
           {analysis.risk_warnings.map((w, i) => (
-            <p key={i} className="text-[12px] leading-relaxed text-rose-200/70 mt-1.5 first:mt-0">⚠️ {w}</p>
+            <p key={i} className="mt-1.5 text-[12px] leading-relaxed text-rose-200/70 first:mt-0">⚠️ {w}</p>
           ))}
         </div>
       )}
@@ -1870,7 +2039,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
       {/* 📋 交易建议表格 */}
       {ts.action_suggestion && (
         <div className="mt-4 rounded-xl border border-sky-400/20 bg-sky-500/5 px-4 py-3">
-          <div className="text-xs font-semibold text-sky-200/90 mb-2">📋 交易建议</div>
+          <div className="mb-2 text-xs font-semibold text-sky-200/90">📋 交易建议</div>
           <p className="text-[13px] leading-relaxed text-white/80">{ts.action_suggestion}</p>
           <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 md:grid-cols-4">
             <MetricMini label="建议买价" value={`${entryZone.low ?? '--'} ~ ${entryZone.high ?? '--'}`} emphasis tooltip="建议的买入价格区间" />
@@ -1887,22 +2056,22 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
       {/* ── 触发条件（第二步新增）── */}
       {analysis.action_trigger && (analysis.action_trigger.buy_trigger || analysis.action_trigger.sell_trigger) && (
         <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/5 px-4 py-3">
-          <div className="text-xs font-semibold text-amber-200/90 mb-2">🎯 执行触发条件</div>
+          <div className="mb-2 text-xs font-semibold text-amber-200/90">🎯 执行触发条件</div>
           {analysis.action_trigger.buy_trigger && (
-            <div className="flex items-start gap-2 mt-1.5 first:mt-0">
+            <div className="mt-1.5 flex items-start gap-2 first:mt-0">
               <span className="mt-0.5 text-xs">🟢</span>
               <div>
                 <span className="text-[11px] font-medium text-white/50">买入触发</span>
-                <p className="text-[13px] leading-relaxed text-red-300/80 mt-0.5">{analysis.action_trigger.buy_trigger}</p>
+                <p className="mt-0.5 text-[13px] leading-relaxed text-red-300/80">{analysis.action_trigger.buy_trigger}</p>
               </div>
             </div>
           )}
           {analysis.action_trigger.sell_trigger && (
-            <div className="flex items-start gap-2 mt-2.5 first:mt-0">
+            <div className="mt-2.5 flex items-start gap-2 first:mt-0">
               <span className="mt-0.5 text-xs">🔴</span>
               <div>
                 <span className="text-[11px] font-medium text-white/50">卖出触发</span>
-                <p className="text-[13px] leading-relaxed text-emerald-300/80 mt-0.5">{analysis.action_trigger.sell_trigger}</p>
+                <p className="mt-0.5 text-[13px] leading-relaxed text-emerald-300/80">{analysis.action_trigger.sell_trigger}</p>
               </div>
             </div>
           )}
@@ -1912,9 +2081,9 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
       {/* ── 关键催化因素（第二步新增）── */}
       {Array.isArray(analysis.key_catalysts) && analysis.key_catalysts.length > 0 && (
         <div className="mt-4 rounded-xl border border-sky-400/15 bg-sky-500/[0.04] px-4 py-3">
-          <div className="text-xs font-semibold text-sky-200/90 mb-2">✨ 潜在催化因素</div>
+          <div className="mb-2 text-xs font-semibold text-sky-200/90">✨ 潜在催化因素</div>
           {analysis.key_catalysts.map((c, i) => (
-            <p key={i} className="text-[12px] leading-relaxed text-sky-200/65 mt-1.5 first:mt-0">💡 {c}</p>
+            <p key={i} className="mt-1.5 text-[12px] leading-relaxed text-sky-200/65 first:mt-0">💡 {c}</p>
           ))}
         </div>
       )}
@@ -1927,7 +2096,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry }) {
       )}
 
       {/* 免责声明 */}
-      <div className="mt-4 rounded-lg bg-black/20 px-3.5 py-2.5 text-[11px] text-white/30 text-center">
+      <div className="mt-4 rounded-lg bg-black/20 px-3.5 py-2.5 text-center text-[11px] text-white/30">
         ⚠️ AI 分析仅供参考，不构成任何投资建议。市场有风险，投资需谨慎。
       </div>
 
@@ -3360,6 +3529,23 @@ function formatDateTime(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function formatAIElapsedCompact(seconds) {
+  const safe = Math.max(0, Number.isFinite(Number(seconds)) ? Number(seconds) : 0)
+  if (safe < 60) return `${safe}s`
+  const mins = Math.floor(safe / 60)
+  const secs = safe % 60
+  return `${mins}分${String(secs).padStart(2, '0')}秒`
+}
+
+function formatAIElapsedLong(seconds) {
+  const safe = Math.max(0, Number.isFinite(Number(seconds)) ? Number(seconds) : 0)
+  if (safe < 60) return `${safe} 秒`
+  const mins = Math.floor(safe / 60)
+  const secs = safe % 60
+  if (secs === 0) return `${mins} 分钟`
+  return `${mins} 分 ${secs} 秒`
 }
 
 function formatDistancePct(value) {

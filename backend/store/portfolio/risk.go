@@ -257,18 +257,125 @@ func (r *RiskRepository) calcLiquidityRisk(ctx context.Context, positions []posi
 		return metrics, nil
 	}
 
-	// 从quadrant_scores表获取流动性数据
-	// TODO: 实际查询quadrant_scores表
-	// 简化实现：假设所有股票流动性良好
-	metrics.AvgDailyTurnover = 5000.0 // 假设平均日成交额5000万元
-	metrics.AvgTurnoverRate = 2.5     // 假设平均换手率2.5%
-	metrics.LiquidityScore = 80.0     // 流动性评分80分
+	// 根据scope过滤持仓
+	filteredPositions := make([]positionWithWeight, 0, len(positions))
+	for _, pos := range positions {
+		isAShare := !isHKCode(pos.Symbol) // A股代码不是5位全数字
+		isHKShare := isHKCode(pos.Symbol)
 
-	// 预警：如果有股票成交额低于100万元
-	if len(positions) > 0 {
-		metrics.IlliquidCount = 0
-		metrics.LowLiquidityWeight = 0.0
-		metrics.Warnings = append(metrics.Warnings, "流动性数据暂未接入真实数据源")
+		switch scope {
+		case "ashares":
+			if isAShare {
+				filteredPositions = append(filteredPositions, pos)
+			}
+		case "hkshares":
+			if isHKShare {
+				filteredPositions = append(filteredPositions, pos)
+			}
+		default: // "all" or empty
+			filteredPositions = append(filteredPositions, pos)
+		}
+	}
+
+	if len(filteredPositions) == 0 {
+		return metrics, nil
+	}
+
+	// 从quadrant_scores表获取流动性数据
+	type LiquidityRecord struct {
+		AvgAmount5d float64
+		Liquidity   float64 // 百分位 (0-1)
+	}
+	liquidityMap := make(map[string]LiquidityRecord)
+
+	// 分批查询A股和港股
+	var aShareCodes []string
+	var hkCodes []string
+	for _, pos := range filteredPositions {
+		if isHKCode(pos.Symbol) {
+			hkCodes = append(hkCodes, pos.Symbol)
+		} else {
+			aShareCodes = append(aShareCodes, pos.Symbol)
+		}
+	}
+
+	// 查询A股数据
+	if len(aShareCodes) > 0 && r.cacheDB != nil {
+		var aShareRecords []quadrant.QuadrantScoreRecord
+		err := r.cacheDB.WithContext(ctx).
+			Where("code IN (?) AND computed_at = (SELECT MAX(computed_at) FROM quadrant_scores)", aShareCodes).
+			Find(&aShareRecords).Error
+		if err != nil {
+			log.Printf("查询A股流动性数据失败: %v", err)
+		} else {
+			for _, rec := range aShareRecords {
+				liquidityMap[rec.Code] = LiquidityRecord{
+					AvgAmount5d: rec.AvgAmount5d,
+					Liquidity:   rec.Liquidity,
+				}
+			}
+		}
+	}
+
+	// 查询港股数据
+	if len(hkCodes) > 0 && r.hkCacheDB != nil {
+		var hkRecords []quadrant.QuadrantScoreRecord
+		err := r.hkCacheDB.WithContext(ctx).
+			Where("code IN (?) AND computed_at = (SELECT MAX(computed_at) FROM quadrant_scores)", hkCodes).
+			Find(&hkRecords).Error
+		if err != nil {
+			log.Printf("查询港股流动性数据失败: %v", err)
+		} else {
+			for _, rec := range hkRecords {
+				liquidityMap[rec.Code] = LiquidityRecord{
+					AvgAmount5d: rec.AvgAmount5d,
+					Liquidity:   rec.Liquidity,
+				}
+			}
+		}
+	}
+
+	// 计算指标
+	var weightedTurnoverSum float64
+	var weightedLiquiditySum float64
+	var totalWeight float64
+	illiquidCount := 0
+	lowLiquidityWeight := 0.0
+
+	for _, pos := range filteredPositions {
+		rec, ok := liquidityMap[pos.Symbol]
+		if !ok {
+			// 没有流动性数据，跳过
+			continue
+		}
+
+		weightedTurnoverSum += rec.AvgAmount5d * pos.Weight
+		weightedLiquiditySum += rec.Liquidity * pos.Weight
+		totalWeight += pos.Weight
+
+		// 低流动性股票：近5日均成交额 < 100万元
+		if rec.AvgAmount5d < 100.0 {
+			illiquidCount++
+			lowLiquidityWeight += pos.Weight
+		}
+	}
+
+	if totalWeight > 0 {
+		metrics.AvgDailyTurnover = weightedTurnoverSum / totalWeight
+		metrics.LiquidityScore = weightedLiquiditySum / totalWeight * 100.0 // 转换为0-100分
+	}
+	// 换手率数据暂不可用，设置为0并添加警告
+	metrics.AvgTurnoverRate = 0.0
+	metrics.IlliquidCount = illiquidCount
+	metrics.LowLiquidityWeight = lowLiquidityWeight
+
+	// 预警
+	if illiquidCount > 0 {
+		metrics.Warnings = append(metrics.Warnings, fmt.Sprintf("有%d只股票流动性较低（成交额<100万元），权重合计%.1f%%", illiquidCount, lowLiquidityWeight*100))
+	}
+	if len(liquidityMap) < len(filteredPositions) {
+		missing := len(filteredPositions) - len(liquidityMap)
+		metrics.Warnings = append(metrics.Warnings, fmt.Sprintf("%d只股票缺少流动性数据", missing))
 	}
 
 	return metrics, nil
@@ -327,6 +434,19 @@ func (r *RiskRepository) calcOverallRiskScore(metrics *RiskMetrics) float64 {
 	}
 
 	return math.Round(score*10) / 10
+}
+
+// isHKCode 判断是否为港股代码（5位全数字）
+func isHKCode(symbol string) bool {
+	if len(symbol) != 5 {
+		return false
+	}
+	for _, ch := range symbol {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // GetRiskMetricsJSON 返回JSON格式的风险指标（用于API响应）

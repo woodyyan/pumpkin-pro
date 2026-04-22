@@ -1,4 +1,10 @@
-import { useRef, useEffect, useCallback, useState } from 'react'
+import { useRef, useEffect, useCallback, useMemo, useState } from 'react'
+
+import {
+  buildQuadrantDetailSymbol,
+  normalizeQuadrantMarket,
+  normalizeQuadrantStockCode,
+} from '../lib/quadrant-search'
 
 /**
  * QuadrantChart — Canvas-based cross quadrant scatter plot.
@@ -32,9 +38,46 @@ function getQuadrantColor(q) {
   return QUADRANT_COLOURS[q] || QUADRANT_COLOURS['中性']
 }
 
+function buildChartItems(allStocks, watchlist) {
+  const watchlistCodes = new Set((watchlist || []).map((item) => item.code))
+  const allItems = (allStocks || []).map((stock) => ({
+    code: stock.c,
+    name: stock.n,
+    opportunity: stock.o,
+    risk: stock.r,
+    quadrant: stock.q,
+    isWatchlist: false,
+  }))
+
+  ;(watchlist || []).forEach((item) => {
+    allItems.push({
+      code: item.code,
+      name: item.name,
+      opportunity: item.opportunity,
+      risk: item.risk,
+      quadrant: item.quadrant,
+      isWatchlist: true,
+      detail: item,
+    })
+  })
+
+  return { allItems, watchlistCodes }
+}
+
+function findChartItemByCode(allItems, code, market) {
+  const normalizedCode = normalizeQuadrantStockCode(code, market)
+  if (!normalizedCode) return null
+  const exactWatchlist = allItems.find((item) => item.isWatchlist && normalizeQuadrantStockCode(item.code, market) === normalizedCode)
+  if (exactWatchlist) return exactWatchlist
+  return allItems.find((item) => normalizeQuadrantStockCode(item.code, market) === normalizedCode) || null
+}
+
 export default function QuadrantChart({
   allStocks = [],
   watchlist = [],
+  market = 'ASHARE',
+  highlightCode = '',
+  autoOpenTooltip = false,
   width: propWidth,
   height: propHeight,
 }) {
@@ -68,6 +111,17 @@ export default function QuadrantChart({
 
   const plotW = width - PADDING.left - PADDING.right
   const plotH = height - PADDING.top - PADDING.bottom
+  const normalizedMarket = normalizeQuadrantMarket(market)
+
+  const { allItems, watchlistCodes } = useMemo(
+    () => buildChartItems(allStocks, watchlist),
+    [allStocks, watchlist]
+  )
+
+  const highlightedItem = useMemo(
+    () => findChartItemByCode(allItems, highlightCode, normalizedMarket),
+    [allItems, highlightCode, normalizedMarket]
+  )
 
   // Build spatial grid (20x20)
   const buildGrid = useCallback(() => {
@@ -78,29 +132,6 @@ export default function QuadrantChart({
       Array.from({ length: GRID_SIZE }, () => [])
     )
 
-    const allItems = allStocks.map((s) => ({
-      code: s.c,
-      name: s.n,
-      opportunity: s.o,
-      risk: s.r,
-      quadrant: s.q,
-      isWatchlist: false,
-    }))
-
-    // Add watchlist items (will be drawn on top)
-    const watchlistCodes = new Set(watchlist.map((w) => w.code))
-    watchlist.forEach((w) => {
-      allItems.push({
-        code: w.code,
-        name: w.name,
-        opportunity: w.opportunity,
-        risk: w.risk,
-        quadrant: w.quadrant,
-        isWatchlist: true,
-        detail: w,
-      })
-    })
-
     allItems.forEach((item) => {
       const { x, y } = mapToCanvas(item.opportunity, item.risk, plotW, plotH)
       const gx = Math.min(GRID_SIZE - 1, Math.max(0, Math.floor((x - PADDING.left) / cellW)))
@@ -109,7 +140,7 @@ export default function QuadrantChart({
     })
 
     gridRef.current = { grid, cellW, cellH, GRID_SIZE }
-  }, [allStocks, watchlist, plotW, plotH])
+  }, [allItems, plotW, plotH])
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -212,7 +243,6 @@ export default function QuadrantChart({
     }
 
     // ── L3: Watchlist dots (large, with labels) ──
-    const watchlistCodes = new Set(watchlist.map((w) => w.code))
     for (const w of watchlist) {
       const { x, y } = mapToCanvas(w.opportunity, w.risk, plotW, plotH)
       const colour = getQuadrantColor(w.quadrant)
@@ -238,7 +268,49 @@ export default function QuadrantChart({
       ctx.textAlign = 'left'
       ctx.fillText(w.name, x + 10, y + 4)
     }
-  }, [allStocks, watchlist, width, height, plotW, plotH])
+
+    // ── L4: Highlighted stock (glow + label) ──
+    if (highlightedItem) {
+      const { x, y } = mapToCanvas(highlightedItem.opportunity, highlightedItem.risk, plotW, plotH)
+      const colour = getQuadrantColor(highlightedItem.quadrant)
+      const radius = watchlistCodes.has(highlightedItem.code) ? 8.5 : 6.5
+
+      ctx.save()
+      ctx.globalAlpha = 0.4
+      ctx.fillStyle = colour.label
+      ctx.shadowColor = colour.label
+      ctx.shadowBlur = 20
+      ctx.beginPath()
+      ctx.arc(x, y, radius + 5, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)'
+      ctx.lineWidth = 2.5
+      ctx.beginPath()
+      ctx.arc(x, y, radius + 1.5, 0, Math.PI * 2)
+      ctx.stroke()
+
+      ctx.fillStyle = colour.label
+      ctx.beginPath()
+      ctx.arc(x, y, radius - 1, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.font = 'bold 11px system-ui, sans-serif'
+      ctx.textAlign = 'left'
+      const label = `${highlightedItem.name}`
+      const metrics = ctx.measureText(label)
+      const pillWidth = metrics.width + 14
+      const pillX = Math.min(x + 12, width - pillWidth - 8)
+      const pillY = Math.max(y - 28, 8)
+      ctx.fillStyle = 'rgba(13,15,20,0.88)'
+      ctx.beginPath()
+      ctx.roundRect(pillX, pillY, pillWidth, 20, 6)
+      ctx.fill()
+      ctx.fillStyle = colour.label
+      ctx.fillText(label, pillX + 7, pillY + 13.5)
+    }
+  }, [allStocks, watchlist, highlightedItem, watchlistCodes, width, height, plotW, plotH])
 
   // Draw + build grid when data changes
   useEffect(() => {
@@ -248,6 +320,39 @@ export default function QuadrantChart({
 
   // Tooltip state (interactive card instead of pointer-events-none text)
   const [activeTooltip, setActiveTooltip] = useState(null) // { name, code, opportunity, risk, quadrant, x, y }
+
+  useEffect(() => {
+    if (!highlightCode || !autoOpenTooltip) {
+      setActiveTooltip(null)
+      return
+    }
+    if (!highlightedItem) {
+      setActiveTooltip(null)
+      return
+    }
+
+    const { x, y } = mapToCanvas(highlightedItem.opportunity, highlightedItem.risk, plotW, plotH)
+    setActiveTooltip((prev) => {
+      if (
+        prev &&
+        normalizeQuadrantStockCode(prev.code, normalizedMarket) === normalizeQuadrantStockCode(highlightedItem.code, normalizedMarket) &&
+        prev.x === x &&
+        prev.y === y
+      ) {
+        return prev
+      }
+      return {
+        name: highlightedItem.name,
+        code: highlightedItem.code,
+        opportunity: highlightedItem.opportunity,
+        risk: highlightedItem.risk,
+        quadrant: highlightedItem.quadrant || '',
+        isWatchlist: highlightedItem.isWatchlist,
+        x,
+        y,
+      }
+    })
+  }, [autoOpenTooltip, highlightCode, highlightedItem, normalizedMarket, plotW, plotH])
 
   // Hover handling
   const handleMouseMove = useCallback((e) => {
@@ -311,19 +416,7 @@ export default function QuadrantChart({
     // Don't clear tooltip on mouse leave — user may want to click the button
   }, [])
 
-  // Code → display format: HK=5-digit, A-share=6-digit
-  const formatCodeDisplay = (code) => {
-    if (/^\d{5}$/.test(String(code))) return String(code).padStart(5, '0')
-    return String(code).padStart(6, '0')
-  }
-
-  // Code → symbol helper
-  const codeToSymbol = (code) => {
-    const c = String(code).padStart(6, '0')
-    // HK codes are 5-digit (e.g. 00700)
-    if (/^\d{5}$/.test(String(code))) return `${c}.HK`
-    return c.startsWith('6') || c.startsWith('9') ? `${c}.SH` : `${c}.SZ`
-  }
+  const formatCodeDisplay = (code) => normalizeQuadrantStockCode(code, normalizedMarket)
 
   return (
     <div ref={containerRef} className="relative w-full" onClick={(e) => {
@@ -357,7 +450,7 @@ export default function QuadrantChart({
             type="button"
             onClick={(e) => {
               e.stopPropagation()
-              window.open(`/live-trading/${codeToSymbol(activeTooltip.code)}`, '_blank')
+              window.open(`/live-trading/${buildQuadrantDetailSymbol(activeTooltip.code, normalizedMarket)}`, '_blank')
               setActiveTooltip(null)
             }}
             className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary transition hover:bg-primary/20"

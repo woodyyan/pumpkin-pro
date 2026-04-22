@@ -1,10 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import dynamic from 'next/dynamic'
 import Head from 'next/head'
+import QuadrantSearchBox from '../components/QuadrantSearchBox'
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import { isAuthRequiredError } from '../lib/auth-storage'
+import {
+  buildQuadrantDetailSymbol,
+  createQuadrantSearchState,
+  findQuadrantStockByCode,
+  getQuadrantSearchEntry,
+  searchQuadrantStocks,
+  updateQuadrantSearchEntry,
+} from '../lib/quadrant-search'
 
 const QuadrantChart = dynamic(() => import('../components/QuadrantChart'), { ssr: false })
 const RankingPanel = dynamic(() => import('../components/RankingPanel'), { ssr: false })
@@ -31,6 +40,7 @@ export default function LiveTradingOverviewPage() {
   const [rankingData, setRankingData] = useState(null)
   const [rankingLoading, setRankingLoading] = useState(false)
   const [rankingExchange, setRankingExchange] = useState('ASHARE') // independent tab state for ranking
+  const [quadrantSearchState, setQuadrantSearchState] = useState(() => createQuadrantSearchState())
 
   const privateAccessReady = ready && isLoggedIn
 
@@ -61,6 +71,23 @@ export default function LiveTradingOverviewPage() {
     })
     return map
   }, [snapshots])
+
+  const currentQuadrantSearch = useMemo(
+    () => getQuadrantSearchEntry(quadrantSearchState, quadrantExchange),
+    [quadrantSearchState, quadrantExchange]
+  )
+
+  const currentQuadrantStocks = quadrantData?.all_stocks || []
+
+  const currentQuadrantSearchResults = useMemo(
+    () => searchQuadrantStocks(currentQuadrantStocks, currentQuadrantSearch.query, quadrantExchange),
+    [currentQuadrantStocks, currentQuadrantSearch.query, quadrantExchange]
+  )
+
+  const highlightedQuadrantStock = useMemo(
+    () => findQuadrantStockByCode(currentQuadrantStocks, currentQuadrantSearch.selectedCode, quadrantExchange),
+    [currentQuadrantStocks, currentQuadrantSearch.selectedCode, quadrantExchange]
+  )
 
   const loadWatchlist = async () => {
     const data = await requestJson('/api/live/watchlist')
@@ -198,6 +225,21 @@ export default function LiveTradingOverviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, privateAccessReady])
 
+  useEffect(() => {
+    if (!currentQuadrantSearch.selectedCode) return
+    if (quadrantLoading) return
+    if (currentQuadrantStocks.length === 0) return
+    if (highlightedQuadrantStock) return
+
+    setQuadrantSearchState((prev) => updateQuadrantSearchEntry(prev, quadrantExchange, { selectedCode: '' }))
+  }, [
+    currentQuadrantSearch.selectedCode,
+    currentQuadrantStocks.length,
+    highlightedQuadrantStock,
+    quadrantExchange,
+    quadrantLoading,
+  ])
+
   const handleAddWatch = async (event) => {
     event.preventDefault()
     setSubmitting(true)
@@ -233,6 +275,35 @@ export default function LiveTradingOverviewPage() {
   const handleOpenDetail = (symbol) => {
     window.open(`/live-trading/${encodeURIComponent(symbol)}`, '_blank')
   }
+
+  const handleQuadrantSearchChange = useCallback((query) => {
+    setQuadrantSearchState((prev) => updateQuadrantSearchEntry(prev, quadrantExchange, {
+      query,
+      selectedCode: '',
+    }))
+  }, [quadrantExchange])
+
+  const handleQuadrantSearchSelect = useCallback((stock) => {
+    if (!stock?.c) return
+    setQuadrantSearchState((prev) => updateQuadrantSearchEntry(prev, quadrantExchange, {
+      query: stock.n || stock.c,
+      selectedCode: stock.c,
+    }))
+  }, [quadrantExchange])
+
+  const handleQuadrantSearchClear = useCallback(() => {
+    setQuadrantSearchState((prev) => updateQuadrantSearchEntry(prev, quadrantExchange, {
+      query: '',
+      selectedCode: '',
+    }))
+  }, [quadrantExchange])
+
+  const handleOpenHighlightedQuadrantDetail = useCallback(() => {
+    if (!highlightedQuadrantStock?.c) return
+    const symbol = buildQuadrantDetailSymbol(highlightedQuadrantStock.c, quadrantExchange)
+    if (!symbol) return
+    window.open(`/live-trading/${symbol}`, '_blank')
+  }, [highlightedQuadrantStock, quadrantExchange])
 
   const handleQuadrantExchangeChange = async (newExchange) => {
     if (newExchange === quadrantExchange) return
@@ -325,6 +396,19 @@ export default function LiveTradingOverviewPage() {
           </div>
         </div>
 
+        <div className="mt-4">
+          <QuadrantSearchBox
+            market={quadrantExchange}
+            query={currentQuadrantSearch.query}
+            results={currentQuadrantSearchResults}
+            selectedCode={currentQuadrantSearch.selectedCode}
+            disabled={!quadrantData || currentQuadrantStocks.length === 0}
+            onQueryChange={handleQuadrantSearchChange}
+            onSelect={handleQuadrantSearchSelect}
+            onClear={handleQuadrantSearchClear}
+          />
+        </div>
+
         {quadrantLoading && !quadrantData ? (
           <div className="mt-6 flex items-center justify-center py-12 text-sm text-white/40">
             <span className="animate-pulse">加载四象限数据...</span>
@@ -335,8 +419,45 @@ export default function LiveTradingOverviewPage() {
               <QuadrantChart
                 allStocks={quadrantData.all_stocks}
                 watchlist={quadrantData.watchlist_details || []}
+                market={quadrantExchange}
+                highlightCode={currentQuadrantSearch.selectedCode}
+                autoOpenTooltip={Boolean(currentQuadrantSearch.selectedCode)}
               />
             </div>
+
+            {highlightedQuadrantStock && (
+              <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 md:flex-row md:items-center md:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-white">
+                    <span className="font-semibold text-primary">已定位</span>
+                    <span className="font-medium">{highlightedQuadrantStock.n}</span>
+                    <span className="font-mono text-xs text-white/45">{highlightedQuadrantStock.c}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] ${quadrantBadgeClass(highlightedQuadrantStock.q)}`}>
+                      {highlightedQuadrantStock.q}区
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-white/55">
+                    机会 {Number(highlightedQuadrantStock.o || 0).toFixed(1)} / 风险 {Number(highlightedQuadrantStock.r || 0).toFixed(1)}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleOpenHighlightedQuadrantDetail}
+                    className="inline-flex items-center justify-center rounded-xl border border-primary/35 bg-primary/10 px-3 py-2 text-xs font-medium text-primary transition hover:bg-primary/15"
+                  >
+                    查看详情
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleQuadrantSearchClear}
+                    className="inline-flex items-center justify-center rounded-xl border border-white/10 px-3 py-2 text-xs text-white/60 transition hover:bg-white/[0.05] hover:text-white/85"
+                  >
+                    清除高亮
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Summary stats */}
             <div className="mt-4 space-y-3">
@@ -624,6 +745,21 @@ function detectExchangeLabel(symbol) {
   const ex = detectExchange(symbol)
   const labels = { SSE: '沪市', SZSE: '深市', HKEX: '港股' }
   return labels[ex] || ex
+}
+
+function quadrantBadgeClass(quadrant) {
+  switch (quadrant) {
+    case '机会':
+      return 'bg-emerald-500/12 text-emerald-300'
+    case '拥挤':
+      return 'bg-amber-500/12 text-amber-300'
+    case '泡沫':
+      return 'bg-rose-500/12 text-rose-300'
+    case '防御':
+      return 'bg-white/8 text-white/70'
+    default:
+      return 'bg-blue-500/12 text-blue-300'
+  }
 }
 
 function formatMarketIndexTitle(name, code) {

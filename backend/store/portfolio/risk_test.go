@@ -97,7 +97,9 @@ func TestCalcConcentrationRisk(t *testing.T) {
 		assert.InDelta(t, 1.0, metrics.Top3Weight, 0.0001)
 		assert.InDelta(t, 1.0, metrics.Top5Weight, 0.0001)
 		assert.InDelta(t, 0.33333, metrics.HerfindahlIndex, 0.0001) // 3 * (0.33333^2) ≈ 0.33333
-		assert.Empty(t, metrics.Warnings) // 单股权重 < 20%，前三大权重 = 100%但未超过60%，HHI < 0.25
+		assert.Contains(t, metrics.Warnings, "单股集中度33.3%超过20%")
+		assert.Contains(t, metrics.Warnings, "前三大持仓占比100.0%超过60%")
+		assert.Contains(t, metrics.Warnings, "赫芬达尔指数0.333表明集中度较高")
 	})
 
 	t.Run("集中持仓", func(t *testing.T) {

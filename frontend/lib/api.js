@@ -1,4 +1,4 @@
-import { getAccessToken, getRefreshToken, readAuthSession, writeAuthSession, clearAuthSession } from './auth-storage'
+import { getAccessToken, getRefreshToken, readAuthSession, writeAuthSession, clearAuthSession } from './auth-storage.js'
 
 // ── Network Error Detection ──
 // Distinguishes "server unreachable / timeout / CORS" from real auth/business errors.

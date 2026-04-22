@@ -2481,6 +2481,103 @@ func (a *appServer) handleInvestmentProfile(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+func parsePortfolioAttributionQuery(r *http.Request) portfolio.PortfolioAttributionQuery {
+	queryValues := r.URL.Query()
+	return portfolio.PortfolioAttributionQuery{
+		Scope:               strings.TrimSpace(queryValues.Get("scope")),
+		Range:               strings.TrimSpace(queryValues.Get("range")),
+		StartDate:           strings.TrimSpace(queryValues.Get("start_date")),
+		EndDate:             strings.TrimSpace(queryValues.Get("end_date")),
+		Limit:               parseLimit(queryValues.Get("limit"), 5),
+		SortBy:              strings.TrimSpace(queryValues.Get("sort_by")),
+		Refresh:             strings.EqualFold(strings.TrimSpace(queryValues.Get("refresh")), "true"),
+		IncludeUnclassified: strings.EqualFold(strings.TrimSpace(queryValues.Get("include_unclassified")), "true"),
+		TimelineLimit:       parseLimit(queryValues.Get("timeline_limit"), 20),
+	}
+}
+
+func writePortfolioAttributionError(w http.ResponseWriter, err error) {
+	if err == nil {
+		return
+	}
+	message := err.Error()
+	if strings.Contains(message, "invalid ") || strings.Contains(message, "requires") || strings.Contains(message, "range exceeds") {
+		writeError(w, http.StatusBadRequest, message)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, message)
+}
+
+func (a *appServer) handlePortfolioAttributionSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	payload, err := a.portfolioService.GetAttributionSummary(r.Context(), userID, parsePortfolioAttributionQuery(r))
+	if err != nil {
+		writePortfolioAttributionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (a *appServer) handlePortfolioAttributionStocks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	payload, err := a.portfolioService.GetAttributionStocks(r.Context(), userID, parsePortfolioAttributionQuery(r))
+	if err != nil {
+		writePortfolioAttributionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (a *appServer) handlePortfolioAttributionSectors(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	payload, err := a.portfolioService.GetAttributionSectors(r.Context(), userID, parsePortfolioAttributionQuery(r))
+	if err != nil {
+		writePortfolioAttributionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (a *appServer) handlePortfolioAttributionTrading(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	payload, err := a.portfolioService.GetAttributionTrading(r.Context(), userID, parsePortfolioAttributionQuery(r))
+	if err != nil {
+		writePortfolioAttributionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (a *appServer) handlePortfolioAttributionMarket(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	payload, err := a.portfolioService.GetAttributionMarket(r.Context(), userID, parsePortfolioAttributionQuery(r))
+	if err != nil {
+		writePortfolioAttributionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
 func (a *appServer) handlePortfolioRiskMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
@@ -3091,6 +3188,11 @@ func main() {
 	mux.HandleFunc("/api/portfolio/allocation", server.withRequiredAuth(server.handlePortfolioAllocation))
 	mux.HandleFunc("/api/portfolio/ai-context", server.withRequiredAuth(server.handlePortfolioAIContext))
 	mux.HandleFunc("/api/portfolio/risk-metrics", server.withRequiredAuth(server.handlePortfolioRiskMetrics))
+	mux.HandleFunc("/api/portfolio/attribution/summary", server.withRequiredAuth(server.handlePortfolioAttributionSummary))
+	mux.HandleFunc("/api/portfolio/attribution/stocks", server.withRequiredAuth(server.handlePortfolioAttributionStocks))
+	mux.HandleFunc("/api/portfolio/attribution/sectors", server.withRequiredAuth(server.handlePortfolioAttributionSectors))
+	mux.HandleFunc("/api/portfolio/attribution/trading", server.withRequiredAuth(server.handlePortfolioAttributionTrading))
+	mux.HandleFunc("/api/portfolio/attribution/market", server.withRequiredAuth(server.handlePortfolioAttributionMarket))
 	mux.HandleFunc("/api/webhook-deliveries/latest", server.withRequiredAuth(server.handleWebhookDeliveriesLatest))
 
 	mux.HandleFunc("/api/live/watchlist", server.withRequiredAuth(server.handleLiveWatchlist))

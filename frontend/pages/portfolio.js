@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import Head from 'next/head'
 import InfoTip, { LabelWithInfo } from '../components/InfoTip'
+import PortfolioAttributionSection from '../components/PortfolioAttributionSection'
 import { useAuth } from '../lib/auth-context'
 import {
   createPortfolioEvent,
@@ -20,6 +21,14 @@ import {
   exchangeTag,
   undoPortfolioEvent,
 } from '../lib/portfolio-dashboard.js'
+import {
+  fetchPortfolioAttributionSummary,
+  fetchPortfolioAttributionStocks,
+  fetchPortfolioAttributionSectors,
+  fetchPortfolioAttributionTrading,
+  fetchPortfolioAttributionMarket,
+} from '../lib/portfolio-attribution.js'
+import { getPortfolioPageViewState } from '../lib/portfolio-page-view.js'
 import {
   buildPortfolioEventPreview,
   createPortfolioActionForm,
@@ -58,6 +67,35 @@ const CURVE_RANGE_OPTIONS = [
   { value: '90D', label: '90 天' },
   { value: 'ALL', label: '全部' },
 ]
+
+const EMPTY_ATTRIBUTION = {
+  summary: null,
+  stocks: null,
+  sectors: null,
+  trading: null,
+  market: null,
+}
+
+const EMPTY_ATTRIBUTION_DETAIL_LOADING = {
+  stocks: false,
+  sectors: false,
+  trading: false,
+  market: false,
+}
+
+const EMPTY_ATTRIBUTION_DETAIL_ERROR = {
+  stocks: '',
+  sectors: '',
+  trading: '',
+  market: '',
+}
+
+const ATTRIBUTION_FETCHERS = {
+  stocks: fetchPortfolioAttributionStocks,
+  sectors: fetchPortfolioAttributionSectors,
+  trading: fetchPortfolioAttributionTrading,
+  market: fetchPortfolioAttributionMarket,
+}
 
 const FIELD_TIPS = {
   manual_notice: '当前持仓管理数据需要你在个股详情页手动记录买入、卖出和调均价操作，系统暂时还不能直接同步券商真实持仓。后续会逐步支持券商数据对接。',
@@ -1468,6 +1506,11 @@ export default function PortfolioPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [riskMetrics, setRiskMetrics] = useState(null)
+  const [attribution, setAttribution] = useState(EMPTY_ATTRIBUTION)
+  const [attributionLoading, setAttributionLoading] = useState(true)
+  const [attributionError, setAttributionError] = useState('')
+  const [attributionDetailLoading, setAttributionDetailLoading] = useState(EMPTY_ATTRIBUTION_DETAIL_LOADING)
+  const [attributionDetailError, setAttributionDetailError] = useState(EMPTY_ATTRIBUTION_DETAIL_ERROR)
 
   const [scope, setScope] = useState('ALL')
   const [sortBy, setSortBy] = useState('market_value')
@@ -1479,15 +1522,33 @@ export default function PortfolioPage() {
   const [priceAutoFilled, setPriceAutoFilled] = useState(false)
   const [tradeDailyBars, setTradeDailyBars] = useState([])
   const tradeDailyBarsRef = useRef(tradeDailyBars)
+  const attributionRequestKeyRef = useRef('')
   tradeDailyBarsRef.current = tradeDailyBars
 
   const defaultTradeMarket = scope === 'HKEX' ? 'HKEX' : 'ASHARE'
 
+  const buildAttributionQuery = useCallback(() => ({
+    scope,
+    range: curveRange,
+    limit: 5,
+    timeline_limit: 8,
+  }), [scope, curveRange])
+
   const load = useCallback(async () => {
     setLoading(true)
+    setAttributionLoading(true)
     setError(null)
+    setAttributionError('')
+    setAttribution((prev) => (prev?.summary ? { ...EMPTY_ATTRIBUTION, summary: prev.summary } : EMPTY_ATTRIBUTION))
+    setAttributionDetailLoading(EMPTY_ATTRIBUTION_DETAIL_LOADING)
+    setAttributionDetailError(EMPTY_ATTRIBUTION_DETAIL_ERROR)
+
+    const attributionQuery = buildAttributionQuery()
+    const requestKey = JSON.stringify(attributionQuery)
+    attributionRequestKeyRef.current = requestKey
+
     try {
-      const [result, riskResult] = await Promise.all([
+      const [result, riskResult, summaryResult] = await Promise.all([
         fetchPortfolioDashboard({
           scope,
           sort_by: sortBy,
@@ -1496,23 +1557,97 @@ export default function PortfolioPage() {
           keyword,
           curve_range: curveRange,
         }),
-        fetchPortfolioRiskMetrics({ scope }).catch(err => {
+        fetchPortfolioRiskMetrics({ scope }).catch((err) => {
           console.warn('风险指标加载失败:', err)
           return null
         }),
+        fetchPortfolioAttributionSummary(attributionQuery).catch((err) => ({ __error: err })),
       ])
+
       setData(result)
       setRiskMetrics(riskResult)
+
+      if (attributionRequestKeyRef.current === requestKey) {
+        if (summaryResult?.__error) {
+          setAttribution(EMPTY_ATTRIBUTION)
+          setAttributionError(summaryResult.__error?.message || '加载绩效归因失败')
+        } else {
+          setAttribution({ ...EMPTY_ATTRIBUTION, summary: summaryResult || null })
+        }
+      }
     } catch (err) {
       setError(err.message || '加载失败')
     } finally {
       setLoading(false)
+      setAttributionLoading(false)
     }
-  }, [scope, sortBy, sortOrder, pnlFilter, keyword, curveRange])
+  }, [buildAttributionQuery, curveRange, keyword, pnlFilter, scope, sortBy, sortOrder])
+
+  const ensureAttributionDetails = useCallback(async (keys = []) => {
+    const requestedKeys = Array.from(new Set((Array.isArray(keys) ? keys : [keys]).filter((key) => ATTRIBUTION_FETCHERS[key])))
+    const pendingKeys = requestedKeys.filter((key) => !attribution[key] && !attributionDetailLoading[key])
+    if (!pendingKeys.length) return
+
+    const requestKey = attributionRequestKeyRef.current
+    const attributionQuery = buildAttributionQuery()
+
+    setAttributionDetailLoading((prev) => {
+      const next = { ...prev }
+      pendingKeys.forEach((key) => {
+        next[key] = true
+      })
+      return next
+    })
+    setAttributionDetailError((prev) => {
+      const next = { ...prev }
+      pendingKeys.forEach((key) => {
+        next[key] = ''
+      })
+      return next
+    })
+
+    const results = await Promise.allSettled(
+      pendingKeys.map((key) => ATTRIBUTION_FETCHERS[key](attributionQuery))
+    )
+
+    if (attributionRequestKeyRef.current !== requestKey) {
+      return
+    }
+
+    setAttribution((prev) => {
+      const next = { ...prev }
+      results.forEach((result, index) => {
+        const key = pendingKeys[index]
+        if (result.status === 'fulfilled') {
+          next[key] = result.value
+        }
+      })
+      return next
+    })
+
+    setAttributionDetailError((prev) => {
+      const next = { ...prev }
+      results.forEach((result, index) => {
+        const key = pendingKeys[index]
+        next[key] = result.status === 'rejected' ? (result.reason?.message || '加载失败') : ''
+      })
+      return next
+    })
+
+    setAttributionDetailLoading((prev) => {
+      const next = { ...prev }
+      pendingKeys.forEach((key) => {
+        next[key] = false
+      })
+      return next
+    })
+  }, [attribution, attributionDetailLoading, buildAttributionQuery])
 
   useEffect(() => {
     load()
   }, [load])
+
+  const pageViewState = useMemo(() => getPortfolioPageViewState({ loading, data }), [loading, data])
 
   const currentTradeSymbol = useMemo(
     () => resolvePortfolioTradeSymbol(tradeDrawer.symbolInput, tradeDrawer.market),
@@ -1873,7 +2008,7 @@ export default function PortfolioPage() {
           keyword={keyword} setKeyword={setKeyword}
         />
 
-        {loading && !data && (
+        {pageViewState.initialLoading && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -1886,20 +2021,35 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        {!loading && data?.summary && <SummarySection summary={data.summary} />}
+        {data?.summary && <SummarySection summary={data.summary} />}
 
-        {!loading && (
+        {pageViewState.hasDashboardData ? (
           <PortfolioChartsSection
             curve={data?.equity_curve_preview}
             allocationItems={data?.allocation_preview}
             curveRange={curveRange}
             setCurveRange={setCurveRange}
           />
-        )}
+        ) : null}
 
-        {!loading && riskMetrics && <RiskSection riskMetrics={riskMetrics} />}
+        <PortfolioAttributionSection
+          loading={attributionLoading}
+          error={attributionError}
+          range={curveRange}
+          onRangeChange={setCurveRange}
+          summary={attribution.summary}
+          stocks={attribution.stocks}
+          sectors={attribution.sectors}
+          trading={attribution.trading}
+          market={attribution.market}
+          detailLoading={attributionDetailLoading}
+          detailError={attributionDetailError}
+          onRequestDetails={ensureAttributionDetails}
+        />
 
-        {!loading && data?.positions && (
+        {riskMetrics && <RiskSection riskMetrics={riskMetrics} />}
+
+        {data?.positions && (
           <section>
             <div className="flex items-center justify-between mb-3 gap-3">
               <h3 className="text-sm font-semibold text-white/75 flex items-center gap-2">
@@ -1915,11 +2065,11 @@ export default function PortfolioPage() {
           </section>
         )}
 
-        {!loading && data?.recent_events_preview && (
+        {data?.recent_events_preview && (
           <RecentEventsSection events={data.recent_events_preview} />
         )}
 
-        {!loading && data && (!data.positions || data.positions.length === 0) && (!data.recent_events_preview || data.recent_events_preview.length === 0) && (
+        {pageViewState.hasDashboardData && (!data.positions || data.positions.length === 0) && (!data.recent_events_preview || data.recent_events_preview.length === 0) && (
           <EmptyPortfolio />
         )}
       </div>

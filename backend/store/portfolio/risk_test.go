@@ -2,7 +2,6 @@ package portfolio
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -57,8 +56,7 @@ func insertQuadrantRecords(t *testing.T, db *gorm.DB, records []quadrant.Quadran
 }
 
 func TestCalcConcentrationRisk(t *testing.T) {
-	riskRepo, cacheDB, _ := setupRiskTest(t)
-	ctx := context.Background()
+	riskRepo, _, _ := setupRiskTest(t)
 
 	t.Run("空持仓", func(t *testing.T) {
 		positions := []positionWithWeight{}
@@ -123,7 +121,6 @@ func TestCalcConcentrationRisk(t *testing.T) {
 func TestCalcLiquidityRisk(t *testing.T) {
 	ctx := context.Background()
 	riskRepo, cacheDB, hkCacheDB := setupRiskTest(t)
-	ctx := context.Background()
 
 	// 插入测试四象限数据
 	computedAt := time.Now().Truncate(time.Hour * 24) // 今天零点

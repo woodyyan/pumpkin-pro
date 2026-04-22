@@ -1272,6 +1272,30 @@ function RiskSection({ riskMetrics }) {
         </span>
       </h3>
 
+      {/* 总体风险评分 */}
+      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 mb-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium text-white/60 mb-1">总体风险评分</div>
+            <div className="text-xl font-semibold text-white/90">{(riskMetrics.overall_risk_score || 0).toFixed(1)} / 10</div>
+            <div className="text-[10px] text-white/35 mt-1">
+              评分越高风险越高，建议保持在 6 分以下
+            </div>
+          </div>
+          <div className="relative">
+            <div className="w-20 h-20 rounded-full border-4 border-white/10 flex items-center justify-center">
+              <div className="text-xl font-semibold text-white/90">{(riskMetrics.overall_risk_score || 0).toFixed(1)}</div>
+            </div>
+            <div 
+              className="absolute inset-0 w-20 h-20 rounded-full border-4 border-primary/60 clip-path-inset-0"
+              style={{
+                clipPath: `inset(0 ${100 - (riskMetrics.overall_risk_score || 0) * 10}% 0 0)`,
+              }}
+            />
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mb-4">
         {/* 集中度风险 */}
         <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3.5">
@@ -1350,30 +1374,6 @@ function RiskSection({ riskMetrics }) {
               {riskMetrics.correlation_risk.warnings.map((w, i) => <div key={i}>⚠️ {w}</div>)}
             </div>
           )}
-        </div>
-      </div>
-
-      {/* 总体风险评分 */}
-      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium text-white/60 mb-1">总体风险评分</div>
-            <div className="text-xl font-semibold text-white/90">{(riskMetrics.overall_risk_score || 0).toFixed(1)} / 10</div>
-            <div className="text-[10px] text-white/35 mt-1">
-              评分越高风险越高，建议保持在 6 分以下
-            </div>
-          </div>
-          <div className="relative">
-            <div className="w-20 h-20 rounded-full border-4 border-white/10 flex items-center justify-center">
-              <div className="text-xl font-semibold text-white/90">{(riskMetrics.overall_risk_score || 0).toFixed(1)}</div>
-            </div>
-            <div 
-              className="absolute inset-0 w-20 h-20 rounded-full border-4 border-primary/60 clip-path-inset-0"
-              style={{
-                clipPath: `inset(0 ${100 - (riskMetrics.overall_risk_score || 0) * 10}% 0 0)`,
-              }}
-            />
-          </div>
         </div>
       </div>
     </section>

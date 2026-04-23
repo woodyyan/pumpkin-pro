@@ -430,15 +430,19 @@ func (r PortfolioEventRecord) toItem() PortfolioEventItem {
 // ── Investment Profile ──
 
 type InvestmentProfileRecord struct {
-	UserID            string    `gorm:"primaryKey;size:36"`
-	TotalCapital      float64   `gorm:"not null;default:0"`
-	RiskPreference    string    `gorm:"size:32;not null;default:''"`
-	InvestmentGoal    string    `gorm:"size:64;not null;default:''"`
-	InvestmentHorizon string    `gorm:"size:32;not null;default:''"`
-	MaxDrawdownPct    float64   `gorm:"not null;default:0"`
-	ExperienceLevel   string    `gorm:"size:32;not null;default:''"`
-	Note              string    `gorm:"type:text;not null;default:''"`
-	UpdatedAt         time.Time `gorm:"not null"`
+	UserID                   string    `gorm:"primaryKey;size:36"`
+	TotalCapital             float64   `gorm:"not null;default:0"`
+	RiskPreference           string    `gorm:"size:32;not null;default:''"`
+	InvestmentGoal           string    `gorm:"size:64;not null;default:''"`
+	InvestmentHorizon        string    `gorm:"size:32;not null;default:''"`
+	MaxDrawdownPct           float64   `gorm:"not null;default:0"`
+	ExperienceLevel          string    `gorm:"size:32;not null;default:''"`
+	DefaultFeeRateAShareBuy  float64   `gorm:"column:default_fee_rate_ashare_buy;not null;default:0"`
+	DefaultFeeRateAShareSell float64   `gorm:"column:default_fee_rate_ashare_sell;not null;default:0"`
+	DefaultFeeRateHKBuy      float64   `gorm:"column:default_fee_rate_hk_buy;not null;default:0"`
+	DefaultFeeRateHKSell     float64   `gorm:"column:default_fee_rate_hk_sell;not null;default:0"`
+	Note                     string    `gorm:"type:text;not null;default:''"`
+	UpdatedAt                time.Time `gorm:"not null"`
 }
 
 func (InvestmentProfileRecord) TableName() string {
@@ -446,35 +450,47 @@ func (InvestmentProfileRecord) TableName() string {
 }
 
 type InvestmentProfile struct {
-	TotalCapital      float64 `json:"total_capital"`
-	RiskPreference    string  `json:"risk_preference"`
-	InvestmentGoal    string  `json:"investment_goal"`
-	InvestmentHorizon string  `json:"investment_horizon"`
-	MaxDrawdownPct    float64 `json:"max_drawdown_pct"`
-	ExperienceLevel   string  `json:"experience_level"`
-	Note              string  `json:"note"`
-	UpdatedAt         string  `json:"updated_at"`
+	TotalCapital             float64 `json:"total_capital"`
+	RiskPreference           string  `json:"risk_preference"`
+	InvestmentGoal           string  `json:"investment_goal"`
+	InvestmentHorizon        string  `json:"investment_horizon"`
+	MaxDrawdownPct           float64 `json:"max_drawdown_pct"`
+	ExperienceLevel          string  `json:"experience_level"`
+	DefaultFeeRateAShareBuy  float64 `json:"default_fee_rate_ashare_buy"`
+	DefaultFeeRateAShareSell float64 `json:"default_fee_rate_ashare_sell"`
+	DefaultFeeRateHKBuy      float64 `json:"default_fee_rate_hk_buy"`
+	DefaultFeeRateHKSell     float64 `json:"default_fee_rate_hk_sell"`
+	Note                     string  `json:"note"`
+	UpdatedAt                string  `json:"updated_at"`
 }
 
 type UpsertInvestmentProfileInput struct {
-	TotalCapital      float64 `json:"total_capital"`
-	RiskPreference    string  `json:"risk_preference"`
-	InvestmentGoal    string  `json:"investment_goal"`
-	InvestmentHorizon string  `json:"investment_horizon"`
-	MaxDrawdownPct    float64 `json:"max_drawdown_pct"`
-	ExperienceLevel   string  `json:"experience_level"`
-	Note              string  `json:"note"`
+	TotalCapital             float64 `json:"total_capital"`
+	RiskPreference           string  `json:"risk_preference"`
+	InvestmentGoal           string  `json:"investment_goal"`
+	InvestmentHorizon        string  `json:"investment_horizon"`
+	MaxDrawdownPct           float64 `json:"max_drawdown_pct"`
+	ExperienceLevel          string  `json:"experience_level"`
+	DefaultFeeRateAShareBuy  float64 `json:"default_fee_rate_ashare_buy"`
+	DefaultFeeRateAShareSell float64 `json:"default_fee_rate_ashare_sell"`
+	DefaultFeeRateHKBuy      float64 `json:"default_fee_rate_hk_buy"`
+	DefaultFeeRateHKSell     float64 `json:"default_fee_rate_hk_sell"`
+	Note                     string  `json:"note"`
 }
 
 func (r InvestmentProfileRecord) toProfile() InvestmentProfile {
 	return InvestmentProfile{
-		TotalCapital:      r.TotalCapital,
-		RiskPreference:    r.RiskPreference,
-		InvestmentGoal:    r.InvestmentGoal,
-		InvestmentHorizon: r.InvestmentHorizon,
-		MaxDrawdownPct:    r.MaxDrawdownPct,
-		ExperienceLevel:   r.ExperienceLevel,
-		Note:              r.Note,
-		UpdatedAt:         r.UpdatedAt.UTC().Format(time.RFC3339),
+		TotalCapital:             r.TotalCapital,
+		RiskPreference:           r.RiskPreference,
+		InvestmentGoal:           r.InvestmentGoal,
+		InvestmentHorizon:        r.InvestmentHorizon,
+		MaxDrawdownPct:           r.MaxDrawdownPct,
+		ExperienceLevel:          r.ExperienceLevel,
+		DefaultFeeRateAShareBuy:  r.DefaultFeeRateAShareBuy,
+		DefaultFeeRateAShareSell: r.DefaultFeeRateAShareSell,
+		DefaultFeeRateHKBuy:      r.DefaultFeeRateHKBuy,
+		DefaultFeeRateHKSell:     r.DefaultFeeRateHKSell,
+		Note:                     r.Note,
+		UpdatedAt:                r.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }

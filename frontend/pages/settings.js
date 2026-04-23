@@ -3,7 +3,30 @@ import { useEffect, useState } from 'react'
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import { isAuthRequiredError } from '../lib/auth-storage'
+import {
+  describeFeeRate,
+  formatFeeRatePercent,
+  getPortfolioDefaultFeeRate,
+  getPortfolioSystemDefaultFeeRate,
+  parseFeeRatePercentInput,
+} from '../lib/portfolio-fee.js'
 import Head from 'next/head'
+
+function createInvestForm(profile = null) {
+  return {
+    total_capital: profile?.total_capital ? String(profile.total_capital) : '',
+    risk_preference: profile?.risk_preference || '',
+    investment_goal: profile?.investment_goal || '',
+    investment_horizon: profile?.investment_horizon || '',
+    max_drawdown_pct: profile?.max_drawdown_pct ? String(profile.max_drawdown_pct) : '',
+    experience_level: profile?.experience_level || '',
+    default_fee_rate_ashare_buy: formatFeeRatePercent(getPortfolioDefaultFeeRate({ exchange: 'ASHARE', action: 'buy', profile })),
+    default_fee_rate_ashare_sell: formatFeeRatePercent(getPortfolioDefaultFeeRate({ exchange: 'ASHARE', action: 'sell', profile })),
+    default_fee_rate_hk_buy: formatFeeRatePercent(getPortfolioDefaultFeeRate({ exchange: 'HKEX', action: 'buy', profile })),
+    default_fee_rate_hk_sell: formatFeeRatePercent(getPortfolioDefaultFeeRate({ exchange: 'HKEX', action: 'sell', profile })),
+    note: profile?.note || '',
+  }
+}
 
 export default function SettingsPage() {
   const { openAuthModal, isLoggedIn, ready, user } = useAuth()
@@ -23,15 +46,7 @@ export default function SettingsPage() {
   const [latestDelivery, setLatestDelivery] = useState(null)
   const [deliveryItems, setDeliveryItems] = useState([])
   const [investProfile, setInvestProfile] = useState(null)
-  const [investForm, setInvestForm] = useState({
-    total_capital: '',
-    risk_preference: '',
-    investment_goal: '',
-    investment_horizon: '',
-    max_drawdown_pct: '',
-    experience_level: '',
-    note: '',
-  })
+  const [investForm, setInvestForm] = useState(() => createInvestForm())
   const [investSaving, setInvestSaving] = useState(false)
   const [investNotice, setInvestNotice] = useState('')
   const [fbCategory, setFbCategory] = useState('bug')
@@ -92,17 +107,7 @@ export default function SettingsPage() {
       const data = await requestJson('/api/investment-profile')
       const p = data?.profile || null
       setInvestProfile(p)
-      if (p) {
-        setInvestForm({
-          total_capital: p.total_capital ? String(p.total_capital) : '',
-          risk_preference: p.risk_preference || '',
-          investment_goal: p.investment_goal || '',
-          investment_horizon: p.investment_horizon || '',
-          max_drawdown_pct: p.max_drawdown_pct ? String(p.max_drawdown_pct) : '',
-          experience_level: p.experience_level || '',
-          note: p.note || '',
-        })
-      }
+      setInvestForm(createInvestForm(p))
     } catch {
       // non-critical
     }
@@ -132,7 +137,7 @@ export default function SettingsPage() {
       setLatestDelivery(null)
       setDeliveryItems([])
       setInvestProfile(null)
-      setInvestForm({ total_capital: '', risk_preference: '', investment_goal: '', investment_horizon: '', max_drawdown_pct: '', experience_level: '', note: '' })
+      setInvestForm(createInvestForm())
       setInvestNotice('')
       setNotice('')
       setError('')
@@ -323,6 +328,82 @@ export default function SettingsPage() {
             </label>
           </div>
 
+          <div className="rounded-xl border border-white/8 bg-white/[0.03] p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-white">默认手续费率</div>
+                <div className="mt-1 text-xs leading-6 text-white/45">买入 / 卖出表单会自动带出这里的费率。A 股小额买卖若按费率估算低于 ¥5.00，会按最低佣金 ¥5.00 估算。</div>
+              </div>
+              <div className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-white/45">可随时手动修改</div>
+            </div>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-xl border border-white/8 bg-black/20 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-white/35">A股</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-xs text-white/55">买入默认费率（%）</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={investForm.default_fee_rate_ashare_buy}
+                      onChange={(e) => setInvestForm((f) => ({ ...f, default_fee_rate_ashare_buy: e.target.value }))}
+                      className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                      placeholder="默认 0.03"
+                    />
+                    <div className="mt-1 text-[11px] text-white/40">{describeFeeRate(parseFeeRatePercentInput(investForm.default_fee_rate_ashare_buy) ?? 0)}</div>
+                  </label>
+                  <label className="block">
+                    <span className="text-xs text-white/55">卖出默认费率（%）</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={investForm.default_fee_rate_ashare_sell}
+                      onChange={(e) => setInvestForm((f) => ({ ...f, default_fee_rate_ashare_sell: e.target.value }))}
+                      className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                      placeholder="默认 0.08"
+                    />
+                    <div className="mt-1 text-[11px] text-white/40">{describeFeeRate(parseFeeRatePercentInput(investForm.default_fee_rate_ashare_sell) ?? 0)}</div>
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/8 bg-black/20 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-white/35">港股</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-xs text-white/55">买入默认费率（%）</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={investForm.default_fee_rate_hk_buy}
+                      onChange={(e) => setInvestForm((f) => ({ ...f, default_fee_rate_hk_buy: e.target.value }))}
+                      className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                      placeholder="默认 0.13"
+                    />
+                    <div className="mt-1 text-[11px] text-white/40">{describeFeeRate(parseFeeRatePercentInput(investForm.default_fee_rate_hk_buy) ?? 0)}</div>
+                  </label>
+                  <label className="block">
+                    <span className="text-xs text-white/55">卖出默认费率（%）</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={investForm.default_fee_rate_hk_sell}
+                      onChange={(e) => setInvestForm((f) => ({ ...f, default_fee_rate_hk_sell: e.target.value }))}
+                      className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                      placeholder="默认 0.13"
+                    />
+                    <div className="mt-1 text-[11px] text-white/40">{describeFeeRate(parseFeeRatePercentInput(investForm.default_fee_rate_hk_sell) ?? 0)}</div>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <label className="block">
             <span className="text-xs text-white/55">补充说明（选填）</span>
             <textarea
@@ -348,6 +429,10 @@ export default function SettingsPage() {
                   investment_horizon: investForm.investment_horizon,
                   max_drawdown_pct: Number(investForm.max_drawdown_pct) || 0,
                   experience_level: investForm.experience_level,
+                  default_fee_rate_ashare_buy: parseFeeRatePercentInput(investForm.default_fee_rate_ashare_buy) ?? getPortfolioSystemDefaultFeeRate({ exchange: 'ASHARE', action: 'buy' }),
+                  default_fee_rate_ashare_sell: parseFeeRatePercentInput(investForm.default_fee_rate_ashare_sell) ?? getPortfolioSystemDefaultFeeRate({ exchange: 'ASHARE', action: 'sell' }),
+                  default_fee_rate_hk_buy: parseFeeRatePercentInput(investForm.default_fee_rate_hk_buy) ?? getPortfolioSystemDefaultFeeRate({ exchange: 'HKEX', action: 'buy' }),
+                  default_fee_rate_hk_sell: parseFeeRatePercentInput(investForm.default_fee_rate_hk_sell) ?? getPortfolioSystemDefaultFeeRate({ exchange: 'HKEX', action: 'sell' }),
                   note: investForm.note,
                 }
                 const result = await requestJson('/api/investment-profile', {
@@ -355,7 +440,10 @@ export default function SettingsPage() {
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(payload),
                 })
-                if (result?.profile) setInvestProfile(result.profile)
+                if (result?.profile) {
+                  setInvestProfile(result.profile)
+                  setInvestForm(createInvestForm(result.profile))
+                }
                 setInvestNotice('投资画像已保存')
               } catch (err) {
                 applyError(err, '投资画像保存失败')

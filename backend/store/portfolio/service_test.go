@@ -268,19 +268,29 @@ func TestServiceUpsertAndListRemainCompatible(t *testing.T) {
 func TestServiceInvestmentProfile(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
 	prof, err := svc.UpsertInvestmentProfile(ctx, "inv-user", UpsertInvestmentProfileInput{
-		TotalCapital:      500000,
-		RiskPreference:    "conservative",
-		InvestmentGoal:    "income",
-		InvestmentHorizon: "long",
-		MaxDrawdownPct:    10.0,
-		ExperienceLevel:   "beginner",
-		Note:              "conservative investor",
+		TotalCapital:             500000,
+		RiskPreference:           "conservative",
+		InvestmentGoal:           "income",
+		InvestmentHorizon:        "long",
+		MaxDrawdownPct:           10.0,
+		ExperienceLevel:          "beginner",
+		DefaultFeeRateAShareBuy:  0.0003,
+		DefaultFeeRateAShareSell: 0.0008,
+		DefaultFeeRateHKBuy:      0.0013,
+		DefaultFeeRateHKSell:     0.0013,
+		Note:                     "conservative investor",
 	})
 	if err != nil {
 		t.Fatalf("UpsertInvestmentProfile failed: %v", err)
 	}
 	if prof.TotalCapital != 500000 {
 		t.Errorf("expected TotalCapital 500000, got %v", prof.TotalCapital)
+	}
+	if prof.DefaultFeeRateAShareBuy != 0.0003 || prof.DefaultFeeRateAShareSell != 0.0008 {
+		t.Errorf("expected A股 default fee rates saved, got buy=%v sell=%v", prof.DefaultFeeRateAShareBuy, prof.DefaultFeeRateAShareSell)
+	}
+	if prof.DefaultFeeRateHKBuy != 0.0013 || prof.DefaultFeeRateHKSell != 0.0013 {
+		t.Errorf("expected 港股 default fee rates saved, got buy=%v sell=%v", prof.DefaultFeeRateHKBuy, prof.DefaultFeeRateHKSell)
 	}
 
 	got, err := svc.GetInvestmentProfile(ctx, "inv-user")
@@ -289,5 +299,11 @@ func TestServiceInvestmentProfile(t *testing.T) {
 	}
 	if got.InvestmentGoal != "income" {
 		t.Errorf("expected investment goal 'income', got %s", got.InvestmentGoal)
+	}
+	if _, err := svc.UpsertInvestmentProfile(ctx, "inv-user", UpsertInvestmentProfileInput{DefaultFeeRateAShareBuy: -0.01}); err == nil {
+		t.Fatal("expected error for negative A股 buy fee rate")
+	}
+	if _, err := svc.UpsertInvestmentProfile(ctx, "inv-user", UpsertInvestmentProfileInput{DefaultFeeRateHKSell: 0.06}); err == nil {
+		t.Fatal("expected error for oversized 港股 sell fee rate")
 	}
 }

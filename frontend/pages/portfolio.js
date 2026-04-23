@@ -3,6 +3,7 @@ import Link from 'next/link'
 import Head from 'next/head'
 import InfoTip, { LabelWithInfo } from '../components/InfoTip'
 import PortfolioAttributionSection from '../components/PortfolioAttributionSection'
+import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import {
   createPortfolioEvent,
@@ -37,6 +38,13 @@ import {
   getPortfolioEventAccent,
   isPortfolioPositionActive,
 } from '../lib/portfolio-events.js'
+import {
+  describeFeeRate,
+  describePortfolioFeeEstimate,
+  formatPortfolioFeeAmount,
+  formatFeeRatePercent,
+  getPortfolioDefaultFeeRate,
+} from '../lib/portfolio-fee.js'
 
 // ── 常量 ──
 
@@ -124,7 +132,7 @@ const FIELD_TIPS = {
   trade_symbol: '支持直接输入完整股票代码，也支持输入裸代码后自动补齐市场后缀。例如 A 股输入 600519 会自动补成 600519.SH，港股输入 700 会自动补成 00700.HK。',
   trade_quantity: '交易数量按股为单位填写，买入和卖出都只记录你这次实际成交的数量。',
   trade_price: '按本次成交的实际单价填写，系统会据此计算新的持仓成本或已实现收益。',
-  trade_fee: '手续费默认为 0，可按实际佣金、平台费用或税费补录。',
+  trade_fee: '手续费改为按默认费率自动估算，A股小额买卖若低于 5 元会按最低佣金 5 元估算；你仍可手动调整本次费率。',
   trade_adjust_reason: '调均价不会改动持仓数量，只会校准当前剩余仓位的平均成本，因此必须写清原因。',
   trade_preview: '结果预览会按当前持仓状态模拟这次操作后的剩余股数、均价和成本，不会提前真正写入。',
 }
@@ -155,14 +163,14 @@ const TRADE_ACTION_COPY = {
   },
 }
 
-function createTradeDrawerState(market = 'ASHARE') {
+function createTradeDrawerState(market = 'ASHARE', profile = null) {
   return {
     open: false,
     action: 'buy',
     market,
     symbolInput: '',
     lockedSymbol: false,
-    form: createPortfolioActionForm('buy'),
+    form: createPortfolioActionForm('buy', null, { exchange: market, profile }),
     item: null,
     events: [],
     loading: false,
@@ -695,6 +703,12 @@ function PortfolioTradeDrawer({
   const detailHint = currentSymbol
     ? `将记录到 ${currentSymbol}`
     : '支持输入 600519 / 600519.SH / 700 / 00700.HK，系统会按市场自动补齐。'
+  const hasTradeAmount = Number(form?.quantity) > 0 && Number(form?.price) > 0
+  const feeHint = action !== 'adjust'
+    ? (hasTradeAmount
+      ? describePortfolioFeeEstimate({ exchange, feeEstimate: preview?.feeEstimate })
+      : '填写数量和价格后，系统会自动估算本次手续费。')
+    : ''
 
   return (
     <div className="fixed inset-0 z-[72]">
@@ -905,18 +919,20 @@ function PortfolioTradeDrawer({
                       </label>
                       <label className="block">
                         <span className="text-xs text-white/55 inline-flex items-center gap-1.5">
-                          手续费（选填）
+                          手续费率（%）
+                          <span className="rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] text-white/45">{describeFeeRate(preview?.feeRate ?? 0)}</span>
                           <InfoTip text={FIELD_TIPS.trade_fee} />
                         </span>
                         <input
                           type="number"
                           min="0"
                           step="any"
-                          value={form.fee_amount}
-                          onChange={(event) => onFormChange?.({ fee_amount: event.target.value })}
-                          placeholder="默认 0"
+                          value={form.fee_rate}
+                          onChange={(event) => onFormChange?.({ fee_rate: event.target.value })}
+                          placeholder={action === 'buy' ? (exchange === 'HKEX' ? '默认 0.13' : '默认 0.03') : (exchange === 'HKEX' ? '默认 0.13' : '默认 0.08')}
                           className="mt-1 block w-full rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none transition focus:border-primary/40"
                         />
+                        <div className="mt-1 text-[11px] leading-5 text-white/40">{feeHint}</div>
                       </label>
                     </>
                   ) : (
@@ -960,10 +976,17 @@ function PortfolioTradeDrawer({
                   {preview?.errors?.length > 0 ? (
                     <div className="mt-2 text-xs text-amber-200">{preview.errors[0]}</div>
                   ) : (
-                    <div className="mt-3 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className={`mt-3 grid gap-2.5 sm:grid-cols-2 ${action === 'adjust' ? 'xl:grid-cols-4' : 'xl:grid-cols-5'}`}>
                       <TradeMetric label="变动后股数" value={`${Number(preview?.nextShares || 0).toLocaleString('zh-CN')} 股`} />
                       <TradeMetric label="变动后均价" value={preview?.valid ? formatTradeDecimal(preview?.nextAvgCostPrice || 0, 3) : '--'} />
                       <TradeMetric label="变动后成本" value={preview?.valid ? formatMoney(preview?.nextTotalCostAmount || 0, exchange) : '--'} />
+                      {action !== 'adjust' ? (
+                        <TradeMetric
+                          label="本次手续费"
+                          value={preview?.valid ? formatPortfolioFeeAmount(preview?.feeAmount || 0, exchange) : '--'}
+                          footnote={preview?.feeEstimate?.minimumApplied ? `低于最低佣金，按 ${formatPortfolioFeeAmount(preview?.feeEstimate?.minimumFeeAmount || 0, exchange)} 结算` : ''}
+                        />
+                      ) : null}
                       <TradeMetric
                         label={action === 'sell' ? '本次已实现收益' : '口径说明'}
                         value={action === 'sell'
@@ -1518,6 +1541,7 @@ export default function PortfolioPage() {
   const [pnlFilter, setPnlFilter] = useState('all')
   const [curveRange, setCurveRange] = useState('30D')
   const [keyword, setKeyword] = useState('')
+  const [investmentProfile, setInvestmentProfile] = useState(null)
   const [tradeDrawer, setTradeDrawer] = useState(() => createTradeDrawerState('ASHARE'))
   const [priceAutoFilled, setPriceAutoFilled] = useState(false)
   const [tradeDailyBars, setTradeDailyBars] = useState([])
@@ -1533,6 +1557,15 @@ export default function PortfolioPage() {
     limit: 5,
     timeline_limit: 8,
   }), [scope, curveRange])
+
+  const loadInvestmentProfile = useCallback(async () => {
+    try {
+      const data = await requestJson('/api/investment-profile')
+      setInvestmentProfile(data?.profile || null)
+    } catch {
+      setInvestmentProfile(null)
+    }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -1646,6 +1679,14 @@ export default function PortfolioPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    if (!ready || !isLoggedIn) {
+      setInvestmentProfile(null)
+      return
+    }
+    loadInvestmentProfile()
+  }, [ready, isLoggedIn, loadInvestmentProfile])
 
   const pageViewState = useMemo(() => getPortfolioPageViewState({ loading, data }), [loading, data])
 
@@ -1795,49 +1836,70 @@ export default function PortfolioPage() {
     const market = position?.exchange === 'HKEX' ? 'HKEX' : defaultTradeMarket
     setPriceAutoFilled(false)
     setTradeDrawer({
-      ...createTradeDrawerState(market),
+      ...createTradeDrawerState(market, investmentProfile),
       open: true,
       action,
       market,
       symbolInput: position?.symbol || '',
       lockedSymbol: Boolean(position),
-      form: createPortfolioActionForm(action, position || null),
+      form: createPortfolioActionForm(action, position || null, { exchange: market, profile: investmentProfile }),
       item: seedTradeContextFromPosition(position),
       loading: Boolean(position?.symbol),
     })
-  }, [defaultTradeMarket])
+  }, [defaultTradeMarket, investmentProfile])
 
   const closeTradeDrawer = useCallback(() => {
-    setTradeDrawer(createTradeDrawerState(defaultTradeMarket))
-  }, [defaultTradeMarket])
+    setTradeDrawer(createTradeDrawerState(defaultTradeMarket, investmentProfile))
+  }, [defaultTradeMarket, investmentProfile])
 
   const handleTradeActionChange = useCallback((nextAction) => {
     setTradeDrawer((prev) => ({
       ...prev,
       action: nextAction,
-      form: createPortfolioActionForm(nextAction, tradeItem),
+      form: createPortfolioActionForm(nextAction, tradeItem, { exchange: inferPortfolioTradeMarket(prev.symbolInput, prev.market), profile: investmentProfile }),
       error: '',
       notice: '',
     }))
-  }, [tradeItem])
+  }, [investmentProfile, tradeItem])
 
   const handleTradeMarketChange = useCallback((nextMarket) => {
-    setTradeDrawer((prev) => ({
-      ...prev,
-      market: nextMarket,
-      error: '',
-      notice: '',
-    }))
-  }, [])
+    setTradeDrawer((prev) => {
+      const inferredExchange = inferPortfolioTradeMarket(prev.symbolInput, nextMarket)
+      return {
+        ...prev,
+        market: nextMarket,
+        form: prev.action === 'adjust'
+          ? { ...prev.form, exchange: inferredExchange }
+          : {
+              ...prev.form,
+              exchange: inferredExchange,
+              fee_rate: formatFeeRatePercent(getPortfolioDefaultFeeRate({ exchange: inferredExchange, action: prev.action, profile: investmentProfile })),
+            },
+        error: '',
+        notice: '',
+      }
+    })
+  }, [investmentProfile])
 
   const handleTradeSymbolInputChange = useCallback((nextValue) => {
-    setTradeDrawer((prev) => ({
-      ...prev,
-      symbolInput: String(nextValue || '').toUpperCase().trim(),
-      error: '',
-      notice: '',
-    }))
-  }, [])
+    setTradeDrawer((prev) => {
+      const normalizedInput = String(nextValue || '').toUpperCase().trim()
+      const inferredExchange = inferPortfolioTradeMarket(normalizedInput, prev.market)
+      return {
+        ...prev,
+        symbolInput: normalizedInput,
+        form: prev.action === 'adjust'
+          ? { ...prev.form, exchange: inferredExchange }
+          : {
+              ...prev.form,
+              exchange: inferredExchange,
+              fee_rate: formatFeeRatePercent(getPortfolioDefaultFeeRate({ exchange: inferredExchange, action: prev.action, profile: investmentProfile })),
+            },
+        error: '',
+        notice: '',
+      }
+    })
+  }, [investmentProfile])
 
   const handleTradeFormChange = useCallback((patch) => {
     setTradeDrawer((prev) => ({
@@ -1874,7 +1936,7 @@ export default function PortfolioPage() {
     } else {
       payload.quantity = Number(tradeDrawer.form.quantity)
       payload.price = Number(tradeDrawer.form.price)
-      payload.fee_amount = Number(tradeDrawer.form.fee_amount || 0)
+      payload.fee_amount = Number(preview.feeAmount || 0)
     }
 
     setTradeDrawer((prev) => ({ ...prev, saving: true, error: '', notice: '' }))
@@ -1889,7 +1951,7 @@ export default function PortfolioPage() {
         ...prev,
         item: mergedItem,
         events: refreshed.events,
-        form: createPortfolioActionForm(prev.action, mergedItem),
+        form: createPortfolioActionForm(prev.action, mergedItem, { exchange: mergedItem?.exchange || prev.market, profile: investmentProfile }),
         saving: false,
         error: '',
         notice: successNotice,
@@ -1917,7 +1979,7 @@ export default function PortfolioPage() {
         ...prev,
         item: mergedItem,
         events: refreshed.events,
-        form: createPortfolioActionForm(prev.action, mergedItem),
+        form: createPortfolioActionForm(prev.action, mergedItem, { exchange: mergedItem?.exchange || prev.market, profile: investmentProfile }),
         saving: false,
         error: '',
         notice: '已撤销最近一条持仓变动记录',

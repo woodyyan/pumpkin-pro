@@ -20,49 +20,77 @@ describe('isPortfolioPositionActive', () => {
 
 describe('createPortfolioActionForm', () => {
   it('prefills avg cost for adjust action', () => {
-    const form = createPortfolioActionForm('adjust', { avg_cost_price: 12.3 })
+    const form = createPortfolioActionForm('adjust', { avg_cost_price: 12.3 }, { exchange: 'SSE' })
     assert.equal(form.avg_cost_price, '12.3')
+    assert.equal(form.exchange, 'ASHARE')
     assert.equal(typeof form.trade_date, 'string')
     assert.equal(form.trade_date.length, 10)
+  })
+
+  it('prefills default fee rate for buy and sell actions', () => {
+    const buyForm = createPortfolioActionForm('buy', null, { exchange: 'SSE' })
+    const sellForm = createPortfolioActionForm('sell', null, { exchange: 'HKEX' })
+    assert.equal(buyForm.fee_rate, '0.03')
+    assert.equal(sellForm.fee_rate, '0.13')
+  })
+
+  it('still uses product defaults when historical profile fee rates are zero', () => {
+    const zeroProfile = {
+      default_fee_rate_ashare_buy: 0,
+      default_fee_rate_ashare_sell: 0,
+      default_fee_rate_hk_buy: 0,
+      default_fee_rate_hk_sell: 0,
+    }
+    const buyForm = createPortfolioActionForm('buy', null, { exchange: 'SSE', profile: zeroProfile })
+    const sellForm = createPortfolioActionForm('sell', null, { exchange: 'HKEX', profile: zeroProfile })
+    assert.equal(buyForm.fee_rate, '0.03')
+    assert.equal(sellForm.fee_rate, '0.13')
   })
 })
 
 describe('buildPortfolioEventPreview - buy', () => {
-  it('computes weighted average after buy', () => {
+  it('computes weighted average after buy using fee rate', () => {
     const preview = buildPortfolioEventPreview('buy', {
       shares: 100,
       avg_cost_price: 10,
       total_cost_amount: 1000,
+      exchange: 'SSE',
     }, {
       quantity: '200',
       price: '13',
-      fee_amount: '0',
+      fee_rate: '0.03',
+      exchange: 'SSE',
       note: '加仓',
     })
     assert.equal(preview.valid, true)
     assert.equal(preview.nextShares, 300)
-    assert.equal(preview.nextAvgCostPrice, 12)
-    assert.equal(preview.nextTotalCostAmount, 3600)
+    assert.equal(preview.feeAmount, 5)
+    assert.equal(preview.feeEstimate.minimumApplied, true)
+    assert.equal(preview.nextAvgCostPrice, 12.016666666666667)
+    assert.equal(preview.nextTotalCostAmount, 3605)
   })
 })
 
 describe('buildPortfolioEventPreview - sell', () => {
-  it('keeps average cost unchanged after sell', () => {
+  it('keeps average cost unchanged after sell and deducts fee', () => {
     const preview = buildPortfolioEventPreview('sell', {
       shares: 300,
       avg_cost_price: 12,
       total_cost_amount: 3600,
+      exchange: 'SSE',
     }, {
       quantity: '100',
       price: '13',
-      fee_amount: '0',
+      fee_rate: '0.08',
+      exchange: 'SSE',
       note: '减仓',
     })
     assert.equal(preview.valid, true)
     assert.equal(preview.nextShares, 200)
     assert.equal(preview.nextAvgCostPrice, 12)
     assert.equal(preview.nextTotalCostAmount, 2400)
-    assert.equal(preview.realizedPnlAmount, 100)
+    assert.equal(preview.feeAmount, 5)
+    assert.equal(preview.realizedPnlAmount, 95)
   })
 
   it('rejects selling more than current shares', () => {
@@ -70,14 +98,35 @@ describe('buildPortfolioEventPreview - sell', () => {
       shares: 100,
       avg_cost_price: 10,
       total_cost_amount: 1000,
+      exchange: 'SSE',
     }, {
       quantity: '120',
       price: '11',
-      fee_amount: '0',
+      fee_rate: '0.03',
+      exchange: 'SSE',
       note: '超量卖出',
     })
     assert.equal(preview.valid, false)
     assert.match(preview.errors.join(' '), /不能超过当前持仓/)
+  })
+
+  it('surfaces minimum commission info for small A股 orders', () => {
+    const preview = buildPortfolioEventPreview('sell', {
+      shares: 100,
+      avg_cost_price: 10,
+      total_cost_amount: 1000,
+      exchange: 'SSE',
+    }, {
+      quantity: '10',
+      price: '10',
+      fee_rate: '0.08',
+      exchange: 'SSE',
+      note: '小额卖出',
+    })
+    assert.equal(preview.valid, true)
+    assert.equal(preview.feeEstimate.minimumApplied, true)
+    assert.equal(preview.feeEstimate.rawFeeAmount, 0.08)
+    assert.equal(preview.feeEstimate.finalFeeAmount, 5)
   })
 })
 
@@ -87,9 +136,11 @@ describe('buildPortfolioEventPreview - adjust', () => {
       shares: 200,
       avg_cost_price: 10,
       total_cost_amount: 2000,
+      exchange: 'SSE',
     }, {
       avg_cost_price: '9.5',
       note: '补录手续费',
+      exchange: 'SSE',
     })
     assert.equal(preview.valid, true)
     assert.equal(preview.nextShares, 200)

@@ -1,3 +1,11 @@
+import {
+  calculatePortfolioFeeEstimate,
+  formatFeeRatePercent,
+  getPortfolioDefaultFeeRate,
+  normalizePortfolioExchange,
+  parseFeeRatePercentInput,
+} from './portfolio-fee.js'
+
 export function isPortfolioPositionActive(item) {
   return Number(item?.shares || 0) > 0
 }
@@ -10,12 +18,22 @@ export function getDefaultTradeDate() {
   return `${year}-${month}-${day}`
 }
 
-export function createPortfolioActionForm(action, item = null) {
+export function createPortfolioActionForm(action, item = null, options = {}) {
+  const normalizedExchange = normalizePortfolioExchange(options.exchange || item?.exchange)
+  const defaultFeeRate = action === 'adjust'
+    ? ''
+    : formatFeeRatePercent(getPortfolioDefaultFeeRate({
+      exchange: normalizedExchange,
+      action,
+      profile: options.profile,
+    }))
+
   return {
     trade_date: getDefaultTradeDate(),
     quantity: '',
     price: '',
-    fee_amount: '',
+    fee_rate: defaultFeeRate,
+    exchange: normalizedExchange,
     avg_cost_price: action === 'adjust' ? String(item?.avg_cost_price ?? '') : '',
     note: '',
   }
@@ -38,12 +56,29 @@ function currentPositionState(item) {
   }
 }
 
+function buildLegacyFeeEstimate(feeAmount) {
+  const normalized = Math.max(Number(feeAmount) || 0, 0)
+  return {
+    rawFeeAmount: normalized,
+    finalFeeAmount: normalized,
+    minimumFeeAmount: 0,
+    minimumApplied: false,
+  }
+}
+
 export function buildPortfolioEventPreview(action, item, form) {
   const current = currentPositionState(item)
   const quantity = parseNumber(form?.quantity)
   const price = parseNumber(form?.price)
-  const feeAmount = parseNumber(form?.fee_amount) ?? 0
   const avgCostPrice = parseNumber(form?.avg_cost_price)
+  const exchange = normalizePortfolioExchange(form?.exchange || item?.exchange)
+  const feeRateInput = String(form?.fee_rate ?? '').trim()
+  const legacyFeeAmount = parseNumber(form?.fee_amount)
+  const feeRate = feeRateInput === '' ? 0 : parseFeeRatePercentInput(feeRateInput)
+  const feeEstimate = feeRate !== null
+    ? calculatePortfolioFeeEstimate({ exchange, action, quantity, price, feeRate })
+    : buildLegacyFeeEstimate(legacyFeeAmount)
+  const feeAmount = feeEstimate.finalFeeAmount
 
   const preview = {
     valid: false,
@@ -53,13 +88,17 @@ export function buildPortfolioEventPreview(action, item, form) {
     nextTotalCostAmount: current.totalCostAmount,
     realizedPnlAmount: 0,
     realizedPnlPct: 0,
+    feeAmount,
+    feeRate: feeRate ?? 0,
+    feeEstimate,
   }
 
   switch (action) {
     case 'buy': {
       if (!(quantity > 0)) preview.errors.push('买入数量必须大于 0')
       if (!(price > 0)) preview.errors.push('买入价格必须大于 0')
-      if (feeAmount < 0) preview.errors.push('手续费不能为负数')
+      if (feeRate === null) preview.errors.push('手续费率格式不正确')
+      if (feeRate !== null && feeRate < 0) preview.errors.push('手续费率不能为负数')
       if (preview.errors.length > 0) return preview
       const buyCost = quantity * price + feeAmount
       preview.nextShares = current.shares + quantity
@@ -71,7 +110,8 @@ export function buildPortfolioEventPreview(action, item, form) {
     case 'sell': {
       if (!(quantity > 0)) preview.errors.push('卖出数量必须大于 0')
       if (!(price > 0)) preview.errors.push('卖出价格必须大于 0')
-      if (feeAmount < 0) preview.errors.push('手续费不能为负数')
+      if (feeRate === null) preview.errors.push('手续费率格式不正确')
+      if (feeRate !== null && feeRate < 0) preview.errors.push('手续费率不能为负数')
       if (!(current.shares > 0)) preview.errors.push('当前无持仓，无法卖出')
       if (quantity > current.shares) preview.errors.push('卖出数量不能超过当前持仓')
       if (preview.errors.length > 0) return preview

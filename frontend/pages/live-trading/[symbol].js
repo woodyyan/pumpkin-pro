@@ -23,6 +23,11 @@ import {
   isPortfolioPositionActive,
 } from '../../lib/portfolio-events'
 import {
+  describeFeeRate,
+  describePortfolioFeeEstimate,
+  formatPortfolioFeeAmount,
+} from '../../lib/portfolio-fee'
+import {
   fetchSymbolSnapshot,
   fetchSymbolDailyBars,
   findClosePriceByDate,
@@ -112,6 +117,7 @@ export default function LiveTradingDetailPage() {
   const [portfolioData, setPortfolioData] = useState(null)
   const [portfolioEvents, setPortfolioEvents] = useState([])
   const [portfolioAction, setPortfolioAction] = useState('')
+  const [investmentProfile, setInvestmentProfile] = useState(null)
   const [portfolioForm, setPortfolioForm] = useState(() => createPortfolioActionForm('buy'))
   const [portfolioSaving, setPortfolioSaving] = useState(false)
   const [portfolioHistoryExpanded, setPortfolioHistoryExpanded] = useState(false)
@@ -315,15 +321,24 @@ export default function LiveTradingDetailPage() {
     }
   }
 
+  const loadInvestmentProfile = async () => {
+    try {
+      const data = await requestJson('/api/investment-profile')
+      setInvestmentProfile(data?.profile || null)
+    } catch {
+      setInvestmentProfile(null)
+    }
+  }
+
   const openPortfolioAction = (action) => {
     setPortfolioAction(action)
-    setPortfolioForm(createPortfolioActionForm(action, portfolioData))
+    setPortfolioForm(createPortfolioActionForm(action, portfolioData, { exchange, profile: investmentProfile }))
     setPortfolioNotice('')
   }
 
   const closePortfolioAction = () => {
     setPortfolioAction('')
-    setPortfolioForm(createPortfolioActionForm('buy'))
+    setPortfolioForm(createPortfolioActionForm('buy', null, { exchange, profile: investmentProfile }))
   }
 
   const submitPortfolioAction = async () => {
@@ -344,7 +359,7 @@ export default function LiveTradingDetailPage() {
     } else {
       payload.quantity = Number(portfolioForm.quantity)
       payload.price = Number(portfolioForm.price)
-      payload.fee_amount = Number(portfolioForm.fee_amount || 0)
+      payload.fee_amount = Number(preview.feeAmount || 0)
     }
 
     setPortfolioSaving(true)
@@ -719,6 +734,7 @@ export default function LiveTradingDetailPage() {
           await Promise.all([
             loadSignalCenter({ force: true }),
             loadPortfolio(symbol),
+            loadInvestmentProfile(),
             loadAnalysisHistory(symbol, { limit: 10 }),
           ])
         } catch (err) {
@@ -741,11 +757,12 @@ export default function LiveTradingDetailPage() {
 
   useEffect(() => {
     setPortfolioAction('')
-    setPortfolioForm(createPortfolioActionForm('buy'))
+    setInvestmentProfile(null)
+    setPortfolioForm(createPortfolioActionForm('buy', null, { exchange }))
     setPortfolioHistoryExpanded(false)
     setPortfolioNotice('')
     setPriceAutoFilled(false)
-  }, [symbol, authIdentityKey])
+  }, [symbol, authIdentityKey, exchange])
 
   // ── 自动填充成交价格（500ms 防抖）──
   useEffect(() => {
@@ -918,6 +935,12 @@ export default function LiveTradingDetailPage() {
   const movingAverageStatusAccent = movingAveragePayload?.status === '双双站上' ? 'up' : movingAveragePayload?.status === '双双跌破' ? 'down' : 'normal'
   const portfolioHasPosition = isPortfolioPositionActive(portfolioData)
   const portfolioPreview = portfolioAction ? buildPortfolioEventPreview(portfolioAction, portfolioData, portfolioForm) : null
+  const portfolioHasTradeAmount = Number(portfolioForm.quantity) > 0 && Number(portfolioForm.price) > 0
+  const portfolioFeeHint = portfolioAction && portfolioAction !== 'adjust'
+    ? (portfolioHasTradeAmount
+      ? describePortfolioFeeEstimate({ exchange, feeEstimate: portfolioPreview?.feeEstimate })
+      : '填写数量和价格后，系统会自动估算本次手续费。')
+    : ''
   const visiblePortfolioEvents = portfolioHistoryExpanded ? portfolioEvents : portfolioEvents.slice(0, 5)
   const portfolioLastTradeAtText = portfolioData?.last_trade_at
     ? new Date(portfolioData.last_trade_at).toLocaleString('zh-CN', { hour12: false })
@@ -1377,16 +1400,20 @@ export default function LiveTradingDetailPage() {
                         />
                       </label>
                       <label className="block">
-                        <span className="text-xs text-white/55">手续费（选填）</span>
+                        <span className="text-xs text-white/55 inline-flex items-center gap-1.5">
+                          手续费率（%）
+                          <span className="rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] text-white/45">{describeFeeRate(portfolioPreview?.feeRate ?? 0)}</span>
+                        </span>
                         <input
                           type="number"
                           min="0"
                           step="any"
-                          value={portfolioForm.fee_amount}
-                          onChange={(e) => setPortfolioForm((f) => ({ ...f, fee_amount: e.target.value }))}
+                          value={portfolioForm.fee_rate}
+                          onChange={(e) => setPortfolioForm((f) => ({ ...f, fee_rate: e.target.value }))}
                           className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
-                          placeholder="默认 0"
+                          placeholder={portfolioAction === 'buy' ? (isAShare ? '默认 0.03' : '默认 0.13') : (isAShare ? '默认 0.08' : '默认 0.13')}
                         />
+                        <div className="mt-1 text-[11px] leading-5 text-white/40">{portfolioFeeHint}</div>
                       </label>
                     </>
                   ) : (
@@ -1421,7 +1448,7 @@ export default function LiveTradingDetailPage() {
                   {portfolioPreview?.errors?.length > 0 ? (
                     <div className="mt-2 text-xs text-amber-200">{portfolioPreview.errors[0]}</div>
                   ) : (
-                    <div className="mt-2 grid gap-2 md:grid-cols-4">
+                    <div className={`mt-2 grid gap-2 ${portfolioAction === 'adjust' ? 'md:grid-cols-4' : 'md:grid-cols-5'}`}>
                       <div>
                         <div className="text-[11px] text-white/35">变动后股数</div>
                         <div className="text-sm font-semibold text-white">{Number(portfolioPreview?.nextShares || 0).toLocaleString('zh-CN')} 股</div>
@@ -1434,6 +1461,15 @@ export default function LiveTradingDetailPage() {
                         <div className="text-[11px] text-white/35">变动后成本</div>
                         <div className="text-sm font-semibold text-white">{formatYiCurrency(portfolioPreview?.nextTotalCostAmount, isAShare ? '¥' : 'HK$')}</div>
                       </div>
+                      {portfolioAction !== 'adjust' ? (
+                        <div>
+                          <div className="text-[11px] text-white/35">本次手续费</div>
+                          <div className="text-sm font-semibold text-white">{formatPortfolioFeeAmount(portfolioPreview?.feeAmount || 0, exchange)}</div>
+                          {portfolioPreview?.feeEstimate?.minimumApplied ? (
+                            <div className="mt-1 text-[10px] text-amber-200">低于最低佣金，按 {formatPortfolioFeeAmount(portfolioPreview?.feeEstimate?.minimumFeeAmount || 0, exchange)} 结算</div>
+                          ) : null}
+                        </div>
+                      ) : null}
                       <div>
                         <div className="text-[11px] text-white/35">{portfolioAction === 'sell' ? '本次已实现收益' : '口径说明'}</div>
                         <div className={`text-sm font-semibold ${portfolioAction === 'sell' ? ((portfolioPreview?.realizedPnlAmount || 0) >= 0 ? 'text-rose-300' : 'text-emerald-300') : 'text-white/70'}`}>

@@ -214,15 +214,19 @@ func TestEventRepositoryLifecycle(t *testing.T) {
 func TestInvestmentProfileCRUD(t *testing.T) {
 	repo, ctx := setupPortfolioDB(t)
 	record := &InvestmentProfileRecord{
-		UserID:            "profile-user",
-		TotalCapital:      100000,
-		RiskPreference:    "moderate",
-		InvestmentGoal:    "growth",
-		InvestmentHorizon: "medium",
-		MaxDrawdownPct:    15.0,
-		ExperienceLevel:   "intermediate",
-		Note:              "test profile",
-		UpdatedAt:         time.Now().UTC(),
+		UserID:                   "profile-user",
+		TotalCapital:             100000,
+		RiskPreference:           "moderate",
+		InvestmentGoal:           "growth",
+		InvestmentHorizon:        "medium",
+		MaxDrawdownPct:           15.0,
+		ExperienceLevel:          "intermediate",
+		DefaultFeeRateAShareBuy:  0.0003,
+		DefaultFeeRateAShareSell: 0.0008,
+		DefaultFeeRateHKBuy:      0.0013,
+		DefaultFeeRateHKSell:     0.0013,
+		Note:                     "test profile",
+		UpdatedAt:                time.Now().UTC(),
 	}
 	if err := repo.UpsertInvestmentProfile(ctx, record); err != nil {
 		t.Fatalf("UpsertInvestmentProfile create failed: %v", err)
@@ -235,13 +239,23 @@ func TestInvestmentProfileCRUD(t *testing.T) {
 	if found.TotalCapital != 100000 {
 		t.Errorf("expected TotalCapital=100000, got %v", found.TotalCapital)
 	}
+	if found.DefaultFeeRateAShareBuy != 0.0003 || found.DefaultFeeRateAShareSell != 0.0008 {
+		t.Errorf("expected A股 default fee rates saved, got buy=%v sell=%v", found.DefaultFeeRateAShareBuy, found.DefaultFeeRateAShareSell)
+	}
+	if found.DefaultFeeRateHKBuy != 0.0013 || found.DefaultFeeRateHKSell != 0.0013 {
+		t.Errorf("expected 港股 default fee rates saved, got buy=%v sell=%v", found.DefaultFeeRateHKBuy, found.DefaultFeeRateHKSell)
+	}
 
 	updated := &InvestmentProfileRecord{
-		UserID:         "profile-user",
-		TotalCapital:   200000,
-		RiskPreference: "aggressive",
-		MaxDrawdownPct: 25.0,
-		UpdatedAt:      time.Now().UTC(),
+		UserID:                   "profile-user",
+		TotalCapital:             200000,
+		RiskPreference:           "aggressive",
+		MaxDrawdownPct:           25.0,
+		DefaultFeeRateAShareBuy:  0.0005,
+		DefaultFeeRateAShareSell: 0.0009,
+		DefaultFeeRateHKBuy:      0.0011,
+		DefaultFeeRateHKSell:     0.0012,
+		UpdatedAt:                time.Now().UTC(),
 	}
 	if err := repo.UpsertInvestmentProfile(ctx, updated); err != nil {
 		t.Fatalf("UpsertInvestmentProfile update failed: %v", err)
@@ -253,5 +267,11 @@ func TestInvestmentProfileCRUD(t *testing.T) {
 	}
 	if found2.MaxDrawdownPct != 25.0 {
 		t.Errorf("expected updated MaxDrawdownPct=25.0, got %v", found2.MaxDrawdownPct)
+	}
+	if found2.DefaultFeeRateAShareBuy != 0.0005 || found2.DefaultFeeRateAShareSell != 0.0009 {
+		t.Errorf("expected updated A股 default fee rates, got buy=%v sell=%v", found2.DefaultFeeRateAShareBuy, found2.DefaultFeeRateAShareSell)
+	}
+	if found2.DefaultFeeRateHKBuy != 0.0011 || found2.DefaultFeeRateHKSell != 0.0012 {
+		t.Errorf("expected updated 港股 default fee rates, got buy=%v sell=%v", found2.DefaultFeeRateHKBuy, found2.DefaultFeeRateHKSell)
 	}
 }

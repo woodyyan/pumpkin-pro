@@ -414,6 +414,13 @@ func (s *Service) GetInvestmentProfile(ctx context.Context, userID string) (*Inv
 	return &profile, nil
 }
 
+func validateDefaultFeeRate(field string, value float64) error {
+	if value < 0 || value > 0.05 {
+		return fmt.Errorf("%s must be between 0 and 0.05", field)
+	}
+	return nil
+}
+
 func (s *Service) UpsertInvestmentProfile(ctx context.Context, userID string, input UpsertInvestmentProfileInput) (*InvestmentProfile, error) {
 	if input.TotalCapital < 0 {
 		return nil, fmt.Errorf("total_capital must be >= 0")
@@ -421,18 +428,34 @@ func (s *Service) UpsertInvestmentProfile(ctx context.Context, userID string, in
 	if input.MaxDrawdownPct < 0 || input.MaxDrawdownPct > 100 {
 		return nil, fmt.Errorf("max_drawdown_pct must be between 0 and 100")
 	}
+	if err := validateDefaultFeeRate("default_fee_rate_ashare_buy", input.DefaultFeeRateAShareBuy); err != nil {
+		return nil, err
+	}
+	if err := validateDefaultFeeRate("default_fee_rate_ashare_sell", input.DefaultFeeRateAShareSell); err != nil {
+		return nil, err
+	}
+	if err := validateDefaultFeeRate("default_fee_rate_hk_buy", input.DefaultFeeRateHKBuy); err != nil {
+		return nil, err
+	}
+	if err := validateDefaultFeeRate("default_fee_rate_hk_sell", input.DefaultFeeRateHKSell); err != nil {
+		return nil, err
+	}
 
 	now := time.Now().UTC()
 	record := &InvestmentProfileRecord{
-		UserID:            userID,
-		TotalCapital:      input.TotalCapital,
-		RiskPreference:    strings.TrimSpace(input.RiskPreference),
-		InvestmentGoal:    strings.TrimSpace(input.InvestmentGoal),
-		InvestmentHorizon: strings.TrimSpace(input.InvestmentHorizon),
-		MaxDrawdownPct:    input.MaxDrawdownPct,
-		ExperienceLevel:   strings.TrimSpace(input.ExperienceLevel),
-		Note:              strings.TrimSpace(input.Note),
-		UpdatedAt:         now,
+		UserID:                   userID,
+		TotalCapital:             input.TotalCapital,
+		RiskPreference:           strings.TrimSpace(input.RiskPreference),
+		InvestmentGoal:           strings.TrimSpace(input.InvestmentGoal),
+		InvestmentHorizon:        strings.TrimSpace(input.InvestmentHorizon),
+		MaxDrawdownPct:           input.MaxDrawdownPct,
+		ExperienceLevel:          strings.TrimSpace(input.ExperienceLevel),
+		DefaultFeeRateAShareBuy:  input.DefaultFeeRateAShareBuy,
+		DefaultFeeRateAShareSell: input.DefaultFeeRateAShareSell,
+		DefaultFeeRateHKBuy:      input.DefaultFeeRateHKBuy,
+		DefaultFeeRateHKSell:     input.DefaultFeeRateHKSell,
+		Note:                     strings.TrimSpace(input.Note),
+		UpdatedAt:                now,
 	}
 
 	if err := s.repo.UpsertInvestmentProfile(ctx, record); err != nil {

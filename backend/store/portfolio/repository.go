@@ -253,13 +253,17 @@ func (r *Repository) UpsertInvestmentProfile(ctx context.Context, record *Invest
 		Model(&InvestmentProfileRecord{}).
 		Where("user_id = ?", record.UserID).
 		Updates(map[string]any{
-			"total_capital":      record.TotalCapital,
-			"risk_preference":    record.RiskPreference,
-			"investment_goal":    record.InvestmentGoal,
-			"investment_horizon": record.InvestmentHorizon,
-			"max_drawdown_pct":   record.MaxDrawdownPct,
-			"experience_level":   record.ExperienceLevel,
-			"note":               record.Note,
-			"updated_at":         record.UpdatedAt,
+			"total_capital":                record.TotalCapital,
+			"risk_preference":              record.RiskPreference,
+			"investment_goal":              record.InvestmentGoal,
+			"investment_horizon":           record.InvestmentHorizon,
+			"max_drawdown_pct":             record.MaxDrawdownPct,
+			"experience_level":             record.ExperienceLevel,
+			"default_fee_rate_ashare_buy":  record.DefaultFeeRateAShareBuy,
+			"default_fee_rate_ashare_sell": record.DefaultFeeRateAShareSell,
+			"default_fee_rate_hk_buy":      record.DefaultFeeRateHKBuy,
+			"default_fee_rate_hk_sell":     record.DefaultFeeRateHKSell,
+			"note":                         record.Note,
+			"updated_at":                   record.UpdatedAt,
 		}).Error
 }

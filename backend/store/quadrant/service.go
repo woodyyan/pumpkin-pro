@@ -593,7 +593,7 @@ func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*
 
 		firstDateStr, _ := s.repo.GetFirstAppearedDate(ctx, r.Code, exchanges)
 		if firstDateStr != "" {
-			startPrice, _ := s.repo.GetClosePriceOnDate(ctx, r.Code, firstDateStr)
+			startPrice, _, _ := s.repo.GetEarliestAvailableClosePrice(ctx, r.Code, exchanges, firstDateStr)
 			currentPrice, _, _ := s.repo.GetLatestAvailableClosePrice(ctx, r.Code, exchanges)
 			if startPrice > 0 && currentPrice > 0 {
 				pct := (currentPrice - startPrice) / startPrice * 100

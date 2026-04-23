@@ -10,3 +10,4 @@ quant/data/cache/
 .env
 .workb/
 /docs/plans/
+backend/.cache/

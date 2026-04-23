@@ -643,3 +643,55 @@ func TestNewQuadrantPriceResolver(t *testing.T) {
 		t.Fatalf("resolver on unsupported exchange returned %.2f; want 0", got)
 	}
 }
+
+func TestQuadrantSnapshotTradeDates(t *testing.T) {
+	tests := []struct {
+		name      string
+		tradeDate string
+		exchange  string
+		want      []string
+	}{
+		{name: "A-share only same day", tradeDate: "2026-04-23", exchange: "SSE", want: []string{"2026-04-23"}},
+		{name: "HK adds prior days", tradeDate: "2026-04-23", exchange: "HKEX", want: []string{"2026-04-23", "2026-04-22", "2026-04-21", "2026-04-20"}},
+		{name: "invalid date keeps original", tradeDate: "bad-date", exchange: "HKEX", want: []string{"bad-date"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := quadrantSnapshotTradeDates(tc.tradeDate, tc.exchange)
+			if len(got) != len(tc.want) {
+				t.Fatalf("len = %d; want %d (%v)", len(got), len(tc.want), got)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("quadrantSnapshotTradeDates()[%d] = %s; want %s", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestNewQuadrantPriceResolver_HKFallsBackToPreviousTradeDate(t *testing.T) {
+	db := testutil.InMemoryDB(t)
+	testutil.AutoMigrateModels(t, db, &live.ClosingSnapshotRecord{})
+	liveRepo := live.NewRepository(db)
+	resolver := newQuadrantPriceResolver(liveRepo)
+	ctx := context.Background()
+
+	snapshot := live.SymbolSnapshot{Symbol: "00700.HK", LastPrice: 456.78}
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal snapshot failed: %v", err)
+	}
+	if err := liveRepo.UpsertClosingSnapshot(ctx, live.ClosingSnapshotRecord{
+		Symbol:       "00700.HK",
+		TradeDate:    "2026-04-22",
+		SnapshotJSON: string(payload),
+		UpdatedAt:    time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed closing snapshot failed: %v", err)
+	}
+
+	if got := resolver(ctx, "700", "HKEX", "2026-04-23"); got != 456.78 {
+		t.Fatalf("resolver returned %.2f; want 456.78", got)
+	}
+}

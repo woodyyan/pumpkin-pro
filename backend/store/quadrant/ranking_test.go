@@ -928,6 +928,30 @@ func TestSnapshot_GetLatestAvailableClosePrice(t *testing.T) {
 	}
 }
 
+func TestSnapshot_GetEarliestAvailableClosePrice(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	for _, snap := range []RankingSnapshot{
+		{Code: "00700", Name: "腾讯控股", Exchange: "HKEX", Rank: 1, Opportunity: 90, Risk: 20, ClosePrice: 0, SnapshotDate: "2026-04-20", CreatedAt: time.Now().UTC()},
+		{Code: "00700", Name: "腾讯控股", Exchange: "HKEX", Rank: 1, Opportunity: 90, Risk: 20, ClosePrice: 11, SnapshotDate: "2026-04-21", CreatedAt: time.Now().UTC()},
+		{Code: "00700", Name: "腾讯控股", Exchange: "HKEX", Rank: 1, Opportunity: 90, Risk: 20, ClosePrice: 12, SnapshotDate: "2026-04-22", CreatedAt: time.Now().UTC()},
+	} {
+		if err := repo.UpsertSnapshot(ctx, snap); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	price, dateStr, err := repo.GetEarliestAvailableClosePrice(ctx, "00700", []string{"HKEX"}, "2026-04-20")
+	if err != nil {
+		t.Fatalf("GetEarliestAvailableClosePrice failed: %v", err)
+	}
+	if dateStr != "2026-04-21" || price != 11 {
+		t.Fatalf("earliest available = (%s, %.2f), want (2026-04-21, 11.00)", dateStr, price)
+	}
+}
+
 func TestSaveRankingSnapshotsBestEffort_UsesResolverAndShanghaiDate(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
@@ -1062,6 +1086,41 @@ func TestGetRanking_ReturnPct_NilWhenPriceMissing(t *testing.T) {
 	}
 	if resp.Items[0].ReturnPct != nil {
 		t.Fatalf("expected nil return_pct when start price missing, got %.2f", *resp.Items[0].ReturnPct)
+	}
+}
+
+func TestGetRanking_ReturnPct_UsesEarliestPricedSnapshotAfterFirstAppearance(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	record := makeRankingRecord("00700", "HKEX", 95, 20)
+	record.ComputedAt = time.Date(2026, 4, 22, 18, 46, 37, 0, time.UTC)
+	seedOpportunityRecords(t, repo, []QuadrantScoreRecord{record})
+
+	for _, snap := range []RankingSnapshot{
+		{Code: "00700", Name: "腾讯控股", Exchange: "HKEX", Rank: 1, Opportunity: 95, Risk: 20, ClosePrice: 0, SnapshotDate: "2026-04-20", CreatedAt: time.Now().UTC()},
+		{Code: "00700", Name: "腾讯控股", Exchange: "HKEX", Rank: 1, Opportunity: 95, Risk: 20, ClosePrice: 10, SnapshotDate: "2026-04-21", CreatedAt: time.Now().UTC()},
+		{Code: "00700", Name: "腾讯控股", Exchange: "HKEX", Rank: 1, Opportunity: 95, Risk: 20, ClosePrice: 12, SnapshotDate: "2026-04-22", CreatedAt: time.Now().UTC()},
+	} {
+		if err := repo.UpsertSnapshot(ctx, snap); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	resp, err := svc.GetRanking(ctx, "HKEX", 20)
+	if err != nil {
+		t.Fatalf("GetRanking failed: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(resp.Items))
+	}
+	if resp.Items[0].ReturnPct == nil {
+		t.Fatal("expected non-nil return_pct when later priced snapshot exists")
+	}
+	if *resp.Items[0].ReturnPct != 20 {
+		t.Fatalf("return_pct = %.2f; want 20.00", *resp.Items[0].ReturnPct)
 	}
 }
 

@@ -65,19 +65,39 @@ func newQuadrantPriceResolver(liveRepo *live.Repository) quadrant.PriceResolver 
 		if symbol == "" {
 			return 0
 		}
-		record, err := liveRepo.GetClosingSnapshot(ctx, symbol, tradeDate)
-		if err != nil || record == nil || strings.TrimSpace(record.SnapshotJSON) == "" {
-			return 0
+		for _, candidateDate := range quadrantSnapshotTradeDates(tradeDate, exchange) {
+			record, err := liveRepo.GetClosingSnapshot(ctx, symbol, candidateDate)
+			if err != nil || record == nil || strings.TrimSpace(record.SnapshotJSON) == "" {
+				continue
+			}
+			var snapshot live.SymbolSnapshot
+			if err := json.Unmarshal([]byte(record.SnapshotJSON), &snapshot); err != nil {
+				continue
+			}
+			if snapshot.LastPrice > 0 {
+				return snapshot.LastPrice
+			}
 		}
-		var snapshot live.SymbolSnapshot
-		if err := json.Unmarshal([]byte(record.SnapshotJSON), &snapshot); err != nil {
-			return 0
-		}
-		if snapshot.LastPrice <= 0 {
-			return 0
-		}
-		return snapshot.LastPrice
+		return 0
 	}
+}
+
+func quadrantSnapshotTradeDates(tradeDate string, exchange string) []string {
+	tradeDate = strings.TrimSpace(tradeDate)
+	if tradeDate == "" {
+		return nil
+	}
+	dates := []string{tradeDate}
+	parsed, err := time.ParseInLocation("2006-01-02", tradeDate, time.FixedZone("CST", 8*60*60))
+	if err != nil {
+		return dates
+	}
+	if strings.EqualFold(strings.TrimSpace(exchange), "HKEX") {
+		for gap := 1; gap <= 3; gap++ {
+			dates = append(dates, parsed.AddDate(0, 0, -gap).Format("2006-01-02"))
+		}
+	}
+	return dates
 }
 
 type appServer struct {
@@ -2592,13 +2612,13 @@ func (a *appServer) handlePortfolioRiskMetrics(w http.ResponseWriter, r *http.Re
 	// TODO: 实现真实的风险计算
 	// 暂时返回模拟数据
 	metrics := map[string]any{
-		"scope": scope,
+		"scope":       scope,
 		"computed_at": time.Now().UTC().Format(time.RFC3339),
 		"concentration_risk": map[string]any{
 			"single_stock_max_weight": 0.35,
-			"top3_weight": 0.68,
-			"top5_weight": 0.82,
-			"herfindahl_index": 0.18,
+			"top3_weight":             0.68,
+			"top5_weight":             0.82,
+			"herfindahl_index":        0.18,
 			"warnings": []string{
 				"单股集中度35%超过20%",
 				"前三大持仓占比68%超过60%",
@@ -2606,26 +2626,26 @@ func (a *appServer) handlePortfolioRiskMetrics(w http.ResponseWriter, r *http.Re
 		},
 		"volatility_risk": map[string]any{
 			"annualized_volatility": 0.24,
-			"max_drawdown": -0.18,
-			"downside_probability": 0.42,
-			"daily_var_95": -0.04,
-			"weekly_var_95": -0.09,
-			"warnings": []string{"波动率较高"},
+			"max_drawdown":          -0.18,
+			"downside_probability":  0.42,
+			"daily_var_95":          -0.04,
+			"weekly_var_95":         -0.09,
+			"warnings":              []string{"波动率较高"},
 		},
 		"liquidity_risk": map[string]any{
-			"avg_daily_turnover": 1500.5,
-			"avg_turnover_rate": 0.02,
-			"illiquid_count": 2,
+			"avg_daily_turnover":   1500.5,
+			"avg_turnover_rate":    0.02,
+			"illiquid_count":       2,
 			"low_liquidity_weight": 0.15,
-			"liquidity_score": 80.0,
-			"warnings": []string{"存在2只低流动性股票"},
+			"liquidity_score":      80.0,
+			"warnings":             []string{"存在2只低流动性股票"},
 		},
 		"tail_risk": map[string]any{
-			"var_95_one_day": -0.04,
-			"var_95_one_week": -0.09,
+			"var_95_one_day":        -0.04,
+			"var_95_one_week":       -0.09,
 			"expected_shortfall_95": -0.06,
-			"worst_case_loss": -0.25,
-			"warnings": []string{"单日最大可能损失超过3%"},
+			"worst_case_loss":       -0.25,
+			"warnings":              []string{"单日最大可能损失超过3%"},
 		},
 		"correlation_risk": map[string]any{
 			"avg_correlation": 0.35,
@@ -2633,7 +2653,7 @@ func (a *appServer) handlePortfolioRiskMetrics(w http.ResponseWriter, r *http.Re
 				{"symbol1": "000001", "symbol2": "000002", "correlation": 0.82},
 			},
 			"diversification_score": 65.0,
-			"warnings": []string{"存在高相关性股票对"},
+			"warnings":              []string{"存在高相关性股票对"},
 		},
 		"overall_risk_score": 6.5,
 	}

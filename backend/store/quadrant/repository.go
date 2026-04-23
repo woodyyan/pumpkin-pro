@@ -3,6 +3,7 @@ package quadrant
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -375,6 +376,7 @@ func (r *Repository) GetClosePriceOnDate(ctx context.Context, code string, dateS
 	err := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
 		Select("close_price").
 		Where("code = ? AND snapshot_date = ?", code, dateStr).
+		Where("close_price > ?", 0).
 		First(&snap).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -383,6 +385,30 @@ func (r *Repository) GetClosePriceOnDate(ctx context.Context, code string, dateS
 		return 0, err
 	}
 	return snap.ClosePrice, nil
+}
+
+// GetEarliestAvailableClosePrice returns the earliest positive close_price on or after a date.
+// This lets ranking returns recover when the first appearance snapshot was saved before a usable
+// closing snapshot was present for that market/day.
+func (r *Repository) GetEarliestAvailableClosePrice(ctx context.Context, code string, exchanges []string, fromDate string) (float64, string, error) {
+	var snap RankingSnapshot
+	query := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
+		Select("snapshot_date", "close_price").
+		Where("code = ? AND close_price > ?", code, 0).
+		Order("snapshot_date ASC")
+	if len(exchanges) > 0 {
+		query = query.Where("exchange IN ?", exchanges)
+	}
+	if strings.TrimSpace(fromDate) != "" {
+		query = query.Where("snapshot_date >= ?", fromDate)
+	}
+	if err := query.First(&snap).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, "", nil
+		}
+		return 0, "", err
+	}
+	return snap.ClosePrice, snap.SnapshotDate, nil
 }
 
 // GetLatestAvailableClosePrice returns the most recent positive close_price for a stock.

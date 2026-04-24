@@ -153,6 +153,13 @@ type UndoPortfolioEventResult struct {
 	UndoneEventID string         `json:"undone_event_id"`
 }
 
+type DeletePortfolioResult struct {
+	Symbol            string   `json:"symbol"`
+	DeletedEventCount int      `json:"deleted_event_count"`
+	DeletedScopes     []string `json:"deleted_scopes"`
+	CacheRebuilt      bool     `json:"cache_rebuilt"`
+}
+
 type PortfolioSummaryAmounts struct {
 	CurrencyCode        string  `json:"currency_code"`
 	CurrencySymbol      string  `json:"currency_symbol"`

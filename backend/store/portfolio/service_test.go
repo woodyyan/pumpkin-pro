@@ -2,6 +2,7 @@ package portfolio
 
 import (
 	"context"
+	"sort"
 	"testing"
 	"time"
 
@@ -14,10 +15,56 @@ func setupPortfolioService(t *testing.T) (*Service, context.Context) {
 	testutil.AutoMigrateModels(t, db,
 		PortfolioRecord{},
 		PortfolioEventRecord{},
+		PortfolioDailySnapshotRecord{},
+		PortfolioPositionDailySnapshotRecord{},
+		SecurityProfileRecord{},
 		InvestmentProfileRecord{},
 	)
 	repo := NewRepository(db)
 	return NewService(repo), context.Background()
+}
+
+type stubHistoryReader struct {
+	bars map[string][]DailyBarRecord
+}
+
+func (s *stubHistoryReader) GetDailyBars(ctx context.Context, symbols []string, startDate, endDate string) (map[string][]DailyBarRecord, error) {
+	result := make(map[string][]DailyBarRecord, len(symbols))
+	for _, symbol := range symbols {
+		if bars, ok := s.bars[symbol]; ok {
+			result[symbol] = bars
+		}
+	}
+	return result, nil
+}
+
+func seedPortfolioProfile(t *testing.T, svc *Service, symbol, exchange, name string) {
+	t.Helper()
+	now := time.Now().UTC()
+	if err := svc.repo.UpsertSecurityProfiles(context.Background(), []SecurityProfileRecord{{
+		Symbol:        symbol,
+		Exchange:      exchange,
+		Name:          name,
+		BenchmarkCode: resolveBenchmarkCode(exchange, ""),
+		Source:        "test",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}}); err != nil {
+		t.Fatalf("UpsertSecurityProfiles failed: %v", err)
+	}
+}
+
+func buildStubBars(code string, closes map[string]float64) []DailyBarRecord {
+	dates := make([]string, 0, len(closes))
+	for date := range closes {
+		dates = append(dates, date)
+	}
+	sort.Strings(dates)
+	items := make([]DailyBarRecord, 0, len(dates))
+	for _, date := range dates {
+		items = append(items, DailyBarRecord{Code: code, Date: date, Close: closes[date]})
+	}
+	return items
 }
 
 func TestServiceCreateBuyEventBuildsWeightedAverage(t *testing.T) {
@@ -212,6 +259,116 @@ func TestServiceUndoLatestEvent(t *testing.T) {
 	}
 	if result.Item.LastEventID != firstEvent.ID {
 		t.Fatalf("expected last event id restored to first event, got %s", result.Item.LastEventID)
+	}
+}
+
+func TestServiceDeleteRebuildsHistoricalSnapshots(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	seedPortfolioProfile(t, svc, "600519.SH", "SSE", "贵州茅台")
+	seedPortfolioProfile(t, svc, "00700.HK", "HKEX", "腾讯控股")
+	svc.historyReader = &stubHistoryReader{bars: map[string][]DailyBarRecord{
+		"600519": buildStubBars("600519", map[string]float64{
+			"2026-04-20": 10,
+			"2026-04-21": 11,
+			"2026-04-22": 12,
+		}),
+		"00700": buildStubBars("00700", map[string]float64{
+			"2026-04-20": 20,
+			"2026-04-21": 21,
+			"2026-04-22": 22,
+		}),
+	}}
+
+	if _, _, err := svc.CreateEvent(ctx, "delete-user", "600519.SH", CreatePortfolioEventInput{
+		EventType: EventTypeBuy,
+		TradeDate: "2026-04-20",
+		Quantity:  100,
+		Price:     10,
+	}); err != nil {
+		t.Fatalf("CreateEvent A-share buy failed: %v", err)
+	}
+	if _, _, err := svc.CreateEvent(ctx, "delete-user", "00700.HK", CreatePortfolioEventInput{
+		EventType: EventTypeBuy,
+		TradeDate: "2026-04-20",
+		Quantity:  50,
+		Price:     20,
+	}); err != nil {
+		t.Fatalf("CreateEvent HK buy failed: %v", err)
+	}
+	if _, _, err := svc.CreateEvent(ctx, "delete-user", "600519.SH", CreatePortfolioEventInput{
+		EventType: EventTypeSell,
+		TradeDate: "2026-04-21",
+		Quantity:  40,
+		Price:     11,
+	}); err != nil {
+		t.Fatalf("CreateEvent A-share sell failed: %v", err)
+	}
+
+	result, err := svc.Delete(ctx, "delete-user", "600519.SH")
+	if err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+	if result.Symbol != "600519.SH" {
+		t.Fatalf("expected symbol 600519.SH, got %s", result.Symbol)
+	}
+	if result.DeletedEventCount != 2 {
+		t.Fatalf("expected 2 deleted events, got %d", result.DeletedEventCount)
+	}
+	if !result.CacheRebuilt {
+		t.Fatal("expected cache rebuilt")
+	}
+
+	detail, err := svc.GetDetailBySymbol(ctx, "delete-user", "600519.SH")
+	if err != nil {
+		t.Fatalf("GetDetailBySymbol failed: %v", err)
+	}
+	if detail.Item != nil || len(detail.HistoryPreview) != 0 {
+		t.Fatalf("expected deleted symbol detail to be empty, got %+v", detail)
+	}
+
+	daily, err := svc.repo.ListDailySnapshots(ctx, "delete-user", nil, "")
+	if err != nil {
+		t.Fatalf("ListDailySnapshots failed: %v", err)
+	}
+	if len(daily) == 0 {
+		t.Fatal("expected rebuilt daily snapshots")
+	}
+	for _, item := range daily {
+		if item.Scope != PortfolioScopeHK {
+			t.Fatalf("expected only HK scope after delete, got %s", item.Scope)
+		}
+		if item.PositionCount != 1 {
+			t.Fatalf("expected position_count=1, got %d", item.PositionCount)
+		}
+		if item.TotalCostAmount <= 0 || item.MarketValueAmount <= 0 {
+			t.Fatalf("expected positive rebuilt snapshot values, got %+v", item)
+		}
+	}
+
+	positions, err := svc.repo.ListPositionDailySnapshots(ctx, "delete-user", nil, "", "")
+	if err != nil {
+		t.Fatalf("ListPositionDailySnapshots failed: %v", err)
+	}
+	if len(positions) == 0 {
+		t.Fatal("expected rebuilt position snapshots")
+	}
+	for _, item := range positions {
+		if item.Symbol != "00700.HK" {
+			t.Fatalf("expected only HK position snapshots, got %s", item.Symbol)
+		}
+		if item.AvgCostPrice != 20 {
+			t.Fatalf("expected avg cost 20, got %v", item.AvgCostPrice)
+		}
+		if item.PositionWeightRatio != 1 {
+			t.Fatalf("expected position weight 1, got %v", item.PositionWeightRatio)
+		}
+	}
+}
+
+func TestServiceDeleteReturnsNotFoundWhenMissing(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	if _, err := svc.Delete(ctx, "missing-user", "600519.SH"); err != ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
 

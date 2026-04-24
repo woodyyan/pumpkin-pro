@@ -59,6 +59,7 @@ func (p *liveSnapshotProvider) FetchDetailedSnapshots(ctx context.Context, symbo
 type Service struct {
 	repo             *Repository
 	snapshotProvider portfolioSnapshotProvider
+	historyReader    attributionHistoryReader
 }
 
 func NewService(repo *Repository) *Service {
@@ -336,8 +337,349 @@ func (s *Service) Upsert(ctx context.Context, userID, symbol string, input Upser
 	return &item, nil
 }
 
-func (s *Service) Delete(ctx context.Context, userID, symbol string) error {
-	return s.repo.Delete(ctx, userID, normalizePortfolioSymbol(symbol))
+func (s *Service) Delete(ctx context.Context, userID, symbol string) (*DeletePortfolioResult, error) {
+	symbol = normalizePortfolioSymbol(symbol)
+	if symbol == "" {
+		return nil, fmt.Errorf("symbol is required")
+	}
+
+	activeEvents, err := s.repo.ListAllActiveEventsAsc(ctx, userID, symbol)
+	if err != nil {
+		return nil, err
+	}
+	record, err := s.repo.GetBySymbol(ctx, userID, symbol)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if errors.Is(err, ErrNotFound) {
+		record = nil
+	}
+	if len(activeEvents) == 0 && record == nil {
+		return nil, ErrNotFound
+	}
+
+	scopes := collectDeletedPortfolioScopes(symbol, record, activeEvents)
+	deletedEvents := 0
+	if err := s.repo.InTx(ctx, func(txRepo *Repository) error {
+		count, txErr := txRepo.DeletePortfolioWithEvents(ctx, userID, symbol)
+		if txErr != nil {
+			return txErr
+		}
+		deletedEvents = count
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := s.RebuildUserHistoricalSnapshots(ctx, userID); err != nil {
+		return nil, err
+	}
+
+	return &DeletePortfolioResult{
+		Symbol:            symbol,
+		DeletedEventCount: deletedEvents,
+		DeletedScopes:     scopes,
+		CacheRebuilt:      true,
+	}, nil
+}
+
+func collectDeletedPortfolioScopes(symbol string, record *PortfolioRecord, events []PortfolioEventRecord) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, 2)
+	addScope := func(scope string) {
+		if scope == "" {
+			return
+		}
+		if _, ok := seen[scope]; ok {
+			return
+		}
+		seen[scope] = struct{}{}
+		result = append(result, scope)
+	}
+	if record != nil {
+		addScope(exchangeToScope(live.ExchangeFromSymbol(record.Symbol)))
+	}
+	for _, event := range events {
+		addScope(exchangeToScope(live.ExchangeFromSymbol(event.Symbol)))
+	}
+	if len(result) == 0 {
+		addScope(exchangeToScope(live.ExchangeFromSymbol(symbol)))
+	}
+	sort.Strings(result)
+	return result
+}
+
+func (s *Service) RebuildUserHistoricalSnapshots(ctx context.Context, userID string) error {
+	events, err := s.repo.ListActiveEventsByUserAsc(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if len(events) == 0 {
+		if err := s.repo.DeleteDailySnapshotsByUser(ctx, userID); err != nil {
+			return err
+		}
+		if err := s.repo.DeletePositionDailySnapshotsByUser(ctx, userID); err != nil {
+			return err
+		}
+		return nil
+	}
+	history, err := s.buildHistoricalPortfolioSnapshots(ctx, userID, events, nil)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.DeleteDailySnapshotsByUser(ctx, userID); err != nil {
+		return err
+	}
+	if err := s.repo.DeletePositionDailySnapshotsByUser(ctx, userID); err != nil {
+		return err
+	}
+	if err := s.repo.ReplaceDailySnapshotsByUser(ctx, userID, history.DailyScopeSnapshots); err != nil {
+		return err
+	}
+	if len(history.DailyPositionSnapshots) > 0 {
+		if err := s.repo.UpsertPositionDailySnapshots(ctx, history.DailyPositionSnapshots); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type historicalPortfolioSnapshots struct {
+	DailyScopeSnapshots    []PortfolioDailySnapshotRecord
+	DailyPositionSnapshots []PortfolioPositionDailySnapshotRecord
+}
+
+func (s *Service) buildHistoricalPortfolioSnapshots(ctx context.Context, userID string, events []PortfolioEventRecord, historyReader attributionHistoryReader) (*historicalPortfolioSnapshots, error) {
+	if len(events) == 0 {
+		return &historicalPortfolioSnapshots{}, nil
+	}
+	if historyReader == nil {
+		historyReader = s.historyReader
+	}
+	if historyReader == nil {
+		historyRepo, err := NewRiskDBRepository()
+		if err != nil {
+			return nil, err
+		}
+		historyReader = historyRepo
+	}
+	profiles, err := s.ensureSecurityProfiles(ctx, events)
+	if err != nil {
+		return nil, err
+	}
+	profileBySymbol := make(map[string]SecurityProfileRecord, len(profiles))
+	for _, item := range profiles {
+		profileBySymbol[item.Symbol] = item
+	}
+
+	eventsByDate := map[string][]PortfolioEventRecord{}
+	dateSet := map[string]struct{}{}
+	stateBySymbol := map[string]*attributionPositionState{}
+	symbolSet := map[string]struct{}{}
+
+	for _, event := range events {
+		normalizedSymbol, exchange := normalizeAttributionSymbol(event.Symbol)
+		if normalizedSymbol == "" {
+			continue
+		}
+		profile := profileBySymbol[normalizedSymbol]
+		if strings.TrimSpace(exchange) == "" {
+			exchange = profile.Exchange
+		}
+		if strings.TrimSpace(exchange) == "" {
+			exchange = live.ExchangeFromSymbol(normalizedSymbol)
+		}
+		if exchangeToScope(exchange) == "" {
+			continue
+		}
+		if stateBySymbol[normalizedSymbol] == nil {
+			currencyCode, currencySymbol := resolveCurrency(exchange)
+			stateBySymbol[normalizedSymbol] = &attributionPositionState{
+				OriginalSymbol:   event.Symbol,
+				NormalizedSymbol: normalizedSymbol,
+				Name:             coalesceString(profile.Name, normalizedSymbol),
+				Exchange:         exchange,
+				CurrencyCode:     currencyCode,
+				CurrencySymbol:   currencySymbol,
+				CostSource:       CostSourceSystem,
+				SectorCode:       profile.SectorCode,
+				SectorName:       normalizeSectorName(profile.SectorName),
+				BenchmarkCode:    resolveBenchmarkCode(exchange, profile.BenchmarkCode),
+			}
+		}
+		eventsByDate[event.TradeDate] = append(eventsByDate[event.TradeDate], event)
+		dateSet[event.TradeDate] = struct{}{}
+		symbolSet[normalizedSymbol] = struct{}{}
+	}
+	result := &historicalPortfolioSnapshots{}
+	if len(symbolSet) == 0 {
+		return result, nil
+	}
+
+	symbols := sortedStringKeys(symbolSet)
+	barCodeToSymbol := make(map[string]string, len(symbols))
+	barCodes := make([]string, 0, len(symbols))
+	for _, symbol := range symbols {
+		code := historyCodeFromSymbol(symbol)
+		if code == "" {
+			continue
+		}
+		barCodeToSymbol[code] = symbol
+		barCodes = append(barCodes, code)
+	}
+	startDate := events[0].TradeDate
+	endDate := time.Now().In(shanghaiLocation()).Format("2006-01-02")
+	barsByCode, err := historyReader.GetDailyBars(ctx, barCodes, shiftDateString(startDate, -7), endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to rebuild portfolio history: %w", err)
+	}
+	barsBySymbol := map[string][]DailyBarRecord{}
+	for code, bars := range barsByCode {
+		symbol := barCodeToSymbol[code]
+		if symbol == "" {
+			continue
+		}
+		barsBySymbol[symbol] = bars
+		for _, bar := range bars {
+			if bar.Date >= startDate && bar.Date <= endDate {
+				dateSet[bar.Date] = struct{}{}
+			}
+		}
+	}
+	dates := sortedStringKeys(dateSet)
+	if len(dates) == 0 {
+		return result, nil
+	}
+
+	rangeStates := cloneAttributionStates(stateBySymbol)
+	realizedByScope := map[string]float64{PortfolioScopeAShare: 0, PortfolioScopeHK: 0}
+	realizedBySymbol := map[string]float64{}
+	orderedScopes := scopeListForAttribution(PortfolioScopeAll, symbols)
+	now := time.Now().UTC()
+
+	for _, date := range dates {
+		for _, event := range eventsByDate[date] {
+			normalizedSymbol, exchange := normalizeAttributionSymbol(event.Symbol)
+			if normalizedSymbol == "" {
+				continue
+			}
+			state := rangeStates[normalizedSymbol]
+			if state == nil {
+				profile := profileBySymbol[normalizedSymbol]
+				if strings.TrimSpace(exchange) == "" {
+					exchange = profile.Exchange
+				}
+				if strings.TrimSpace(exchange) == "" {
+					exchange = live.ExchangeFromSymbol(normalizedSymbol)
+				}
+				currencyCode, currencySymbol := resolveCurrency(exchange)
+				state = &attributionPositionState{
+					OriginalSymbol:   event.Symbol,
+					NormalizedSymbol: normalizedSymbol,
+					Name:             coalesceString(profile.Name, normalizedSymbol),
+					Exchange:         exchange,
+					CurrencyCode:     currencyCode,
+					CurrencySymbol:   currencySymbol,
+					CostSource:       CostSourceSystem,
+					SectorCode:       profile.SectorCode,
+					SectorName:       normalizeSectorName(profile.SectorName),
+					BenchmarkCode:    resolveBenchmarkCode(exchange, profile.BenchmarkCode),
+				}
+				rangeStates[normalizedSymbol] = state
+			}
+			applyAttributionEventToState(state, event)
+			scope := exchangeToScope(state.Exchange)
+			realizedByScope[scope] += event.RealizedPnlAmount
+			realizedBySymbol[normalizedSymbol] += event.RealizedPnlAmount
+		}
+
+		dayPositions := make([]*PortfolioPositionDailySnapshotRecord, 0, len(symbols))
+		totalByScope := map[string]float64{}
+		scopeRecords := map[string]*PortfolioDailySnapshotRecord{}
+
+		for _, symbol := range symbols {
+			state := rangeStates[symbol]
+			if state == nil || state.Shares <= 0 {
+				continue
+			}
+			closePrice, prevClose, ok := lookupBarCloseForDate(barsBySymbol[symbol], date)
+			if !ok || closePrice <= 0 {
+				continue
+			}
+			scope := exchangeToScope(state.Exchange)
+			if scope == "" {
+				continue
+			}
+			marketValue := state.Shares * closePrice
+			unrealized := marketValue - state.TotalCostAmount
+			todayPnl := 0.0
+			if prevClose > 0 {
+				todayPnl = state.Shares * (closePrice - prevClose)
+			}
+			snapshot := &PortfolioPositionDailySnapshotRecord{
+				ID:                  uuid.New().String(),
+				UserID:              userID,
+				SnapshotDate:        date,
+				Symbol:              state.NormalizedSymbol,
+				Exchange:            state.Exchange,
+				CurrencyCode:        state.CurrencyCode,
+				CurrencySymbol:      state.CurrencySymbol,
+				Name:                state.Name,
+				Shares:              state.Shares,
+				AvgCostPrice:        state.AvgCostPrice,
+				TotalCostAmount:     state.TotalCostAmount,
+				ClosePrice:          closePrice,
+				PrevClosePrice:      prevClose,
+				MarketValueAmount:   marketValue,
+				UnrealizedPnlAmount: unrealized,
+				RealizedPnlCum:      realizedBySymbol[symbol],
+				SectorCode:          state.SectorCode,
+				SectorName:          coalesceString(state.SectorName, "未分类"),
+				BenchmarkCode:       state.BenchmarkCode,
+				CreatedAt:           now,
+				UpdatedAt:           now,
+			}
+			dayPositions = append(dayPositions, snapshot)
+			totalByScope[scope] += marketValue
+
+			record := scopeRecords[scope]
+			if record == nil {
+				record = &PortfolioDailySnapshotRecord{
+					ID:           uuid.New().String(),
+					UserID:       userID,
+					Scope:        scope,
+					SnapshotDate: date,
+					CurrencyCode: state.CurrencyCode,
+					CreatedAt:    now,
+					UpdatedAt:    now,
+				}
+				scopeRecords[scope] = record
+			}
+			record.MarketValueAmount += marketValue
+			record.TotalCostAmount += state.TotalCostAmount
+			record.UnrealizedPnlAmount += unrealized
+			record.RealizedPnlAmount = realizedByScope[scope]
+			record.TodayPnlAmount += todayPnl
+			record.PositionCount++
+		}
+
+		for _, snapshot := range dayPositions {
+			scope := exchangeToScope(snapshot.Exchange)
+			if totalByScope[scope] > 0 {
+				snapshot.PositionWeightRatio = snapshot.MarketValueAmount / totalByScope[scope]
+			}
+			result.DailyPositionSnapshots = append(result.DailyPositionSnapshots, *snapshot)
+		}
+		for _, scope := range orderedScopes {
+			record := scopeRecords[scope]
+			if record == nil {
+				continue
+			}
+			record.TotalPnlAmount = record.RealizedPnlAmount + record.UnrealizedPnlAmount
+			result.DailyScopeSnapshots = append(result.DailyScopeSnapshots, *record)
+		}
+	}
+	return result, nil
 }
 
 func (s *Service) EnsureInitEventFromSnapshot(ctx context.Context, userID, symbol string) error {

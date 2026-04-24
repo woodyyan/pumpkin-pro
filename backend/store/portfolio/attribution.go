@@ -57,16 +57,16 @@ type attributionSnapshotLite struct {
 }
 
 type attributionTradeStats struct {
-	RealizedPnlAmount       float64
-	FeeAmount               float64
-	TradeCount              int
-	BuyCount                int
-	SellCount               int
-	SellAmount              float64
-	WinningSellCount        int
-	HoldingDaysBeforeSell   int
-	HoldingDaysSampleCount  int
-	Timeline                []PortfolioAttributionTradingTimelineItem
+	RealizedPnlAmount      float64
+	FeeAmount              float64
+	TradeCount             int
+	BuyCount               int
+	SellCount              int
+	SellAmount             float64
+	WinningSellCount       int
+	HoldingDaysBeforeSell  int
+	HoldingDaysSampleCount int
+	Timeline               []PortfolioAttributionTradingTimelineItem
 }
 
 type attributionSymbolAggregate struct {
@@ -93,41 +93,41 @@ type attributionSymbolAggregate struct {
 }
 
 type attributionScopeDailyTotal struct {
-	Date               string
-	Scope              string
-	CurrencyCode       string
-	CurrencySymbol     string
-	MarketValueAmount  float64
-	UnrealizedPnl      float64
-	RangeRealizedPnl   float64
-	MaxWeightRatio     float64
+	Date              string
+	Scope             string
+	CurrencyCode      string
+	CurrencySymbol    string
+	MarketValueAmount float64
+	UnrealizedPnl     float64
+	RangeRealizedPnl  float64
+	MaxWeightRatio    float64
 }
 
 type attributionScopeAggregate struct {
-	Scope                     string
-	ScopeLabel                string
-	CurrencyCode              string
-	CurrencySymbol            string
-	StartMarketValueAmount    float64
-	EndMarketValueAmount      float64
-	StartUnrealizedPnlAmount  float64
-	EndUnrealizedPnlAmount    float64
-	RealizedPnlAmount         float64
-	UnrealizedPnlChangeAmount float64
-	FeeAmount                 float64
-	TradingAlphaAmount        float64
-	MarketContributionAmount  float64
-	ExcessContributionAmount  float64
-	TotalPnlAmount            float64
-	TotalReturnPct            float64
-	ShadowHoldPnlAmount       float64
-	BenchmarkCode             string
-	BenchmarkName             string
-	BenchmarkReturnPct        float64
+	Scope                       string
+	ScopeLabel                  string
+	CurrencyCode                string
+	CurrencySymbol              string
+	StartMarketValueAmount      float64
+	EndMarketValueAmount        float64
+	StartUnrealizedPnlAmount    float64
+	EndUnrealizedPnlAmount      float64
+	RealizedPnlAmount           float64
+	UnrealizedPnlChangeAmount   float64
+	FeeAmount                   float64
+	TradingAlphaAmount          float64
+	MarketContributionAmount    float64
+	ExcessContributionAmount    float64
+	TotalPnlAmount              float64
+	TotalReturnPct              float64
+	ShadowHoldPnlAmount         float64
+	BenchmarkCode               string
+	BenchmarkName               string
+	BenchmarkReturnPct          float64
 	SelectionContributionAmount float64
-	DailyTotals               []attributionScopeDailyTotal
-	Series                    []PortfolioAttributionMarketSeriesPoint
-	TradeStats                attributionTradeStats
+	DailyTotals                 []attributionScopeDailyTotal
+	Series                      []PortfolioAttributionMarketSeriesPoint
+	TradeStats                  attributionTradeStats
 }
 
 type attributionDataset struct {
@@ -385,19 +385,24 @@ func (s *Service) loadAttributionDataset(ctx context.Context, userID string, que
 	if err != nil {
 		return nil, err
 	}
-	meta := PortfolioAttributionMeta{
-		Scope:      normalized.Scope,
-		Range:      normalized.Range,
-		StartDate:  normalized.StartDate,
-		EndDate:    normalized.EndDate,
-		ComputedAt: time.Now().UTC().Format(time.RFC3339),
-	}
 	if err := s.ensureInitEventsForUser(ctx, userID); err != nil {
 		return nil, err
 	}
 	events, err := s.repo.ListActiveEventsByUserAsc(ctx, userID)
 	if err != nil {
 		return nil, err
+	}
+	return s.loadAttributionDatasetFromEvents(ctx, userID, events, normalized, historyReader, benchmarkReader)
+}
+
+func (s *Service) loadAttributionDatasetFromEvents(ctx context.Context, userID string, events []PortfolioEventRecord, query PortfolioAttributionQuery, historyReader attributionHistoryReader, benchmarkReader attributionBenchmarkReader) (*attributionDataset, error) {
+	normalized := query
+	meta := PortfolioAttributionMeta{
+		Scope:      normalized.Scope,
+		Range:      normalized.Range,
+		StartDate:  normalized.StartDate,
+		EndDate:    normalized.EndDate,
+		ComputedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	if len(events) == 0 {
 		meta.EmptyReason = "暂无持仓事件，暂时无法生成绩效归因分析。"
@@ -668,12 +673,12 @@ func (s *Service) loadAttributionDataset(ctx context.Context, userID string, que
 			continue
 		}
 		agg := &attributionScopeAggregate{
-			Scope:         scope,
-			ScopeLabel:    scopeLabel(scope),
-			CurrencyCode:  dailies[0].CurrencyCode,
+			Scope:          scope,
+			ScopeLabel:     scopeLabel(scope),
+			CurrencyCode:   dailies[0].CurrencyCode,
 			CurrencySymbol: dailies[0].CurrencySymbol,
-			DailyTotals:   dailies,
-			TradeStats:    *ensureAttributionTradeStats(tradeStatsByScope, scope),
+			DailyTotals:    dailies,
+			TradeStats:     *ensureAttributionTradeStats(tradeStatsByScope, scope),
 		}
 		agg.StartMarketValueAmount = dailies[0].MarketValueAmount
 		agg.EndMarketValueAmount = dailies[len(dailies)-1].MarketValueAmount

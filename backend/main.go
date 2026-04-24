@@ -2393,7 +2393,8 @@ func (a *appServer) handlePortfolioBySymbol(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusOK, map[string]any{"item": item})
 
 	case http.MethodDelete:
-		if err := a.portfolioService.Delete(r.Context(), userID, symbol); err != nil {
+		result, err := a.portfolioService.Delete(r.Context(), userID, symbol)
+		if err != nil {
 			if errors.Is(err, portfolio.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "portfolio not found")
 				return
@@ -2401,7 +2402,7 @@ func (a *appServer) handlePortfolioBySymbol(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
 
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "Only GET, PUT, DELETE methods are allowed")

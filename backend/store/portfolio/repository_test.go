@@ -14,6 +14,8 @@ func setupPortfolioDB(t *testing.T) (*Repository, context.Context) {
 	testutil.AutoMigrateModels(t, db,
 		PortfolioRecord{},
 		PortfolioEventRecord{},
+		PortfolioDailySnapshotRecord{},
+		PortfolioPositionDailySnapshotRecord{},
 		InvestmentProfileRecord{},
 	)
 	return NewRepository(db), context.Background()
@@ -127,6 +129,69 @@ func TestDeletePortfolioRemovesEvents(t *testing.T) {
 	}
 	if len(events) != 0 {
 		t.Fatalf("expected 0 events after delete, got %d", len(events))
+	}
+}
+
+func TestDeletePortfolioWithEventsAllowsEventOnlySymbol(t *testing.T) {
+	repo, ctx := setupPortfolioDB(t)
+	now := time.Now().UTC()
+	if err := repo.CreateEvent(ctx, &PortfolioEventRecord{
+		ID: "evt-only", UserID: "user-event-only", Symbol: "00700.HK", EventType: EventTypeSell,
+		TradeDate: "2025-01-02", EffectiveAt: now,
+		Quantity: 100, Price: 400, RealizedPnlAmount: 1200,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateEvent failed: %v", err)
+	}
+
+	count, err := repo.DeletePortfolioWithEvents(ctx, "user-event-only", "00700.HK")
+	if err != nil {
+		t.Fatalf("DeletePortfolioWithEvents failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 deleted event, got %d", count)
+	}
+	items, err := repo.ListEventsBySymbol(ctx, "user-event-only", "00700.HK", 10)
+	if err != nil {
+		t.Fatalf("ListEventsBySymbol failed: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected events removed, got %d", len(items))
+	}
+}
+
+func TestDeleteUserSnapshotsHelpers(t *testing.T) {
+	repo, ctx := setupPortfolioDB(t)
+	now := time.Now().UTC()
+	if err := repo.UpsertDailySnapshot(ctx, &PortfolioDailySnapshotRecord{
+		ID: "ds-1", UserID: "user-snap", Scope: PortfolioScopeAShare, SnapshotDate: "2026-04-20", CurrencyCode: "CNY", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertDailySnapshot failed: %v", err)
+	}
+	if err := repo.UpsertPositionDailySnapshots(ctx, []PortfolioPositionDailySnapshotRecord{{
+		ID: "ps-1", UserID: "user-snap", SnapshotDate: "2026-04-20", Symbol: "600519.SH", Exchange: "SSE", CurrencyCode: "CNY", CurrencySymbol: "¥", Name: "贵州茅台", CreatedAt: now, UpdatedAt: now,
+	}}); err != nil {
+		t.Fatalf("UpsertPositionDailySnapshots failed: %v", err)
+	}
+	if err := repo.DeleteDailySnapshotsByUser(ctx, "user-snap"); err != nil {
+		t.Fatalf("DeleteDailySnapshotsByUser failed: %v", err)
+	}
+	if err := repo.DeletePositionDailySnapshotsByUser(ctx, "user-snap"); err != nil {
+		t.Fatalf("DeletePositionDailySnapshotsByUser failed: %v", err)
+	}
+	daily, err := repo.ListDailySnapshots(ctx, "user-snap", nil, "")
+	if err != nil {
+		t.Fatalf("ListDailySnapshots failed: %v", err)
+	}
+	if len(daily) != 0 {
+		t.Fatalf("expected 0 daily snapshots, got %d", len(daily))
+	}
+	positions, err := repo.ListPositionDailySnapshots(ctx, "user-snap", nil, "", "")
+	if err != nil {
+		t.Fatalf("ListPositionDailySnapshots failed: %v", err)
+	}
+	if len(positions) != 0 {
+		t.Fatalf("expected 0 position snapshots, got %d", len(positions))
 	}
 }
 

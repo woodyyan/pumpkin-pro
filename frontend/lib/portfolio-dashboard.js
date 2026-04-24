@@ -97,6 +97,20 @@ export async function undoPortfolioEvent(symbol, eventId) {
   }, '撤销持仓变动失败')
 }
 
+export async function deletePortfolioHistory(symbol) {
+  const normalized = String(symbol || '').trim().toUpperCase()
+  if (!normalized) {
+    throw new Error('缺少可删除的股票代码')
+  }
+  return await requestJson(`/api/portfolio/${encodeURIComponent(normalized)}`, {
+    method: 'DELETE',
+  }, '删除持仓历史失败')
+}
+
+export function buildPortfolioDeleteConfirmText(symbol) {
+  return `DELETE ${String(symbol || '').trim().toUpperCase()}`
+}
+
 export function resolvePortfolioTradeSymbol(input, market = 'ASHARE') {
   const raw = String(input || '').trim().toUpperCase()
   if (!raw) return ''

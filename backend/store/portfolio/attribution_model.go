@@ -30,9 +30,9 @@ func (SecurityProfileRecord) TableName() string {
 
 type PortfolioPositionDailySnapshotRecord struct {
 	ID                  string    `gorm:"primaryKey;size:36"`
-	UserID              string    `gorm:"size:36;not null;index:idx_ppds_user_date_symbol,priority:1"`
-	SnapshotDate        string    `gorm:"size:10;not null;index:idx_ppds_user_date_symbol,priority:2"`
-	Symbol              string    `gorm:"size:16;not null;index:idx_ppds_user_date_symbol,priority:3"`
+	UserID              string    `gorm:"size:36;not null;index:idx_ppds_user_date_symbol,priority:1;uniqueIndex:uidx_ppds_user_date_symbol,priority:1"`
+	SnapshotDate        string    `gorm:"size:10;not null;index:idx_ppds_user_date_symbol,priority:2;uniqueIndex:uidx_ppds_user_date_symbol,priority:2"`
+	Symbol              string    `gorm:"size:16;not null;index:idx_ppds_user_date_symbol,priority:3;uniqueIndex:uidx_ppds_user_date_symbol,priority:3"`
 	Exchange            string    `gorm:"size:8;not null;default:'';index"`
 	CurrencyCode        string    `gorm:"size:8;not null;default:''"`
 	CurrencySymbol      string    `gorm:"size:8;not null;default:''"`
@@ -112,10 +112,10 @@ type PortfolioAttributionWaterfallItem struct {
 }
 
 type PortfolioAttributionWaterfallGroup struct {
-	Scope          string                             `json:"scope"`
-	ScopeLabel     string                             `json:"scope_label"`
-	CurrencyCode   string                             `json:"currency_code"`
-	CurrencySymbol string                             `json:"currency_symbol"`
+	Scope          string                              `json:"scope"`
+	ScopeLabel     string                              `json:"scope_label"`
+	CurrencyCode   string                              `json:"currency_code"`
+	CurrencySymbol string                              `json:"currency_symbol"`
 	Items          []PortfolioAttributionWaterfallItem `json:"items"`
 }
 
@@ -138,11 +138,11 @@ type PortfolioAttributionMarketBlock struct {
 
 type PortfolioAttributionSummaryPayload struct {
 	PortfolioAttributionMeta
-	Headline        string                              `json:"headline"`
-	SummaryCards    []PortfolioAttributionSummaryCard   `json:"summary_cards"`
+	Headline        string                               `json:"headline"`
+	SummaryCards    []PortfolioAttributionSummaryCard    `json:"summary_cards"`
 	WaterfallGroups []PortfolioAttributionWaterfallGroup `json:"waterfall_groups"`
-	MarketBlocks    []PortfolioAttributionMarketBlock   `json:"market_blocks"`
-	Insights        []PortfolioAttributionInsight       `json:"insights"`
+	MarketBlocks    []PortfolioAttributionMarketBlock    `json:"market_blocks"`
+	Insights        []PortfolioAttributionInsight        `json:"insights"`
 }
 
 type PortfolioAttributionStockItem struct {
@@ -169,10 +169,10 @@ type PortfolioAttributionStockItem struct {
 }
 
 type PortfolioAttributionStockGroup struct {
-	Scope          string                        `json:"scope"`
-	ScopeLabel     string                        `json:"scope_label"`
-	CurrencyCode   string                        `json:"currency_code"`
-	CurrencySymbol string                        `json:"currency_symbol"`
+	Scope          string                          `json:"scope"`
+	ScopeLabel     string                          `json:"scope_label"`
+	CurrencyCode   string                          `json:"currency_code"`
+	CurrencySymbol string                          `json:"currency_symbol"`
 	Items          []PortfolioAttributionStockItem `json:"items"`
 }
 
@@ -201,19 +201,19 @@ type PortfolioAttributionSectorItem struct {
 }
 
 type PortfolioAttributionSectorGroup struct {
-	Scope          string                         `json:"scope"`
-	ScopeLabel     string                         `json:"scope_label"`
-	CurrencyCode   string                         `json:"currency_code"`
-	CurrencySymbol string                         `json:"currency_symbol"`
+	Scope          string                           `json:"scope"`
+	ScopeLabel     string                           `json:"scope_label"`
+	CurrencyCode   string                           `json:"currency_code"`
+	CurrencySymbol string                           `json:"currency_symbol"`
 	Items          []PortfolioAttributionSectorItem `json:"items"`
 }
 
 type PortfolioAttributionSectorsPayload struct {
 	PortfolioAttributionMeta
-	ClassificationSource string                           `json:"classification_source"`
-	CoverageRatio        float64                          `json:"coverage_ratio"`
-	UnclassifiedStockCount int                            `json:"unclassified_stock_count"`
-	Groups               []PortfolioAttributionSectorGroup `json:"groups"`
+	ClassificationSource   string                            `json:"classification_source"`
+	CoverageRatio          float64                           `json:"coverage_ratio"`
+	UnclassifiedStockCount int                               `json:"unclassified_stock_count"`
+	Groups                 []PortfolioAttributionSectorGroup `json:"groups"`
 }
 
 type PortfolioAttributionTradingTimelineItem struct {
@@ -229,22 +229,22 @@ type PortfolioAttributionTradingTimelineItem struct {
 }
 
 type PortfolioAttributionTradingGroup struct {
-	Scope                    string                                 `json:"scope"`
-	ScopeLabel               string                                 `json:"scope_label"`
-	CurrencyCode             string                                 `json:"currency_code"`
-	CurrencySymbol           string                                 `json:"currency_symbol"`
-	ActualTotalPnlAmount     float64                                `json:"actual_total_pnl_amount"`
-	ShadowHoldPnlAmount      float64                                `json:"shadow_hold_pnl_amount"`
-	TradingAlphaAmount       float64                                `json:"trading_alpha_amount"`
-	FeeAmount                float64                                `json:"fee_amount"`
-	TurnoverRatio            float64                                `json:"turnover_ratio"`
-	TradeCount               int                                    `json:"trade_count"`
-	BuyCount                 int                                    `json:"buy_count"`
-	SellCount                int                                    `json:"sell_count"`
-	WinSellRatio             float64                                `json:"win_sell_ratio"`
-	AvgHoldingDaysBeforeSell float64                                `json:"avg_holding_days_before_sell"`
+	Scope                    string                                    `json:"scope"`
+	ScopeLabel               string                                    `json:"scope_label"`
+	CurrencyCode             string                                    `json:"currency_code"`
+	CurrencySymbol           string                                    `json:"currency_symbol"`
+	ActualTotalPnlAmount     float64                                   `json:"actual_total_pnl_amount"`
+	ShadowHoldPnlAmount      float64                                   `json:"shadow_hold_pnl_amount"`
+	TradingAlphaAmount       float64                                   `json:"trading_alpha_amount"`
+	FeeAmount                float64                                   `json:"fee_amount"`
+	TurnoverRatio            float64                                   `json:"turnover_ratio"`
+	TradeCount               int                                       `json:"trade_count"`
+	BuyCount                 int                                       `json:"buy_count"`
+	SellCount                int                                       `json:"sell_count"`
+	WinSellRatio             float64                                   `json:"win_sell_ratio"`
+	AvgHoldingDaysBeforeSell float64                                   `json:"avg_holding_days_before_sell"`
 	Timeline                 []PortfolioAttributionTradingTimelineItem `json:"timeline"`
-	Insights                 []PortfolioAttributionInsight          `json:"insights"`
+	Insights                 []PortfolioAttributionInsight             `json:"insights"`
 }
 
 type PortfolioAttributionTradingPayload struct {
@@ -263,21 +263,21 @@ type PortfolioAttributionMarketSeriesPoint struct {
 }
 
 type PortfolioAttributionMarketGroup struct {
-	Scope                       string                           `json:"scope"`
-	ScopeLabel                  string                           `json:"scope_label"`
-	CurrencyCode                string                           `json:"currency_code"`
-	CurrencySymbol              string                           `json:"currency_symbol"`
-	BenchmarkCode               string                           `json:"benchmark_code"`
-	BenchmarkName               string                           `json:"benchmark_name"`
-	PortfolioReturnPct          float64                          `json:"portfolio_return_pct"`
-	BenchmarkReturnPct          float64                          `json:"benchmark_return_pct"`
-	ExcessReturnPct             float64                          `json:"excess_return_pct"`
-	MarketContributionAmount    float64                          `json:"market_contribution_amount"`
-	SelectionContributionAmount float64                          `json:"selection_contribution_amount"`
-	TradingAlphaAmount          float64                          `json:"trading_alpha_amount"`
-	FeeAmount                   float64                          `json:"fee_amount"`
+	Scope                       string                                  `json:"scope"`
+	ScopeLabel                  string                                  `json:"scope_label"`
+	CurrencyCode                string                                  `json:"currency_code"`
+	CurrencySymbol              string                                  `json:"currency_symbol"`
+	BenchmarkCode               string                                  `json:"benchmark_code"`
+	BenchmarkName               string                                  `json:"benchmark_name"`
+	PortfolioReturnPct          float64                                 `json:"portfolio_return_pct"`
+	BenchmarkReturnPct          float64                                 `json:"benchmark_return_pct"`
+	ExcessReturnPct             float64                                 `json:"excess_return_pct"`
+	MarketContributionAmount    float64                                 `json:"market_contribution_amount"`
+	SelectionContributionAmount float64                                 `json:"selection_contribution_amount"`
+	TradingAlphaAmount          float64                                 `json:"trading_alpha_amount"`
+	FeeAmount                   float64                                 `json:"fee_amount"`
 	Series                      []PortfolioAttributionMarketSeriesPoint `json:"series"`
-	Insights                    []PortfolioAttributionInsight    `json:"insights"`
+	Insights                    []PortfolioAttributionInsight           `json:"insights"`
 }
 
 type PortfolioAttributionMarketPayload struct {

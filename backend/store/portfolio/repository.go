@@ -80,19 +80,50 @@ func (r *Repository) Upsert(ctx context.Context, record *PortfolioRecord) error 
 
 func (r *Repository) Delete(ctx context.Context, userID, symbol string) error {
 	return r.InTx(ctx, func(txRepo *Repository) error {
-		result := txRepo.db.WithContext(ctx).
-			Where("user_id = ? AND symbol = ?", userID, symbol).
-			Delete(&PortfolioRecord{})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return ErrNotFound
-		}
-		return txRepo.db.WithContext(ctx).
-			Where("user_id = ? AND symbol = ?", userID, symbol).
-			Delete(&PortfolioEventRecord{}).Error
+		_, err := txRepo.DeletePortfolioWithEvents(ctx, userID, symbol)
+		return err
 	})
+}
+
+func (r *Repository) DeletePortfolioRecord(ctx context.Context, userID, symbol string) error {
+	result := r.db.WithContext(ctx).
+		Where("user_id = ? AND symbol = ?", userID, symbol).
+		Delete(&PortfolioRecord{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repository) DeletePortfolioEventsBySymbol(ctx context.Context, userID, symbol string) (int, error) {
+	result := r.db.WithContext(ctx).
+		Where("user_id = ? AND symbol = ?", userID, symbol).
+		Delete(&PortfolioEventRecord{})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return int(result.RowsAffected), nil
+}
+
+func (r *Repository) DeletePortfolioWithEvents(ctx context.Context, userID, symbol string) (int, error) {
+	hadRecord := true
+	if err := r.DeletePortfolioRecord(ctx, userID, symbol); err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			return 0, err
+		}
+		hadRecord = false
+	}
+	deletedEvents, err := r.DeletePortfolioEventsBySymbol(ctx, userID, symbol)
+	if err != nil {
+		return 0, err
+	}
+	if !hadRecord && deletedEvents == 0 {
+		return 0, ErrNotFound
+	}
+	return deletedEvents, nil
 }
 
 func (r *Repository) CreateEvent(ctx context.Context, record *PortfolioEventRecord) error {
@@ -154,6 +185,15 @@ func (r *Repository) ListActiveEventsByUser(ctx context.Context, userID string) 
 	return records, err
 }
 
+func (r *Repository) ListActiveEventsByUserAsc(ctx context.Context, userID string) ([]PortfolioEventRecord, error) {
+	var records []PortfolioEventRecord
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND is_voided = ?", userID, false).
+		Order("effective_at ASC, created_at ASC").
+		Find(&records).Error
+	return records, err
+}
+
 func (r *Repository) FindEventByID(ctx context.Context, userID, eventID string) (*PortfolioEventRecord, error) {
 	var record PortfolioEventRecord
 	err := r.db.WithContext(ctx).
@@ -210,6 +250,30 @@ func (r *Repository) UpsertDailySnapshot(ctx context.Context, record *PortfolioD
 			"position_count":        record.PositionCount,
 			"updated_at":            record.UpdatedAt,
 		}).Error
+}
+
+func (r *Repository) ReplaceDailySnapshotsByUser(ctx context.Context, userID string, records []PortfolioDailySnapshotRecord) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ?", userID).Delete(&PortfolioDailySnapshotRecord{}).Error; err != nil {
+			return err
+		}
+		if len(records) == 0 {
+			return nil
+		}
+		return tx.Create(&records).Error
+	})
+}
+
+func (r *Repository) DeleteDailySnapshotsByUser(ctx context.Context, userID string) error {
+	return r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Delete(&PortfolioDailySnapshotRecord{}).Error
+}
+
+func (r *Repository) DeletePositionDailySnapshotsByUser(ctx context.Context, userID string) error {
+	return r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Delete(&PortfolioPositionDailySnapshotRecord{}).Error
 }
 
 func (r *Repository) ListDailySnapshots(ctx context.Context, userID string, scopes []string, fromDate string) ([]PortfolioDailySnapshotRecord, error) {

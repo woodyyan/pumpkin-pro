@@ -34,6 +34,8 @@ import {
   getPortfolioDefaultFeeRate,
 } from '../../lib/portfolio-fee'
 import {
+  buildPortfolioDeleteConfirmText,
+  deletePortfolioHistory,
   fetchSymbolSnapshot,
   fetchSymbolDailyBars,
   findClosePriceByDate,
@@ -49,6 +51,24 @@ const SUPPORT_LOOKBACK_DAYS = 120
 const MA_LOOKBACK_DAYS = 240
 const SIGNAL_MAX_ATTEMPTS = 4
 const SIGNAL_BACKOFF_STEPS = ['1 分钟', '5 分钟', '15 分钟']
+
+export function createPortfolioDangerMenuState() {
+  return { open: false }
+}
+
+export function reducePortfolioDangerMenu(state, action) {
+  const current = state && typeof state === 'object' ? state : createPortfolioDangerMenuState()
+  switch (action?.type) {
+    case 'open':
+      return { open: true }
+    case 'close':
+      return { open: false }
+    case 'toggle':
+      return { open: !current.open }
+    default:
+      return current
+  }
+}
 
 function isAShareTradingHours(sym) {
   const ex = detectExchange(sym)
@@ -129,6 +149,9 @@ export default function LiveTradingDetailPage() {
   const [portfolioHistoryExpanded, setPortfolioHistoryExpanded] = useState(false)
   const [portfolioTimelineLoading, setPortfolioTimelineLoading] = useState(false)
   const [portfolioNotice, setPortfolioNotice] = useState('')
+  const [portfolioDeleteConfirmOpen, setPortfolioDeleteConfirmOpen] = useState(false)
+  const [portfolioDeleteConfirmValue, setPortfolioDeleteConfirmValue] = useState('')
+  const [portfolioDangerMenu, setPortfolioDangerMenu] = useState(() => createPortfolioDangerMenuState())
   const [priceAutoFilled, setPriceAutoFilled] = useState(false)
   const [portfolioDailyBars, setPortfolioDailyBars] = useState([])
   const portfolioDailyBarsRef = useRef(portfolioDailyBars)
@@ -347,6 +370,26 @@ export default function LiveTradingDetailPage() {
     setPortfolioForm(createPortfolioActionForm('buy', null, { exchange, profile: investmentProfile }))
   }
 
+  const openPortfolioDeleteConfirm = () => {
+    closePortfolioDangerMenu()
+    setPortfolioDeleteConfirmOpen(true)
+    setPortfolioDeleteConfirmValue('')
+    setPortfolioNotice('')
+  }
+
+  const closePortfolioDeleteConfirm = () => {
+    setPortfolioDeleteConfirmOpen(false)
+    setPortfolioDeleteConfirmValue('')
+  }
+
+  const togglePortfolioDangerMenu = () => {
+    setPortfolioDangerMenu((prev) => reducePortfolioDangerMenu(prev, { type: 'toggle' }))
+  }
+
+  const closePortfolioDangerMenu = () => {
+    setPortfolioDangerMenu((prev) => reducePortfolioDangerMenu(prev, { type: 'close' }))
+  }
+
   const submitPortfolioAction = async () => {
     if (!symbol || !portfolioAction) return
     const preview = buildPortfolioEventPreview(portfolioAction, portfolioData, portfolioForm)
@@ -409,6 +452,32 @@ export default function LiveTradingDetailPage() {
       }
     } catch (err) {
       alert(err.message || '撤销失败')
+    } finally {
+      setPortfolioSaving(false)
+    }
+  }
+
+  const deleteCurrentPortfolioHistory = async () => {
+    if (!symbol) return
+    const expected = buildPortfolioDeleteConfirmText(symbol)
+    if (portfolioDeleteConfirmValue.trim().toUpperCase() !== expected) {
+      alert(`请输入 ${expected} 以确认删除`)
+      return
+    }
+    setPortfolioSaving(true)
+    try {
+      await deletePortfolioHistory(symbol)
+      setPortfolioNotice('该股票全部持仓记录已删除，当前持仓、最近交易、收益曲线与归因分析已同步移除。')
+      setPortfolioDangerMenu(createPortfolioDangerMenuState())
+      setPortfolioAction('')
+      setPortfolioForm(createPortfolioActionForm('buy', null, { exchange, profile: investmentProfile }))
+      closePortfolioDeleteConfirm()
+      await loadPortfolio(symbol)
+      if (portfolioHistoryExpanded) {
+        await loadPortfolioEvents(symbol, { limit: 20 })
+      }
+    } catch (err) {
+      alert(err.message || '删除失败')
     } finally {
       setPortfolioSaving(false)
     }
@@ -767,6 +836,9 @@ export default function LiveTradingDetailPage() {
     setPortfolioForm(createPortfolioActionForm('buy', null, { exchange }))
     setPortfolioHistoryExpanded(false)
     setPortfolioNotice('')
+    setPortfolioDeleteConfirmOpen(false)
+    setPortfolioDeleteConfirmValue('')
+    setPortfolioDangerMenu(createPortfolioDangerMenuState())
     setPriceAutoFilled(false)
   }, [symbol, authIdentityKey, exchange])
 
@@ -969,6 +1041,8 @@ export default function LiveTradingDetailPage() {
   const portfolioLastTradeAtText = portfolioData?.last_trade_at
     ? new Date(portfolioData.last_trade_at).toLocaleString('zh-CN', { hour12: false })
     : '--'
+  const canDeletePortfolioHistory = Boolean(portfolioData?.symbol) || portfolioEvents.length > 0
+  const portfolioDangerMenuOpen = portfolioDangerMenu.open
 
   if (!symbol) {
     return (
@@ -1239,6 +1313,50 @@ export default function LiveTradingDetailPage() {
           />
         )}
 
+        {privateAccessReady && portfolioDeleteConfirmOpen && symbol && (
+          <div className="fixed inset-0 z-[82]">
+            <button
+              type="button"
+              aria-label="关闭删除确认"
+              onClick={closePortfolioDeleteConfirm}
+              className="absolute inset-0 bg-black/70"
+            />
+            <div className="absolute inset-x-4 top-1/2 mx-auto w-full max-w-lg -translate-y-1/2 rounded-2xl border border-rose-400/20 bg-[#12151b] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.45)]">
+              <div className="text-lg font-semibold text-white">确认删除整只股票的全部持仓记录</div>
+              <div className="mt-3 text-sm leading-7 text-white/70">
+                你将删除 <span className="font-mono text-white">{symbol}</span> 的全部买入、卖出、调均价与初始化历史。删除后，该股票会从当前持仓、最近交易、收益曲线和归因分析中移除，且无法恢复。
+              </div>
+              <div className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/[0.08] px-3 py-3 text-xs leading-6 text-rose-100/85">
+                为避免误删，请输入 <span className="font-mono text-rose-100">{buildPortfolioDeleteConfirmText(symbol)}</span> 后再确认。
+              </div>
+              <input
+                type="text"
+                value={portfolioDeleteConfirmValue}
+                onChange={(event) => setPortfolioDeleteConfirmValue(event.target.value)}
+                placeholder={buildPortfolioDeleteConfirmText(symbol)}
+                className="mt-4 block w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none transition focus:border-rose-300/50"
+              />
+              <div className="mt-5 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closePortfolioDeleteConfirm}
+                  className="rounded-lg border border-white/12 px-4 py-2 text-xs text-white/65 transition hover:border-white/25 hover:text-white"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={portfolioSaving}
+                  onClick={deleteCurrentPortfolioHistory}
+                  className="rounded-lg border border-rose-300/30 bg-rose-500/15 px-4 py-2 text-xs font-medium text-rose-100 transition hover:bg-rose-500/22 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {portfolioSaving ? '删除中...' : '确认永久删除'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Snapshot */}
         <section className="rounded-2xl border border-border bg-card p-5">
           <h3 className="text-base font-semibold text-white">实时快照</h3>
@@ -1306,6 +1424,32 @@ export default function LiveTradingDetailPage() {
                   >
                     撤销最近一条
                   </button>
+                )}
+                {canDeletePortfolioHistory && (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      aria-haspopup="menu"
+                      aria-expanded={portfolioDangerMenuOpen ? 'true' : 'false'}
+                      onClick={togglePortfolioDangerMenu}
+                      className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-white/45 transition hover:border-white/20 hover:text-white/75"
+                    >
+                      更多
+                    </button>
+                    {portfolioDangerMenuOpen && (
+                      <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-56 rounded-xl border border-white/10 bg-[#131820] p-2 shadow-[0_18px_48px_rgba(0,0,0,0.35)]">
+                        <div className="px-2 pb-2 text-[11px] leading-5 text-white/35">危险操作已折叠到这里，避免干扰日常买卖与调仓。</div>
+                        <button
+                          type="button"
+                          onClick={openPortfolioDeleteConfirm}
+                          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs text-rose-200 transition hover:bg-rose-500/10"
+                        >
+                          <span>删除全部持仓记录</span>
+                          <span className="text-[10px] text-rose-200/65">不可恢复</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

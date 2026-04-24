@@ -6,6 +6,7 @@ import PortfolioAttributionSection from '../components/PortfolioAttributionSecti
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import {
+  buildPortfolioDeleteConfirmText,
   createPortfolioEvent,
   fetchPortfolioDashboard,
   fetchPortfolioDetail,
@@ -20,6 +21,7 @@ import {
   resolvePortfolioTradeSymbol,
   scopeLabel,
   exchangeTag,
+  deletePortfolioHistory,
   undoPortfolioEvent,
 } from '../lib/portfolio-dashboard.js'
 import {
@@ -181,6 +183,8 @@ function createTradeDrawerState(market = 'ASHARE', profile = null) {
     saving: false,
     error: '',
     notice: '',
+    deleteConfirmOpen: false,
+    deleteConfirmValue: '',
   }
 }
 
@@ -665,6 +669,7 @@ function PortfolioTradeDrawer({
   symbolLocked,
   item,
   events,
+  canDelete,
   form,
   preview,
   loading,
@@ -681,6 +686,7 @@ function PortfolioTradeDrawer({
   onSubmit,
   onUndo,
   onOpenDetail,
+  onOpenDeleteConfirm,
 }) {
   useEffect(() => {
     if (!open) return undefined
@@ -765,7 +771,7 @@ function PortfolioTradeDrawer({
                 <div className="text-sm font-semibold text-white">{actionCopy.title}</div>
                 <div className="mt-1 text-xs leading-6 text-white/45">{actionCopy.description}</div>
               </div>
-              {currentSymbol ? (
+              {currentSymbol && canDelete ? (
                 <button
                   type="button"
                   onClick={onOpenDetail}
@@ -1045,6 +1051,27 @@ function PortfolioTradeDrawer({
                   暂无该股票的持仓变动记录。
                 </div>
               )}
+            </div>
+          ) : null}
+
+          {currentSymbol && canDelete ? (
+            <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/[0.05] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-rose-100">危险操作</div>
+                  <div className="mt-1 text-xs leading-6 text-rose-100/70">
+                    删除后，将清空该股票全部持仓记录，包括所有买入、卖出、调均价与初始化历史；该股票也会从当前持仓、最近交易、收益曲线和归因分析中移除，且无法恢复。
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={onOpenDeleteConfirm}
+                  className="rounded-lg border border-rose-300/30 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-200 transition hover:border-rose-200/50 hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  删除该股票全部记录
+                </button>
+              </div>
             </div>
           ) : null}
         </div>
@@ -1549,6 +1576,7 @@ export default function PortfolioPage() {
   const [tradeDrawer, setTradeDrawer] = useState(() => createTradeDrawerState('ASHARE'))
   const [priceAutoFilled, setPriceAutoFilled] = useState(false)
   const [tradeDailyBars, setTradeDailyBars] = useState([])
+  const [pageNotice, setPageNotice] = useState('')
   const tradeDailyBarsRef = useRef(tradeDailyBars)
   const attributionRequestKeyRef = useRef('')
   tradeDailyBarsRef.current = tradeDailyBars
@@ -1737,6 +1765,10 @@ export default function PortfolioPage() {
     return buildPortfolioEventPreview(tradeDrawer.action, tradeItem, tradeDrawer.form)
   }, [tradeDrawer.open, tradeDrawer.action, tradeItem, tradeDrawer.form])
 
+  const canDeleteTradeHistory = useMemo(() => (
+    Boolean(tradeItem?.symbol) || (Array.isArray(tradeDrawer.events) && tradeDrawer.events.length > 0)
+  ), [tradeDrawer.events, tradeItem?.symbol])
+
   const syncTradeContext = useCallback(async (symbol, { showLoading = true } = {}) => {
     const normalized = String(symbol || '').trim().toUpperCase()
     if (!normalized) {
@@ -1879,6 +1911,29 @@ export default function PortfolioPage() {
     setTradeDrawer(createTradeDrawerState(defaultTradeMarket, investmentProfile))
   }, [defaultTradeMarket, investmentProfile])
 
+  const handleOpenDeleteConfirm = useCallback(() => {
+    if (!currentTradeSymbol) return
+    setTradeDrawer((prev) => ({
+      ...prev,
+      deleteConfirmOpen: true,
+      deleteConfirmValue: '',
+      error: '',
+      notice: '',
+    }))
+  }, [currentTradeSymbol])
+
+  const handleDeleteConfirmValueChange = useCallback((value) => {
+    setTradeDrawer((prev) => ({ ...prev, deleteConfirmValue: value }))
+  }, [])
+
+  const handleCloseDeleteConfirm = useCallback(() => {
+    setTradeDrawer((prev) => ({
+      ...prev,
+      deleteConfirmOpen: false,
+      deleteConfirmValue: '',
+    }))
+  }, [])
+
   const handleTradeActionChange = useCallback((nextAction) => {
     setTradeDrawer((prev) => ({
       ...prev,
@@ -2020,6 +2075,30 @@ export default function PortfolioPage() {
     }
   }, [currentTradeSymbol, tradeItem, load, syncTradeContext])
 
+  const handleDeleteTradeHistory = useCallback(async () => {
+    if (!currentTradeSymbol) return
+    const expected = buildPortfolioDeleteConfirmText(currentTradeSymbol)
+    if (tradeDrawer.deleteConfirmValue.trim().toUpperCase() !== expected) {
+      setTradeDrawer((prev) => ({ ...prev, error: `请输入 ${expected} 以确认删除` }))
+      return
+    }
+
+    setTradeDrawer((prev) => ({ ...prev, saving: true, error: '', notice: '' }))
+    try {
+      await deletePortfolioHistory(currentTradeSymbol)
+      await load()
+      setPageNotice(`${currentTradeSymbol} 的全部持仓记录已删除，相关持仓、最近交易、收益曲线与归因分析已同步刷新。`)
+      setTradeDrawer(createTradeDrawerState(defaultTradeMarket, investmentProfile))
+      setPriceAutoFilled(false)
+    } catch (err) {
+      setTradeDrawer((prev) => ({
+        ...prev,
+        saving: false,
+        error: err.message || '删除失败',
+      }))
+    }
+  }, [currentTradeSymbol, defaultTradeMarket, investmentProfile, load, tradeDrawer.deleteConfirmValue])
+
   function handleNavigate(symbol) {
     window.open(`/live-trading/${symbol}`, '_blank')
   }
@@ -2084,6 +2163,12 @@ export default function PortfolioPage() {
           <div className="rounded-lg border border-rose-500/25 bg-rose-500/[0.06] px-4 py-3 text-sm text-rose-300">
             {error}
             <button type="button" onClick={load} className="ml-3 underline text-rose-200 hover:text-white">重试</button>
+          </div>
+        )}
+
+        {pageNotice && (
+          <div className="rounded-lg border border-emerald-400/25 bg-emerald-500/[0.08] px-4 py-3 text-sm text-emerald-200">
+            {pageNotice}
           </div>
         )}
 
@@ -2172,6 +2257,7 @@ export default function PortfolioPage() {
         symbolLocked={tradeDrawer.lockedSymbol}
         item={tradeItem}
         events={tradeDrawer.events}
+        canDelete={canDeleteTradeHistory}
         form={tradeDrawer.form}
         preview={tradePreview}
         loading={tradeDrawer.loading}
@@ -2188,7 +2274,52 @@ export default function PortfolioPage() {
         onSubmit={handleSubmitTrade}
         onUndo={handleUndoTrade}
         onOpenDetail={handleOpenTradeDetail}
+        onOpenDeleteConfirm={handleOpenDeleteConfirm}
       />
+
+      {tradeDrawer.deleteConfirmOpen && currentTradeSymbol ? (
+        <div className="fixed inset-0 z-[82]">
+          <button
+            type="button"
+            aria-label="关闭删除确认"
+            onClick={handleCloseDeleteConfirm}
+            className="absolute inset-0 bg-black/70"
+          />
+          <div className="absolute inset-x-4 top-1/2 mx-auto w-full max-w-lg -translate-y-1/2 rounded-2xl border border-rose-400/20 bg-[#12151b] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.45)]">
+            <div className="text-lg font-semibold text-white">确认删除整只股票的全部持仓记录</div>
+            <div className="mt-3 text-sm leading-7 text-white/70">
+              你将删除 <span className="font-mono text-white">{currentTradeSymbol}</span> 的全部买入、卖出、调均价与初始化历史。删除后，该股票会从当前持仓、最近交易、收益曲线和归因分析中移除，且无法恢复。
+            </div>
+            <div className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/[0.08] px-3 py-3 text-xs leading-6 text-rose-100/85">
+              为避免误删，请输入 <span className="font-mono text-rose-100">{buildPortfolioDeleteConfirmText(currentTradeSymbol)}</span> 后再确认。
+            </div>
+            <input
+              type="text"
+              value={tradeDrawer.deleteConfirmValue}
+              onChange={(event) => handleDeleteConfirmValueChange(event.target.value)}
+              placeholder={buildPortfolioDeleteConfirmText(currentTradeSymbol)}
+              className="mt-4 block w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none transition focus:border-rose-300/50"
+            />
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleCloseDeleteConfirm}
+                className="rounded-lg border border-white/12 px-4 py-2 text-xs text-white/65 transition hover:border-white/25 hover:text-white"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={tradeDrawer.saving}
+                onClick={handleDeleteTradeHistory}
+                className="rounded-lg border border-rose-300/30 bg-rose-500/15 px-4 py-2 text-xs font-medium text-rose-100 transition hover:bg-rose-500/22 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {tradeDrawer.saving ? '删除中...' : '确认永久删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <style jsx>{`
         .custom-scrollbar::-webkit-scrollbar {

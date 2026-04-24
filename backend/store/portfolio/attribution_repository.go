@@ -9,15 +9,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func (r *Repository) ListActiveEventsByUserAsc(ctx context.Context, userID string) ([]PortfolioEventRecord, error) {
-	var records []PortfolioEventRecord
-	err := r.db.WithContext(ctx).
-		Where("user_id = ? AND is_voided = ?", userID, false).
-		Order("effective_at ASC, created_at ASC").
-		Find(&records).Error
-	return records, err
-}
-
 func (r *Repository) ListSecurityProfilesBySymbols(ctx context.Context, symbols []string) ([]SecurityProfileRecord, error) {
 	if len(symbols) == 0 {
 		return []SecurityProfileRecord{}, nil

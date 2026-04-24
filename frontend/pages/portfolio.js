@@ -31,6 +31,10 @@ import {
 } from '../lib/portfolio-attribution.js'
 import { getPortfolioPageViewState } from '../lib/portfolio-page-view.js'
 import {
+  readInvestmentProfileCache,
+  subscribeInvestmentProfileUpdates,
+} from '../lib/investment-profile-storage.js'
+import {
   buildPortfolioEventPreview,
   createPortfolioActionForm,
   formatPortfolioEventHeadline,
@@ -1685,8 +1689,31 @@ export default function PortfolioPage() {
       setInvestmentProfile(null)
       return
     }
+    const cached = readInvestmentProfileCache()
+    if (cached) {
+      setInvestmentProfile(cached)
+    }
     loadInvestmentProfile()
   }, [ready, isLoggedIn, loadInvestmentProfile])
+
+  useEffect(() => {
+    if (!ready || !isLoggedIn) return undefined
+    return subscribeInvestmentProfileUpdates((profile) => {
+      setInvestmentProfile(profile)
+      setTradeDrawer((prev) => {
+        if (!prev.open || prev.action === 'adjust') return prev
+        const nextExchange = inferPortfolioTradeMarket(prev.symbolInput, prev.market)
+        return {
+          ...prev,
+          form: {
+            ...prev.form,
+            exchange: nextExchange,
+            fee_rate: formatFeeRatePercent(getPortfolioDefaultFeeRate({ exchange: nextExchange, action: prev.action, profile })),
+          },
+        }
+      })
+    })
+  }, [ready, isLoggedIn])
 
   const pageViewState = useMemo(() => getPortfolioPageViewState({ loading, data }), [loading, data])
 

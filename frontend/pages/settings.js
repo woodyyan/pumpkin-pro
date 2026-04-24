@@ -10,6 +10,11 @@ import {
   getPortfolioSystemDefaultFeeRate,
   parseFeeRatePercentInput,
 } from '../lib/portfolio-fee.js'
+import {
+  clearInvestmentProfileCache,
+  dispatchInvestmentProfileUpdated,
+  writeInvestmentProfileCache,
+} from '../lib/investment-profile-storage.js'
 import Head from 'next/head'
 
 function createInvestForm(profile = null) {
@@ -108,6 +113,8 @@ export default function SettingsPage() {
       const p = data?.profile || null
       setInvestProfile(p)
       setInvestForm(createInvestForm(p))
+      if (p) writeInvestmentProfileCache(p)
+      else clearInvestmentProfileCache()
     } catch {
       // non-critical
     }
@@ -138,6 +145,7 @@ export default function SettingsPage() {
       setDeliveryItems([])
       setInvestProfile(null)
       setInvestForm(createInvestForm())
+      clearInvestmentProfileCache()
       setInvestNotice('')
       setNotice('')
       setError('')
@@ -443,6 +451,8 @@ export default function SettingsPage() {
                 if (result?.profile) {
                   setInvestProfile(result.profile)
                   setInvestForm(createInvestForm(result.profile))
+                  writeInvestmentProfileCache(result.profile)
+                  dispatchInvestmentProfileUpdated(result.profile)
                 }
                 setInvestNotice('投资画像已保存')
               } catch (err) {

@@ -46,6 +46,19 @@ describe('createPortfolioActionForm', () => {
     assert.equal(buyForm.fee_rate, '0.03')
     assert.equal(sellForm.fee_rate, '0.13')
   })
+
+  it('uses the latest user-configured default fee rates when profile is provided', () => {
+    const profile = {
+      default_fee_rate_ashare_buy: 0.0002,
+      default_fee_rate_ashare_sell: 0.0006,
+      default_fee_rate_hk_buy: 0.0011,
+      default_fee_rate_hk_sell: 0.0015,
+    }
+    const buyForm = createPortfolioActionForm('buy', null, { exchange: 'SSE', profile })
+    const sellForm = createPortfolioActionForm('sell', null, { exchange: 'HKEX', profile })
+    assert.equal(buyForm.fee_rate, '0.02')
+    assert.equal(sellForm.fee_rate, '0.15')
+  })
 })
 
 describe('buildPortfolioEventPreview - buy', () => {

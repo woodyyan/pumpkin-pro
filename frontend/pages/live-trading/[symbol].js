@@ -8,6 +8,10 @@ import { useAuth } from '../../lib/auth-context'
 import { isAuthRequiredError } from '../../lib/auth-storage'
 import { deriveAIAnalysisWaitState } from '../../lib/ai-analysis-wait'
 import {
+  readInvestmentProfileCache,
+  subscribeInvestmentProfileUpdates,
+} from '../../lib/investment-profile-storage.js'
+import {
   buildSignalConfigPayload,
   canEnableSignal,
   hasSignalConfigChanged,
@@ -26,6 +30,8 @@ import {
   describeFeeRate,
   describePortfolioFeeEstimate,
   formatPortfolioFeeAmount,
+  formatFeeRatePercent,
+  getPortfolioDefaultFeeRate,
 } from '../../lib/portfolio-fee'
 import {
   fetchSymbolSnapshot,
@@ -763,6 +769,24 @@ export default function LiveTradingDetailPage() {
     setPortfolioNotice('')
     setPriceAutoFilled(false)
   }, [symbol, authIdentityKey, exchange])
+
+  useEffect(() => {
+    if (!ready || !isLoggedIn) return undefined
+    const cached = readInvestmentProfileCache()
+    if (cached) {
+      setInvestmentProfile(cached)
+    }
+    return subscribeInvestmentProfileUpdates((profile) => {
+      setInvestmentProfile(profile)
+      setPortfolioForm((prev) => {
+        if (!portfolioAction || portfolioAction === 'adjust') return prev
+        return {
+          ...prev,
+          fee_rate: formatFeeRatePercent(getPortfolioDefaultFeeRate({ exchange, action: portfolioAction, profile })),
+        }
+      })
+    })
+  }, [ready, isLoggedIn, exchange, portfolioAction])
 
   // ── 自动填充成交价格（500ms 防抖）──
   useEffect(() => {

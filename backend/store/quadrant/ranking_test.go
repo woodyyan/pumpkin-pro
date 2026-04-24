@@ -1068,6 +1068,7 @@ func TestGetRanking_ReturnPct_NilWhenPriceMissing(t *testing.T) {
 	record.ComputedAt = time.Date(2026, 4, 16, 18, 46, 37, 0, time.UTC)
 	seedOpportunityRecords(t, repo, []QuadrantScoreRecord{record})
 
+	// 两个快照的日期不同，但价格相同，涨幅应为 0%
 	for _, snap := range []RankingSnapshot{
 		{Code: "000001", Name: "平安银行", Exchange: "SZSE", Rank: 1, Opportunity: 96, Risk: 18, ClosePrice: 0, SnapshotDate: "2026-04-16", CreatedAt: time.Now().UTC()},
 		{Code: "000001", Name: "平安银行", Exchange: "SZSE", Rank: 1, Opportunity: 96, Risk: 18, ClosePrice: 10, SnapshotDate: "2026-04-17", CreatedAt: time.Now().UTC()},
@@ -1084,8 +1085,45 @@ func TestGetRanking_ReturnPct_NilWhenPriceMissing(t *testing.T) {
 	if len(resp.Items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(resp.Items))
 	}
+	// 起始价格（2026-04-17 的 10）和当前价格（也是 2026-04-17 的 10）相同，涨幅应为 0%
+	if resp.Items[0].ReturnPct == nil {
+		t.Fatal("expected non-nil return_pct when both start and current prices are available")
+	}
+	if *resp.Items[0].ReturnPct != 0 {
+		t.Fatalf("return_pct = %.2f; want 0.00", *resp.Items[0].ReturnPct)
+	}
+}
+
+func TestGetRanking_ReturnPct_NilWhenNoValidPriceAtAll(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	record := makeRankingRecord("000001", "SZSE", 96, 18)
+	record.ComputedAt = time.Date(2026, 4, 16, 18, 46, 37, 0, time.UTC)
+	seedOpportunityRecords(t, repo, []QuadrantScoreRecord{record})
+
+	// 所有快照的 close_price 都为 0，无法计算涨幅
+	for _, snap := range []RankingSnapshot{
+		{Code: "000001", Name: "平安银行", Exchange: "SZSE", Rank: 1, Opportunity: 96, Risk: 18, ClosePrice: 0, SnapshotDate: "2026-04-16", CreatedAt: time.Now().UTC()},
+		{Code: "000001", Name: "平安银行", Exchange: "SZSE", Rank: 1, Opportunity: 96, Risk: 18, ClosePrice: 0, SnapshotDate: "2026-04-17", CreatedAt: time.Now().UTC()},
+	} {
+		if err := repo.UpsertSnapshot(ctx, snap); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking failed: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(resp.Items))
+	}
+	// 没有有效的收盘价，应该返回 nil
 	if resp.Items[0].ReturnPct != nil {
-		t.Fatalf("expected nil return_pct when start price missing, got %.2f", *resp.Items[0].ReturnPct)
+		t.Fatalf("expected nil return_pct when no valid price available, got %.2f", *resp.Items[0].ReturnPct)
 	}
 }
 

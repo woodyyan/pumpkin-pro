@@ -11,9 +11,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
       - BACKEND_API_URL=http://backend:8080
-      - CHOKIDAR_USEPOLLING=true
     depends_on:
       - backend
     # 移除主机挂载，防止宿主机的环境(Mac)和容器的环境(Alpine Linux)互相污染 node_modules
@@ -24,7 +23,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - GO_ENV=development
+      - GO_ENV=production
       - QUANT_SERVICE_URL=http://quant:8000
       - BACKEND_CALLBACK_URL=http://backend:8080
       - DB_TYPE=${DB_TYPE:-sqlite}

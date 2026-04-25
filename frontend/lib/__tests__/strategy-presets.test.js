@@ -162,8 +162,21 @@ describe('createDraftFromType()', () => {
       { id: 'grid-strategy-2', key: 'grid_strategy_2', name: '网格交易策略 2' },
     ];
     const draft = createDraftFromType('grid', existing);
-    assert.equal(draft.id, 'grid-strategy-3');
-    assert.equal(draft.key, 'grid_strategy_3');
+    assert.equal(draft.name, '网格交易策略 3');
+    assert.match(draft.id, /^grid-strategy-[a-z0-9]+$/);
+    assert.match(draft.key, /^grid_strategy_[a-z0-9]+$/);
+  });
+
+  it('does not reuse system preset id/key when no user strategy exists yet', () => {
+    const existing = [
+      { id: 'trend-ma-cross', key: 'trend_ma_cross', name: '中期均线回踩' },
+    ];
+    const draft = createDraftFromType('trend_cross', existing);
+    assert.equal(draft.name, '趋势跟踪策略 1');
+    assert.notEqual(draft.id, 'trend-ma-cross');
+    assert.notEqual(draft.key, 'trend_ma_cross');
+    assert.match(draft.id, /^trend-strategy-[a-z0-9]+$/);
+    assert.match(draft.key, /^trend_strategy_[a-z0-9]+$/);
   });
 
   it('throws error for unknown typeKey', () => {

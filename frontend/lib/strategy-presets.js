@@ -589,9 +589,10 @@ export function createDraftFromType(typeKey, strategies) {
   }
 
   const nextIndex = pickNextIndex(preset, strategies || []);
+  const identity = buildUniqueStrategyIdentity(preset);
   return {
-    id: `${preset.idPrefix}-${nextIndex}`,
-    key: `${preset.keyPrefix}_${nextIndex}`,
+    id: identity.id,
+    key: identity.key,
     name: `${preset.namePrefix} ${nextIndex}`,
     description: preset.defaultDescription,
     category: preset.category,
@@ -653,17 +654,26 @@ export function resolveStrategyDescription(description, preset) {
 }
 
 function pickNextIndex(preset, strategies) {
-  const usedIds = new Set(strategies.map((item) => item.id));
-  const usedKeys = new Set(strategies.map((item) => item.key));
   const usedNames = new Set(strategies.map((item) => item.name));
 
   let index = 1;
-  while (
-    usedIds.has(`${preset.idPrefix}-${index}`)
-    || usedKeys.has(`${preset.keyPrefix}_${index}`)
-    || usedNames.has(`${preset.namePrefix} ${index}`)
-  ) {
+  while (usedNames.has(`${preset.namePrefix} ${index}`)) {
     index += 1;
   }
   return index;
+}
+
+function buildUniqueStrategyIdentity(preset) {
+  const suffix = createUniqueSuffix();
+  return {
+    id: `${preset.idPrefix}-${suffix}`,
+    key: `${preset.keyPrefix}_${suffix}`,
+  };
+}
+
+function createUniqueSuffix() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '').toLowerCase();
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 }

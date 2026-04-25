@@ -103,6 +103,40 @@ func TestStrategyRepo_Create_DuplicateKey(t *testing.T) {
 	}
 }
 
+func TestStrategyRepo_Create_SystemAndUserCanShareSemanticsButNotKey(t *testing.T) {
+	repo, cleanup := setupStrategyTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	systemPayload := StrategyPayload{
+		ID: "trend-ma-cross", Key: "trend_ma_cross", Name: "系统趋势策略",
+		Description: "D", Category: "趋势", ImplementationKey: "trend_cross",
+		Status: "active", Version: 1, ParamSchema: []ParamSchemaItem{},
+	}
+	if _, err := repo.Create(ctx, "", systemPayload); err != nil {
+		t.Fatalf("create system strategy failed: %v", err)
+	}
+
+	userPayload := StrategyPayload{
+		ID: "trend-strategy-abc123", Key: "trend_strategy_abc123", Name: "趋势跟踪策略 1",
+		Description: "D", Category: "趋势", ImplementationKey: "trend_cross",
+		Status: "draft", Version: 1, ParamSchema: []ParamSchemaItem{},
+	}
+	if _, err := repo.Create(ctx, "user-1", userPayload); err != nil {
+		t.Fatalf("create user strategy failed: %v", err)
+	}
+
+	conflictPayload := StrategyPayload{
+		ID: "other-id", Key: "trend_ma_cross", Name: "冲突策略",
+		Description: "D", Category: "趋势", ImplementationKey: "trend_cross",
+		Status: "draft", Version: 1, ParamSchema: []ParamSchemaItem{},
+	}
+	_, err := repo.Create(ctx, "", conflictPayload)
+	if err != ErrConflict {
+		t.Errorf("expected ErrConflict for duplicate system key, got %v", err)
+	}
+}
+
 func TestStrategyRepo_List_Empty(t *testing.T) {
 	repo, cleanup := setupStrategyTest(t)
 	defer cleanup()

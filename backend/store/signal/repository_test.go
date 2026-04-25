@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 	"github.com/woodyyan/pumpkin-pro/backend/tests/testutil"
 )
 
@@ -16,6 +17,7 @@ func setupSignalTest(t *testing.T) (*Repository, func()) {
 		&SymbolSignalConfigRecord{},
 		&SignalEventRecord{},
 		&WebhookDeliveryRecord{},
+		&quadrant.QuadrantScoreRecord{},
 	)
 	repo := NewRepository(db)
 	return repo, func() {}
@@ -431,4 +433,45 @@ func TestModelConversions(t *testing.T) {
 			t.Errorf("round-trip mismatch for key a: got %T=%v", decoded["a"], decoded["a"])
 		}
 	})
+}
+
+func TestSignalRepo_ListSymbolConfigRefs(t *testing.T) {
+	repo, cleanup := setupSignalTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	for _, sym := range []string{"000001.SZ", "600000.SH"} {
+		r := makeSignalConfigRecord("refs-user", sym)
+		r.StrategyID = "ref-strategy"
+		_, _ = repo.SaveSymbolConfig(ctx, r)
+	}
+
+	refs, err := repo.ListSymbolConfigRefs(ctx, "refs-user", "ref-strategy")
+	if err != nil {
+		t.Fatalf("ListSymbolConfigRefs failed: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("expected 2 refs, got %d", len(refs))
+	}
+	got := map[string]bool{}
+	for _, r := range refs {
+		got[r.Symbol] = true
+	}
+	if !got["000001.SZ"] || !got["600000.SH"] {
+		t.Errorf("expected symbols 000001.SZ and 600000.SH, got %v", got)
+	}
+}
+
+func TestSignalRepo_ListSymbolConfigRefs_NoRefs(t *testing.T) {
+	repo, cleanup := setupSignalTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	refs, err := repo.ListSymbolConfigRefs(ctx, "noref-user", "no-ref-strategy")
+	if err != nil {
+		t.Fatalf("ListSymbolConfigRefs failed: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Errorf("expected 0 refs, got %d", len(refs))
+	}
 }

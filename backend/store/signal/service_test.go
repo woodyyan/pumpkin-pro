@@ -1,9 +1,13 @@
 package signal
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
+	"github.com/woodyyan/pumpkin-pro/backend/tests/testutil"
 )
 
 // ── Pure function / helper tests (no DB needed) ──
@@ -288,5 +292,68 @@ func TestSummarizeWebhookReason(t *testing.T) {
 		if got != tc.expected {
 			t.Errorf("summarizeWebhookReason(%s): got %q, want %q", tc.name, got, tc.expected)
 		}
+	}
+}
+
+// ── Service-level tests (with DB) ──
+
+func setupSignalServiceTest(t *testing.T) (*Service, *Repository, func()) {
+	t.Helper()
+	db := testutil.InMemoryDB(t)
+	testutil.AutoMigrateModels(t, db,
+		&SymbolSignalConfigRecord{},
+		&quadrant.QuadrantScoreRecord{},
+	)
+	repo := NewRepository(db)
+	svc := NewService(repo, ServiceConfig{})
+	return svc, repo, func() {}
+}
+
+func TestSignalService_ListSymbolConfigRefs(t *testing.T) {
+	svc, repo, cleanup := setupSignalServiceTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	for _, sym := range []string{"000001.SZ", "600000.SH"} {
+		r := SymbolSignalConfigRecord{
+			ID:                  "sc-" + sym,
+			UserID:              "svc-ref-user",
+			Symbol:              sym,
+			StrategyID:          "svc-ref-strategy",
+			IsEnabled:           true,
+			CooldownSeconds:     3600,
+			EvalIntervalSeconds: 3600,
+			ThresholdsJSON:      "{}",
+		}
+		_, _ = repo.SaveSymbolConfig(ctx, r)
+	}
+
+	refs, err := svc.ListSymbolConfigRefs(ctx, "svc-ref-user", "svc-ref-strategy")
+	if err != nil {
+		t.Fatalf("ListSymbolConfigRefs failed: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("expected 2 refs, got %d", len(refs))
+	}
+	got := map[string]bool{}
+	for _, r := range refs {
+		got[r.Symbol] = true
+	}
+	if !got["000001.SZ"] || !got["600000.SH"] {
+		t.Errorf("expected symbols 000001.SZ and 600000.SH, got %v", got)
+	}
+}
+
+func TestSignalService_ListSymbolConfigRefs_NoRefs(t *testing.T) {
+	svc, _, cleanup := setupSignalServiceTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	refs, err := svc.ListSymbolConfigRefs(ctx, "svc-no-refs-user", "no-ref-strategy")
+	if err != nil {
+		t.Fatalf("ListSymbolConfigRefs failed: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Errorf("expected 0 refs, got %d", len(refs))
 	}
 }

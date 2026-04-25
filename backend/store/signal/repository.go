@@ -153,6 +153,36 @@ func (r *Repository) CountSymbolConfigsByStrategy(ctx context.Context, userID, s
 	return count, nil
 }
 
+// SymbolRef holds a symbol and its display name that references a strategy.
+type SymbolRef struct {
+	Symbol string `json:"symbol"`
+	Name   string `json:"name"`
+}
+
+// ListSymbolConfigRefs returns the list of symbols that reference the given strategy.
+// It left-joins quadrant_scores to attach stock names when available.
+func (r *Repository) ListSymbolConfigRefs(ctx context.Context, userID, strategyID string) ([]SymbolRef, error) {
+	type result struct {
+		Symbol string
+		Name   string
+	}
+	var rows []result
+	if err := r.db.WithContext(ctx).
+		Table("symbol_signal_configs ssc").
+		Select("ssc.symbol as symbol, COALESCE(qs.name, '') as name").
+		Joins("LEFT JOIN quadrant_scores qs ON (qs.code = ssc.symbol OR qs.code = CASE WHEN instr(ssc.symbol, '.') > 0 THEN substr(ssc.symbol, 1, instr(ssc.symbol, '.') - 1) ELSE ssc.symbol END)").
+		Where("ssc.user_id = ? AND ssc.strategy_id = ?", userID, strategyID).
+		Order("ssc.symbol ASC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	refs := make([]SymbolRef, 0, len(rows))
+	for _, row := range rows {
+		refs = append(refs, SymbolRef{Symbol: row.Symbol, Name: row.Name})
+	}
+	return refs, nil
+}
+
 func (r *Repository) CreateEventWithDelivery(ctx context.Context, event SignalEventRecord, delivery WebhookDeliveryRecord) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&event).Error; err != nil {

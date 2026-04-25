@@ -10,7 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
+	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
+	"github.com/woodyyan/pumpkin-pro/backend/store/signal"
+	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
+
 	"github.com/woodyyan/pumpkin-pro/backend/tests/testutil"
 )
 
@@ -695,3 +700,112 @@ func TestNewQuadrantPriceResolver_HKFallsBackToPreviousTradeDate(t *testing.T) {
 		t.Fatalf("resolver returned %.2f; want 456.78", got)
 	}
 }
+
+// ── DELETE /api/strategies/:id ──
+
+func TestHandleStrategyDelete_WithRefs_Returns409(t *testing.T) {
+	db := testutil.InMemoryDB(t)
+	testutil.AutoMigrateModels(t, db,
+		&strategy.StrategyRecord{},
+		&signal.SymbolSignalConfigRecord{},
+		&quadrant.QuadrantScoreRecord{},
+	)
+
+	// ── Seed strategy ──
+	strategyRepo := strategy.NewRepository(db)
+	ss := strategy.NewService(strategyRepo)
+
+	ctx := context.Background()
+	createReq := strategy.StrategyPayload{
+		ID:                "test-strategy-001",
+		Key:               "test-strategy",
+		Name:              "Test-Strategy",
+		Description:       "strategy for ref test",
+		ImplementationKey: "trend_cross",
+		Status:            "active",
+		Version:           1,
+		ParamSchema:       []strategy.ParamSchemaItem{},
+		DefaultParams:     map[string]any{"fast_period": float64(5), "slow_period": float64(20)},
+	}
+	created, err := ss.Create(ctx, "test-user", createReq)
+	if err != nil {
+		t.Fatalf("seed strategy failed: %v", err)
+	}
+	strategyID := created.ID
+
+	// ── Seed QuadrantScore (so the JOIN can find a name) ──
+	db.Create(&quadrant.QuadrantScoreRecord{
+		Code:     "000001",
+		Name:     "平安银行",
+		Exchange: "SZSE",
+	})
+
+	// ── Seed SymbolSignalConfig referencing this strategy ──
+	signalRepo := signal.NewRepository(db)
+	svc := signal.NewService(signalRepo, signal.ServiceConfig{
+		SecretKey: "test-secret-key-for-unit-tests-only",
+	})
+
+	_, err = svc.UpsertSymbolConfig(ctx, "test-user", "000001", signal.SymbolSignalConfigInput{
+		StrategyID: strategyID,
+		IsEnabled:  boolPtr(false),
+	})
+	if err != nil {
+		t.Fatalf("seed symbol config failed: %v", err)
+	}
+
+	// ── Build appServer with test services ──
+	a := &appServer{
+		strategyService: ss,
+		signalService:   svc,
+	}
+
+	// ── Make DELETE request (with auth context) ──
+	req := httptest.NewRequest("DELETE", "/api/strategies/"+strategyID, nil)
+	userCtx := auth.WithCurrentUser(req.Context(), auth.CurrentUser{
+		UserID: "test-user",
+		Email:  "test@example.com",
+	})
+	req = req.WithContext(userCtx)
+
+	w := httptest.NewRecorder()
+	a.handleStrategyDetail(w, req, strategyID)
+
+	// ── Verify: 409 Conflict + refs array ──
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d; want %d (Conflict)", w.Code, http.StatusConflict)
+	}
+
+	var body map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body failed: %v", err)
+	}
+
+	if body["error"] == nil {
+		t.Error("expected 'error' field in response body")
+	}
+
+	refs, ok := body["refs"].([]interface{})
+	if !ok {
+		t.Error("expected 'refs' array in response body")
+	}
+	if len(refs) < 1 {
+		t.Errorf("expected at least 1 ref, got %d", len(refs))
+	}
+
+	// ── 关键：断言 JSON key 是小写 symbol / name ──
+	for i, r := range refs {
+		ref, ok := r.(map[string]interface{})
+		if !ok {
+			t.Fatalf("ref[%d] is not an object, got %T", i, r)
+		}
+		if _, ok := ref["symbol"]; !ok {
+			t.Errorf("ref[%d] missing lowercase 'symbol' key; got keys: %v", i, ref)
+		}
+		if _, ok := ref["name"]; !ok {
+			t.Errorf("ref[%d] missing lowercase 'name' key; got keys: %v", i, ref)
+		}
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }

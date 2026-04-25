@@ -935,7 +935,15 @@ func (a *appServer) handleStrategyDetail(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		if refCount > 0 {
-			writeError(w, http.StatusConflict, fmt.Sprintf("该策略已被 %d 个股票信号配置引用，请先在实盘页更换后再删除", refCount))
+			refs, refErr := a.signalService.ListSymbolConfigRefs(r.Context(), userID, strategyID)
+			if refErr != nil {
+				a.writeSignalError(w, refErr)
+				return
+			}
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "该策略正在被交易信号使用，无法删除",
+				"refs":  refs,
+			})
 			return
 		}
 

@@ -40,6 +40,7 @@ export default function StrategyLibraryPage() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteRefs, setDeleteRefs] = useState([]);
   const [error, setError] = useState('');
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false);
   const [success, setSuccess] = useState('');
@@ -233,6 +234,7 @@ export default function StrategyLibraryPage() {
   const requestDeleteStrategy = () => {
     if (!canDeleteSelected) return;
     setDeleteConfirmOpen(true);
+    setDeleteRefs([]);
     updateError('');
     setSuccess('');
   };
@@ -244,15 +246,12 @@ export default function StrategyLibraryPage() {
     updateError('');
     setSuccess('');
     try {
-      await requestJson(
-        `/api/strategies/${selectedDetail.id}`,
-        { method: 'DELETE' },
-        '删除策略失败',
-      );
+      await requestJson(`/api/strategies/${selectedDetail.id}`, { method: 'DELETE' });
       const deletedID = selectedDetail.id;
       const items = await fetchStrategyCollection();
       const fallbackId = items.find((item) => item.id !== deletedID)?.id || items[0]?.id || '';
       setDeleteConfirmOpen(false);
+      setDeleteRefs([]);
       if (fallbackId) {
         await loadStrategyDetail(fallbackId);
       } else {
@@ -260,6 +259,11 @@ export default function StrategyLibraryPage() {
       }
       setSuccess('策略已删除。');
     } catch (err) {
+      if (err?.status === 409 && err?.responseData?.refs) {
+        setDeleteRefs(err.responseData.refs);
+        setDeleting(false);
+        return;
+      }
       applyRequestError(err, '删除策略失败');
     } finally {
       setDeleting(false);
@@ -704,9 +708,11 @@ export default function StrategyLibraryPage() {
         <DeleteConfirmDialog
           strategyName={selectedDetail?.name || ''}
           deleting={deleting}
+          refs={deleteRefs}
           onCancel={() => {
             if (!deleting) {
               setDeleteConfirmOpen(false);
+              setDeleteRefs([]);
             }
           }}
           onConfirm={handleDeleteStrategy}
@@ -888,36 +894,75 @@ function ConfirmDialog({ title, description, onSaveAndContinue, onDiscardAndCont
   );
 }
 
-function DeleteConfirmDialog({ strategyName, deleting, onCancel, onConfirm }) {
+function DeleteConfirmDialog({ strategyName, deleting, refs, onCancel, onConfirm }) {
+  const hasRefs = Array.isArray(refs) && refs.length > 0;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
       <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
         <div className="space-y-3">
-          <div className="text-lg font-semibold text-white">确认删除策略</div>
-          <p className="text-sm leading-7 text-white/65">
-            确认删除“{strategyName || '当前策略'}”？删除后不可恢复。
-          </p>
-          <p className="text-xs leading-6 text-white/45">
-            若该策略仍被股票信号配置引用，系统会阻止删除并提示你先替换引用。
-          </p>
+          <div className="text-lg font-semibold text-white">
+            {hasRefs ? '无法删除' : '确认删除策略'}
+          </div>
+          {hasRefs ? (
+            <>
+              <p className="text-sm leading-7 text-white/65">
+                「{strategyName || '当前策略'}」正在被以下股票的交易信号配置使用，无法删除：
+              </p>
+              <div className="max-h-52 overflow-y-auto rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+                <ul className="space-y-2 text-sm text-white/85">
+                  {refs.map((ref, i) => (
+                    <li key={i} className="flex items-center gap-3">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-400" />
+                      <span className="font-mono text-white/90">{`${ref.symbol}${ref.name ? ` ${ref.name}` : ''}`}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <p className="flex items-start gap-2 text-sm leading-7 text-white/45">
+                <span>💡</span>
+                <span>请先在「股票详情」页中将这些股票的信号策略更换为其他策略，再回来删除。</span>
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm leading-7 text-white/65">
+                确认删除「{strategyName || '当前策略'}」？删除后不可恢复。
+              </p>
+              <p className="text-xs leading-6 text-white/45">
+                若该策略仍被股票信号配置引用，系统会阻止删除并提示你先替换引用。
+              </p>
+            </>
+          )}
         </div>
         <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={deleting}
-            className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm font-medium text-white/75 transition hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={deleting}
-            className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-negative/20 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {deleting ? '删除中...' : '确认删除'}
-          </button>
+          {hasRefs ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm font-medium text-white/75 transition hover:border-white/20 hover:text-white"
+            >
+              关闭
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={deleting}
+                className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm font-medium text-white/75 transition hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={onConfirm}
+                disabled={deleting}
+                className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-2.5 text-sm font-semibold text-red-200 transition hover:bg-negative/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deleting ? '删除中...' : '确认删除'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

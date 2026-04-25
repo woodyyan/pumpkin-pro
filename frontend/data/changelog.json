@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-04-24",
+  "last_updated": "2026-04-25",
   "manual_entry_template": {
     "date": "YYYY-MM-DD",
     "type": "新功能",
@@ -11,6 +11,14 @@
     "visible": true
   },
   "items": [
+    {
+      "date": "2026-04-25",
+      "type": "修复",
+      "title": "修复策略删除 403 权限错误与引用列表显示异常",
+      "summary": "修复策略库删除策略时出现的 403 权限错误（前端改用 requestJson 自动携带 Token）；修复删除确认框中股票名称显示为 undefined 的问题（SymbolRef 结构体补充 json tag，确保 JSON 字段名为小写 symbol / name）；修复 SQL JOIN 无法匹配带交易所后缀（.SH/.SZ）的股票代码，导致引用列表中股票名称为空；删除确认弹窗现在会展示 symbol + name，并在有引用时显示完整引用列表，引导用户先到股票详情页更换策略再删除。同时新增后端和前端测试覆盖删除保护逻辑，确保修复有效且防止回归。",
+      "scope": "策略库 / 后端 / 前端",
+      "visible": true
+    },
     {
       "date": "2026-04-24",
       "type": "新功能",

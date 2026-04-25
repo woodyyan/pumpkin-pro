@@ -319,6 +319,26 @@ func (s *Service) CountSymbolConfigRefsByStrategy(ctx context.Context, userID, s
 	return s.repo.CountSymbolConfigsByStrategy(ctx, strings.TrimSpace(userID), strategyID)
 }
 
+// ListSymbolConfigRefs returns the list of symbols that reference the given strategy.
+func (s *Service) ListSymbolConfigRefs(ctx context.Context, userID, strategyID string) ([]SymbolRef, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, ErrForbidden
+	}
+	strategyID = strings.TrimSpace(strategyID)
+	if strategyID == "" {
+		return nil, fmt.Errorf("%w: strategy_id 不能为空", ErrInvalidInput)
+	}
+	repoRefs, err := s.repo.ListSymbolConfigRefs(ctx, strings.TrimSpace(userID), strategyID)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]SymbolRef, 0, len(repoRefs))
+	for _, r := range repoRefs {
+		refs = append(refs, SymbolRef{Symbol: r.Symbol, Name: r.Name})
+	}
+	return refs, nil
+}
+
 func (s *Service) EmitSignal(ctx context.Context, input EmitSignalInput) (*SignalEvent, error) {
 	userID := strings.TrimSpace(input.UserID)
 	if userID == "" {

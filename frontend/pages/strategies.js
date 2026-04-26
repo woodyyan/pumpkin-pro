@@ -449,43 +449,31 @@ export default function StrategyLibraryPage() {
         <meta name="description" content="卧龙AI量化交易台策略库 — 创建和管理量化策略，支持趋势跟踪、均线交叉、RSI 等多种策略类型，AI 智能生成策略并自动回测验证。" />
         <link rel="canonical" href="https://wolongtrader.top/strategies" />
       </Head>
-      <section className="bg-card border border-border rounded-2xl p-6 md:p-8">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-3 max-w-3xl">
-            <span className="inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-              Wolong Pro · 策略库
-            </span>
-            <div>
-              <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">策略库</h1>
-              <p className="mt-3 text-sm md:text-base text-white/65 leading-7">
-                你可以在这里维护多条策略，并持续调整名称、状态、说明与参数。
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-3 text-sm text-white/70 md:min-w-[180px]">
-            <MiniStat label="策略数量" value={`${strategies.length} 条`} />
-          </div>
-        </div>
-      </section>
 
       <section className="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
         <PanelCard
           title="策略列表"
-          description="你可以在这里维护多条策略。"
+          description={null}
           action={
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={openAIDialog}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 px-4 py-2 text-xs font-semibold text-white shadow-[0_0_16px_rgba(99,102,241,0.35)] transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_0_24px_rgba(99,102,241,0.5)] active:scale-[0.98] animate-ai-glow"
-              >
-                ✨ AI 生成
-              </button>
-              <CreateStrategyDropdown
-                open={createMenuOpen}
-                onToggle={() => setCreateMenuOpen((prev) => !prev)}
-                onSelect={(strategyType) => requestWorkspaceAction({ type: 'create', strategyType })}
-              />
+            <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="inline-flex items-center gap-2 self-start rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-xs text-white/60">
+                <span className="text-white/35">策略数量</span>
+                <span className="font-semibold text-white">{strategies.length} 条</span>
+              </div>
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={openAIDialog}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 px-4 py-2 text-xs font-semibold text-white shadow-[0_0_16px_rgba(99,102,241,0.35)] transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_0_24px_rgba(99,102,241,0.5)] active:scale-[0.98] animate-ai-glow"
+                >
+                  ✨ AI 生成
+                </button>
+                <CreateStrategyDropdown
+                  open={createMenuOpen}
+                  onToggle={() => setCreateMenuOpen((prev) => !prev)}
+                  onSelect={(strategyType) => requestWorkspaceAction({ type: 'create', strategyType })}
+                />
+              </div>
             </div>
           }
         >
@@ -776,18 +764,17 @@ function CreateStrategyDropdown({ open, onToggle, onSelect, variant = 'primary' 
 function PanelCard({ title, description, action, children }) {
   return (
     <section className="rounded-2xl border border-border bg-card p-6">
-      <div className="mb-5 flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold text-white">{title}</h2>
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-lg font-semibold text-white sm:whitespace-nowrap">{title}</h2>
           {description ? <p className="mt-2 text-sm leading-6 text-white/55">{description}</p> : null}
         </div>
-        {action}
+        <div className="w-full sm:w-auto">{action}</div>
       </div>
       {children}
     </section>
   );
 }
-
 function SectionBlock({ title, description, children }) {
   return (
     <section className="space-y-4 rounded-2xl border border-white/5 bg-black/15 p-4 md:p-5">

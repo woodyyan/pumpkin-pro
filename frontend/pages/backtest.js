@@ -585,28 +585,6 @@ export default function BacktestPage() {
         <meta name="description" content="卧龙AI量化交易台回测引擎 — 基于历史数据验证策略表现，查看收益率、最大回撤、夏普比率等关键指标，支持 A 股/港股在线数据下载与自定义策略回测。" />
         <link rel="canonical" href="https://wolongtrader.top/backtest" />
       </Head>
-      <section ref={backtestFormRef} className="bg-card border border-border rounded-2xl p-6 md:p-8">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-3 max-w-3xl">
-            <span className="inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-              Wolong Pro · 历史回测
-            </span>
-            <div>
-              <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">历史回测工作台</h1>
-              <p className="mt-3 text-sm md:text-base text-white/65 leading-7">
-                历史回测已接入策略库。你可以直接选择已启用的策略模板，参数由策略库统一维护。
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3 text-sm text-white/70 md:min-w-[320px]">
-            <MiniStat label="数据源" value="CSV / 示例 / 在线下载" />
-            <MiniStat label="策略来源" value={strategiesLoading ? '加载中...' : `${strategies.length} 条启用策略`} />
-            <MiniStat label="指标分析" value="收益 / 回撤 / 夏普" />
-            <MiniStat label="图表输出" value="K 线 / 资产 / 回撤" />
-          </div>
-        </div>
-      </section>
-
       <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <SectionCard title="回测配置" description="先选择数据来源，再配置回测区间与资金参数。">
           <div className="space-y-6">
@@ -708,7 +686,15 @@ export default function BacktestPage() {
           </div>
         </SectionCard>
 
-        <SectionCard title="策略设置">
+        <SectionCard
+          title="策略设置"
+          action={
+            <div className="inline-flex items-center gap-2 self-start rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-xs text-white/60">
+              <span className="text-white/35">已启用策略</span>
+              <span className="font-semibold text-white">{strategiesLoading ? '加载中...' : `${strategies.length} 条`}</span>
+            </div>
+          }
+        >
           <div className="space-y-6">
             <Field label="回测策略">
               <select
@@ -1296,18 +1282,6 @@ function Input(props) {
   return <input {...props} className="w-full box-border min-w-0 rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary" />;
 }
 
-function SectionCard({ title, description, children }) {
-  return (
-    <section className="rounded-2xl border border-border bg-card p-6">
-      <div className="mb-5">
-        <h2 className="text-lg font-semibold text-white">{title}</h2>
-        {description && <p className="mt-2 text-sm leading-6 text-white/55">{description}</p>}
-      </div>
-      {children}
-    </section>
-  );
-}
-
 function TableCard({ title, description, children }) {
   return (
     <section className="rounded-2xl border border-border bg-card p-6">
@@ -1320,20 +1294,26 @@ function TableCard({ title, description, children }) {
   );
 }
 
+function SectionCard({ title, description, action, children }) {
+  return (
+    <section className="rounded-2xl border border-border bg-card p-6">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-lg font-semibold text-white sm:whitespace-nowrap">{title}</h2>
+          {description && <p className="mt-2 text-sm leading-6 text-white/55">{description}</p>}
+        </div>
+        {action ? <div className="w-full sm:w-auto">{action}</div> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 function SummaryPill({ label, value }) {
   return (
     <div className="rounded-2xl border border-border bg-card px-5 py-4">
       <div className="text-xs uppercase tracking-[0.18em] text-white/35">{label}</div>
       <div className="mt-2 text-sm font-medium text-white/80">{value || '--'}</div>
-    </div>
-  );
-}
-
-function MiniStat({ label, value }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-      <div className="text-xs uppercase tracking-[0.16em] text-white/35">{label}</div>
-      <div className="mt-2 text-sm font-medium text-white/85">{value}</div>
     </div>
   );
 }
@@ -1356,7 +1336,6 @@ function MetricCard({ title, value, type }) {
     </div>
   );
 }
-
 function StatRow({ label, value }) {
   return (
     <div className="flex items-center justify-between rounded-xl border border-white/5 bg-black/20 px-4 py-3 text-sm">

@@ -351,7 +351,7 @@ export default function LiveTradingOverviewPage() {
       <section className="rounded-2xl border border-border bg-card p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold text-white">风险机会全景图<span className="ml-2 inline-block rounded bg-white/8 px-1.5 py-0.5 text-[11px] font-normal text-white/45">{quadrantExchange === 'HKEX' ? '港股' : 'A 股'}</span></h3>
+            <h3 className="text-base font-semibold text-white">风险机会全景图</h3>
             {quadrantData?.meta?.computed_at && (
               <div className="mt-1 flex items-center gap-2 text-xs text-white/50">
                 <span>数据日期：{formatDateTime(quadrantData.meta.computed_at)}</span>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
   QUADRANT_SEARCH_MIN_QUERY_LEN,
@@ -23,11 +23,6 @@ export default function QuadrantSearchBox({
   const [activeIdx, setActiveIdx] = useState(-1)
   const normalizedSelectedCode = normalizeQuadrantStockCode(selectedCode, normalizedMarket)
   const showEmptyState = !disabled && query.trim().length >= QUADRANT_SEARCH_MIN_QUERY_LEN && results.length === 0
-  const helperText = useMemo(() => (
-    normalizedMarket === 'HKEX'
-      ? '仅搜索当前港股四象限中的股票，支持代码或名称。'
-      : '仅搜索当前 A 股四象限中的股票，支持代码或名称。'
-  ), [normalizedMarket])
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -98,46 +93,42 @@ export default function QuadrantSearchBox({
 
   return (
     <div ref={wrapperRef} className="relative">
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div className="min-w-0">
-          <div className="text-xs font-medium text-white/65">在当前{normalizedMarket === 'HKEX' ? '港股' : 'A 股'}四象限中搜索</div>
-          <div className="mt-1 text-[11px] text-white/35">{helperText}</div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className={`flex min-w-0 flex-1 items-center rounded-xl border px-3 py-2 transition ${disabled ? 'border-border/40 bg-black/10 text-white/30' : 'border-border bg-black/20 text-white focus-within:border-primary/45'}`}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mr-2 shrink-0 text-white/35">
+            <circle cx="11" cy="11" r="8" />
+            <path d="M21 21l-4.35-4.35" />
+          </svg>
+          <input
+            type="text"
+            value={query}
+            disabled={disabled}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            onFocus={() => {
+              if (!disabled && (results.length > 0 || showEmptyState)) setIsOpen(true)
+            }}
+            placeholder={disabled ? '四象限数据加载完成后即可搜索' : '输入股票代码或名称，例如 600519 / 腾讯'}
+            className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder-white/30 outline-none disabled:cursor-not-allowed"
+          />
+          {(query || normalizedSelectedCode) && !disabled && (
+            <button
+              type="button"
+              onClick={handleClear}
+              className="ml-2 shrink-0 text-white/35 transition hover:text-white/70"
+              aria-label="清除四象限搜索"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          )}
         </div>
-        <div className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/15 bg-primary/5 px-2.5 py-1 text-[11px] text-primary/80">
+
+        <div className="inline-flex shrink-0 items-center justify-center gap-1 self-start rounded-full border border-primary/15 bg-primary/5 px-2.5 py-1 text-[11px] text-primary/80 sm:self-auto">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/80" />
           {normalizedMarket === 'HKEX' ? '港股独立搜索' : 'A 股独立搜索'}
         </div>
-      </div>
-
-      <div className={`mt-3 flex items-center rounded-xl border px-3 py-2 transition ${disabled ? 'border-border/40 bg-black/10 text-white/30' : 'border-border bg-black/20 text-white focus-within:border-primary/45'}`}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mr-2 shrink-0 text-white/35">
-          <circle cx="11" cy="11" r="8" />
-          <path d="M21 21l-4.35-4.35" />
-        </svg>
-        <input
-          type="text"
-          value={query}
-          disabled={disabled}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          onFocus={() => {
-            if (!disabled && (results.length > 0 || showEmptyState)) setIsOpen(true)
-          }}
-          placeholder={disabled ? '四象限数据加载完成后即可搜索' : '输入股票代码或名称，例如 600519 / 腾讯'}
-          className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder-white/30 outline-none disabled:cursor-not-allowed"
-        />
-        {(query || normalizedSelectedCode) && !disabled && (
-          <button
-            type="button"
-            onClick={handleClear}
-            className="ml-2 shrink-0 text-white/35 transition hover:text-white/70"
-            aria-label="清除四象限搜索"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
-        )}
       </div>
 
       {isOpen && !disabled && (results.length > 0 || showEmptyState) && (

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -21,27 +21,27 @@ type RiskDBRepository struct {
 
 // NewRiskDBRepository 创建风险数据库仓库
 func NewRiskDBRepository() (*RiskDBRepository, error) {
-	// 获取当前工作目录
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("获取工作目录失败: %w", err)
+	return NewRiskDBRepositoryFromPaths("data/quant", "data/quant")
+}
+
+// NewRiskDBRepositoryFromPaths 按显式缓存目录创建风险数据库仓库
+func NewRiskDBRepositoryFromPaths(cacheADir string, cacheHKDir string) (*RiskDBRepository, error) {
+	cacheADir = strings.TrimSpace(cacheADir)
+	if cacheADir == "" {
+		cacheADir = "data/quant"
+	}
+	cacheHKDir = strings.TrimSpace(cacheHKDir)
+	if cacheHKDir == "" {
+		cacheHKDir = cacheADir
 	}
 
-	// 如果当前在backend目录，则向上退一级到项目根目录
-	projectRoot := cwd
-	if filepath.Base(cwd) == "backend" {
-		projectRoot = filepath.Dir(cwd)
-	}
-
-	// A股缓存数据库路径
-	cachePath := filepath.Join(projectRoot, "data", "quant", "quadrant_cache.db")
+	cachePath := filepath.Join(cacheADir, "quadrant_cache.db")
 	cacheDB, err := openCacheDB(cachePath)
 	if err != nil {
 		return nil, fmt.Errorf("打开A股缓存数据库失败: %w", err)
 	}
 
-	// 港股缓存数据库路径
-	hkCachePath := filepath.Join(projectRoot, "data", "quant", "quadrant_cache_hk.db")
+	hkCachePath := filepath.Join(cacheHKDir, "quadrant_cache_hk.db")
 	hkCacheDB, err := openCacheDB(hkCachePath)
 	if err != nil {
 		// 如果港股数据库不存在，可能是旧版本，只记录警告
@@ -53,6 +53,20 @@ func NewRiskDBRepository() (*RiskDBRepository, error) {
 		cacheDB:   cacheDB,
 		hkCacheDB: hkCacheDB,
 	}, nil
+}
+
+func (r *RiskDBRepository) CacheDB() *gorm.DB {
+	if r == nil {
+		return nil
+	}
+	return r.cacheDB
+}
+
+func (r *RiskDBRepository) HKCacheDB() *gorm.DB {
+	if r == nil {
+		return nil
+	}
+	return r.hkCacheDB
 }
 
 // openCacheDB 打开只读SQLite数据库

@@ -1599,7 +1599,19 @@ export default function PortfolioPage() {
     }
   }, [])
 
-  const load = useCallback(async () => {
+  const loadRiskMetrics = useCallback(async () => {
+    try {
+      const result = await fetchPortfolioRiskMetrics({ scope })
+      setRiskMetrics(result)
+      return result
+    } catch (err) {
+      console.warn('风险指标加载失败:', err)
+      setRiskMetrics(null)
+      return null
+    }
+  }, [scope])
+
+  const load = useCallback(async ({ refreshRisk = false } = {}) => {
     setLoading(true)
     setAttributionLoading(true)
     setError(null)
@@ -1613,7 +1625,7 @@ export default function PortfolioPage() {
     attributionRequestKeyRef.current = requestKey
 
     try {
-      const [result, riskResult, summaryResult] = await Promise.all([
+      const [result, summaryResult] = await Promise.all([
         fetchPortfolioDashboard({
           scope,
           sort_by: sortBy,
@@ -1622,15 +1634,13 @@ export default function PortfolioPage() {
           keyword,
           curve_range: curveRange,
         }),
-        fetchPortfolioRiskMetrics({ scope }).catch((err) => {
-          console.warn('风险指标加载失败:', err)
-          return null
-        }),
         fetchPortfolioAttributionSummary(attributionQuery).catch((err) => ({ __error: err })),
       ])
 
       setData(result)
-      setRiskMetrics(riskResult)
+      if (refreshRisk) {
+        loadRiskMetrics()
+      }
 
       if (attributionRequestKeyRef.current === requestKey) {
         if (summaryResult?.__error) {
@@ -1646,7 +1656,7 @@ export default function PortfolioPage() {
       setLoading(false)
       setAttributionLoading(false)
     }
-  }, [buildAttributionQuery, curveRange, keyword, pnlFilter, scope, sortBy, sortOrder])
+  }, [buildAttributionQuery, curveRange, keyword, loadRiskMetrics, pnlFilter, scope, sortBy, sortOrder])
 
   const ensureAttributionDetails = useCallback(async (keys = []) => {
     const requestedKeys = Array.from(new Set((Array.isArray(keys) ? keys : [keys]).filter((key) => ATTRIBUTION_FETCHERS[key])))
@@ -1709,8 +1719,12 @@ export default function PortfolioPage() {
   }, [attribution, attributionDetailLoading, buildAttributionQuery])
 
   useEffect(() => {
-    load()
+    load({ refreshRisk: true })
   }, [load])
+
+  useEffect(() => {
+    loadRiskMetrics()
+  }, [loadRiskMetrics])
 
   useEffect(() => {
     if (!ready || !isLoggedIn) {
@@ -2025,7 +2039,7 @@ export default function PortfolioPage() {
 
     try {
       await createPortfolioEvent(currentTradeSymbol, payload)
-      await load()
+      await load({ refreshRisk: true })
       const refreshed = await syncTradeContext(currentTradeSymbol, { showLoading: false })
       const mergedItem = mergeTradeContextItem(tradeItem, refreshed.item)
       const successNotice = buildTradeSuccessNotice(tradeDrawer.action)
@@ -2054,7 +2068,7 @@ export default function PortfolioPage() {
     setTradeDrawer((prev) => ({ ...prev, saving: true, error: '', notice: '' }))
     try {
       await undoPortfolioEvent(currentTradeSymbol, tradeItem.last_event_id)
-      await load()
+      await load({ refreshRisk: true })
       const refreshed = await syncTradeContext(currentTradeSymbol, { showLoading: false })
       const mergedItem = mergeTradeContextItem(tradeItem, refreshed.item)
       setTradeDrawer((prev) => ({
@@ -2086,7 +2100,7 @@ export default function PortfolioPage() {
     setTradeDrawer((prev) => ({ ...prev, saving: true, error: '', notice: '' }))
     try {
       await deletePortfolioHistory(currentTradeSymbol)
-      await load()
+      await load({ refreshRisk: true })
       setPageNotice(`${currentTradeSymbol} 的全部持仓记录已删除，相关持仓、最近交易、收益曲线与归因分析已同步刷新。`)
       setTradeDrawer(createTradeDrawerState(defaultTradeMarket, investmentProfile))
       setPriceAutoFilled(false)
@@ -2147,7 +2161,7 @@ export default function PortfolioPage() {
             </button>
             <button
               type="button"
-              onClick={load}
+              onClick={() => load({ refreshRisk: true })}
               disabled={loading}
               className="rounded-lg border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs text-white/60 hover:text-white hover:bg-white/08 disabled:opacity-40 transition flex items-center gap-1.5"
             >
@@ -2162,7 +2176,7 @@ export default function PortfolioPage() {
         {error && (
           <div className="rounded-lg border border-rose-500/25 bg-rose-500/[0.06] px-4 py-3 text-sm text-rose-300">
             {error}
-            <button type="button" onClick={load} className="ml-3 underline text-rose-200 hover:text-white">重试</button>
+            <button type="button" onClick={() => load({ refreshRisk: true })} className="ml-3 underline text-rose-200 hover:text-white">重试</button>
           </div>
         )}
 

@@ -118,6 +118,7 @@ type appServer struct {
 	aiRateLimiter       *strategy.AIRateLimiter
 	fundCacheRepo       *fundcache.Repository
 	analysisHistoryRepo *analysis_history.Repository
+	portfolioRiskRepo   *portfolio.RiskRepository
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -194,6 +195,20 @@ func currentUserID(r *http.Request) string {
 		return ""
 	}
 	return user.UserID
+}
+
+func normalizePortfolioRiskScope(raw string) (string, error) {
+	scope := strings.ToUpper(strings.TrimSpace(raw))
+	switch scope {
+	case "", portfolio.PortfolioScopeAll:
+		return portfolio.PortfolioScopeAll, nil
+	case portfolio.PortfolioScopeAShare, "SSE", "SZSE", "ASHARES":
+		return portfolio.PortfolioScopeAShare, nil
+	case portfolio.PortfolioScopeHK, "HKSHARES":
+		return portfolio.PortfolioScopeHK, nil
+	default:
+		return "", fmt.Errorf("invalid portfolio scope: %s", raw)
+	}
 }
 
 func writeAuthRequired(w http.ResponseWriter) {
@@ -2612,59 +2627,21 @@ func (a *appServer) handlePortfolioRiskMetrics(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
 		return
 	}
-	_ = currentUserID(r) // userID暂未使用
-	scope := strings.TrimSpace(r.URL.Query().Get("scope"))
-	if scope == "" {
-		scope = portfolio.PortfolioScopeAll
+	if a.portfolioRiskRepo == nil {
+		writeError(w, http.StatusInternalServerError, "portfolio risk repository is not initialized")
+		return
 	}
-
-	// TODO: 实现真实的风险计算
-	// 暂时返回模拟数据
-	metrics := map[string]any{
-		"scope":       scope,
-		"computed_at": time.Now().UTC().Format(time.RFC3339),
-		"concentration_risk": map[string]any{
-			"single_stock_max_weight": 0.35,
-			"top3_weight":             0.68,
-			"top5_weight":             0.82,
-			"herfindahl_index":        0.18,
-			"warnings": []string{
-				"单股集中度35%超过20%",
-				"前三大持仓占比68%超过60%",
-			},
-		},
-		"volatility_risk": map[string]any{
-			"annualized_volatility": 0.24,
-			"max_drawdown":          -0.18,
-			"downside_probability":  0.42,
-			"daily_var_95":          -0.04,
-			"weekly_var_95":         -0.09,
-			"warnings":              []string{"波动率较高"},
-		},
-		"liquidity_risk": map[string]any{
-			"avg_daily_turnover":   1500.5,
-			"avg_turnover_rate":    0.02,
-			"illiquid_count":       2,
-			"low_liquidity_weight": 0.15,
-			"liquidity_score":      80.0,
-			"warnings":             []string{"存在2只低流动性股票"},
-		},
-		"tail_risk": map[string]any{
-			"var_95_one_day":        -0.04,
-			"var_95_one_week":       -0.09,
-			"expected_shortfall_95": -0.06,
-			"worst_case_loss":       -0.25,
-			"warnings":              []string{"单日最大可能损失超过3%"},
-		},
-		"correlation_risk": map[string]any{
-			"avg_correlation": 0.35,
-			"high_correlation_pairs": []map[string]any{
-				{"symbol1": "000001", "symbol2": "000002", "correlation": 0.82},
-			},
-			"diversification_score": 65.0,
-			"warnings":              []string{"存在高相关性股票对"},
-		},
-		"overall_risk_score": 6.5,
+	userID := currentUserID(r)
+	scope, err := normalizePortfolioRiskScope(strings.TrimSpace(r.URL.Query().Get("scope")))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	metrics, err := a.portfolioRiskRepo.GetRiskMetrics(r.Context(), userID, scope)
+	if err != nil {
+		log.Printf("portfolio risk metrics failed: %v", err)
+		writeError(w, http.StatusInternalServerError, "加载风险指标失败")
+		return
 	}
 	writeJSON(w, http.StatusOK, metrics)
 }
@@ -3107,6 +3084,14 @@ func main() {
 	portfolioRepo := portfolio.NewRepository(storeInstance.DB)
 	portfolioService := portfolio.NewService(portfolioRepo)
 
+	var portfolioRiskRepo *portfolio.RiskRepository
+	riskDBRepo, err := portfolio.NewRiskDBRepositoryFromPaths(cfg.Backup.CacheADir, cfg.Backup.CacheHKDir)
+	if err != nil {
+		log.Printf("portfolio risk repository init skipped: %v", err)
+	} else {
+		portfolioRiskRepo = portfolio.NewRiskRepository(portfolioRepo, nil, riskDBRepo.CacheDB(), riskDBRepo.HKCacheDB())
+	}
+
 	quadrantRepo := quadrant.NewRepository(storeInstance.DB)
 	quadrantService := quadrant.NewService(quadrantRepo)
 	quadrantService.SetPriceResolver(newQuadrantPriceResolver(liveRepo))
@@ -3178,6 +3163,7 @@ func main() {
 		aiRateLimiter:       strategy.NewAIRateLimiter(20),
 		fundCacheRepo:       fundCacheRepo,
 		analysisHistoryRepo: analysisHistoryRepo,
+		portfolioRiskRepo:   portfolioRiskRepo,
 	}
 
 	mux := http.NewServeMux()

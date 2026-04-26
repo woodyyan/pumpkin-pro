@@ -328,13 +328,6 @@ export default function LiveTradingOverviewPage() {
         <meta name="description" content="卧龙AI量化交易台行情看板 — 实时 A 股/港股行情、四象限风险全景图、关注池管理。支持 AI 个股智能诊断与技术指标分析。" />
         <link rel="canonical" href="https://wolongtrader.top/live-trading" />
       </Head>
-      <section className="rounded-2xl border border-border bg-card p-6">
-        <h1 className="text-2xl font-semibold tracking-tight">行情看板</h1>
-        <p className="mt-2 text-sm leading-7 text-white/60">
-          关注池股票概览，点击卡片可在新标签页打开独立的实时详情页。
-        </p>
-      </section>
-
       {/* Market overview — compact index bar */}
       <section className="rounded-2xl border border-border bg-card px-5 py-3">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">

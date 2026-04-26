@@ -292,7 +292,6 @@ func (s *Service) GetStats(ctx context.Context) (*StatsResult, error) {
 	// Live
 	watchlistItems, _ := s.repo.CountWatchlistItems(ctx)
 	usersWithWatchlist, _ := s.repo.CountUsersWithWatchlist(ctx)
-	activeSymbols, _ := s.repo.CountActiveSymbols(ctx)
 
 	// Signals
 	webhookUsers, _ := s.repo.CountWebhookUsers(ctx)
@@ -336,7 +335,6 @@ func (s *Service) GetStats(ctx context.Context) (*StatsResult, error) {
 		Live: LiveStats{
 			WatchlistItems:     watchlistItems,
 			UsersWithWatchlist: usersWithWatchlist,
-			ActiveSymbols:      activeSymbols,
 		},
 		Signals: SignalStats{
 			WebhookUsers:         webhookUsers,

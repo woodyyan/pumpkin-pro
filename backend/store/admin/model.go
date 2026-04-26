@@ -82,7 +82,6 @@ type StrategyStats struct {
 type LiveStats struct {
 	WatchlistItems     int64 `json:"watchlist_items"`
 	UsersWithWatchlist int64 `json:"users_with_watchlist"`
-	ActiveSymbols      int64 `json:"active_symbols"`
 }
 
 type SignalStats struct {

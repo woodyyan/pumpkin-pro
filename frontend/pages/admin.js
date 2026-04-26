@@ -320,10 +320,9 @@ function AdminDashboard({ session, onLogout }) {
             {/* Panel 4: Live */}
             <section>
               <h2 className="text-base font-semibold text-white/80 mb-3">📈 行情看板</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-2">
                 <StatCard label="关注池条目" value={stats.live.watchlist_items} />
                 <StatCard label="有关注的用户" value={stats.live.users_with_watchlist} />
-                <StatCard label="已激活标的" value={stats.live.active_symbols} />
               </div>
             </section>
 

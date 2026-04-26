@@ -106,13 +106,6 @@ func (r *Repository) CountUsersWithWatchlist(ctx context.Context) (int64, error)
 	return count, err
 }
 
-func (r *Repository) CountActiveSymbols(ctx context.Context) (int64, error) {
-	var count int64
-	err := r.db.WithContext(ctx).Table("live_watchlist_items").
-		Where("is_active = ?", true).Count(&count).Error
-	return count, err
-}
-
 func (r *Repository) CountWebhookUsers(ctx context.Context) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Table("webhook_endpoints").Count(&count).Error

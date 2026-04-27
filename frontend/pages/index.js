@@ -69,7 +69,7 @@ const SCENARIOS = [
     title: '我想选股',
     href: '/stock-picker',
     cta: '去 AI 选股',
-    value: "🎯 不懂指标？用说话就能从全市场筛选",
+    value: '🎯 不懂指标？用说话就能从全市场筛选',
     recommended: false,
     steps: [
       '进入「选股器」页面',
@@ -96,6 +96,57 @@ const SCENARIOS = [
     aiPreview: [
       { icon: '📈', text: '年化 +23.4%', color: 'text-red-300', highlight: true },
       { text: '夏普比率 1.82 · 最大回撤 12%', color: 'text-white/60' },
+    ],
+  },
+  {
+    icon: '🌌',
+    title: '我想看四象限 + 卧龙AI精选',
+    href: '/live-trading',
+    cta: '去看全景',
+    recommended: false,
+    value: '🎯 先看全市场机会，再缩小到卧龙AI精选名单',
+    steps: [
+      '进入「行情看板」页面，切换到「风险机会全景图」区域',
+      '查看四象限分布，优先关注机会区和高亮标的',
+      '继续查看下方「卧龙AI精选」，打开感兴趣股票的详情页',
+    ],
+    aiPreview: [
+      { icon: '★', text: '卧龙AI精选：机会区 Top 标的', color: 'text-white', highlight: true },
+      { text: '先看全景，再看精选，效率更高', color: 'text-white/55' },
+    ],
+  },
+  {
+    icon: '💼',
+    title: '我想管理持仓',
+    href: '/portfolio',
+    cta: '去管持仓',
+    recommended: false,
+    value: '🎯 把分散在个股里的仓位变化集中看清楚',
+    steps: [
+      '进入「持仓管理」页面，查看组合总览和资产曲线',
+      '按股票维度浏览当前持仓、市值、盈亏和最近交易',
+      '需要调整时，直接进入对应个股详情页继续维护持仓',
+    ],
+    aiPreview: [
+      { icon: '📦', text: '组合视角查看持仓和盈亏', color: 'text-white', highlight: true },
+      { text: '适合日常复盘和仓位检查', color: 'text-white/55' },
+    ],
+  },
+  {
+    icon: '🔔',
+    title: '我想配置交易信号',
+    href: '/live-trading',
+    cta: '去配信号',
+    recommended: false,
+    value: '🎯 让系统按策略自动盯盘，到点推送提醒',
+    steps: [
+      '进入「行情看板」，打开任意股票详情页中的信号配置区域',
+      '选择策略、评估频率和阈值，保存当前股票的信号设置',
+      '前往「设置」页面配置 Webhook，验证送达后开始接收提醒',
+    ],
+    aiPreview: [
+      { icon: '⚡', text: '策略触发后自动推送', color: 'text-white', highlight: true },
+      { text: '适合盘中盯信号，不必一直盯盘', color: 'text-white/55' },
     ],
   },
 ]
@@ -304,10 +355,10 @@ export default function HomePage() {
       <section className="px-4 py-16 md:py-24 max-w-5xl mx-auto">
         <div className="text-center mb-12">
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight">🚀 快速上手</h2>
-          <p className="mt-3 text-sm text-white/40">选择你的使用场景，3 步开始体验</p>
+          <p className="mt-3 text-sm text-white/40">选择你的使用场景，3 步开始体验，共 6 条路径</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
           {SCENARIOS.map((s, i) => (
             <Link
               key={i}

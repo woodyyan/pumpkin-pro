@@ -266,7 +266,7 @@ export default function HomePage() {
           卧龙 AI 量化交易台
         </h1>
         <p className="relative mt-3 text-base md:text-lg text-white/50 font-medium">
-          智能分析 · 策略回测 · 信号推送
+          智能分析 · 行情看板 · 信号推送
         </p>
         <p className="relative mt-4 max-w-xl text-sm md:text-base text-white/40 leading-7">
           面向个人投资者的 AI 量化分析平台，帮你用数据和策略看清市场，做出更理性的投资决策。

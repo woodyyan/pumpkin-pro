@@ -200,3 +200,40 @@ export function getPortfolioEventAccent(event) {
   if (event.event_type === 'init' || event.event_type === 'sync_position') return 'text-amber-200'
   return 'text-white/70'
 }
+
+export function buildPortfolioSummaryMetrics({ portfolioData, snapshot, currencySymbol = '¥' } = {}) {
+  const shares = Number(portfolioData?.shares || 0)
+  const avgCostPrice = Number(portfolioData?.avg_cost_price || 0)
+  const lastPrice = Number(snapshot?.last_price)
+  const hasRealtimePrice = Number.isFinite(lastPrice) && lastPrice > 0
+  const pnlAmount = hasRealtimePrice && avgCostPrice > 0
+    ? (lastPrice - avgCostPrice) * shares
+    : null
+  const pnlPct = hasRealtimePrice && avgCostPrice > 0
+    ? ((lastPrice / avgCostPrice) - 1) * 100
+    : null
+
+  let pnlValue = '--'
+  let pnlAccent = 'normal'
+  if (pnlAmount !== null && Number.isFinite(pnlPct)) {
+    const signedAmount = `${pnlAmount >= 0 ? '+' : ''}${currencySymbol}${Math.abs(pnlAmount).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`
+    pnlValue = `${signedAmount}（${pnlPct.toFixed(2)}%）`
+    pnlAccent = pnlAmount >= 0 ? 'up' : 'down'
+  }
+
+  return [
+    { label: '持仓数量', value: `${shares.toLocaleString('zh-CN')} 股` },
+    {
+      label: '买入均价',
+      value: avgCostPrice > 0 ? `${currencySymbol}${avgCostPrice.toLocaleString('zh-CN', { maximumFractionDigits: 3 })}` : '--',
+    },
+    {
+      label: '浮动盈亏',
+      value: pnlValue,
+      accent: pnlAccent,
+      emphasis: true,
+      marketAccent: true,
+      tooltip: '（最新价 - 买入均价）× 持仓数量。红色为盈利，绿色为亏损。',
+    },
+  ]
+}

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   buildPortfolioEventPreview,
+  buildPortfolioSummaryMetrics,
   createPortfolioActionForm,
   formatPortfolioEventHeadline,
   formatPortfolioEventSubline,
@@ -196,5 +197,39 @@ describe('portfolio event copy helpers', () => {
     assert.equal(formatPortfolioEventSubline(sellEvent, '600036').includes('已实现收益'), true)
     assert.equal(formatPortfolioEventHeadline(adjustEvent, '600036'), '手动调整均价')
     assert.equal(formatPortfolioEventSubline(adjustEvent, '600036').includes('持仓 200 股未变'), true)
+  })
+})
+
+describe('buildPortfolioSummaryMetrics', () => {
+  it('returns compact metrics for active position with positive pnl', () => {
+    const metrics = buildPortfolioSummaryMetrics({
+      portfolioData: { shares: 200, avg_cost_price: 10.256 },
+      snapshot: { last_price: 12.5 },
+      currencySymbol: '¥',
+    })
+    assert.deepEqual(metrics, [
+      { label: '持仓数量', value: '200 股' },
+      { label: '买入均价', value: '¥10.256' },
+      {
+        label: '浮动盈亏',
+        value: '+¥448.8（21.88%）',
+        accent: 'up',
+        emphasis: true,
+        marketAccent: true,
+        tooltip: '（最新价 - 买入均价）× 持仓数量。红色为盈利，绿色为亏损。',
+      },
+    ])
+  })
+
+  it('returns fallback pnl copy when realtime price is unavailable', () => {
+    const metrics = buildPortfolioSummaryMetrics({
+      portfolioData: { shares: 0, avg_cost_price: 0 },
+      snapshot: null,
+      currencySymbol: 'HK$',
+    })
+    assert.equal(metrics[0].value, '0 股')
+    assert.equal(metrics[1].value, '--')
+    assert.equal(metrics[2].value, '--')
+    assert.equal(metrics[2].accent, 'normal')
   })
 })

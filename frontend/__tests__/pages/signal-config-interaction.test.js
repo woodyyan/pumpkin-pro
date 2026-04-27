@@ -2,7 +2,9 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  buildSignalConfigMeta,
   buildSignalConfigPayload,
+  buildSignalStatusSummary,
   canEnableSignal,
   hasSignalConfigChanged,
   mergeServerSignalConfig,
@@ -63,5 +65,39 @@ describe('signal config interaction workflow', () => {
       eval_interval_seconds: 900,
       thresholds: { score: 0.75 },
     })
+  })
+
+  it('builds folded summary content without exposing inline switch state', () => {
+    const draft = makeServer({ is_enabled: true, eval_interval_seconds: 900 })
+    const summary = buildSignalStatusSummary({ config: draft })
+    const meta = buildSignalConfigMeta({
+      config: draft,
+      strategyMap: { macd: { name: 'MACD' } },
+      isDirty: false,
+      webhookConfigured: true,
+      webhookEnabled: true,
+    })
+
+    assert.equal(summary, '交易信号已开启')
+    assert.deepEqual(meta, [
+      { label: '状态', value: '已开启' },
+      { label: '策略', value: 'MACD' },
+      { label: '频率', value: '每 15 分钟' },
+      { label: '推送', value: '已就绪' },
+    ])
+  })
+
+  it('surfaces unsaved and webhook risk in folded summary meta', () => {
+    const draft = makeServer({ is_enabled: true, strategy_id: '' })
+    const meta = buildSignalConfigMeta({
+      config: draft,
+      strategyMap: {},
+      isDirty: true,
+      webhookConfigured: false,
+      webhookEnabled: false,
+    })
+
+    assert.equal(meta[3].value, '未就绪')
+    assert.deepEqual(meta[4], { label: '配置', value: '有未保存修改', tone: 'warning' })
   })
 })

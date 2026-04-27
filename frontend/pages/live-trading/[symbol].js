@@ -13,7 +13,9 @@ import {
   subscribeInvestmentProfileUpdates,
 } from '../../lib/investment-profile-storage.js'
 import {
+  buildSignalConfigMeta,
   buildSignalConfigPayload,
+  buildSignalStatusSummary,
   canEnableSignal,
   hasSignalConfigChanged,
   mergeServerSignalConfig,
@@ -119,6 +121,7 @@ export default function LiveTradingDetailPage() {
   const [toggleTargetEnabled, setToggleTargetEnabled] = useState(null)
   const [signalNotice, setSignalNotice] = useState('')
   const [signalError, setSignalError] = useState('')
+  const [signalConfigExpanded, setSignalConfigExpanded] = useState(false)
   const [error, setError] = useState('')
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState('')
@@ -804,6 +807,7 @@ export default function LiveTradingDetailPage() {
     setPortfolioDeleteConfirmOpen(false)
     setPortfolioDeleteConfirmValue('')
     setPortfolioDangerMenu(createPortfolioDangerMenuState())
+    setSignalConfigExpanded(false)
     setPriceAutoFilled(false)
   }, [symbol, authIdentityKey, exchange])
 
@@ -980,6 +984,18 @@ export default function LiveTradingDetailPage() {
 
   const signalConfig = draftSignalConfig
   const webhookConfigured = Boolean(webhookConfig.url)
+  const signalStatusSummary = buildSignalStatusSummary({
+    config: signalConfig,
+    isToggling: isTogglingSignal,
+    toggleTargetEnabled,
+  })
+  const signalConfigMeta = buildSignalConfigMeta({
+    config: signalConfig,
+    strategyMap: strategyByID,
+    isDirty: signalDirty,
+    webhookConfigured,
+    webhookEnabled: Boolean(webhookConfig.is_enabled),
+  })
   const fundamentalsItems = fundamentalsPayload?.items || {}
   const fundamentalsMeta = fundamentalsPayload?.meta || null
   const fundamentalsReportLabel = buildFundamentalsReportLabel(fundamentalsMeta)
@@ -1131,97 +1147,117 @@ export default function LiveTradingDetailPage() {
               {signalError && <div className="mb-3 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{signalError}</div>}
 
               <div className="rounded-xl border border-white/8 bg-black/15 p-3">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
-                    <div className="text-sm font-medium text-white/85">
-                      {isTogglingSignal
-                        ? (toggleTargetEnabled ? '交易信号开启中...' : '交易信号关闭中...')
-                        : (signalConfig.is_enabled ? '交易信号已开启' : '交易信号已关闭')}
-                    </div>
-                    <div className="mt-1 text-xs text-white/45">
-                      {signalConfig.is_enabled
-                        ? '满足条件后会自动评估并发送提醒'
-                        : '关闭后将不再生成该股票的交易提醒'}
-                    </div>
+                    <div className="text-sm font-medium text-white/88">交易信号</div>
                   </div>
-
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={Boolean(signalConfig.is_enabled)}
-                    disabled={isTogglingSignal || savingSignalConfig}
-                    onClick={handleToggleSignal}
-                    className={`inline-flex items-center gap-2 self-start rounded-lg border px-3 py-1.5 text-xs transition focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60 ${
-                      signalConfig.is_enabled
-                        ? 'border-emerald-300/60 bg-emerald-500/18 text-emerald-50'
-                        : 'border-white/15 bg-black/25 text-white/65 hover:border-white/30'
-                    }`}
-                  >
-                    <span className="font-medium">
-                      {isTogglingSignal
-                        ? (toggleTargetEnabled ? '开启中...' : '关闭中...')
-                        : (signalConfig.is_enabled ? '已开启' : '已关闭')}
-                    </span>
-                    <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border transition ${signalConfig.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-white/20 bg-black/30'}`}>
-                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${signalConfig.is_enabled ? 'left-[18px]' : 'left-0.5'}`} />
-                    </span>
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${signalConfig.is_enabled ? 'border-emerald-200/55 bg-emerald-400/22 text-emerald-50 shadow-[0_0_0_1px_rgba(110,231,183,0.12)]' : 'border-white/10 bg-white/[0.04] text-white/60'}`}>
+                      {signalStatusSummary}
+                    </div>
+                    <button
+                      type="button"
+                      aria-expanded={signalConfigExpanded ? 'true' : 'false'}
+                      onClick={() => setSignalConfigExpanded((prev) => !prev)}
+                      className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/70 transition hover:border-white/20 hover:text-white"
+                    >
+                      {signalConfigExpanded ? '收起配置' : '配置'}
+                    </button>
+                  </div>
                 </div>
+
+                {signalNotice && (
+                  <div className="mt-3 rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+                    {signalNotice}
+                  </div>
+                )}
+
+                {signalConfigExpanded && (
+                  <div className="mt-3 border-t border-white/8 pt-3">
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                      {signalConfigMeta.map((item) => (
+                        <div key={item.label} className="rounded-lg border border-white/8 bg-white/[0.03] px-3 py-2.5">
+                          <div className="text-[11px] text-white/35">{item.label}</div>
+                          <div className={`mt-1 text-sm font-semibold ${item.tone === 'warning' ? 'text-amber-300' : 'text-white'}`}>{item.value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={Boolean(signalConfig.is_enabled)}
+                        disabled={isTogglingSignal || savingSignalConfig}
+                        onClick={handleToggleSignal}
+                        className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60 ${
+                          signalConfig.is_enabled
+                            ? 'border-emerald-300/60 bg-emerald-500/18 text-emerald-50'
+                            : 'border-white/15 bg-black/25 text-white/65 hover:border-white/30'
+                        }`}
+                      >
+                        <span className="font-medium">
+                          {isTogglingSignal
+                            ? (toggleTargetEnabled ? '开启中...' : '关闭中...')
+                            : (signalConfig.is_enabled ? '已开启' : '已关闭')}
+                        </span>
+                        <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border transition ${signalConfig.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-white/20 bg-black/30'}`}>
+                          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${signalConfig.is_enabled ? 'left-[18px]' : 'left-0.5'}`} />
+                        </span>
+                      </button>
+                      <select
+                        value={signalConfig.strategy_id || ''}
+                        onChange={(e) => updateDraftSignalConfig({ strategy_id: e.target.value })}
+                        className={`min-w-[140px] rounded-lg border bg-black/30 px-2.5 py-1.5 text-xs text-white outline-none transition focus:border-primary ${signalError.includes('请选择策略') ? 'border-rose-300/60' : 'border-border'}`}
+                      >
+                        <option value="">请选择策略</option>
+                        {activeStrategies.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={signalConfig.eval_interval_seconds || 3600}
+                        onChange={(e) => updateDraftSignalConfig({ eval_interval_seconds: Number(e.target.value) })}
+                        className="rounded-lg border border-border bg-black/30 px-2.5 py-1.5 text-xs text-white outline-none transition focus:border-primary"
+                      >
+                        <option value={900}>每 15 分钟</option>
+                        <option value={1800}>每 30 分钟</option>
+                        <option value={3600}>每小时</option>
+                        <option value={7200}>每 2 小时</option>
+                        <option value={14400}>每 4 小时</option>
+                      </select>
+                      <button
+                        type="button"
+                        disabled={savingSignalConfig || isTogglingSignal || !signalDirty}
+                        onClick={handleSaveSignalConfig}
+                        className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {savingSignalConfig ? '保存中...' : '保存配置'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingSignalConfig || isTogglingSignal || !signalDirty}
+                        onClick={handleResetSignalDraft}
+                        className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-white/70 transition hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        取消修改
+                      </button>
+                    </div>
+
+                    {signalDirty && !isTogglingSignal && (
+                      <div className="mt-2 rounded-lg border border-white/8 bg-white/5 px-3 py-1.5 text-[11px] text-white/55">
+                        当前修改尚未生效，点击「保存配置」后更新信号配置。
+                      </div>
+                    )}
+
+                    {signalConfig.is_enabled && (!webhookConfigured || !webhookConfig.is_enabled) && (
+                      <div className="mt-2 rounded-lg border border-amber-400/25 bg-amber-500/8 px-3 py-1.5 text-[11px] text-amber-200/90">
+                        信号已开启，但当前 Webhook 未配置或未启用，暂时不会发送提醒。<a href="/settings" className="ml-1 underline underline-offset-2 hover:text-amber-100">去配置</a>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-
-              <div className="mt-3 flex flex-wrap items-center gap-2.5">
-                <select
-                  value={signalConfig.strategy_id || ''}
-                  onChange={(e) => updateDraftSignalConfig({ strategy_id: e.target.value })}
-                  className={`min-w-[140px] rounded-lg border bg-black/30 px-2.5 py-1.5 text-xs text-white outline-none transition focus:border-primary ${signalError.includes('请选择策略') ? 'border-rose-300/60' : 'border-border'}`}
-                >
-                  <option value="">请选择策略</option>
-                  {activeStrategies.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-                <select
-                  value={signalConfig.eval_interval_seconds || 3600}
-                  onChange={(e) => updateDraftSignalConfig({ eval_interval_seconds: Number(e.target.value) })}
-                  className="rounded-lg border border-border bg-black/30 px-2.5 py-1.5 text-xs text-white outline-none transition focus:border-primary"
-                >
-                  <option value={900}>每 15 分钟</option>
-                  <option value={1800}>每 30 分钟</option>
-                  <option value={3600}>每小时</option>
-                  <option value={7200}>每 2 小时</option>
-                  <option value={14400}>每 4 小时</option>
-                </select>
-                <button
-                  type="button"
-                  disabled={savingSignalConfig || isTogglingSignal || !signalDirty}
-                  onClick={handleSaveSignalConfig}
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {savingSignalConfig ? '保存中...' : '保存配置'}
-                </button>
-                <button
-                  type="button"
-                  disabled={savingSignalConfig || isTogglingSignal || !signalDirty}
-                  onClick={handleResetSignalDraft}
-                  className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-white/70 transition hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  取消修改
-                </button>
-                {signalDirty && !isTogglingSignal && <span className="text-xs text-amber-300">有未保存修改</span>}
-                {signalNotice && <span className="text-xs text-emerald-300">{signalNotice}</span>}
-              </div>
-
-              {signalDirty && !isTogglingSignal && (
-                <div className="mt-2 rounded-lg border border-white/8 bg-white/5 px-3 py-1.5 text-[11px] text-white/55">
-                  当前修改尚未生效，点击「保存配置」后更新信号配置。
-                </div>
-              )}
-
-              {signalConfig.is_enabled && (!webhookConfigured || !webhookConfig.is_enabled) && (
-                <div className="mt-2 rounded-lg border border-amber-400/25 bg-amber-500/8 px-3 py-1.5 text-[11px] text-amber-200/90">
-                  信号已开启，但当前 Webhook 未配置或未启用，暂时不会发送提醒。<a href="/settings" className="ml-1 underline underline-offset-2 hover:text-amber-100">去配置</a>
-                </div>
-              )}
             </div>
           )}
         </section>

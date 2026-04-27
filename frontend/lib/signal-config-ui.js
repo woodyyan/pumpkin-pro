@@ -56,6 +56,35 @@ export function canEnableSignal(config) {
   return { ok: true, reason: '' }
 }
 
+export function buildSignalStatusSummary({ config, isToggling = false, toggleTargetEnabled = null } = {}) {
+  const enabled = Boolean(config?.is_enabled)
+  if (isToggling) {
+    return toggleTargetEnabled ? '交易信号开启中...' : '交易信号关闭中...'
+  }
+  return enabled ? '交易信号已开启' : '交易信号已关闭'
+}
+
+export function buildSignalConfigMeta({ config, strategyMap = {}, isDirty = false, webhookConfigured = false, webhookEnabled = false } = {}) {
+  const enabled = Boolean(config?.is_enabled)
+  const strategyName = strategyMap?.[config?.strategy_id]?.name || '未选择策略'
+  const intervalSeconds = Number(config?.eval_interval_seconds) || 3600
+  const intervalLabelMap = {
+    900: '每 15 分钟',
+    1800: '每 30 分钟',
+    3600: '每小时',
+    7200: '每 2 小时',
+    14400: '每 4 小时',
+  }
+  const intervalLabel = intervalLabelMap[intervalSeconds] || `每 ${Math.max(1, Math.round(intervalSeconds / 60))} 分钟`
+
+  return [
+    { label: '状态', value: enabled ? '已开启' : '已关闭' },
+    { label: '策略', value: strategyName },
+    { label: '频率', value: intervalLabel },
+    { label: '推送', value: enabled ? ((webhookConfigured && webhookEnabled) ? '已就绪' : '未就绪') : '未启用' },
+    ...(isDirty ? [{ label: '配置', value: '有未保存修改', tone: 'warning' }] : []),
+  ]
+}
 export function buildSignalConfigPayload(config, enabled = config?.is_enabled) {
   return {
     strategy_id: config?.strategy_id || '',

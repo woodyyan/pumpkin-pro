@@ -6,7 +6,9 @@ import {
   normalizeSignalConfig,
   hasSignalConfigChanged,
   canEnableSignal,
+  buildSignalConfigMeta,
   buildSignalConfigPayload,
+  buildSignalStatusSummary,
   mergeServerSignalConfig,
 } from '../signal-config-ui.js'
 
@@ -134,5 +136,47 @@ describe('mergeServerSignalConfig()', () => {
     const server = makeConfig({ is_enabled: false })
     const draft = makeConfig({ is_enabled: true })
     assert.deepEqual(mergeServerSignalConfig({ serverConfig: server, draftConfig: draft, isDirty: false, isToggling: true }), draft)
+  })
+})
+
+describe('buildSignalStatusSummary()', () => {
+  it('returns stable status copy for enabled, disabled and toggling states', () => {
+    assert.equal(buildSignalStatusSummary({ config: makeConfig({ is_enabled: true }) }), '交易信号已开启')
+    assert.equal(buildSignalStatusSummary({ config: makeConfig({ is_enabled: false }) }), '交易信号已关闭')
+    assert.equal(buildSignalStatusSummary({ config: makeConfig({ is_enabled: false }), isToggling: true, toggleTargetEnabled: true }), '交易信号开启中...')
+  })
+})
+
+describe('buildSignalConfigMeta()', () => {
+  it('builds compact meta rows for folded summary', () => {
+    const meta = buildSignalConfigMeta({
+      config: makeConfig({ is_enabled: true, strategy_id: 'trend', eval_interval_seconds: 1800 }),
+      strategyMap: { trend: { name: '趋势策略' } },
+      webhookConfigured: true,
+      webhookEnabled: true,
+    })
+    assert.deepEqual(meta, [
+      { label: '状态', value: '已开启' },
+      { label: '策略', value: '趋势策略' },
+      { label: '频率', value: '每 30 分钟' },
+      { label: '推送', value: '已就绪' },
+    ])
+  })
+
+  it('marks unsaved changes and missing webhook in summary meta', () => {
+    const meta = buildSignalConfigMeta({
+      config: makeConfig({ is_enabled: true, strategy_id: '' }),
+      strategyMap: {},
+      isDirty: true,
+      webhookConfigured: false,
+      webhookEnabled: false,
+    })
+    assert.deepEqual(meta, [
+      { label: '状态', value: '已开启' },
+      { label: '策略', value: '未选择策略' },
+      { label: '频率', value: '每小时' },
+      { label: '推送', value: '未就绪' },
+      { label: '配置', value: '有未保存修改', tone: 'warning' },
+    ])
   })
 })

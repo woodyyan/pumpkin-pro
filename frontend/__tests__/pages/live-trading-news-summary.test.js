@@ -21,4 +21,10 @@ describe('live trading news summary integration', () => {
     assert.match(pageSource, /buildAINewsContext/)
     assert.match(pageSource, /news_context: newsPayload/)
   })
+
+  it('surfaces news loading state inside the AI wait panel', () => {
+    assert.match(pageSource, /aiNewsContextState/)
+    assert.match(pageSource, /新闻上下文/)
+    assert.match(pageSource, /最近的媒体新闻、公司公告和财报/)
+  })
 })

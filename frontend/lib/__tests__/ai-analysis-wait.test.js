@@ -40,8 +40,25 @@ describe('deriveAIAnalysisWaitState', () => {
     assert.equal(state.stage.key, 'slow')
     assert.equal(state.progress, 92)
     assert.equal(state.steps[4].status, 'done')
-    assert.equal(state.steps[5].status, 'active')
+    assert.equal(state.steps[5].status, 'done')
+    assert.equal(state.steps[6].status, 'active')
   })
+  it('reflects news loading and fallback states in the step list', () => {
+    const loadingState = deriveAIAnalysisWaitState(46, { newsState: 'loading' })
+    const emptyState = deriveAIAnalysisWaitState(46, { newsState: 'empty' })
+    const errorState = deriveAIAnalysisWaitState(46, { newsState: 'error' })
+
+    assert.equal(loadingState.steps[5].label, '新闻与公告')
+    assert.equal(loadingState.steps[5].status, 'active')
+    assert.match(loadingState.steps[5].description, /正在补充最新新闻/)
+
+    assert.equal(emptyState.steps[5].status, 'done')
+    assert.match(emptyState.steps[5].description, /暂无可纳入的高相关新闻/)
+
+    assert.equal(errorState.steps[5].status, 'done')
+    assert.match(errorState.steps[5].description, /新闻暂不可用/)
+  })
+
 
   it('clamps invalid elapsed input to a safe starting state', () => {
     const state = deriveAIAnalysisWaitState(-5)

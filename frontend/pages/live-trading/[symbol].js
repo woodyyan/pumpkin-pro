@@ -145,6 +145,7 @@ export default function LiveTradingDetailPage() {
   const [showAiPanel, setShowAiPanel] = useState(false)
   const [aiWaitStartedAt, setAiWaitStartedAt] = useState(0)
   const [aiWaitElapsedSec, setAiWaitElapsedSec] = useState(0)
+  const [aiNewsContextState, setAiNewsContextState] = useState('idle')
 
   // ── AI 分析历史 ──
   const [analysisHistory, setAnalysisHistory] = useState([])
@@ -192,8 +193,8 @@ export default function LiveTradingDetailPage() {
   const latestAnalysisReference = useMemo(() => (Array.isArray(analysisHistory) && analysisHistory.length > 0 ? analysisHistory[0] : null), [analysisHistory])
   const aiHasPositionContext = Boolean(portfolioData && Number(portfolioData.shares) > 0)
   const aiWaitState = useMemo(
-    () => deriveAIAnalysisWaitState(aiWaitElapsedSec, { hasPosition: aiHasPositionContext }),
-    [aiWaitElapsedSec, aiHasPositionContext]
+    () => deriveAIAnalysisWaitState(aiWaitElapsedSec, { hasPosition: aiHasPositionContext, newsState: aiNewsContextState }),
+    [aiWaitElapsedSec, aiHasPositionContext, aiNewsContextState]
   )
 
   const signalDirty = useMemo(() => hasSignalConfigChanged(serverSignalConfig, draftSignalConfig), [serverSignalConfig, draftSignalConfig])
@@ -544,6 +545,7 @@ export default function LiveTradingDetailPage() {
     setShowAiPanel(true)
     setAiWaitStartedAt(Date.now())
     setAiWaitElapsedSec(0)
+    setAiNewsContextState('loading')
 
     try {
       // Level 1: 行情快照已检查（上面）
@@ -647,8 +649,10 @@ export default function LiveTradingDetailPage() {
           items: newsListData?.items || [],
           maxItems: 6,
         })
+        setAiNewsContextState(newsPayload?._valid ? 'ready' : 'empty')
       } catch (_) {
         newsPayload = { _valid: false }
+        setAiNewsContextState('error')
       }
 
       let portfolioPayload = { has_position: false }
@@ -1408,7 +1412,8 @@ export default function LiveTradingDetailPage() {
             elapsedSec={aiWaitElapsedSec}
             waitState={aiWaitState}
             referenceItem={latestAnalysisReference}
-            onClose={() => { setShowAiPanel(false); setAiResult(null); setAiError('') }}
+            newsState={aiNewsContextState}
+            onClose={() => { setShowAiPanel(false); setAiResult(null); setAiError(''); setAiNewsContextState('idle') }}
             onRetry={handleAIAnalysis}
           />
         )}
@@ -2043,7 +2048,7 @@ export default function LiveTradingDetailPage() {
 
 // ── AI 分析结果面板 ──
 
-function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, referenceItem }) {
+function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, referenceItem, newsState }) {
   const signalToneMap = {
     buy: 'text-red-200 bg-red-500/10 border-red-400/25',
     sell: 'text-emerald-200 bg-emerald-500/10 border-emerald-400/25',
@@ -2064,7 +2069,7 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
             <h3 className="text-base font-semibold text-white">AI 正在分析「{symbolName || symbol || '--'}」</h3>
           </div>
           <p className="mt-2 text-xs leading-6 text-white/50">
-            正在结合实时行情、技术面、基础面和你的持仓信息生成本次判断。
+            正在结合实时行情、技术面、基础面、新闻公告和你的持仓信息生成本次判断。
           </p>
         </div>
         <div className="inline-flex items-center self-start rounded-full border border-indigo-400/25 bg-indigo-500/10 px-3 py-1 text-[11px] font-medium text-indigo-100">
@@ -2179,7 +2184,26 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
         </div>
 
         <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
-          <div className="text-xs font-semibold text-white/70">本次说明</div>
+          <div className="text-xs font-semibold text-white/70">新闻上下文</div>
+          <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.02] px-3.5 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[12px] font-medium text-white/78">新闻与公告</div>
+              <span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[10px] text-white/50">
+                {newsState === 'loading' ? '拉取中' : newsState === 'ready' ? '已纳入' : newsState === 'empty' ? '暂无新增' : newsState === 'error' ? '本次跳过' : '等待中'}
+              </span>
+            </div>
+            <div className="mt-2 text-[12px] leading-6 text-white/58">
+              {newsState === 'loading'
+                ? '正在补充这只股票最近的媒体新闻、公司公告和财报，用来增强本次 AI 判断。'
+                : newsState === 'ready'
+                  ? '本次分析会把最近的媒体新闻、公司公告和财报一起纳入判断。'
+                  : newsState === 'empty'
+                    ? '最近没有足够相关的新闻或公告，本次会按空新闻上下文继续分析。'
+                    : newsState === 'error'
+                      ? '新闻暂时不可用，本次会优先使用行情、技术面和基础面继续分析。'
+                      : '即将开始拉取新闻与公告。'}
+            </div>
+          </div>
           <ul className="mt-3 space-y-2 text-[12px] leading-6 text-white/55">
             <li>• 这一步会比普通接口更慢，因为需要组合多类数据一起判断。</li>
             <li>• 市场波动越大、可用上下文越多，分析耗时通常也会更长。</li>
@@ -2191,7 +2215,7 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
   )
 }
 
-function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolName, elapsedSec, waitState, referenceItem, symbol }) {
+function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolName, elapsedSec, waitState, referenceItem, symbol, newsState }) {
   const [logicExpanded, setLogicExpanded] = useState(true)
 
   if (analyzing) {
@@ -2202,6 +2226,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolNam
         elapsedSec={elapsedSec}
         waitState={waitState}
         referenceItem={referenceItem}
+        newsState={newsState}
       />
     )
   }

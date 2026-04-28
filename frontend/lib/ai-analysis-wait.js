@@ -106,15 +106,24 @@ const AI_ANALYSIS_WAIT_STEP_DEFS = [
     key: 'portfolio',
     label: '持仓上下文',
     startSec: 34,
-    doneSec: 44,
+    doneSec: 42,
     getPendingText: ({ hasPosition }) => hasPosition ? '等待上一阶段' : '如无持仓将按空仓视角评估',
     getActiveText: ({ hasPosition }) => hasPosition ? '正在结合你的持仓盈亏' : '正在按空仓视角评估',
     getDoneText: ({ hasPosition }) => hasPosition ? '已纳入持仓信息' : '已按空仓视角评估',
   },
   {
+    key: 'news',
+    label: '新闻与公告',
+    startSec: 42,
+    doneSec: 50,
+    getPendingText: () => '等待上一阶段',
+    getActiveText: () => '正在补充最新新闻、公告与财报',
+    getDoneText: () => '已纳入新闻上下文',
+  },
+  {
     key: 'conclusion',
     label: 'AI 结论',
-    startSec: 44,
+    startSec: 50,
     doneSec: Number.POSITIVE_INFINITY,
     getPendingText: () => '等待上一阶段',
     getActiveText: () => '正在生成结论与风险提示',
@@ -145,6 +154,7 @@ export function deriveAIAnalysisWaitState(elapsedSec, options = {}) {
   const safeElapsed = clamp(Number.isFinite(Number(elapsedSec)) ? Number(elapsedSec) : 0, 0, 3600)
   const stage = resolveStage(safeElapsed)
   const progress = computeStageProgress(safeElapsed, stage)
+  const newsState = String(options.newsState || '').trim().toLowerCase()
 
   const steps = AI_ANALYSIS_WAIT_STEP_DEFS.map((step) => {
     let status = 'pending'
@@ -160,11 +170,28 @@ export function deriveAIAnalysisWaitState(elapsedSec, options = {}) {
         ? step.getActiveText
         : step.getPendingText
 
+    let description = textGetter({ hasPosition })
+    if (step.key === 'news') {
+      if (newsState === 'loading') {
+        status = 'active'
+        description = '正在补充最新新闻、公告与财报'
+      } else if (newsState === 'ready') {
+        status = 'done'
+        description = '已纳入新闻上下文'
+      } else if (newsState === 'empty') {
+        status = 'done'
+        description = '暂无可纳入的高相关新闻，已按空新闻上下文继续分析'
+      } else if (newsState === 'error') {
+        status = 'done'
+        description = '新闻暂不可用，已按无新闻上下文继续分析'
+      }
+    }
+
     return {
       key: step.key,
       label: step.label,
       status,
-      description: textGetter({ hasPosition }),
+      description,
     }
   })
 

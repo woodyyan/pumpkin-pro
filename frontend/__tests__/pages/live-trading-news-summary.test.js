@@ -11,6 +11,12 @@ describe('live trading news summary integration', () => {
     assert.match(pageSource, /onOpen=\{openNewsPanel\}/)
   })
 
+  it('uses the watch-style CTA copy for opening the full news panel', () => {
+    const cardSource = readFileSync(new URL('../../components/SymbolNewsSummaryCard.js', import.meta.url), 'utf8')
+    assert.match(cardSource, /查看全部 →/)
+    assert.match(cardSource, /border-primary\/40 bg-primary\/10/)
+  })
+
   it('loads summary and panel data through dedicated endpoints', () => {
     assert.match(pageSource, /\/news\/summary/)
     assert.match(pageSource, /\/news\?limit=8/)

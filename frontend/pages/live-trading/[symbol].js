@@ -4,7 +4,10 @@ import { useRouter } from 'next/router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import InfoTip from '../../components/InfoTip'
+import SymbolNewsPanel from '../../components/SymbolNewsPanel'
+import SymbolNewsSummaryCard from '../../components/SymbolNewsSummaryCard'
 import { requestJson } from '../../lib/api'
+import { buildAINewsContext } from '../../lib/symbol-news-ui'
 import { useAuth } from '../../lib/auth-context'
 import { isAuthRequiredError } from '../../lib/auth-storage'
 import { deriveAIAnalysisWaitState } from '../../lib/ai-analysis-wait'
@@ -45,6 +48,8 @@ const POLL_MS = 10000
 const POLL_MS_NON_TRADING = 60000  // non-trading: 1 min fallback (data comes from DB cache)
 const OVERLAY_WINDOW_MINUTES = 60
 const SUPPORT_REFRESH_MS = 60 * 1000
+const NEWS_SUMMARY_REFRESH_MS = 10 * 60 * 1000
+const NEWS_PANEL_REFRESH_MS = 60 * 1000
 const SIGNAL_CENTER_REFRESH_MS = 15 * 1000
 const FUNDAMENTALS_REFRESH_MS = 24 * 60 * 60 * 1000
 const SUPPORT_LOOKBACK_DAYS = 120
@@ -122,6 +127,13 @@ export default function LiveTradingDetailPage() {
   const [signalNotice, setSignalNotice] = useState('')
   const [signalError, setSignalError] = useState('')
   const [signalConfigExpanded, setSignalConfigExpanded] = useState(false)
+  const [newsSummary, setNewsSummary] = useState(null)
+  const [newsItems, setNewsItems] = useState([])
+  const [newsLoading, setNewsLoading] = useState(false)
+  const [newsError, setNewsError] = useState('')
+  const [newsPanelOpen, setNewsPanelOpen] = useState(false)
+  const [newsFilter, setNewsFilter] = useState('all')
+  const [newsUpdatedAt, setNewsUpdatedAt] = useState('')
   const [error, setError] = useState('')
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState('')
@@ -159,6 +171,8 @@ export default function LiveTradingDetailPage() {
   const resistanceRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const movingAverageRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const fundamentalsRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
+  const newsSummaryRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
+  const newsPanelRefreshRef = useRef(0)
   const signalCenterRefreshRef = useRef(0)
   const signalDirtyRef = useRef(false)
   const togglingSignalRef = useRef(false)
@@ -326,6 +340,61 @@ export default function LiveTradingDetailPage() {
     } catch {
       setPortfolioData(null)
     }
+  }
+
+  const loadNewsSummary = async (sym, { force = false } = {}) => {
+    if (!sym) return
+    const now = Date.now()
+    const cache = newsSummaryRefreshRef.current
+    if (!force && cache.symbol === sym && now - cache.refreshedAt < NEWS_SUMMARY_REFRESH_MS) return
+    try {
+      const data = await requestJson(`/api/live/symbols/${encodeURIComponent(sym)}/news/summary`)
+      setNewsSummary(data?.summary || null)
+      setNewsUpdatedAt(data?.updated_at || '')
+      setNewsError('')
+      newsSummaryRefreshRef.current = { symbol: sym, refreshedAt: now }
+    } catch (err) {
+      setNewsError(err.message || '新闻摘要暂不可用')
+      if (force || cache.symbol !== sym) {
+        setNewsSummary(null)
+        setNewsUpdatedAt('')
+      }
+    }
+  }
+
+  const loadNewsItems = async (sym, { type = 'all', force = false } = {}) => {
+    if (!sym) return
+    const now = Date.now()
+    if (!force && now - newsPanelRefreshRef.current < NEWS_PANEL_REFRESH_MS && newsItems.length > 0 && newsFilter === type) return
+    setNewsLoading(true)
+    try {
+      const query = type && type !== 'all' ? `?type=${encodeURIComponent(type)}&limit=24` : '?limit=24'
+      const data = await requestJson(`/api/live/symbols/${encodeURIComponent(sym)}/news${query}`)
+      setNewsSummary(data?.summary || null)
+      setNewsItems(Array.isArray(data?.items) ? data.items : [])
+      setNewsUpdatedAt(data?.updated_at || '')
+      setNewsError('')
+      newsPanelRefreshRef.current = now
+      newsSummaryRefreshRef.current = { symbol: sym, refreshedAt: now }
+    } catch (err) {
+      setNewsError(err.message || '新闻列表暂不可用')
+      if (force) setNewsItems([])
+    } finally {
+      setNewsLoading(false)
+    }
+  }
+
+  const openNewsPanel = () => {
+    setNewsPanelOpen(true)
+    loadNewsItems(symbol, { type: newsFilter, force: true })
+  }
+
+  const closeNewsPanel = () => {
+    setNewsPanelOpen(false)
+  }
+
+  const refreshNewsPanel = () => {
+    loadNewsItems(symbol, { type: newsFilter, force: true })
   }
 
   const loadInvestmentProfile = async () => {
@@ -569,6 +638,19 @@ export default function LiveTradingDetailPage() {
       } catch (_) { /* 大盘降级 */ }
 
       // 持仓（Level 3：可选）
+      let newsPayload = { _valid: false }
+      try {
+        const newsSummaryData = await requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/news/summary`)
+        const newsListData = await requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/news?limit=8`)
+        newsPayload = buildAINewsContext({
+          summary: newsSummaryData?.summary || newsListData?.summary || null,
+          items: newsListData?.items || [],
+          maxItems: 6,
+        })
+      } catch (_) {
+        newsPayload = { _valid: false }
+      }
+
       let portfolioPayload = { has_position: false }
       if (portfolioData && portfolioData.shares > 0) {
         const pnlPct = snapshot?.last_price && portfolioData.avg_cost_price > 0
@@ -608,6 +690,7 @@ export default function LiveTradingDetailPage() {
               fundamentals,
               market_overview: marketOverview,
               portfolio: portfolioPayload,
+              news_context: newsPayload,
             }),
           })
           lastErr = null
@@ -723,6 +806,26 @@ export default function LiveTradingDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, symbol, overlayRange])
 
+  useEffect(() => {
+    if (!ready || !symbol) return undefined
+    const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      loadNewsSummary(symbol)
+    }, NEWS_SUMMARY_REFRESH_MS)
+    return () => clearInterval(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, symbol])
+
+  useEffect(() => {
+    if (!ready || !symbol || !newsPanelOpen) return undefined
+    const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      loadNewsItems(symbol, { type: newsFilter, force: true })
+    }, NEWS_PANEL_REFRESH_MS)
+    return () => clearInterval(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, symbol, newsPanelOpen, newsFilter])
+
   const loadSignalCenter = async ({ force = false } = {}) => {
     const now = Date.now()
     if (!force && now - signalCenterRefreshRef.current < SIGNAL_CENTER_REFRESH_MS) return
@@ -768,6 +871,7 @@ export default function LiveTradingDetailPage() {
           loadSymbolPanels(symbol, { forceSupport: true }),
           loadFundamentals(symbol),
           loadDailyOverlay(symbol, overlayRange),
+          loadNewsSummary(symbol, { force: true }),
         ])
         updateError('')
       } catch (err) {
@@ -809,6 +913,14 @@ export default function LiveTradingDetailPage() {
     setPortfolioDangerMenu(createPortfolioDangerMenuState())
     setSignalConfigExpanded(false)
     setPriceAutoFilled(false)
+    setNewsPanelOpen(false)
+    setNewsFilter('all')
+    setNewsItems([])
+    setNewsSummary(null)
+    setNewsError('')
+    setNewsUpdatedAt('')
+    newsSummaryRefreshRef.current = { symbol: '', refreshedAt: 0 }
+    newsPanelRefreshRef.current = 0
   }, [symbol, authIdentityKey, exchange])
 
   useEffect(() => {
@@ -1261,6 +1373,14 @@ export default function LiveTradingDetailPage() {
             </div>
           )}
         </section>
+
+        <SymbolNewsSummaryCard
+          summary={newsSummary}
+          updatedAt={newsUpdatedAt}
+          loading={newsLoading && newsPanelOpen}
+          error={newsError && !newsPanelOpen ? newsError : ''}
+          onOpen={openNewsPanel}
+        />
 
         {error ? (
           <div className="rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
@@ -1901,6 +2021,22 @@ export default function LiveTradingDetailPage() {
           <BlockFlowChart events={blockFlowEvents} />
         </section>
       </div>
+
+      <SymbolNewsPanel
+        open={newsPanelOpen}
+        items={newsItems}
+        summary={newsSummary}
+        activeType={newsFilter}
+        loading={newsLoading}
+        error={newsPanelOpen ? newsError : ''}
+        updatedAt={newsUpdatedAt}
+        onClose={closeNewsPanel}
+        onRefresh={refreshNewsPanel}
+        onTypeChange={(nextType) => {
+          setNewsFilter(nextType)
+          loadNewsItems(symbol, { type: nextType, force: true })
+        }}
+      />
     </>
   )
 }

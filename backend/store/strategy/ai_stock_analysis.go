@@ -23,6 +23,7 @@ type StockAnalysisInput struct {
 	Fundamentals   map[string]any `json:"fundamentals"`
 	MarketOverview map[string]any `json:"market_overview"`
 	Portfolio      map[string]any `json:"portfolio"`
+	NewsContext    map[string]any `json:"news_context"`
 }
 
 // StockAnalysisOutput LLM 返回的结构化分析结果
@@ -478,6 +479,57 @@ func buildStockUserPrompt(input *StockAnalysisInput, profile *portfolio.Investme
 		sb.WriteString("\n## 市场环境\n⚠️ 大盘指数数据暂不可用，请仅从个股维度分析。\n")
 	}
 
+	// 新闻上下文
+	newsValid := boolField(input.NewsContext, "_valid")
+	if newsValid {
+		sb.WriteString("\n## 新闻与公告\n")
+		if summary, ok := input.NewsContext["summary"].(map[string]any); ok {
+			fmt.Fprintf(&sb, "- 近24小时新闻：%.0f 条\n", asFloat(summary["last_24h_count"]))
+			fmt.Fprintf(&sb, "- 公告数量：%.0f 条\n", asFloat(summary["announcement_count"]))
+			fmt.Fprintf(&sb, "- 财报数量：%.0f 条\n", asFloat(summary["filing_count"]))
+			if headline, _ := summary["latest_headline"].(string); strings.TrimSpace(headline) != "" {
+				fmt.Fprintf(&sb, "- 最新重点：%s\n", headline)
+			}
+			if tags, ok := summary["highlight_tags"].([]any); ok && len(tags) > 0 {
+				parts := make([]string, 0, len(tags))
+				for _, item := range tags {
+					if text := strings.TrimSpace(anyToString(item)); text != "" {
+						parts = append(parts, text)
+					}
+				}
+				if len(parts) > 0 {
+					fmt.Fprintf(&sb, "- 事件标签：%s\n", strings.Join(parts, "、"))
+				}
+			}
+		}
+		if items, ok := input.NewsContext["items"].([]any); ok && len(items) > 0 {
+			limit := len(items)
+			if limit > 6 {
+				limit = 6
+			}
+			for i := 0; i < limit; i++ {
+				row, ok := items[i].(map[string]any)
+				if !ok {
+					continue
+				}
+				title, _ := row["title"].(string)
+				if strings.TrimSpace(title) == "" {
+					continue
+				}
+				itemType, _ := row["type"].(string)
+				source, _ := row["source"].(string)
+				publishedAt, _ := row["published_at"].(string)
+				summaryText, _ := row["summary"].(string)
+				fmt.Fprintf(&sb, "- [%s] %s | %s | %s\n", firstNonEmptyString(itemType, "news"), title, firstNonEmptyString(source, "未知来源"), firstNonEmptyString(publishedAt, "时间未知"))
+				if strings.TrimSpace(summaryText) != "" {
+					fmt.Fprintf(&sb, "  摘要：%s\n", summaryText)
+				}
+			}
+		}
+	} else {
+		sb.WriteString("\n## 新闻与公告\n- 最近新闻与公告数据暂不可用，请避免对短期事件驱动做过度判断。\n")
+	}
+
 	// 用户持仓状态
 	hasPos := boolField(input.Portfolio, "has_position")
 	if hasPos {
@@ -660,6 +712,11 @@ func buildDataCompleteness(input *StockAnalysisInput, profile *portfolio.Investm
 	} else {
 		c["market_overview"] = "missing"
 	}
+	if boolField(input.NewsContext, "_valid") {
+		c["news_context"] = "complete"
+	} else {
+		c["news_context"] = "missing"
+	}
 	if boolField(input.Portfolio, "has_position") {
 		c["portfolio"] = "has_position"
 	} else {
@@ -674,6 +731,25 @@ func buildDataCompleteness(input *StockAnalysisInput, profile *portfolio.Investm
 }
 
 // ── helpers ──
+
+func anyToString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return strings.TrimSpace(fmt.Sprintf("%v", value))
+	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		text := strings.TrimSpace(value)
+		if text != "" {
+			return text
+		}
+	}
+	return ""
+}
 
 func boolField(m map[string]any, key string) bool {
 	if m == nil {

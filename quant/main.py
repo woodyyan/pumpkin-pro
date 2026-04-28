@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from config import EXECUTION_PRICE
 from data.data_loader import DataLoader, generate_sample_data
 from data.fundamentals import get_symbol_fundamentals
+from data.news import get_symbol_news
 from data.scripts.akshare_loader import fetch_stock_data, resolve_stock_name_with_debug
 from engine.backtest_engine import BacktestEngine
 from result.metrics import PerformanceMetrics
@@ -170,6 +171,19 @@ def get_fundamentals(symbol: str):
     except Exception as exc:
         logger.exception("基础面接口异常 symbol=%s", symbol)
         raise HTTPException(status_code=500, detail=f"基础面加载失败: {exc}") from exc
+
+
+@app.get("/api/news/{symbol}")
+def get_symbol_news_endpoint(symbol: str):
+    try:
+        return get_symbol_news(symbol)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("新闻接口异常 symbol=%s", symbol)
+        raise HTTPException(status_code=500, detail=f"新闻加载失败: {exc}") from exc
 
 
 @app.get("/api/backtest/options")

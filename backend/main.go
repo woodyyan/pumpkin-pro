@@ -119,6 +119,7 @@ type appServer struct {
 	fundCacheRepo       *fundcache.Repository
 	analysisHistoryRepo *analysis_history.Repository
 	portfolioRiskRepo   *portfolio.RiskRepository
+	newsService         *live.NewsService
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -1434,6 +1435,30 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 		a.handleStockAIAnalysis(w, r, symbol)
 	case "analysis-history":
 		a.handleAnalysisHistorySubroutes(w, r, symbol)
+	case "news":
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+			return
+		}
+		newsType := strings.TrimSpace(r.URL.Query().Get("type"))
+		limit := parseLimit(r.URL.Query().Get("limit"), 20)
+		payload, err := a.newsService.GetSymbolNews(r.Context(), symbol, live.StockNewsListOptions{Type: newsType, Limit: limit})
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, payload)
+	case "news/summary":
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+			return
+		}
+		payload, err := a.newsService.GetSymbolNewsSummary(r.Context(), symbol)
+		if err != nil {
+			a.writeLiveError(w, err)
+			return
+		}
+		writeLiveJSON(w, http.StatusOK, payload)
 	default:
 		http.NotFound(w, r)
 	}
@@ -3144,6 +3169,7 @@ func main() {
 	feedbackRepo := feedback.NewRepository(storeInstance.DB)
 	fundCacheRepo := fundcache.NewRepository(storeInstance.DB)
 	analysisHistoryRepo := analysis_history.NewRepository(storeInstance.DB)
+	newsService := live.NewNewsService(liveRepo, cfg.QuantServiceURL)
 
 	server := &appServer{
 		cfg:                 cfg,
@@ -3164,6 +3190,7 @@ func main() {
 		fundCacheRepo:       fundCacheRepo,
 		analysisHistoryRepo: analysisHistoryRepo,
 		portfolioRiskRepo:   portfolioRiskRepo,
+		newsService:         newsService,
 	}
 
 	mux := http.NewServeMux()

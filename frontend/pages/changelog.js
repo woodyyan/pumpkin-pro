@@ -23,13 +23,11 @@ function buildMetaCards(items) {
     {
       label: '最近更新时间',
       value: formatDisplayDate(items[0]?.date || changelogData.last_updated),
-      hint: '以最近一条公开更新为准',
       tone: 'text-white',
     },
     {
-      label: '公开更新条数',
+      label: '更新日志条数',
       value: `${items.length} 条`,
-      hint: '仅统计默认对外可见的记录',
       tone: 'text-primary',
     },
   ]
@@ -94,7 +92,7 @@ export default function ChangelogPage() {
               产品更新日志
             </h1>
             <p className="mt-5 max-w-2xl text-sm leading-7 text-white/68 md:text-base">
-              这里记录卧龙AI量化交易台近期的功能更新，如果你有什么想要的功能都可以告诉我们。
+              如果你有什么想要的功能可以在设置页面提交反馈告诉我们
             </p>
           </div>
 
@@ -103,7 +101,7 @@ export default function ChangelogPage() {
               <div key={card.label} className="rounded-[24px] border border-white/10 bg-black/25 px-5 py-5 backdrop-blur-sm">
                 <div className="text-[11px] uppercase tracking-[0.22em] text-white/40">{card.label}</div>
                 <div className={`mt-3 text-2xl font-semibold ${card.tone}`}>{card.value}</div>
-                <div className="mt-2 text-xs leading-6 text-white/42">{card.hint}</div>
+                {card.hint ? <div className="mt-2 text-xs leading-6 text-white/42">{card.hint}</div> : null}
               </div>
             ))}
           </div>
@@ -114,7 +112,6 @@ export default function ChangelogPage() {
         <div className="flex flex-col gap-4 border-b border-white/8 pb-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-white">最近更新</h2>
-            <p className="mt-1 text-sm text-white/52">支持按类型筛选，默认只展示对外公开的产品更新。</p>
           </div>
 
           <div className="flex flex-wrap gap-2">

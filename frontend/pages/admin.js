@@ -167,6 +167,340 @@ function formatUserDisplay(user) {
   return '--'
 }
 
+const AI_CONFIG_SOURCE_LABELS = {
+  admin: '后台配置',
+  env: '环境变量',
+  none: '未配置',
+}
+
+const AI_CONFIG_STATUS_META = {
+  available: {
+    label: '可用',
+    badgeClassName: 'border-emerald-400/25 bg-emerald-500/12 text-emerald-200',
+  },
+  invalid_auth: {
+    label: '鉴权失败',
+    badgeClassName: 'border-rose-400/25 bg-rose-500/12 text-rose-200',
+  },
+  invalid_model: {
+    label: '模型不可用',
+    badgeClassName: 'border-amber-400/25 bg-amber-500/12 text-amber-100',
+  },
+  timeout: {
+    label: '请求超时',
+    badgeClassName: 'border-amber-400/25 bg-amber-500/12 text-amber-100',
+  },
+  network_error: {
+    label: '网络异常',
+    badgeClassName: 'border-amber-400/25 bg-amber-500/12 text-amber-100',
+  },
+  provider_error: {
+    label: '服务异常',
+    badgeClassName: 'border-white/15 bg-white/7 text-white/75',
+  },
+  disabled: {
+    label: '已禁用',
+    badgeClassName: 'border-white/12 bg-white/6 text-white/55',
+  },
+  unknown: {
+    label: '未测试',
+    badgeClassName: 'border-sky-400/20 bg-sky-500/10 text-sky-100',
+  },
+  unconfigured: {
+    label: '未配置',
+    badgeClassName: 'border-white/12 bg-white/6 text-white/55',
+  },
+}
+
+function createAIConfigDraft(view) {
+  return {
+    base_url: view?.config?.base_url || '',
+    model_id: view?.config?.model_id || '',
+    api_key: '',
+    is_enabled: Boolean(view?.config?.is_enabled),
+  }
+}
+
+function getAIConfigStatusMeta(status) {
+  return AI_CONFIG_STATUS_META[status] || AI_CONFIG_STATUS_META.unknown
+}
+
+function formatAdminDateTime(value) {
+  if (!value) return '--'
+  try {
+    return new Date(value).toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return '--'
+  }
+}
+
+function AIConfigMetric({ label, value, sub }) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-[#171a21] px-4 py-3">
+      <div className="text-[11px] text-white/40">{label}</div>
+      <div className="mt-1 text-sm font-semibold text-white">{value || '--'}</div>
+      {sub ? <div className="mt-1 text-[11px] text-white/35">{sub}</div> : null}
+    </div>
+  )
+}
+
+function AIProviderConfigPanel({ onUnauthorized }) {
+  const [view, setView] = useState(null)
+  const [draft, setDraft] = useState(() => createAIConfigDraft(null))
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [banner, setBanner] = useState(null)
+  const [testResult, setTestResult] = useState(null)
+  const initializedRef = useRef(false)
+
+  const handleUnauthorized = useCallback(() => {
+    writeAdminSession(null)
+    onUnauthorized?.()
+  }, [onUnauthorized])
+
+  const loadConfig = useCallback(async ({ resetDraft = false } = {}) => {
+    try {
+      const data = await adminFetch('/api/admin/ai-config')
+      setView(data)
+      if (resetDraft || !initializedRef.current) {
+        setDraft(createAIConfigDraft(data))
+        initializedRef.current = true
+      }
+      if (resetDraft) {
+        setBanner(null)
+        setTestResult(null)
+      }
+    } catch (err) {
+      if (err.status === 401) {
+        handleUnauthorized()
+        return
+      }
+      setBanner({ tone: 'error', text: err.message || '加载 AI 配置失败' })
+    } finally {
+      setLoading(false)
+    }
+  }, [handleUnauthorized])
+
+  useEffect(() => {
+    loadConfig({ resetDraft: true })
+  }, [loadConfig])
+
+  const health = testResult || view?.health
+  const healthMeta = getAIConfigStatusMeta(health?.status)
+  const sourceLabel = AI_CONFIG_SOURCE_LABELS[view?.effective?.source] || AI_CONFIG_SOURCE_LABELS.none
+
+  const updateDraft = (key, value) => {
+    setDraft((current) => ({ ...current, [key]: value }))
+  }
+
+  const restoreSaved = () => {
+    setDraft(createAIConfigDraft(view))
+    setBanner(null)
+    setTestResult(null)
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setBanner(null)
+    try {
+      const data = await adminFetch('/api/admin/ai-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          base_url: draft.base_url.trim(),
+          model_id: draft.model_id.trim(),
+          api_key: draft.api_key,
+          is_enabled: draft.is_enabled,
+        }),
+      })
+      setView(data)
+      setDraft(createAIConfigDraft(data))
+      setTestResult(null)
+      setBanner({ tone: 'success', text: 'AI 配置已保存' })
+    } catch (err) {
+      if (err.status === 401) {
+        handleUnauthorized()
+        return
+      }
+      setBanner({ tone: 'error', text: err.message || '保存 AI 配置失败' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleTest = async () => {
+    setTesting(true)
+    setBanner(null)
+    try {
+      const matchesSaved =
+        draft.base_url.trim() === (view?.config?.base_url || '').trim() &&
+        draft.model_id.trim() === (view?.config?.model_id || '').trim() &&
+        draft.is_enabled === Boolean(view?.config?.is_enabled) &&
+        !draft.api_key.trim()
+
+      const init = {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }
+      if (!matchesSaved) {
+        init.body = JSON.stringify({
+          base_url: draft.base_url.trim(),
+          model_id: draft.model_id.trim(),
+          api_key: draft.api_key,
+          is_enabled: draft.is_enabled,
+        })
+      }
+
+      const result = await adminFetch('/api/admin/ai-config/test', init)
+      setTestResult(result)
+      setBanner({
+        tone: result?.status === 'available' ? 'success' : 'info',
+        text: result?.message || '测试完成',
+      })
+    } catch (err) {
+      if (err.status === 401) {
+        handleUnauthorized()
+        return
+      }
+      setBanner({ tone: 'error', text: err.message || '测试连接失败' })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  if (loading && !view) {
+    return (
+      <section className="rounded-2xl border border-white/8 bg-[#111318] p-5">
+        <div className="text-sm text-white/40">加载 AI 配置中…</div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="rounded-2xl border border-white/8 bg-[#111318] p-4 sm:p-5">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-white/85">🤖 AI 模型配置</h2>
+          <p className="mt-1 text-xs text-white/35">当前系统仅支持 OpenAI-compatible Chat Completions 接口</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:min-w-[520px]">
+          <AIConfigMetric label="当前生效" value={sourceLabel} sub={view?.effective?.configured ? '运行中' : '待配置'} />
+          <AIConfigMetric label="当前状态" value={healthMeta.label} sub={health?.message || '--'} />
+          <AIConfigMetric label="最近延迟" value={health?.latency_ms ? `${health.latency_ms}ms` : '--'} sub="测试连接结果" />
+          <AIConfigMetric label="最近测试" value={formatAdminDateTime(health?.checked_at)} sub={view?.effective?.model_id || '--'} />
+        </div>
+      </div>
+
+      {banner ? (
+        <div
+          className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${
+            banner.tone === 'success'
+              ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-100'
+              : banner.tone === 'error'
+                ? 'border-rose-400/20 bg-rose-500/10 text-rose-100'
+                : 'border-sky-400/20 bg-sky-500/10 text-sky-100'
+          }`}
+        >
+          {banner.text}
+        </div>
+      ) : null}
+
+      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div>
+          <label className="mb-1.5 block text-xs text-white/45">Base URL</label>
+          <input
+            type="text"
+            value={draft.base_url}
+            onChange={(e) => updateDraft('base_url', e.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-[#171a21] px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400/60 focus:bg-[#1b1f28]"
+            placeholder="https://api.openai.com/v1"
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-xs text-white/45">Model ID</label>
+          <input
+            type="text"
+            value={draft.model_id}
+            onChange={(e) => updateDraft('model_id', e.target.value)}
+            className="w-full rounded-2xl border border-white/10 bg-[#171a21] px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400/60 focus:bg-[#1b1f28]"
+            placeholder="gpt-4o-mini"
+          />
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <label className="mb-1.5 block text-xs text-white/45">API Key</label>
+        <input
+          type="password"
+          value={draft.api_key}
+          onChange={(e) => updateDraft('api_key', e.target.value)}
+          className="w-full rounded-2xl border border-white/10 bg-[#171a21] px-4 py-3 text-sm text-white outline-none transition focus:border-amber-400/60 focus:bg-[#1b1f28]"
+          placeholder="留空表示保持当前 key"
+        />
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-white/35">
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
+            {view?.config?.has_api_key ? `已保存：${view.config.api_key_mask || '已保存'}` : '暂未保存后台 key'}
+          </span>
+          <span>只有更换 key 时才需要重新输入</span>
+        </div>
+      </div>
+
+      <label className="mt-4 flex items-start gap-3 rounded-2xl border border-white/8 bg-[#171a21] px-4 py-3">
+        <input
+          type="checkbox"
+          checked={draft.is_enabled}
+          onChange={(e) => updateDraft('is_enabled', e.target.checked)}
+          className="mt-0.5 h-4 w-4 rounded border-white/20 bg-transparent text-amber-400 focus:ring-amber-400"
+        />
+        <div>
+          <div className="text-sm font-medium text-white">启用后台配置</div>
+          <div className="mt-1 text-xs text-white/35">启用后将优先使用这里保存的模型参数；关闭后自动回退到环境变量。</div>
+        </div>
+      </label>
+
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <button
+          type="button"
+          onClick={handleTest}
+          disabled={testing}
+          className="rounded-2xl border border-sky-400/25 bg-sky-500/10 px-4 py-3 text-sm font-medium text-sky-100 transition hover:bg-sky-500/16 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {testing ? '测试中…' : '测试连接'}
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-2xl border border-amber-400/30 bg-amber-500/12 px-4 py-3 text-sm font-medium text-amber-100 transition hover:bg-amber-500/18 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {saving ? '保存中…' : '保存配置'}
+        </button>
+        <button
+          type="button"
+          onClick={restoreSaved}
+          className="rounded-2xl border border-white/12 bg-white/[0.04] px-4 py-3 text-sm font-medium text-white/72 transition hover:bg-white/[0.08]"
+        >
+          恢复已保存值
+        </button>
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center gap-2 text-xs">
+        <span className={`rounded-full border px-2.5 py-1 ${healthMeta.badgeClassName}`}>
+          {healthMeta.label}
+        </span>
+        <span className="text-white/42">当前生效模型：{view?.effective?.model_id || '--'}</span>
+        <span className="text-white/28">base URL：{view?.effective?.base_url || '--'}</span>
+      </div>
+    </section>
+  )
+}
+
 // ── Dashboard ──
 
 function AdminDashboard({ session, onLogout }) {
@@ -481,7 +815,10 @@ function AdminDashboard({ session, onLogout }) {
             {/* Panel 14: 数据备份 */}
             <BackupPanel />
 
-            {/* Panel 11: AI 调用统计 */}
+            {/* Panel 11: AI 模型配置 */}
+            <AIProviderConfigPanel onUnauthorized={onLogout} />
+
+            {/* Panel 12: AI 调用统计 */}
             {stats.ai && (
               <section>
                 <h2 className="text-base font-semibold text-white/80 mb-3">🤖 AI 调用统计</h2>

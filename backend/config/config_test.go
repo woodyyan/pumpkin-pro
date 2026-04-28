@@ -13,7 +13,7 @@ func TestLoadDefaults(t *testing.T) {
 		"DB_TYPE", "DB_PATH", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_SSLMODE",
 		"ADMIN_SEED_EMAIL", "ADMIN_SEED_PASSWORD",
 		"AUTH_JWT_SECRET", "AUTH_ACCESS_TOKEN_TTL_MINUTES", "AUTH_REFRESH_TOKEN_TTL_HOURS",
-		"AI_API_KEY", "AI_BASE_URL", "AI_MODEL",
+		"AI_API_KEY", "AI_BASE_URL", "AI_MODEL", "AI_CONFIG_CIPHER_KEY",
 	} {
 		os.Unsetenv(key)
 	}
@@ -72,13 +72,16 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AI.Model != "gpt-4o-mini" {
 		t.Errorf("expected AI.Model gpt-4o-mini, got %s", cfg.AI.Model)
 	}
+	if cfg.AI.CipherKey != "" {
+		t.Errorf("expected empty AI.CipherKey by default, got %q", cfg.AI.CipherKey)
+	}
 }
 
 func TestEnvOverride(t *testing.T) {
 	tests := []struct {
-		key       string
-		value     string
-		validate  func(Config) bool
+		key      string
+		value    string
+		validate func(Config) bool
 	}{
 		{"PORT", "9090", func(c Config) bool { return c.Port == "9090" }},
 		{"QUANT_SERVICE_URL", "http://quant:9000/", func(c Config) bool { return c.QuantServiceURL == "http://quant:9000" }},
@@ -86,6 +89,7 @@ func TestEnvOverride(t *testing.T) {
 		{"DB_PORT", "5433", func(c Config) bool { return c.DB.Port == 5433 }},
 		{"AUTH_JWT_SECRET", "my-super-secret", func(c Config) bool { return c.Auth.JWTSecret == "my-super-secret" }},
 		{"AI_MODEL", "gpt-4o", func(c Config) bool { return c.AI.Model == "gpt-4o" }},
+		{"AI_CONFIG_CIPHER_KEY", "12345678901234567890123456789012", func(c Config) bool { return c.AI.CipherKey == "12345678901234567890123456789012" }},
 	}
 
 	for _, tt := range tests {

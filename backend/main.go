@@ -198,6 +198,48 @@ func currentUserID(r *http.Request) string {
 	return user.UserID
 }
 
+func (a *appServer) resolveRuntimeAIConfig(ctx context.Context) (*admin.ResolvedAIConfig, error) {
+	if a.adminService == nil {
+		baseURL := strings.TrimSpace(a.cfg.AI.BaseURL)
+		modelID := strings.TrimSpace(a.cfg.AI.Model)
+		apiKey := strings.TrimSpace(a.cfg.AI.APIKey)
+		configured := baseURL != "" && modelID != "" && apiKey != ""
+		return &admin.ResolvedAIConfig{
+			Source:     "env",
+			BaseURL:    baseURL,
+			ModelID:    modelID,
+			APIKey:     apiKey,
+			Enabled:    configured,
+			Configured: configured,
+		}, nil
+	}
+	return a.adminService.ResolveRuntimeAIConfig(ctx)
+}
+
+func (a *appServer) resolveStrategyAIConfig(ctx context.Context) (strategy.AIConfig, error) {
+	resolved, err := a.resolveRuntimeAIConfig(ctx)
+	if err != nil {
+		return strategy.AIConfig{}, err
+	}
+	return strategy.AIConfig{
+		APIKey:  resolved.APIKey,
+		BaseURL: resolved.BaseURL,
+		Model:   resolved.ModelID,
+	}, nil
+}
+
+func (a *appServer) resolveScreenerAIConfig(ctx context.Context) (screener.AIConfig, error) {
+	resolved, err := a.resolveRuntimeAIConfig(ctx)
+	if err != nil {
+		return screener.AIConfig{}, err
+	}
+	return screener.AIConfig{
+		APIKey:  resolved.APIKey,
+		BaseURL: resolved.BaseURL,
+		Model:   resolved.ModelID,
+	}, nil
+}
+
 func normalizePortfolioRiskScope(raw string) (string, error) {
 	scope := strings.ToUpper(strings.TrimSpace(raw))
 	switch scope {
@@ -675,10 +717,11 @@ func (a *appServer) handleStrategyAIGenerate(w http.ResponseWriter, r *http.Requ
 		MAStatus:        maPayload.Status,
 	}
 
-	aiCfg := strategy.AIConfig{
-		APIKey:  a.cfg.AI.APIKey,
-		BaseURL: a.cfg.AI.BaseURL,
-		Model:   a.cfg.AI.Model,
+	aiCfg, err := a.resolveStrategyAIConfig(r.Context())
+	if err != nil {
+		log.Printf("[ai-generate] resolve runtime config failed: %v", err)
+		writeError(w, http.StatusInternalServerError, "AI 配置读取失败，请联系管理员检查")
+		return
 	}
 
 	result, err := strategy.GenerateStrategy(r.Context(), aiCfg, userID, summary)
@@ -737,10 +780,11 @@ func (a *appServer) handleStrategyAIBacktest(w http.ResponseWriter, r *http.Requ
 	// 回测 API 要求纯数字 ticker
 	backtestTicker := stripSymbolSuffix(symbol)
 
-	aiCfg := strategy.AIConfig{
-		APIKey:  a.cfg.AI.APIKey,
-		BaseURL: a.cfg.AI.BaseURL,
-		Model:   a.cfg.AI.Model,
+	aiCfg, err := a.resolveStrategyAIConfig(r.Context())
+	if err != nil {
+		log.Printf("[ai-backtest] resolve runtime config failed: %v", err)
+		writeError(w, http.StatusInternalServerError, "AI 配置读取失败，请联系管理员检查")
+		return
 	}
 
 	// 获取市场摘要（用于迭代 Prompt）
@@ -866,10 +910,11 @@ func (a *appServer) handleBacktestAIOptimize(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	aiCfg := strategy.AIConfig{
-		APIKey:  a.cfg.AI.APIKey,
-		BaseURL: a.cfg.AI.BaseURL,
-		Model:   a.cfg.AI.Model,
+	aiCfg, err := a.resolveStrategyAIConfig(r.Context())
+	if err != nil {
+		log.Printf("[ai-optimize] resolve runtime config failed: %v", err)
+		writeError(w, http.StatusInternalServerError, "AI 配置读取失败，请联系管理员检查")
+		return
 	}
 
 	analysis, err := strategy.AnalyzeBacktest(r.Context(), aiCfg, userID, input)
@@ -1653,10 +1698,11 @@ func (a *appServer) handleStockAIAnalysis(w http.ResponseWriter, r *http.Request
 	}
 
 	// 构建 AI 配置
-	cfg := strategy.AIConfig{
-		APIKey:  a.cfg.AI.APIKey,
-		BaseURL: a.cfg.AI.BaseURL,
-		Model:   a.cfg.AI.Model,
+	cfg, err := a.resolveStrategyAIConfig(r.Context())
+	if err != nil {
+		log.Printf("[stock-ai] resolve runtime config failed for %s: %v", symbol, err)
+		writeError(w, http.StatusInternalServerError, "AI 配置读取失败，请联系管理员检查")
+		return
 	}
 
 	// 调用 AI 分析
@@ -2272,10 +2318,11 @@ func (a *appServer) handleScreenerAIParse(w http.ResponseWriter, r *http.Request
 		exchange = "ASHARE"
 	}
 
-	aiCfg := screener.AIConfig{
-		APIKey:  a.cfg.AI.APIKey,
-		BaseURL: a.cfg.AI.BaseURL,
-		Model:   a.cfg.AI.Model,
+	aiCfg, err := a.resolveScreenerAIConfig(r.Context())
+	if err != nil {
+		log.Printf("[screener-ai] resolve runtime config failed: %v", err)
+		writeError(w, http.StatusInternalServerError, "AI 配置读取失败，请联系管理员检查")
+		return
 	}
 
 	result, err := screener.ParseNaturalLanguage(r.Context(), aiCfg, userID, query, exchange)
@@ -3154,6 +3201,7 @@ func main() {
 	adminService := admin.NewService(adminRepo, admin.ServiceConfig{
 		JWTSecret: strings.TrimSpace(cfg.Auth.JWTSecret),
 		AccessTTL: 2 * time.Hour,
+		EnvAI:     cfg.AI,
 	})
 	if err := adminService.SeedAdmin(context.Background(), cfg.AdminSeed.Email, cfg.AdminSeed.Password); err != nil {
 		log.Printf("Admin seed skipped: %v", err)
@@ -3250,6 +3298,8 @@ func main() {
 	mux.HandleFunc("/api/admin/system-health/logs", server.withSuperAdminAuth(server.handleAdminSystemHealthLogs))
 	mux.HandleFunc("/api/admin/system-health/purge", server.withSuperAdminAuth(server.handleAdminSystemHealthPurge))
 	mux.HandleFunc("/api/admin/user-funnel", server.withSuperAdminAuth(server.handleAdminUserFunnel))
+	mux.HandleFunc("/api/admin/ai-config", server.withSuperAdminAuth(server.handleAdminAIConfig))
+	mux.HandleFunc("/api/admin/ai-config/test", server.withSuperAdminAuth(server.handleAdminAIConfigTest))
 	mux.HandleFunc("/api/admin/ai-usage", server.withSuperAdminAuth(server.handleAdminAITokenUsage))
 
 	mux.HandleFunc("/api/analytics/pageview", server.withOptionalAuth(server.handlePageView))

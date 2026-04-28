@@ -12,17 +12,20 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/woodyyan/pumpkin-pro/backend/config"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type ServiceConfig struct {
 	JWTSecret string
 	AccessTTL time.Duration
+	EnvAI     config.AIConfig
 }
 
 type Service struct {
-	repo *Repository
-	cfg  ServiceConfig
+	repo     *Repository
+	cfg      ServiceConfig
+	aiTester aiProviderTester
 }
 
 func NewService(repo *Repository, cfg ServiceConfig) *Service {

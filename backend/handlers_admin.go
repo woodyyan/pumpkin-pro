@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -82,6 +85,80 @@ func (a *appServer) handleAdminUserFunnel(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, stats)
+}
+
+// handleAdminAIConfig manages AI provider settings for the admin panel.
+// GET /api/admin/ai-config
+// PUT /api/admin/ai-config
+func (a *appServer) handleAdminAIConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		view, err := a.adminService.GetAIProviderConfigView(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "获取 AI 配置失败")
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
+	case http.MethodPut:
+		var input admin.SaveAIProviderConfigInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, http.StatusBadRequest, "AI 配置请求格式错误")
+			return
+		}
+		view, err := a.adminService.SaveAIProviderConfig(r.Context(), input)
+		if err != nil {
+			if errors.Is(err, admin.ErrAIConfigInvalid) {
+				writeError(w, http.StatusBadRequest, "请检查 base URL、模型和 API Key 配置")
+				return
+			}
+			if errors.Is(err, admin.ErrAIConfigCipherKeyUnset) {
+				writeError(w, http.StatusInternalServerError, "服务器未配置 AI 配置加密密钥，暂时无法保存后台 AI 配置")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "保存 AI 配置失败")
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Only GET and PUT methods are allowed")
+	}
+}
+
+// handleAdminAIConfigTest validates a saved or draft AI provider config.
+// POST /api/admin/ai-config/test
+func (a *appServer) handleAdminAIConfigTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "读取 AI 测试请求失败")
+		return
+	}
+	var input *admin.TestAIProviderConfigInput
+	if len(bytes.TrimSpace(body)) > 0 {
+		var decoded admin.TestAIProviderConfigInput
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			writeError(w, http.StatusBadRequest, "AI 测试请求格式错误")
+			return
+		}
+		input = &decoded
+	}
+	result, err := a.adminService.TestAIProviderConfig(r.Context(), input)
+	if err != nil {
+		if errors.Is(err, admin.ErrAIConfigInvalid) {
+			writeError(w, http.StatusBadRequest, "请检查 base URL、模型和 API Key 配置")
+			return
+		}
+		if errors.Is(err, admin.ErrAIConfigCipherKeyUnset) {
+			writeError(w, http.StatusInternalServerError, "服务器未配置 AI 配置加密密钥，暂时无法读取已保存的后台 AI 配置")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "AI 测试连接失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // handleAdminAITokenUsage returns per-day per-user AI token usage details.

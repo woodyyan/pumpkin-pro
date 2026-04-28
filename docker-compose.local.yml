@@ -48,6 +48,7 @@ services:
       - AI_API_KEY=${AI_API_KEY:-}
       - AI_BASE_URL=${AI_BASE_URL:-https://api.openai.com/v1}
       - AI_MODEL=${AI_MODEL:-gpt-4o-mini}
+      - AI_CONFIG_CIPHER_KEY=${AI_CONFIG_CIPHER_KEY:-}
       - COS_BUCKET=${COS_BUCKET:-}
       - COS_REGION=${COS_REGION:-}
       - COS_BACKUP_PREFIX=${COS_BACKUP_PREFIX:-pumpkin-pro-backups/}

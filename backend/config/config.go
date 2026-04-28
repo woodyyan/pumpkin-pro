@@ -35,9 +35,10 @@ type BackupConfig struct {
 }
 
 type AIConfig struct {
-	APIKey  string
-	BaseURL string
-	Model   string
+	APIKey    string
+	BaseURL   string
+	Model     string
+	CipherKey string
 }
 
 type AdminSeedConfig struct {
@@ -67,7 +68,7 @@ func Load() Config {
 		Port:               getEnv("PORT", "8080"),
 		QuantServiceURL:    trimTrailingSlash(getEnv("QUANT_SERVICE_URL", "http://localhost:8000")),
 		BackendCallbackURL: trimTrailingSlash(getEnv("BACKEND_CALLBACK_URL", fmt.Sprintf("http://localhost:%s", getEnv("PORT", "8080")))),
-		StrategySeedPath: getEnv("STRATEGY_SEED_PATH", "seed/strategies.json"),
+		StrategySeedPath:   getEnv("STRATEGY_SEED_PATH", "seed/strategies.json"),
 		AdminSeed: AdminSeedConfig{
 			Email:    getEnv("ADMIN_SEED_EMAIL", ""),
 			Password: getEnv("ADMIN_SEED_PASSWORD", ""),
@@ -87,24 +88,25 @@ func Load() Config {
 			AccessTokenTTLMinutes: getEnvAsInt("AUTH_ACCESS_TOKEN_TTL_MINUTES", 1440),
 			RefreshTokenTTLHours:  getEnvAsInt("AUTH_REFRESH_TOKEN_TTL_HOURS", 168),
 		},
-	AI: AIConfig{
-		APIKey:  getEnv("AI_API_KEY", ""),
-		BaseURL: trimTrailingSlash(getEnv("AI_BASE_URL", "https://api.openai.com/v1")),
-		Model:   getEnv("AI_MODEL", "gpt-4o-mini"),
-	},
+		AI: AIConfig{
+			APIKey:    getEnv("AI_API_KEY", ""),
+			BaseURL:   trimTrailingSlash(getEnv("AI_BASE_URL", "https://api.openai.com/v1")),
+			Model:     getEnv("AI_MODEL", "gpt-4o-mini"),
+			CipherKey: getEnv("AI_CONFIG_CIPHER_KEY", ""),
+		},
 		Backup: BackupConfig{
-		DBPath:          getEnv("DB_PATH", "data/pumpkin.db"),
-		BackupDir:       getEnv("BACKUP_DIR", "data/backups"),
-		CacheADir:       getEnv("CACHE_A_DIR", "data/quant"),
-		CacheHKDir:      getEnv("CACHE_HK_DIR", "data/quant"),
-		RetentionDays:   getEnvAsInt("BACKUP_RETENTION_DAYS", 7),
-		CooldownMinutes: getEnvAsInt("BACKUP_COOLDOWN_MINUTES", 120),
-		COSBucket:       getEnv("COS_BUCKET", ""),
-		COSRegion:       getEnv("COS_REGION", ""),
-		COSPrefix:       getEnv("COS_BACKUP_PREFIX", "pumpkin-pro-backups/"),
-		COSSecretID:     getEnv("COS_SECRET_ID", ""),
-		COSSecretKey:    getEnv("COS_SECRET_KEY", ""),
-	},
+			DBPath:          getEnv("DB_PATH", "data/pumpkin.db"),
+			BackupDir:       getEnv("BACKUP_DIR", "data/backups"),
+			CacheADir:       getEnv("CACHE_A_DIR", "data/quant"),
+			CacheHKDir:      getEnv("CACHE_HK_DIR", "data/quant"),
+			RetentionDays:   getEnvAsInt("BACKUP_RETENTION_DAYS", 7),
+			CooldownMinutes: getEnvAsInt("BACKUP_COOLDOWN_MINUTES", 120),
+			COSBucket:       getEnv("COS_BUCKET", ""),
+			COSRegion:       getEnv("COS_REGION", ""),
+			COSPrefix:       getEnv("COS_BACKUP_PREFIX", "pumpkin-pro-backups/"),
+			COSSecretID:     getEnv("COS_SECRET_ID", ""),
+			COSSecretKey:    getEnv("COS_SECRET_KEY", ""),
+		},
 	}
 }
 

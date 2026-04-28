@@ -100,7 +100,7 @@ const SCENARIOS = [
   },
   {
     icon: '🌌',
-    title: '我想看四象限 + 卧龙AI精选',
+    title: '我想抄作业',
     href: '/live-trading',
     cta: '去看全景',
     recommended: false,

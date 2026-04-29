@@ -1,5 +1,5 @@
 {
-  "last_updated": "2026-04-28",
+  "last_updated": "2026-04-29",
   "manual_entry_template": {
     "date": "YYYY-MM-DD",
     "type": "新功能",
@@ -11,6 +11,14 @@
     "visible": true
   },
   "items": [
+    {
+      "date": "2026-04-29",
+      "type": "新功能",
+      "title": "AI 分析支持 DeepSeek V4 Pro",
+      "summary": "AI 分析已接入 DeepSeek V4 Pro，覆盖个股解读、持仓复盘等需要快速给出观点的分析场景。新模型响应更快，推理过程更稳定，常见分析请求的等待时间明显缩短；盘中查看股票观点、复盘组合表现或连续追问时，可以更快拿到结构化结论。",
+      "scope": "AI 分析 / 模型服务",
+      "visible": true
+    },
     {
       "date": "2026-04-28",
       "type": "新功能",

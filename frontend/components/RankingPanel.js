@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 
 /**
  * RankingPanel — 卧龙AI精选排行榜
- * 从四象限机会区中筛选 Top N 股票，按 Opportunity 降序排列。
+ * A 股按精选评分展示，港股继续按机会区机会评分展示。
  *
  * @param {Object} props
  * @param {Array|null}  props.items     - 排行榜数据列表（RankingItem[]）
@@ -39,7 +39,7 @@ export default function RankingPanel({ items = [], meta = null, loading = false,
       <section className="rounded-2xl border border-border bg-card p-5">
         <RankingHeader exchange={exchange} onExchangeChange={onExchangeChange} />
         <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-white/40">
-          当前市场暂无明显机会标的，建议关注防御区选项。
+          当前市场暂无可展示精选标的，建议稍后再看。
         </div>
       </section>
     )
@@ -73,12 +73,26 @@ export default function RankingPanel({ items = [], meta = null, loading = false,
 
 // ── Sub-components ──
 
+function getPrimaryScoreLabel(exchange) {
+  return exchange === 'HKEX' ? '机会评分' : '精选评分'
+}
+
+function getPrimaryScoreValue(item) {
+  if (item?.exchange !== 'HKEX' && typeof item?.ranking_score === 'number' && Number.isFinite(item.ranking_score) && item.ranking_score > 0) {
+    return item.ranking_score
+  }
+  if (typeof item?.opportunity === 'number' && Number.isFinite(item.opportunity)) {
+    return item.opportunity
+  }
+  return 0
+}
+
 function RankingHeader({ exchange, onExchangeChange, meta }) {
   const tabs = [
     { key: 'ASHARE', label: 'A股精选' },
     { key: 'HKEX', label: '港股精选' },
   ]
-  const metaSummary = buildRankingMetaSummary(meta)
+  const metaSummary = buildRankingMetaSummary(meta, exchange)
 
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -113,7 +127,9 @@ function RankingHeader({ exchange, onExchangeChange, meta }) {
 
 function RankRow({ item, onClick }) {
   const medal = getMedal(item.rank)
-  const oppClass = item.opportunity >= 90 ? 'text-emerald-300' : item.opportunity >= 70 ? 'text-white/80' : 'text-white/55'
+  const primaryScore = getPrimaryScoreValue(item)
+  const primaryScoreLabel = getPrimaryScoreLabel(item.exchange)
+  const oppClass = primaryScore >= 90 ? 'text-emerald-300' : primaryScore >= 70 ? 'text-white/80' : 'text-white/55'
   const riskClass = item.risk < 30 ? 'text-emerald-300' : item.risk < 50 ? 'text-amber-300' : 'text-white/55'
   const returnClass = getReturnTextClass(item.return_pct)
   const consecutiveClass = getConsecutiveValueClass(item.consecutive_days)
@@ -158,7 +174,7 @@ function RankRow({ item, onClick }) {
 
       {/* Explanation */}
       <div className="hidden xl:flex shrink-0 items-center gap-4 text-xs tabular-nums">
-        <MetricStat label="机会评分" value={item.opportunity.toFixed(1)} valueClass={`${oppClass} font-medium`} />
+        <MetricStat label={primaryScoreLabel} value={primaryScore.toFixed(1)} valueClass={`${oppClass} font-medium`} />
         <MetricStat label="风险评分" value={item.risk.toFixed(1)} valueClass={riskClass} />
         <ScoreBar label="趋势" value={item.trend} max={100} width="w-14" />
         <ScoreBar label="资金" value={item.flow} max={100} width="w-14" />
@@ -166,7 +182,7 @@ function RankRow({ item, onClick }) {
       </div>
 
       <div className="hidden lg:flex xl:hidden shrink-0 flex-col items-end gap-0.5 text-[10px] text-white/30 tabular-nums">
-        <span>{`机会评分 ${item.opportunity.toFixed(1)}`}</span>
+        <span>{`${primaryScoreLabel} ${primaryScore.toFixed(1)}`}</span>
         <span>{`风险评分 ${item.risk.toFixed(1)}`}</span>
       </div>
 
@@ -178,6 +194,8 @@ function RankRow({ item, onClick }) {
 
 function RankCard({ item, onClick }) {
   const medal = getMedal(item.rank)
+  const primaryScore = getPrimaryScoreValue(item)
+  const primaryScoreLabel = getPrimaryScoreLabel(item.exchange)
   const returnClass = getReturnTextClass(item.return_pct)
   const consecutiveClass = getConsecutiveValueClass(item.consecutive_days)
 
@@ -216,7 +234,7 @@ function RankCard({ item, onClick }) {
           <span className={`ml-1.5 ${consecutiveClass}`}>{item.consecutive_days > 0 ? `${item.consecutive_days} 日` : '--'}</span>
         </div>
         <div className="text-[10px] text-white/30 tabular-nums">
-          {`机会评分 ${item.opportunity.toFixed(1)} · 风险评分 ${item.risk.toFixed(1)}`}
+          {`${primaryScoreLabel} ${primaryScore.toFixed(1)} · 风险评分 ${item.risk.toFixed(1)}`}
         </div>
       </div>
 
@@ -232,7 +250,7 @@ function RankCard({ item, onClick }) {
         <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.05]">
           <div
             className="h-full rounded-full bg-gradient-to-r from-emerald-400/60 to-cyan-400/40 transition-all"
-            style={{ width: `${Math.min(100, item.opportunity)}%` }}
+            style={{ width: `${Math.min(100, primaryScore)}%` }}
           />
         </div>
       </div>
@@ -286,8 +304,9 @@ function formatMetaDateTime(value) {
   return date.toLocaleString('zh-CN', { hour12: false })
 }
 
-function buildRankingMetaSummary(meta) {
-  const parts = ['精选股票来自机会区']
+function buildRankingMetaSummary(meta, currentExchange = 'ASHARE') {
+  const exchange = meta?.exchange || currentExchange
+  const parts = [exchange === 'HKEX' ? '港股榜单来自机会区' : 'A股榜单按精选评分排序']
   if (meta?.computed_at) {
     parts.push(`数据日期：${formatMetaDateTime(meta.computed_at)}`)
   }

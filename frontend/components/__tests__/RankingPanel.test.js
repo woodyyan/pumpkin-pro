@@ -27,6 +27,20 @@ function exchangeLabel(ex) {
   return labels[ex] || ex
 }
 
+function getPrimaryScoreLabel(exchange) {
+  return exchange === 'HKEX' ? '机会评分' : '精选评分'
+}
+
+function getPrimaryScoreValue(item) {
+  if (item?.exchange !== 'HKEX' && typeof item?.ranking_score === 'number' && Number.isFinite(item.ranking_score) && item.ranking_score > 0) {
+    return item.ranking_score
+  }
+  if (typeof item?.opportunity === 'number' && Number.isFinite(item.opportunity)) {
+    return item.opportunity
+  }
+  return 0
+}
+
 function hasReturnPct(value) {
   return typeof value === 'number' && Number.isFinite(value)
 }
@@ -38,8 +52,9 @@ function formatMetaDateTime(value) {
   return date.toLocaleString('zh-CN', { hour12: false })
 }
 
-function buildRankingMetaSummary(meta) {
-  const parts = ['精选股票来自机会区']
+function buildRankingMetaSummary(meta, currentExchange = 'ASHARE') {
+  const exchange = meta?.exchange || currentExchange
+  const parts = [exchange === 'HKEX' ? '港股榜单来自机会区' : 'A股榜单按精选评分排序']
   if (meta?.computed_at) {
     parts.push(`数据日期：${formatMetaDateTime(meta.computed_at)}`)
   }
@@ -78,17 +93,17 @@ function buildMobileKeyFacts(days, pct) {
 const SAMPLE_ASHARE_ITEMS = [
   {
     rank: 1, code: '600519', name: '贵州茅台', exchange: 'SSE',
-    opportunity: 96.5, risk: 22.3, quadrant: '机会',
+    opportunity: 96.5, ranking_score: 98.2, risk: 22.3, quadrant: '机会',
     trend: 94.2, flow: 88.7, revision: 85.1,
   },
   {
     rank: 2, code: '000001', name: '平安银行', exchange: 'SZSE',
-    opportunity: 94.8, risk: 28.1, quadrant: '机会',
+    opportunity: 94.8, ranking_score: 95.6, risk: 28.1, quadrant: '机会',
     trend: 91.5, flow: 86.3, revision: 78.9,
   },
   {
     rank: 3, code: '601318', name: '中国平安', exchange: 'SSE',
-    opportunity: 92.3, risk: 18.7, quadrant: '机会',
+    opportunity: 92.3, ranking_score: 93.4, risk: 18.7, quadrant: '机会',
     trend: 90.0, flow: 84.0, revision: 80.5,
   },
 ]
@@ -185,18 +200,45 @@ describe('exchangeLabel (market label)', () => {
   })
 })
 
+describe('primary score helpers', () => {
+
+  it('uses 精选评分 for A-share items', () => {
+    assert.equal(getPrimaryScoreLabel('SSE'), '精选评分')
+    assert.equal(getPrimaryScoreLabel('SZSE'), '精选评分')
+    assert.equal(getPrimaryScoreValue(SAMPLE_ASHARE_ITEMS[0]), 98.2)
+  })
+
+  it('falls back to opportunity when A-share ranking_score is missing or zero', () => {
+    const missingItem = { exchange: 'SSE', opportunity: 87.5 }
+    const zeroItem = { exchange: 'SSE', opportunity: 86.2, ranking_score: 0 }
+    assert.equal(getPrimaryScoreValue(missingItem), 87.5)
+    assert.equal(getPrimaryScoreValue(zeroItem), 86.2)
+  })
+
+  it('keeps 机会评分 for HK items', () => {
+    assert.equal(getPrimaryScoreLabel('HKEX'), '机会评分')
+    assert.equal(getPrimaryScoreValue(SAMPLE_HKEX_ITEMS[0]), SAMPLE_HKEX_ITEMS[0].opportunity)
+  })
+})
+
 describe('ranking meta summary', () => {
 
-  it('builds concise header copy with data date and TOP count', () => {
+  it('builds A-share header copy with data date and TOP count', () => {
     const summary = buildRankingMetaSummary(SAMPLE_META)
-    assert.ok(summary.includes('精选股票来自机会区'))
+    assert.ok(summary.includes('A股榜单按精选评分排序'))
     assert.ok(summary.includes('数据日期：'))
     assert.ok(summary.includes('当前展示 TOP20 只'))
     assert.ok(!summary.includes('机会区共'))
   })
 
-  it('falls back to source description when meta is missing', () => {
-    assert.equal(buildRankingMetaSummary(null), '精选股票来自机会区')
+  it('uses HK opportunity-zone copy for HK meta', () => {
+    const summary = buildRankingMetaSummary({ ...SAMPLE_META, exchange: 'HKEX' }, 'HKEX')
+    assert.ok(summary.includes('港股榜单来自机会区'))
+  })
+
+  it('falls back to exchange-specific source description when meta is missing', () => {
+    assert.equal(buildRankingMetaSummary(null), 'A股榜单按精选评分排序')
+    assert.equal(buildRankingMetaSummary(null, 'HKEX'), '港股榜单来自机会区')
   })
 })
 
@@ -261,6 +303,7 @@ describe('Ranking data structure validation', () => {
       assert.ok(typeof item.name === 'string' && item.name.length > 0, `${item.code} missing name`)
       assert.ok(['SSE', 'SZSE'].includes(item.exchange), `${item.code}: unexpected A-share exchange ${item.exchange}`)
       assert.ok(typeof item.opportunity === 'number' && item.opportunity >= 0, `${item.code}: invalid opportunity`)
+      assert.ok(typeof item.ranking_score === 'number' && item.ranking_score >= 0, `${item.code}: invalid ranking_score`)
       assert.ok(typeof item.risk === 'number' && item.risk >= 0, `${item.code}: invalid risk`)
       assert.ok(item.quadrant === '机会', `${item.code}: not in opportunity zone`)
     }
@@ -272,10 +315,10 @@ describe('Ranking data structure validation', () => {
     }
   })
 
-  it('items are sorted by opportunity DESC', () => {
+  it('A-share sample items are sorted by ranking_score DESC', () => {
     for (let i = 1; i < SAMPLE_ASHARE_ITEMS.length; i++) {
       assert.ok(
-        SAMPLE_ASHARE_ITEMS[i].opportunity <= SAMPLE_ASHARE_ITEMS[i - 1].opportunity,
+        SAMPLE_ASHARE_ITEMS[i].ranking_score <= SAMPLE_ASHARE_ITEMS[i - 1].ranking_score,
         `Sort violation at index ${i}`
       )
     }

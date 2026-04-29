@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -87,7 +88,11 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 			Trend: item.Trend, Flow: item.Flow, Revision: item.Revision,
 			Liquidity: item.Liquidity, Volatility: item.Volatility,
 			Drawdown: item.Drawdown, Crowding: item.Crowding,
-			AvgAmount5d: item.AvgAmount5d, ComputedAt: computedAt,
+			AvgAmount5d: item.AvgAmount5d,
+			Board:       strings.TrimSpace(item.Board), RankingScore: item.RankingScore,
+			GlobalRankScore: item.GlobalRankScore, BoardRankScore: item.BoardRankScore,
+			TradabilityScore: item.TradabilityScore, RiskAdjustedMomentum60d: item.RiskAdjustedMomentum60d,
+			ComputedAt: computedAt,
 		})
 	}
 
@@ -247,32 +252,135 @@ func mustMarshal(v any) string {
 	return string(b)
 }
 
-// saveRankingSnapshotsBestEffort saves top-50 opportunity-zone records as daily ranking snapshots.
-// This is best-effort: errors are logged but not propagated to the caller.
-func (s *Service) saveRankingSnapshotsBestEffort(ctx context.Context, records []QuadrantScoreRecord, computedAt time.Time) {
-	// Extract opportunity-zone records only
-	var oppRecords []QuadrantScoreRecord
-	for _, r := range records {
-		if r.Quadrant == "机会" && r.Opportunity > 0 {
-			oppRecords = append(oppRecords, r)
-		}
+func applyBoardCap(records []QuadrantScoreRecord, limit int, maxShare float64) []QuadrantScoreRecord {
+	if limit <= 0 {
+		limit = 20
 	}
-	if len(oppRecords) == 0 {
-		return
+	if len(records) == 0 {
+		return []QuadrantScoreRecord{}
+	}
+	if maxShare <= 0 || maxShare > 1 {
+		maxShare = 0.5
+	}
+	capPerBoard := int(math.Ceil(float64(limit) * maxShare))
+	if capPerBoard < 1 {
+		capPerBoard = 1
 	}
 
-	// Sort by opportunity DESC (same as ranking order)
+	selected := make([]QuadrantScoreRecord, 0, limit)
+	skipped := make([]QuadrantScoreRecord, 0)
+	counts := map[string]int{}
+
+	for _, record := range records {
+		board := strings.TrimSpace(record.Board)
+		if board == "" {
+			board = "OTHER"
+		}
+		if counts[board] >= capPerBoard {
+			skipped = append(skipped, record)
+			continue
+		}
+		selected = append(selected, record)
+		counts[board]++
+		if len(selected) == limit {
+			return selected
+		}
+	}
+
+	for _, record := range skipped {
+		selected = append(selected, record)
+		if len(selected) == limit {
+			break
+		}
+	}
+	return selected
+}
+
+func isAShareRecords(records []QuadrantScoreRecord) bool {
+	if len(records) == 0 {
+		return false
+	}
+	for _, record := range records {
+		if record.Exchange != "SSE" && record.Exchange != "SZSE" {
+			return false
+		}
+	}
+	return true
+}
+
+func hasNonZeroRankingScore(records []QuadrantScoreRecord) bool {
+	for _, record := range records {
+		if record.RankingScore > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func selectSnapshotRecords(records []QuadrantScoreRecord, limit int) []QuadrantScoreRecord {
+	if limit <= 0 {
+		limit = 50
+	}
+	if len(records) == 0 {
+		return nil
+	}
+
+	if isAShareRecords(records) {
+		filtered := make([]QuadrantScoreRecord, 0, len(records))
+		for _, record := range records {
+			if strings.Contains(strings.ToUpper(strings.TrimSpace(record.Name)), "ST") {
+				continue
+			}
+			if record.AvgAmount5d < 5000 {
+				continue
+			}
+			filtered = append(filtered, record)
+		}
+		if hasNonZeroRankingScore(filtered) {
+			sort.Slice(filtered, func(i, j int) bool {
+				if filtered[i].RankingScore == filtered[j].RankingScore {
+					if filtered[i].Risk == filtered[j].Risk {
+						return filtered[i].AvgAmount5d > filtered[j].AvgAmount5d
+					}
+					return filtered[i].Risk < filtered[j].Risk
+				}
+				return filtered[i].RankingScore > filtered[j].RankingScore
+			})
+			return applyBoardCap(filtered, limit, 0.5)
+		}
+		records = filtered
+	}
+
+	oppRecords := make([]QuadrantScoreRecord, 0, len(records))
+	for _, record := range records {
+		if record.Quadrant == "机会" && record.Opportunity > 0 {
+			oppRecords = append(oppRecords, record)
+		}
+	}
 	sort.Slice(oppRecords, func(i, j int) bool {
+		if oppRecords[i].Opportunity == oppRecords[j].Opportunity {
+			return oppRecords[i].Risk < oppRecords[j].Risk
+		}
 		return oppRecords[i].Opportunity > oppRecords[j].Opportunity
 	})
-	if len(oppRecords) > 50 {
-		oppRecords = oppRecords[:50]
+	if len(oppRecords) > limit {
+		oppRecords = oppRecords[:limit]
+	}
+	return oppRecords
+}
+
+// saveRankingSnapshotsBestEffort saves daily ranking snapshots using the active market-specific ranking rules.
+// This is best-effort: errors are logged but not propagated to the caller.
+func (s *Service) saveRankingSnapshotsBestEffort(ctx context.Context, records []QuadrantScoreRecord, computedAt time.Time) {
+	selectedRecords := selectSnapshotRecords(records, 50)
+	if len(selectedRecords) == 0 {
+		return
 	}
 
 	now := time.Now().UTC()
 	dateStr := rankingSnapshotDate(computedAt)
-	snaps := make([]RankingSnapshot, 0, len(oppRecords))
-	for i, r := range oppRecords {
+	snaps := make([]RankingSnapshot, 0, len(selectedRecords))
+	for i, r := range selectedRecords {
 		closePrice := 0.0
 		if s.priceResolver != nil {
 			closePrice = s.priceResolver(ctx, r.Code, r.Exchange, dateStr)
@@ -526,27 +634,22 @@ func resolveRankingExchanges(exchange string) []string {
 	}
 }
 
-// GetRanking returns the top-N stocks from the opportunity zone (机会区),
-// ordered by opportunity DESC + risk ASC.
-// Applies a minimum liquidity filter (avg_amount_5d threshold) per market:
-//
-//	A-share: 5000 万元, HKEX: 2000 万 HKD.
-//
-// Backward compatibility: if no records have non-zero avg_amount5d (i.e.
-// data was computed before the liquidity field was introduced), the filter is
-// automatically disabled so old datasets still show results.
+// GetRanking returns the market-specific ranking list.
+// HKEX keeps the legacy opportunity-zone logic; ASHARE prefers ranking_score when available.
 func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*RankingResponse, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
+	}
+	displayExchange := strings.ToUpper(strings.TrimSpace(exchange))
+	if displayExchange != "HKEX" {
+		displayExchange = "ASHARE"
 	}
 	exchanges := resolveRankingExchanges(exchange)
 
 	// Liquidity hard-filter thresholds (万元 / 万HKD)
 	defaultMinAmount := 5000.0 // A-share default
-	for _, ex := range exchanges {
-		if ex == "HKEX" {
-			defaultMinAmount = 2000.0
-		}
+	if displayExchange == "HKEX" {
+		defaultMinAmount = 2000.0
 	}
 
 	// Check if the data has been recomputed with liquidity field.
@@ -560,9 +663,24 @@ func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*
 		minAmount = 0
 	}
 
-	records, totalInZone, err := s.repo.FindOpportunityZone(ctx, exchanges, limit, minAmount)
-	if err != nil {
-		return nil, err
+	var records []QuadrantScoreRecord
+	var totalInZone int64
+	if displayExchange == "HKEX" {
+		records, totalInZone, err = s.repo.FindOpportunityZone(ctx, exchanges, limit, minAmount)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		var hasRankingScore bool
+		records, totalInZone, hasRankingScore, err = s.repo.FindAShareRankingCandidates(ctx, limit, minAmount)
+		if err != nil {
+			return nil, err
+		}
+		if hasRankingScore {
+			records = applyBoardCap(records, limit, 0.5)
+		} else if len(records) > limit {
+			records = records[:limit]
+		}
 	}
 
 	items := make([]RankingItem, 0, len(records))
@@ -570,18 +688,23 @@ func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*
 
 	for i, r := range records {
 		item := RankingItem{
-			Rank:        i + 1,
-			Code:        r.Code,
-			Name:        r.Name,
-			Exchange:    r.Exchange,
-			Opportunity: r.Opportunity,
-			Risk:        r.Risk,
-			Quadrant:    r.Quadrant,
-			Trend:       r.Trend,
-			Flow:        r.Flow,
-			Revision:    r.Revision,
-			Liquidity:   r.Liquidity,
-			AvgAmount5d: r.AvgAmount5d,
+			Rank:             i + 1,
+			Code:             r.Code,
+			Name:             r.Name,
+			Exchange:         r.Exchange,
+			Opportunity:      r.Opportunity,
+			Risk:             r.Risk,
+			Quadrant:         r.Quadrant,
+			Trend:            r.Trend,
+			Flow:             r.Flow,
+			Revision:         r.Revision,
+			Liquidity:        r.Liquidity,
+			AvgAmount5d:      r.AvgAmount5d,
+			Board:            r.Board,
+			RankingScore:     r.RankingScore,
+			GlobalRankScore:  r.GlobalRankScore,
+			BoardRankScore:   r.BoardRankScore,
+			TradabilityScore: r.TradabilityScore,
 		}
 		if r.ComputedAt.After(latestComputedAt) {
 			latestComputedAt = r.ComputedAt
@@ -607,11 +730,6 @@ func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*
 	computedAtStr := ""
 	if !latestComputedAt.IsZero() {
 		computedAtStr = latestComputedAt.UTC().Format(time.RFC3339)
-	}
-
-	displayExchange := strings.ToUpper(strings.TrimSpace(exchange))
-	if displayExchange == "" || displayExchange != "HKEX" {
-		displayExchange = "ASHARE"
 	}
 
 	return &RankingResponse{

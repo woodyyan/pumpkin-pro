@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,9 +56,35 @@ func makeNonOpportunityRecord(code, exchange string, quadrant string) QuadrantSc
 	}
 }
 
+func makeAShareRankingRecord(code, board, quadrant string, rankingScore, opportunity, risk, avgAmount float64) QuadrantScoreRecord {
+	record := QuadrantScoreRecord{
+		Code:             code,
+		Name:             "股票" + code,
+		Exchange:         "SSE",
+		Opportunity:      opportunity,
+		Risk:             risk,
+		Quadrant:         quadrant,
+		Trend:            opportunity * 0.9,
+		Flow:             opportunity * 0.85,
+		Revision:         opportunity * 0.8,
+		Liquidity:        75,
+		AvgAmount5d:      avgAmount,
+		Board:            board,
+		RankingScore:     rankingScore,
+		GlobalRankScore:  rankingScore - 3,
+		BoardRankScore:   rankingScore - 1,
+		TradabilityScore: 80,
+		ComputedAt:       time.Date(2026, 4, 15, 2, 30, 0, 0, time.UTC),
+	}
+	if strings.HasPrefix(code, "0") || strings.HasPrefix(code, "3") {
+		record.Exchange = "SZSE"
+	}
+	return record
+}
+
 // padCode returns a zero-padded string of length digits.
 func padCode(n int, digits int) string {
-	return fmt.Sprintf("%0*dd", digits, n)
+	return fmt.Sprintf("%0*d", digits, n)
 }
 
 // ── T-R1: Model / Struct Tests ──
@@ -65,20 +92,25 @@ func padCode(n int, digits int) string {
 func TestRankingItem_JSONRoundTrip(t *testing.T) {
 	pct := 5.6
 	item := RankingItem{
-		Rank:            1,
-		Code:            "600519",
-		Name:            "贵州茅台",
-		Exchange:        "SSE",
-		Opportunity:     96.5,
-		Risk:            22.3,
-		Quadrant:        "机会",
-		Trend:           94.2,
-		Flow:            88.7,
-		Revision:        85.1,
-		Liquidity:       92.0,
-		AvgAmount5d:     150000.0,
-		ConsecutiveDays: 3,
-		ReturnPct:       &pct,
+		Rank:             1,
+		Code:             "600519",
+		Name:             "贵州茅台",
+		Exchange:         "SSE",
+		Opportunity:      96.5,
+		Risk:             22.3,
+		Quadrant:         "机会",
+		Trend:            94.2,
+		Flow:             88.7,
+		Revision:         85.1,
+		Liquidity:        92.0,
+		AvgAmount5d:      150000.0,
+		Board:            "MAIN",
+		RankingScore:     91.2,
+		GlobalRankScore:  89.1,
+		BoardRankScore:   95.0,
+		TradabilityScore: 88.0,
+		ConsecutiveDays:  3,
+		ReturnPct:        &pct,
 	}
 
 	data, err := json.Marshal(item)
@@ -91,7 +123,10 @@ func TestRankingItem_JSONRoundTrip(t *testing.T) {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
 
-	if got.Rank != item.Rank || got.Code != item.Code || got.Opportunity != item.Opportunity {
+	if got.Rank != item.Rank || got.Code != item.Code || got.Opportunity != item.Opportunity ||
+		got.Board != item.Board || got.RankingScore != item.RankingScore ||
+		got.GlobalRankScore != item.GlobalRankScore || got.BoardRankScore != item.BoardRankScore ||
+		got.TradabilityScore != item.TradabilityScore {
 		t.Errorf("roundtrip mismatch: got %+v", got)
 	}
 	if got.ReturnPct == nil || *got.ReturnPct != pct {
@@ -101,7 +136,7 @@ func TestRankingItem_JSONRoundTrip(t *testing.T) {
 	// Verify JSON keys are correct (not Go struct names)
 	var raw map[string]any
 	json.Unmarshal(data, &raw)
-	expectedKeys := []string{"rank", "code", "name", "exchange", "opportunity", "risk", "quadrant", "trend", "flow", "revision"}
+	expectedKeys := []string{"rank", "code", "name", "exchange", "opportunity", "risk", "quadrant", "trend", "flow", "revision", "board", "ranking_score", "global_rank_score", "board_rank_score", "tradability_score"}
 	for _, k := range expectedKeys {
 		if _, ok := raw[k]; !ok {
 			t.Errorf("missing JSON key: %s", k)
@@ -336,6 +371,151 @@ func TestGetRanking_RiskAsSecondarySort(t *testing.T) {
 	}
 }
 
+func TestGetRanking_AShareUsesRankingScoreOutsideOpportunityZone(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	records := []QuadrantScoreRecord{
+		makeAShareRankingRecord("600001", "MAIN", "中性", 99, 40, 22, 12000),
+		makeAShareRankingRecord("600002", "MAIN", "机会", 80, 90, 18, 15000),
+	}
+	seedOpportunityRecords(t, repo, records)
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking failed: %v", err)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(resp.Items))
+	}
+	if resp.Items[0].Code != "600001" {
+		t.Fatalf("expected non-opportunity stock 600001 to rank first, got %s", resp.Items[0].Code)
+	}
+	if resp.Items[0].RankingScore != 99 {
+		t.Fatalf("expected ranking_score 99, got %.1f", resp.Items[0].RankingScore)
+	}
+}
+
+func TestGetRanking_HKEXKeepsOpportunitySortingWithRankingScorePresent(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	hkNeutral := makeAShareRankingRecord("00700", "", "中性", 99, 50, 30, 5000)
+	hkNeutral.Exchange = "HKEX"
+	hkNeutral.Name = "腾讯控股"
+	hkOpportunity := makeAShareRankingRecord("00005", "", "机会", 70, 90, 18, 5000)
+	hkOpportunity.Exchange = "HKEX"
+	hkOpportunity.Name = "汇丰控股"
+
+	seedOpportunityRecords(t, repo, []QuadrantScoreRecord{hkNeutral, hkOpportunity})
+
+	resp, err := svc.GetRanking(ctx, "HKEX", 20)
+	if err != nil {
+		t.Fatalf("GetRanking(HKEX) failed: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected only 1 HK opportunity item, got %d", len(resp.Items))
+	}
+	if resp.Items[0].Code != "00005" {
+		t.Fatalf("expected HK opportunity stock 00005 first, got %s", resp.Items[0].Code)
+	}
+}
+
+func TestApplyBoardCap_LimitsSingleBoardToHalf(t *testing.T) {
+	records := make([]QuadrantScoreRecord, 0, 25)
+	for i := 0; i < 15; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("600%03d", i), "MAIN", "机会", float64(100-i), 80, 20, 12000))
+	}
+	for i := 0; i < 5; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("300%03d", i), "CHINEXT", "机会", float64(85-i), 75, 20, 12000))
+	}
+	for i := 0; i < 5; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("688%03d", i), "STAR", "机会", float64(80-i), 70, 20, 12000))
+	}
+
+	selected := applyBoardCap(records, 20, 0.5)
+	if len(selected) != 20 {
+		t.Fatalf("expected 20 records, got %d", len(selected))
+	}
+	mainCount := 0
+	for _, record := range selected {
+		if record.Board == "MAIN" {
+			mainCount++
+		}
+	}
+	if mainCount > 10 {
+		t.Fatalf("expected MAIN board <= 10, got %d", mainCount)
+	}
+}
+
+func TestApplyBoardCap_FillsBackWhenBoardCoverageInsufficient(t *testing.T) {
+	records := make([]QuadrantScoreRecord, 0, 20)
+	for i := 0; i < 18; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("600%03d", i), "MAIN", "机会", float64(100-i), 80, 20, 12000))
+	}
+	for i := 0; i < 2; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("300%03d", i), "CHINEXT", "机会", float64(70-i), 75, 20, 12000))
+	}
+
+	selected := applyBoardCap(records, 20, 0.5)
+	if len(selected) != 20 {
+		t.Fatalf("expected light cap to fill back to 20, got %d", len(selected))
+	}
+}
+
+func TestGetRanking_AShareFallbackToOpportunityWhenRankingScoreMissing(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	records := []QuadrantScoreRecord{
+		makeRankingRecord("600010", "SSE", 92, 18),
+		makeRankingRecord("600011", "SSE", 88, 15),
+		makeNonOpportunityRecord("600012", "SSE", "中性"),
+	}
+	seedOpportunityRecords(t, repo, records)
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking failed: %v", err)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("expected 2 fallback items, got %d", len(resp.Items))
+	}
+	if resp.Items[0].Code != "600010" {
+		t.Fatalf("expected fallback to opportunity sort, got %s", resp.Items[0].Code)
+	}
+}
+
+func TestGetRanking_AShareStillFiltersSTAndLowLiquidityWithRankingScore(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	stRecord := makeAShareRankingRecord("600020", "MAIN", "机会", 99, 80, 20, 12000)
+	stRecord.Name = "ST测试"
+	lowLiquidity := makeAShareRankingRecord("600021", "MAIN", "机会", 98, 80, 20, 1000)
+	valid := makeAShareRankingRecord("600022", "MAIN", "机会", 97, 80, 20, 15000)
+	seedOpportunityRecords(t, repo, []QuadrantScoreRecord{stRecord, lowLiquidity, valid})
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking failed: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected only 1 valid item, got %d", len(resp.Items))
+	}
+	if resp.Items[0].Code != "600022" {
+		t.Fatalf("expected valid stock 600022, got %s", resp.Items[0].Code)
+	}
+}
+
 // ── resolveRankingExchanges helper tests ──
 
 func TestResolveRankingExchanges(t *testing.T) {
@@ -489,7 +669,9 @@ func TestBulkSave_ExchangePreservation(t *testing.T) {
 		Items: []BulkSaveItem{
 			{Code: "600519", Name: "贵州茅台", Opportunity: 90, Risk: 20,
 				Quadrant: "机会", Trend: 85, Flow: 80, Revision: 75,
-				Volatility: 30, Drawdown: 15, Crowding: 40, Exchange: "SSE"},
+				Volatility: 30, Drawdown: 15, Crowding: 40, Exchange: "SSE",
+				Board: "MAIN", RankingScore: 91.2, GlobalRankScore: 89.1, BoardRankScore: 95.0,
+				TradabilityScore: 88.0, RiskAdjustedMomentum60d: 1234.5},
 			{Code: "000001", Name: "平安银行", Opportunity: 85, Risk: 25,
 				Quadrant: "机会", Trend: 80, Flow: 75, Revision: 70,
 				Volatility: 35, Drawdown: 18, Crowding: 45, Exchange: "SZSE"},
@@ -532,6 +714,15 @@ func TestBulkSave_ExchangePreservation(t *testing.T) {
 	}
 	if exchangeMap["300750"] != "SZSE" {
 		t.Errorf("300750 (no exchange) should default to SZSE, got %s", exchangeMap["300750"])
+	}
+
+	var maotai QuadrantScoreRecord
+	if err := repo.db.WithContext(ctx).Where("code = ?", "600519").First(&maotai).Error; err != nil {
+		t.Fatalf("query 600519 failed: %v", err)
+	}
+	if maotai.Board != "MAIN" || maotai.RankingScore != 91.2 || maotai.GlobalRankScore != 89.1 ||
+		maotai.BoardRankScore != 95.0 || maotai.TradabilityScore != 88.0 || maotai.RiskAdjustedMomentum60d != 1234.5 {
+		t.Fatalf("new ranking fields not persisted correctly: %+v", maotai)
 	}
 }
 

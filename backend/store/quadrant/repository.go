@@ -41,6 +41,8 @@ func (r *Repository) BulkUpsert(ctx context.Context, records []QuadrantScoreReco
 					"name", "opportunity", "risk", "quadrant",
 					"trend", "flow", "revision", "liquidity",
 					"volatility", "drawdown", "crowding", "avg_amount5d",
+					"board", "ranking_score", "global_rank_score", "board_rank_score",
+					"tradability_score", "risk_adjusted_momentum_60d",
 					"computed_at",
 				}),
 			}).Create(&batch).Error; err != nil {
@@ -264,6 +266,53 @@ func (r *Repository) FindOpportunityZone(ctx context.Context, exchanges []string
 		return nil, 0, err
 	}
 	return records, totalInZone, nil
+}
+
+// FindAShareRankingCandidates returns A-share ranking candidates using the new ranking_score model
+// when available, and falls back to the legacy opportunity-zone logic otherwise.
+func (r *Repository) FindAShareRankingCandidates(ctx context.Context, limit int, minAmount float64) ([]QuadrantScoreRecord, int64, bool, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	candidateLimit := limit * 5
+	if candidateLimit < 100 {
+		candidateLimit = 100
+	}
+
+	base := r.db.WithContext(ctx).
+		Model(&QuadrantScoreRecord{}).
+		Where("exchange IN ?", []string{"SSE", "SZSE"}).
+		Where("name NOT LIKE ?", "%ST%")
+	if minAmount > 0 {
+		base = base.Where("avg_amount5d >= ?", minAmount)
+	}
+
+	var rankingCount int64
+	if err := base.Session(&gorm.Session{}).Where("ranking_score > 0").Count(&rankingCount).Error; err != nil {
+		return nil, 0, false, err
+	}
+	hasRankingScore := rankingCount > 0
+
+	query := base.Session(&gorm.Session{})
+	totalCandidates := rankingCount
+	if hasRankingScore {
+		query = query.Where("ranking_score > 0")
+	} else {
+		query = query.Where("quadrant = ?", "机会")
+		if err := query.Session(&gorm.Session{}).Count(&totalCandidates).Error; err != nil {
+			return nil, 0, false, err
+		}
+	}
+
+	var records []QuadrantScoreRecord
+	orderBy := "opportunity DESC, risk ASC"
+	if hasRankingScore {
+		orderBy = "ranking_score DESC, risk ASC, avg_amount5d DESC"
+	}
+	if err := query.Order(orderBy).Limit(candidateLimit).Find(&records).Error; err != nil {
+		return nil, 0, false, err
+	}
+	return records, totalCandidates, hasRankingScore, nil
 }
 
 // ── Ranking Snapshot ──

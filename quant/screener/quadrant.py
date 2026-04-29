@@ -609,6 +609,22 @@ def _percentile_rank(series: pd.Series) -> pd.Series:
     return series.rank(pct=True, na_option="keep") * 100
 
 
+def _classify_a_share_board(code: str) -> str:
+    code = str(code or "").strip()
+    if code.startswith(("688", "689")):
+        return "STAR"
+    if code.startswith(("300", "301")):
+        return "CHINEXT"
+    if code.startswith(("600", "601", "603", "605", "000", "001", "002", "003")):
+        return "MAIN"
+    return "OTHER"
+
+
+def _safe_momentum(return_pct: pd.Series, volatility: pd.Series, floor: float = 0.005) -> pd.Series:
+    safe_vol = volatility.fillna(floor).clip(lower=floor)
+    return return_pct.fillna(0) / safe_vol
+
+
 # ── Float sanitization for JSON compliance ──────────────────────
 # Python's standard json.dumps rejects NaN / Inf / -Inf (RFC 7159).
 # Some stocks may have missing or degenerate daily-bar data that
@@ -629,7 +645,8 @@ def _sanitize_item(d: dict) -> dict:
     FLOAT_KEYS = {
         "opportunity", "risk", "trend", "flow", "revision",
         "liquidity", "volatility", "drawdown", "crowding",
-        "avg_amount_5d",
+        "avg_amount_5d", "ranking_score", "global_rank_score",
+        "board_rank_score", "tradability_score", "risk_adjusted_momentum_60d",
     }
     for k in FLOAT_KEYS:
         if k in d and isinstance(d[k], float):
@@ -640,6 +657,7 @@ def _sanitize_item(d: dict) -> dict:
 def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
     result: Dict[str, float] = {
         "std_20d": np.nan,
+        "std_60d": np.nan,
         "max_drawdown_60d": np.nan,
         "turnover_20d_avg": np.nan,
         "cumulative_turnover_20d": np.nan,
@@ -658,6 +676,11 @@ def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
         result["std_20d"] = float(returns.tail(20).std())
     elif len(returns) >= 5:
         result["std_20d"] = float(returns.std())
+
+    if len(returns) >= 60:
+        result["std_60d"] = float(returns.tail(60).std())
+    elif len(returns) >= 20:
+        result["std_60d"] = float(returns.std())
 
     lookback_closes = closes.tail(60) if len(closes) >= 60 else closes
     rolling_max = lookback_closes.cummax()
@@ -883,6 +906,7 @@ def compute_all_quadrant_scores(
 
         daily_metrics_df = pd.DataFrame(daily_metrics_rows)
         merged = snapshot_df.merge(daily_metrics_df, on="code", how="left")
+        merged["board"] = merged["code"].apply(_classify_a_share_board)
 
         # ── Diagnostic: log non-null rates for all key columns ──
         total = len(merged)
@@ -975,6 +999,34 @@ def compute_all_quadrant_scores(
         r_score = merged["revision"].fillna(50)
         l_score = merged["liquidity_raw"].fillna(50)
 
+        std_60d = merged.get("std_60d", pd.Series(np.nan, index=merged.index))
+        ram = _safe_momentum(merged["change_pct_60d"], std_60d)
+        relative_ram = _safe_momentum(merged["change_pct_60d"] - bench_60d, std_60d)
+        merged["risk_adjusted_momentum_60d"] = ram.replace([np.inf, -np.inf], np.nan).fillna(0)
+        ram_rank = _percentile_rank(ram.replace([np.inf, -np.inf], np.nan)).fillna(50)
+        relative_ram_rank = _percentile_rank(relative_ram.replace([np.inf, -np.inf], np.nan)).fillna(50)
+        merged["ranking_trend"] = 0.5 * ram_rank + 0.5 * relative_ram_rank
+
+        ranking_raw = (
+            0.4 * merged["ranking_trend"].fillna(50)
+            + 0.25 * merged["flow"].fillna(50)
+            + 0.15 * merged["revision"].fillna(50)
+            + 0.20 * merged["liquidity_raw"].fillna(50)
+        )
+        merged["global_rank_score"] = _percentile_rank(ranking_raw).fillna(50)
+        merged["board_rank_score"] = 50.0
+        for board, idx in merged.groupby("board").groups.items():
+            merged.loc[idx, "board_rank_score"] = _percentile_rank(ranking_raw.loc[idx]).fillna(50)
+
+        tradability_raw = np.log1p(merged["avg_amount_5d"].fillna(0).clip(lower=0))
+        merged["tradability_score"] = _percentile_rank(tradability_raw).fillna(50)
+        merged["ranking_score"] = (
+            0.5 * merged["global_rank_score"].fillna(50)
+            + 0.3 * merged["board_rank_score"].fillna(50)
+            + 0.2 * merged["tradability_score"].fillna(50)
+        )
+        merged["ranking_score"] = merged["ranking_score"].fillna(50).clip(0, 100).round(2)
+
         # Opportunity = 0.4×Trend + 0.25×Flow + 0.15×Revision + 0.20×Liquidity
         merged["opportunity"] = 0.4 * t_score + 0.25 * f_score + 0.15 * r_score + 0.20 * l_score
         merged["risk"] = 0.4 * v_raw + 0.3 * d_raw + 0.3 * c_raw
@@ -997,8 +1049,12 @@ def compute_all_quadrant_scores(
 
         merged["opportunity"] = merged["opportunity"].fillna(50).clip(0, 100).round(2)
         merged["risk"] = merged["risk"].fillna(50).clip(0, 100).round(2)
+        merged["global_rank_score"] = merged["global_rank_score"].fillna(50).clip(0, 100).round(2)
+        merged["board_rank_score"] = merged["board_rank_score"].fillna(50).clip(0, 100).round(2)
+        merged["tradability_score"] = merged["tradability_score"].fillna(50).clip(0, 100).round(2)
+        merged["risk_adjusted_momentum_60d"] = merged["risk_adjusted_momentum_60d"].fillna(0).round(4)
         for col in ["trend", "flow", "revision", "liquidity_raw",
-                    "volatility_raw", "drawdown_raw", "crowding_raw"]:
+                    "volatility_raw", "drawdown_raw", "crowding_raw", "ranking_trend"]:
             merged[col] = merged[col].fillna(50).clip(0, 100).round(2)
 
         # ── Step 6: 分配象限 ──
@@ -1037,6 +1093,12 @@ def compute_all_quadrant_scores(
                 "drawdown": float(row["drawdown_raw"]),
                 "crowding": float(row["crowding_raw"]),
                 "avg_amount_5d": round(float(row.get("avg_amount_5d", 0) or 0), 2),
+                "board": str(row.get("board", "")),
+                "ranking_score": float(row.get("ranking_score", 0) or 0),
+                "global_rank_score": float(row.get("global_rank_score", 0) or 0),
+                "board_rank_score": float(row.get("board_rank_score", 0) or 0),
+                "tradability_score": float(row.get("tradability_score", 0) or 0),
+                "risk_adjusted_momentum_60d": float(row.get("risk_adjusted_momentum_60d", 0) or 0),
             }
             result_items.append(_sanitize_item(item))
 

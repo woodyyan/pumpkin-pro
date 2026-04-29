@@ -6,21 +6,27 @@ import (
 
 // QuadrantScoreRecord maps to the `quadrant_scores` table.
 type QuadrantScoreRecord struct {
-	Code        string    `gorm:"primaryKey;size:10"`
-	Name        string    `gorm:"size:128;not null"`
-	Exchange    string    `gorm:"size:8;not null;default:'SZSE';index:idx_quadrant_exchange"`
-	Opportunity float64   `gorm:"not null"`
-	Risk        float64   `gorm:"not null"`
-	Quadrant    string    `gorm:"size:16;not null"`
-	Trend       float64   `gorm:"not null;default:0"`
-	Flow        float64   `gorm:"not null;default:0"`
-	Revision    float64   `gorm:"not null;default:0"`
-	Liquidity   float64   `gorm:"not null;default:0"` // 流动性：近5日均成交额 percentile rank
-	Volatility  float64   `gorm:"not null;default:0"`
-	Drawdown    float64   `gorm:"not null;default:0"`
-	Crowding    float64   `gorm:"not null;default:0"`
-	AvgAmount5d float64   `gorm:"not null;default:0"` // 近5日均成交额（万元）
-	ComputedAt  time.Time `gorm:"not null"`
+	Code                    string    `gorm:"primaryKey;size:10"`
+	Name                    string    `gorm:"size:128;not null"`
+	Exchange                string    `gorm:"size:8;not null;default:'SZSE';index:idx_quadrant_exchange"`
+	Opportunity             float64   `gorm:"not null"`
+	Risk                    float64   `gorm:"not null"`
+	Quadrant                string    `gorm:"size:16;not null"`
+	Trend                   float64   `gorm:"not null;default:0"`
+	Flow                    float64   `gorm:"not null;default:0"`
+	Revision                float64   `gorm:"not null;default:0"`
+	Liquidity               float64   `gorm:"not null;default:0"` // 流动性：近5日均成交额 percentile rank
+	Volatility              float64   `gorm:"not null;default:0"`
+	Drawdown                float64   `gorm:"not null;default:0"`
+	Crowding                float64   `gorm:"not null;default:0"`
+	AvgAmount5d             float64   `gorm:"not null;default:0"` // 近5日均成交额（万元）
+	Board                   string    `gorm:"column:board;size:16;not null;default:'';index:idx_quadrant_board"`
+	RankingScore            float64   `gorm:"column:ranking_score;not null;default:0"`
+	GlobalRankScore         float64   `gorm:"column:global_rank_score;not null;default:0"`
+	BoardRankScore          float64   `gorm:"column:board_rank_score;not null;default:0"`
+	TradabilityScore        float64   `gorm:"column:tradability_score;not null;default:0"`
+	RiskAdjustedMomentum60d float64   `gorm:"column:risk_adjusted_momentum_60d;not null;default:0"`
+	ComputedAt              time.Time `gorm:"not null"`
 }
 
 func (QuadrantScoreRecord) TableName() string {
@@ -84,20 +90,26 @@ type BulkSaveInput struct {
 }
 
 type BulkSaveItem struct {
-	Code        string  `json:"code"`
-	Name        string  `json:"name"`
-	Opportunity float64 `json:"opportunity"`
-	Risk        float64 `json:"risk"`
-	Quadrant    string  `json:"quadrant"`
-	Trend       float64 `json:"trend"`
-	Flow        float64 `json:"flow"`
-	Revision    float64 `json:"revision"`
-	Liquidity   float64 `json:"liquidity"`
-	Volatility  float64 `json:"volatility"`
-	Drawdown    float64 `json:"drawdown"`
-	Crowding    float64 `json:"crowding"`
-	AvgAmount5d float64 `json:"avg_amount_5d"`      // 近5日均成交额（万元）
-	Exchange    string  `json:"exchange,omitempty"` // "SSE"/"SZSE"(默认)/"HKEX"
+	Code                    string  `json:"code"`
+	Name                    string  `json:"name"`
+	Opportunity             float64 `json:"opportunity"`
+	Risk                    float64 `json:"risk"`
+	Quadrant                string  `json:"quadrant"`
+	Trend                   float64 `json:"trend"`
+	Flow                    float64 `json:"flow"`
+	Revision                float64 `json:"revision"`
+	Liquidity               float64 `json:"liquidity"`
+	Volatility              float64 `json:"volatility"`
+	Drawdown                float64 `json:"drawdown"`
+	Crowding                float64 `json:"crowding"`
+	AvgAmount5d             float64 `json:"avg_amount_5d"`      // 近5日均成交额（万元）
+	Exchange                string  `json:"exchange,omitempty"` // "SSE"/"SZSE"(默认)/"HKEX"
+	Board                   string  `json:"board,omitempty"`
+	RankingScore            float64 `json:"ranking_score,omitempty"`
+	GlobalRankScore         float64 `json:"global_rank_score,omitempty"`
+	BoardRankScore          float64 `json:"board_rank_score,omitempty"`
+	TradabilityScore        float64 `json:"tradability_score,omitempty"`
+	RiskAdjustedMomentum60d float64 `json:"risk_adjusted_momentum_60d,omitempty"`
 }
 
 // ComputeLogRecord stores quadrant compute history for observability.
@@ -143,20 +155,25 @@ type QuadrantStatusResponse struct {
 
 // RankingItem is a single stock in the ranking list.
 type RankingItem struct {
-	Rank            int      `json:"rank"`
-	Code            string   `json:"code"`
-	Name            string   `json:"name"`
-	Exchange        string   `json:"exchange"`
-	Opportunity     float64  `json:"opportunity"`
-	Risk            float64  `json:"risk"`
-	Quadrant        string   `json:"quadrant"`
-	Trend           float64  `json:"trend"`
-	Flow            float64  `json:"flow"`
-	Revision        float64  `json:"revision"`
-	Liquidity       float64  `json:"liquidity"`
-	AvgAmount5d     float64  `json:"avg_amount_5d"`    // 近5日均成交额（万元）
-	ConsecutiveDays int      `json:"consecutive_days"` // 连续上榜天数
-	ReturnPct       *float64 `json:"return_pct"`       // 首次上榜至今涨幅(%)；nil 表示暂无可用快照价格
+	Rank             int      `json:"rank"`
+	Code             string   `json:"code"`
+	Name             string   `json:"name"`
+	Exchange         string   `json:"exchange"`
+	Opportunity      float64  `json:"opportunity"`
+	Risk             float64  `json:"risk"`
+	Quadrant         string   `json:"quadrant"`
+	Trend            float64  `json:"trend"`
+	Flow             float64  `json:"flow"`
+	Revision         float64  `json:"revision"`
+	Liquidity        float64  `json:"liquidity"`
+	AvgAmount5d      float64  `json:"avg_amount_5d"` // 近5日均成交额（万元）
+	Board            string   `json:"board,omitempty"`
+	RankingScore     float64  `json:"ranking_score,omitempty"`
+	GlobalRankScore  float64  `json:"global_rank_score,omitempty"`
+	BoardRankScore   float64  `json:"board_rank_score,omitempty"`
+	TradabilityScore float64  `json:"tradability_score,omitempty"`
+	ConsecutiveDays  int      `json:"consecutive_days"` // 连续上榜天数
+	ReturnPct        *float64 `json:"return_pct"`       // 首次上榜至今涨幅(%)；nil 表示暂无可用快照价格
 }
 
 // RankingSnapshot captures a daily snapshot of top opportunity-zone stocks.

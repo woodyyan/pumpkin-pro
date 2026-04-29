@@ -1,8 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import Head from 'next/head'
 import changelogData from '../data/changelog.json'
-
-const FILTER_OPTIONS = ['全部', '新功能', '修复优化', '工程维护']
 
 const TYPE_STYLES = {
   新功能: 'border-sky-400/35 bg-sky-500/12 text-sky-100 shadow-[0_10px_30px_rgba(56,189,248,0.12)]',
@@ -51,8 +49,6 @@ function buildDateGroups(items) {
 }
 
 export default function ChangelogPage() {
-  const [activeFilter, setActiveFilter] = useState('全部')
-
   const allItems = useMemo(() => {
     const items = Array.isArray(changelogData?.items) ? changelogData.items : []
 
@@ -61,13 +57,8 @@ export default function ChangelogPage() {
       .sort((left, right) => String(right.date || '').localeCompare(String(left.date || '')))
   }, [])
 
-  const filteredItems = useMemo(() => {
-    if (activeFilter === '全部') return allItems
-    return allItems.filter((item) => item.type === activeFilter)
-  }, [activeFilter, allItems])
-
   const metaCards = useMemo(() => buildMetaCards(allItems), [allItems])
-  const groupedItems = useMemo(() => buildDateGroups(filteredItems), [filteredItems])
+  const groupedItems = useMemo(() => buildDateGroups(allItems), [allItems])
 
   return (
     <div className="space-y-6 pb-8">
@@ -109,30 +100,8 @@ export default function ChangelogPage() {
       </section>
 
       <section className="rounded-[28px] border border-border bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-        <div className="flex flex-col gap-4 border-b border-white/8 pb-5 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-white">最近更新</h2>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {FILTER_OPTIONS.map((option) => {
-              const isActive = activeFilter === option
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => setActiveFilter(option)}
-                  className={`rounded-full border px-3.5 py-1.5 text-xs transition ${
-                    isActive
-                      ? 'border-primary bg-primary/12 text-primary shadow-[0_0_0_1px_rgba(230,126,34,0.15)]'
-                      : 'border-white/10 bg-black/15 text-white/65 hover:border-white/20 hover:text-white'
-                  }`}
-                >
-                  {option}
-                </button>
-              )
-            })}
-          </div>
+        <div className="border-b border-white/8 pb-5">
+          <h2 className="text-lg font-semibold text-white">最近更新</h2>
         </div>
 
         {groupedItems.length ? (
@@ -201,7 +170,7 @@ export default function ChangelogPage() {
           </div>
         ) : (
           <div className="mt-6 rounded-[24px] border border-dashed border-white/10 px-4 py-10 text-center text-sm text-white/45">
-            当前筛选条件下还没有可展示的更新，先别急，产品没有偷偷摸鱼。
+            暂时还没有可展示的更新，先别急，产品没有偷偷摸鱼。
           </div>
         )}
       </section>

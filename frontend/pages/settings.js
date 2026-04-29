@@ -15,6 +15,12 @@ import {
   dispatchInvestmentProfileUpdated,
   writeInvestmentProfileCache,
 } from '../lib/investment-profile-storage.js'
+import {
+  isIOSSafari,
+  isNotificationSupported,
+  loadNotificationPreferences,
+  saveNotificationPreferences,
+} from '../lib/notification.js'
 import Head from 'next/head'
 
 function createInvestForm(profile = null) {
@@ -60,6 +66,8 @@ export default function SettingsPage() {
   const [fbSaving, setFbSaving] = useState(false)
   const [fbNotice, setFbNotice] = useState('')
   const [fbError, setFbError] = useState('')
+  const [notifPrefs, setNotifPrefs] = useState(() => loadNotificationPreferences())
+  const [notifSupported, setNotifSupported] = useState(false)
   const authIdentityKey = String(user?.id || user?.email || '')
 
   const applyError = (err, fallbackText) => {
@@ -128,6 +136,10 @@ export default function SettingsPage() {
       applyError(err, '加载设置失败')
     }
   }
+
+  useEffect(() => {
+    setNotifSupported(isNotificationSupported())
+  }, [])
 
   useEffect(() => {
     if (!ready) return
@@ -464,6 +476,43 @@ export default function SettingsPage() {
           </button>
         </div>
       </section>
+
+      {/* Desktop Notifications */}
+      {notifSupported && (
+        <section className="rounded-2xl border border-border bg-card p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-white">桌面通知</h2>
+              <p className="mt-1 text-xs text-white/60">控制是否通过浏览器系统弹窗接收通知。</p>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3 rounded-xl border border-border bg-black/20 p-4">
+            <label className="flex cursor-pointer items-center gap-3">
+              <input
+                type="checkbox"
+                checked={notifPrefs.aiAnalysis}
+                onChange={(e) => {
+                  const next = { ...notifPrefs, aiAnalysis: e.target.checked }
+                  setNotifPrefs(next)
+                  saveNotificationPreferences(next)
+                }}
+                className="h-4 w-4 rounded border-border bg-black/30 text-primary accent-primary"
+              />
+              <div>
+                <div className="text-sm text-white/85">AI 分析完成时通知我</div>
+                <div className="text-[11px] text-white/40">分析完成后通过桌面弹窗提醒，即使切换到其他标签页也能收到</div>
+              </div>
+            </label>
+
+            {isIOSSafari() && (
+              <div className="rounded-xl border border-amber-400/20 bg-amber-500/8 px-3.5 py-2.5 text-[12px] leading-6 text-amber-200/80">
+                📱 iOS 用户：添加到主屏幕后可在后台接收通知
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       <section className="rounded-2xl border border-border bg-card p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">

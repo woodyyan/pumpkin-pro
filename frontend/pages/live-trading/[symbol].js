@@ -12,6 +12,12 @@ import { useAuth } from '../../lib/auth-context'
 import { isAuthRequiredError } from '../../lib/auth-storage'
 import { deriveAIAnalysisWaitState } from '../../lib/ai-analysis-wait'
 import {
+  getNotificationPermission,
+  requestNotificationPermission,
+  sendNotification,
+  NOTIFICATION_CATEGORIES,
+} from '../../lib/notification'
+import {
   readInvestmentProfileCache,
   subscribeInvestmentProfileUpdates,
 } from '../../lib/investment-profile-storage.js'
@@ -146,6 +152,7 @@ export default function LiveTradingDetailPage() {
   const [aiWaitStartedAt, setAiWaitStartedAt] = useState(0)
   const [aiWaitElapsedSec, setAiWaitElapsedSec] = useState(0)
   const [aiNewsContextState, setAiNewsContextState] = useState('idle')
+  const [aiNotifPromptVisible, setAiNotifPromptVisible] = useState(false)
 
   // ── AI 分析历史 ──
   const [analysisHistory, setAnalysisHistory] = useState([])
@@ -539,6 +546,12 @@ export default function LiveTradingDetailPage() {
     if (!isLoggedIn) { openAuthModal('login', '登录后可使用 AI 分析功能'); return }
     if (!snapshotPayload?.snapshot) { setAiError('行情数据尚未加载完成，请稍后再试'); return }
 
+    // 首次点击且权限未决定时，展示产品内提示条
+    const perm = getNotificationPermission()
+    if (perm === 'default') {
+      setAiNotifPromptVisible(true)
+    }
+
     setAiAnalyzing(true)
     setAiResult(null)
     setAiError('')
@@ -717,6 +730,13 @@ export default function LiveTradingDetailPage() {
       if (!result) throw lastErr
 
       setAiResult(result)
+      // 浏览器通知：AI 分析完成
+      sendNotification(NOTIFICATION_CATEGORIES.AI_ANALYSIS, {
+        symbol,
+        symbolName: symbolName || symbol,
+        signal: result?.analysis?.signal,
+        confidenceScore: result?.analysis?.confidence_score,
+      })
       // 刷新历史记录（新结果已异步保存到后端）
       loadAnalysisHistory(symbol, { limit: 10 })
     } catch (err) {
@@ -1413,6 +1433,8 @@ export default function LiveTradingDetailPage() {
             waitState={aiWaitState}
             referenceItem={latestAnalysisReference}
             newsState={aiNewsContextState}
+            notifPromptVisible={aiNotifPromptVisible}
+            onNotifPromptClose={() => setAiNotifPromptVisible(false)}
             onClose={() => { setShowAiPanel(false); setAiResult(null); setAiError(''); setAiNewsContextState('idle') }}
             onRetry={handleAIAnalysis}
           />
@@ -2048,7 +2070,7 @@ export default function LiveTradingDetailPage() {
 
 // ── AI 分析结果面板 ──
 
-function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, referenceItem, newsState }) {
+function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, referenceItem, newsState, notifPromptVisible, onNotifPromptClose }) {
   const signalToneMap = {
     buy: 'text-red-200 bg-red-500/10 border-red-400/25',
     sell: 'text-emerald-200 bg-emerald-500/10 border-emerald-400/25',
@@ -2062,6 +2084,30 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
 
   return (
     <section className="rounded-2xl border border-primary/25 bg-card p-4 sm:p-6">
+      {notifPromptVisible && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-sky-400/25 bg-sky-500/10 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm text-sky-100">
+            <span>💡</span>
+            <span>分析完成后通过桌面通知提醒你，是否开启？</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => { onNotifPromptClose?.(); requestNotificationPermission() }}
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-primary/85"
+            >
+              开启通知
+            </button>
+            <button
+              type="button"
+              onClick={() => onNotifPromptClose?.()}
+              className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-white/60 transition hover:border-white/30 hover:text-white"
+            >
+              稍后再说
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
           <div className="flex items-center gap-3">
@@ -2215,7 +2261,7 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
   )
 }
 
-function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolName, elapsedSec, waitState, referenceItem, symbol, newsState }) {
+function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolName, elapsedSec, waitState, referenceItem, symbol, newsState, notifPromptVisible, onNotifPromptClose }) {
   const [logicExpanded, setLogicExpanded] = useState(true)
 
   if (analyzing) {
@@ -2227,6 +2273,8 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolNam
         waitState={waitState}
         referenceItem={referenceItem}
         newsState={newsState}
+        notifPromptVisible={notifPromptVisible}
+        onNotifPromptClose={onNotifPromptClose}
       />
     )
   }

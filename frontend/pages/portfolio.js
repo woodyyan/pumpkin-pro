@@ -272,9 +272,6 @@ function ManualMaintenanceNotice() {
             <span>当前持仓数据仍以手动维护为主，暂未直连券商。</span>
             <InfoTip text={FIELD_TIPS.manual_notice} iconClassName="border-white/12 text-white/30 hover:border-white/25 hover:text-white/55" />
           </div>
-          <p className="mt-0.5 text-[11px] text-white/32">
-            你在个股详情页记录的买入、卖出和调均价，会同步汇总到这里；后续版本会逐步补上自动同步能力。
-          </p>
         </div>
       </div>
     </div>
@@ -476,11 +473,8 @@ function SummarySection({ summary }) {
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-white/80">分市场总览</h3>
-              <p className="mt-1 text-xs text-white/35">选择「全部」时，金额类指标按市场分别展示，避免人民币与港币混排。</p>
-            </div>
+          <div className="mb-4">
+            <h3 className="text-sm font-semibold text-white/80">分市场总览</h3>
           </div>
           <div className="grid gap-3 xl:grid-cols-2">
             {marketBlocks.map((block) => (
@@ -1262,7 +1256,6 @@ function EquityCurveSection({ curve, curveRange, setCurveRange }) {
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 17l6-6 4 4 7-8"/></svg>
             <LabelWithInfo label="资产曲线" tooltip={FIELD_TIPS.equity_curve} />
           </h3>
-          <p className="mt-1 text-xs text-white/35">基于每日持仓快照生成，当前默认展示市值曲线。</p>
         </div>
         <div className="flex flex-col items-start gap-2 sm:items-end">
           <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-white/10 bg-black/20 p-1">
@@ -1300,11 +1293,10 @@ function AllocationBar({ allocationItems }) {
 
   return (
     <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
-      <h3 className="text-sm font-semibold text-white/80 mb-1 flex items-center gap-2">
+      <h3 className="text-sm font-semibold text-white/80 mb-4 flex items-center gap-2">
         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
         <LabelWithInfo label="持仓分布" tooltip={FIELD_TIPS.allocation} />
       </h3>
-      <p className="mb-4 text-xs text-white/35">按当前持仓市值估算前 {allocationItems.length} 大仓位权重。</p>
       <div className="space-y-2.5">
         {allocationItems.map((item) => {
           const ratio = totalMarketValue > 0 ? (item.market_value_amount || 0) / totalMarketValue : 0
@@ -2156,7 +2148,6 @@ export default function PortfolioPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-white/90 tracking-tight">持仓管理</h1>
-            <p className="text-xs text-white/35 mt-0.5">组合控制台 — 全部持仓一览</p>
           </div>
           <div className="flex items-center gap-2">
             <button

@@ -372,10 +372,7 @@ function DetailContent({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-white/86">详细归因</div>
-          <div className="mt-1 text-[11px] text-white/38">关键股票、关键交易、市场对比和行业归因按同一层连续展开，方便直接顺着看完。</div>
-        </div>
+        <div className="text-sm font-semibold text-white/86">详细归因</div>
         {onClose ? (
           <button
             type="button"
@@ -581,14 +578,9 @@ export default function PortfolioAttributionSection({
       <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 sm:p-6">
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-white/86">
-                <LabelWithInfo label="绩效归因分析" tooltip={ATTRIBUTION_TIPS.section} />
-              </h3>
-              <p className="mt-1 text-xs text-white/38">
-                {summary?.mixed_currency ? 'A/H 混仓按市场分块返回，不做跨币种硬合并；默认一次只看一个市场。' : '默认只给一个结论和一张主图，帮你先看懂结果，再决定要不要深挖。'}
-              </p>
-            </div>
+            <h3 className="text-sm font-semibold text-white/86">
+              <LabelWithInfo label="绩效归因分析" tooltip={ATTRIBUTION_TIPS.section} />
+            </h3>
             <div className="text-[11px] text-white/34">计算于 {formatComputedAt(summary?.computed_at)}</div>
           </div>
 
@@ -617,7 +609,6 @@ export default function PortfolioAttributionSection({
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="max-w-2xl">
                 <div className="text-lg font-semibold leading-8 text-white/92">{hero.headline || '这段时间的收益拆解结果如下。'}</div>
-                <div className="mt-2 text-sm text-white/42">默认只保留主结论和主图，详情只在你主动展开时显示。</div>
               </div>
               <button
                 type="button"

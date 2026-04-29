@@ -111,6 +111,12 @@ const ATTRIBUTION_FETCHERS = {
   market: fetchPortfolioAttributionMarket,
 }
 
+const MARKET_PNL_OPTIONS = [
+  { value: 'unrealized_pnl', label: '未实现盈亏', amountKey: 'unrealized_pnl_amount', tipKey: 'unrealized_pnl' },
+  { value: 'realized_pnl', label: '已实现盈亏', amountKey: 'realized_pnl_amount', tipKey: 'realized_pnl' },
+  { value: 'total_pnl', label: '累计盈亏', amountKey: 'total_pnl_amount', tipKey: 'total_pnl' },
+]
+
 const FIELD_TIPS = {
   manual_notice: '当前持仓管理数据需要你在个股详情页手动记录买入、卖出和调均价操作，系统暂时还不能直接同步券商真实持仓。后续会逐步支持券商数据对接。',
   position_count: '当前筛选范围内仍持有仓位的股票数量。只有持仓数量大于 0 的标的才会统计在内。',
@@ -355,12 +361,14 @@ function SummaryRow({ label, tooltip, value, valueClassName = 'text-white/85', f
 }
 
 function MarketOverviewCard({ block }) {
+  const [selectedPnl, setSelectedPnl] = useState('total_pnl')
   const marketValue = buildMoneyMetric(block.market_value_amount, block.scope)
   const totalCost = buildMoneyMetric(block.total_cost_amount, block.scope)
-  const unrealized = buildMoneyMetric(block.unrealized_pnl_amount, block.scope, { signed: true })
-  const realized = buildMoneyMetric(block.realized_pnl_amount, block.scope, { signed: true })
-  const total = buildMoneyMetric(block.total_pnl_amount, block.scope, { signed: true })
   const today = buildMoneyMetric(block.today_pnl_amount, block.scope, { signed: true })
+
+  const pnlOption = MARKET_PNL_OPTIONS.find((o) => o.value === selectedPnl) || MARKET_PNL_OPTIONS[2]
+  const pnlAmount = block[pnlOption.amountKey]
+  const pnlMetric = buildMoneyMetric(pnlAmount, block.scope, { signed: true })
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
@@ -378,35 +386,34 @@ function MarketOverviewCard({ block }) {
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2.5">
+      <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-2.5">
         <SummaryRow label="总成本" tooltip={FIELD_TIPS.total_cost} value={totalCost.main} footnote={totalCost.detail} />
-        <SummaryRow
-          label="未实现盈亏"
-          tooltip={FIELD_TIPS.unrealized_pnl}
-          value={unrealized.main}
-          footnote={unrealized.detail}
-          valueClassName={block.unrealized_pnl_amount >= 0 ? 'text-rose-400' : 'text-emerald-400'}
-        />
-        <SummaryRow
-          label="已实现盈亏"
-          tooltip={FIELD_TIPS.realized_pnl}
-          value={realized.main}
-          footnote={realized.detail}
-          valueClassName={block.realized_pnl_amount >= 0 ? 'text-rose-400' : 'text-emerald-400'}
-        />
-        <SummaryRow
-          label="累计盈亏"
-          tooltip={FIELD_TIPS.total_pnl}
-          value={total.main}
-          footnote={total.detail}
-          valueClassName={block.total_pnl_amount >= 0 ? 'text-rose-400' : 'text-emerald-400'}
-        />
         <SummaryRow
           label="今日盈亏"
           tooltip={FIELD_TIPS.today_pnl}
           value={today.main}
           footnote={today.detail}
           valueClassName={block.today_pnl_amount >= 0 ? 'text-rose-400' : 'text-emerald-400'}
+        />
+        <SummaryRow
+          label={
+            <select
+              value={selectedPnl}
+              onChange={(e) => setSelectedPnl(e.target.value)}
+              className="appearance-none bg-transparent text-white/50 text-[11px] border border-white/10 rounded px-1.5 py-0.5 cursor-pointer hover:border-white/25 focus:outline-none focus:border-white/30"
+              aria-label="选择盈亏指标"
+            >
+              {MARKET_PNL_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value} className="bg-[#1a1a1e] text-white/80 text-[11px]">
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          }
+          tooltip={FIELD_TIPS[pnlOption.tipKey]}
+          value={pnlMetric.main}
+          footnote={pnlMetric.detail}
+          valueClassName={pnlAmount >= 0 ? 'text-rose-400' : 'text-emerald-400'}
         />
         <SummaryRow
           label="最大单仓占比"

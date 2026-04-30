@@ -4,6 +4,8 @@ import { useRouter } from 'next/router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import InfoTip from '../../components/InfoTip'
+import AIAnalysisReportContent from '../../components/AIAnalysisReportContent'
+import AIAnalysisShareCard from '../../components/AIAnalysisShareCard'
 import SymbolNewsPanel from '../../components/SymbolNewsPanel'
 import SymbolNewsSummaryCard from '../../components/SymbolNewsSummaryCard'
 import { requestJson } from '../../lib/api'
@@ -11,6 +13,7 @@ import { buildAINewsContext } from '../../lib/symbol-news-ui'
 import { useAuth } from '../../lib/auth-context'
 import { isAuthRequiredError } from '../../lib/auth-storage'
 import { deriveAIAnalysisWaitState } from '../../lib/ai-analysis-wait'
+import { buildAIAnalysisSharePayload, exportAIAnalysisShareImages } from '../../lib/ai-analysis-share'
 import {
   getNotificationPermission,
   requestNotificationPermission,
@@ -1428,6 +1431,7 @@ export default function LiveTradingDetailPage() {
             result={aiResult}
             error={aiError}
             symbol={symbol}
+            exchange={exchange}
             symbolName={symbolName || symbol}
             elapsedSec={aiWaitElapsedSec}
             waitState={aiWaitState}
@@ -2261,8 +2265,24 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
   )
 }
 
-function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolName, elapsedSec, waitState, referenceItem, symbol, newsState, notifPromptVisible, onNotifPromptClose }) {
+function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolName, elapsedSec, waitState, referenceItem, symbol, exchange, newsState, notifPromptVisible, onNotifPromptClose }) {
   const [logicExpanded, setLogicExpanded] = useState(true)
+  const [shareBusy, setShareBusy] = useState(false)
+  const [shareNotice, setShareNotice] = useState('')
+  const [shareError, setShareError] = useState('')
+  const shareCardWrapRef = useRef(null)
+
+  const sharePayload = useMemo(() => buildAIAnalysisSharePayload({
+    symbol,
+    symbolName: symbolName || symbol,
+    exchange,
+    result,
+  }), [exchange, result, symbol, symbolName])
+
+  useEffect(() => {
+    setShareNotice('')
+    setShareError('')
+  }, [result?.meta?.generated_at, result?.analysis?.data_timestamp, symbol])
 
   if (analyzing) {
     return (
@@ -2279,258 +2299,82 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolNam
     )
   }
 
-  // 错误由顶部 Header 区域统一展示，此处不再重复渲染
-
-  // 结果展示
   const analysis = result?.analysis
   if (!analysis) return null
 
-  const signalMap = {
-    buy: { label: '看多', arrow: '↑', hint: '偏多配置', color: 'text-red-300', bg: 'bg-red-500/12', border: 'border-red-400/40', dot: '🔴' },
-    sell: { label: '看空', arrow: '↓', hint: '注意风险', color: 'text-emerald-300', bg: 'bg-emerald-500/12', border: 'border-emerald-400/40', dot: '🟢' },
-    hold: { label: '观望', arrow: '→', hint: '持仓不变', color: 'text-amber-300', bg: 'bg-amber-500/12', border: 'border-amber-400/40', dot: '🟡' },
-  }
-  const sig = signalMap[analysis.signal] || signalMap.hold
-  const confidencePct = Math.min(100, Math.max(0, analysis.confidence_score || 0))
-  const confidenceLabel = analysis.confidence_level || 'medium'
+  const handleShareImage = async () => {
+    const shareElement = shareCardWrapRef.current?.querySelector('[data-share-card-root="true"]')
+    if (!sharePayload?.result?.analysis || !shareElement) {
+      setShareError('分享图内容尚未准备好，请稍后重试')
+      return
+    }
 
-  // 数据完整性标签
-  const dc = result?.meta?.data_completeness || {}
-  const completenessLabels = {
-    market: dc.market === 'complete' ? '实时' : '缺失',
-    technical: dc.technical === 'complete' ? '可用' : '部分缺失',
-    fundamentals: dc.fundamentals === 'complete' ? '昨日收盘' : '不可用',
-    market_overview: dc.market_overview === 'complete' ? '实时' : '不可用',
+    setShareBusy(true)
+    setShareNotice('')
+    setShareError('')
+    try {
+      const exportResult = await exportAIAnalysisShareImages({
+        element: shareElement,
+        payload: sharePayload,
+      })
+      if (exportResult.action === 'shared') {
+        setShareNotice(exportResult.total > 1 ? `已唤起系统分享，共 ${exportResult.total} 张图片。` : '已唤起系统分享。')
+      } else if (exportResult.action === 'cancelled') {
+        setShareNotice('已取消分享。')
+      } else {
+        setShareNotice(exportResult.total > 1 ? `已下载 ${exportResult.total} 张分享图片。` : '分享图片已开始下载。')
+      }
+    } catch (err) {
+      setShareError(err?.message || '生成分享图片失败，请稍后重试')
+    } finally {
+      setShareBusy(false)
+    }
   }
-
-  const ts = analysis.trading_suggestions || {}
-  const entryZone = ts.entry_zone || {}
-  const stopLoss = ts.stop_loss || {}
-  const takeProfit = ts.take_profit || {}
 
   return (
-    <section className={`rounded-2xl border ${sig.border} ${sig.bg} p-5`}>
-      {/* 核心信号卡片 */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <span className="text-xl">{sig.dot}</span>
-          <div>
-            <div className={`text-lg font-bold ${sig.color}`}>{sig.label} <span className="text-base">{sig.arrow}</span></div>
-            <div className="mt-0.5 text-[11px] text-white/40">{sig.hint}</div>
-            <div className="mt-1.5 flex items-center gap-2">
-              <span className="text-xs text-white/50">置信度</span>
-              <div className="h-2 w-32 overflow-hidden rounded-full bg-white/10">
-                <div
-                  className={`h-full rounded-full transition-all ${
-                    confidencePct >= 70 ? 'bg-red-400' : confidencePct >= 40 ? 'bg-amber-400' : 'bg-gray-500'
-                  }`}
-                  style={{ width: `${confidencePct}%` }}
-                />
-              </div>
-              <span className={`text-xs font-medium ${
-                confidencePct >= 70 ? 'text-red-300' : confidencePct >= 40 ? 'text-amber-300' : 'text-gray-400'
-              }`}>{confidencePct}%（{confidenceLabel}）</span>
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={onRetry} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-white/60 transition hover:border-white/30 hover:text-white">
-            🔄 重新分析
-          </button>
-          <button type="button" onClick={onClose} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-white/40 transition hover:border-white/30 hover:text-white/70">
-            ✕ 关闭
-          </button>
-        </div>
-      </div>
-
-      {/* 数据时效 */}
-      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-white/35">
-        <span>数据时效：</span>
-        <span>行情 {completenessLabels.market}</span>
-        <span>· 技术 {completenessLabels.technical}</span>
-        <span>· 基础面 {completenessLabels.fundamentals}</span>
-        <span>· 大盘 {completenessLabels.market_overview}</span>
-      </div>
-
-      {/* ── 四层分析评分（第二步新增）── */}
-      {analysis.layer_scores && Object.keys(analysis.layer_scores).length > 0 && (
-        <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-4 py-3.5">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-xs font-semibold text-white/70">📊 卧龙模型评分</span>
-            {/* 市场状态标签 */}
-            {analysis.market_state && (
-              <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                analysis.market_state === 'trend' ? 'bg-red-500/15 text-red-300' :
-                analysis.market_state === 'speculative' ? 'bg-purple-500/15 text-purple-300' :
-                analysis.market_state === 'bubble' ? 'bg-orange-500/15 text-orange-300' :
-                analysis.market_state === 'decline' ? 'bg-emerald-500/15 text-emerald-300' :
-                'bg-sky-500/15 text-sky-300'
-              }`}>
-                🏷️ {analysis.market_state_label || analysis.market_state}
-              </span>
-            )}
-          </div>
-          {(['narrative', 'liquidity', 'expectation', 'fundamental']).map((key) => {
-            const ls = analysis.layer_scores[key]
-            if (!ls) return null
-            const layerMeta = {
-              narrative:   { label: '叙事层', icon: '📖', color: '#a78bfa', weight: '25%' },
-              liquidity:   { label: '资金层', icon: '💧', color: '#38bdf8', weight: '25%' },
-              expectation: { label: '预期层', icon: '🎯', color: '#f472b6', weight: '30%' },
-              fundamental: { label: '基本面', icon: '📈', color: '#34d399', weight: '20%' },
-            }
-            const meta = layerMeta[key]
-            // score -2~+2 映射到 0~100% 进度条
-            const barPct = Math.max(0, Math.min(100, ((ls.score + 2) / 4) * 100))
-            const dirLabel = { bullish: '看多', neutral: '中性', bearish: '看空' }[ls.direction] || '中性'
-            const dirColor = ls.direction === 'bullish' ? '#ef4444' : ls.direction === 'bearish' ? '#22c55e' : '#9ca3af'
-            return (
-              <div key={key} className="mt-2 first:mt-0">
-                <div className="mb-1 flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[13px]">{meta.icon}</span>
-                    <span className="text-[12px] font-medium text-white/80">{meta.label}</span>
-                    <span className="text-[10px] text-white/30">({meta.weight})</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-semibold" style={{ color: dirColor }}>{dirLabel}</span>
-                    <span className="text-[11px] font-mono text-white/50">{ls.score > 0 ? '+' : ''}{ls.score}</span>
-                    <span className="text-[10px] text-white/30">置信度 {(ls.confidence * 100).toFixed(0)}%</span>
-                  </div>
-                </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/8">
-                  <div
-                    className="h-full rounded-full transition-all"
-                    style={{ width: `${barPct}%`, backgroundColor: meta.color }}
-                  />
-                </div>
-                {ls.reason && (
-                  <p className="mt-1 text-[11px] leading-relaxed text-white/40">{ls.reason}</p>
-                )}
-              </div>
-            )
-          })}
-          {/* 综合评分 */}
-          {analysis.total_score != null && (
-            <div className="mt-3 flex items-center justify-between border-t border-white/8 pt-3">
-              <span className="text-[11px] text-white/40">加权综合评分</span>
-              <span className={`text-sm font-bold font-mono ${
-                analysis.total_score >= 0.5 ? 'text-red-400' :
-                analysis.total_score <= -0.5 ? 'text-emerald-400' :
-                'text-amber-400'
-              }`}>
-                {analysis.total_score > 0 ? '+' : ''}{analysis.total_score.toFixed(2)}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 分析逻辑 */}
-      <div className="mt-4 overflow-hidden rounded-xl border border-white/8 bg-black/20">
-        <button
-          type="button"
-          onClick={() => setLogicExpanded(!logicExpanded)}
-          className="flex w-full items-center justify-between px-4 py-2.5 text-left"
-        >
-          <span className="text-xs font-medium text-white/70">▾ 分析逻辑{!logicExpanded && '（点击展开）'}</span>
-          <span className="text-[11px] text-white/35">{logicExpanded ? '收起' : '展开'}</span>
-        </button>
-        {logicExpanded && (
-          <div className="px-4 pb-4">
-            {(analysis.logic_summary || '').split('\n').filter(Boolean).map((line, i) => (
-              <p key={i} className="mt-2 text-[13px] leading-relaxed text-white/75 first:mt-0">
-                • {line.trim().replace(/^•\s*/, '')}
-              </p>
-            ))}
-          </div>
+    <>
+      <AIAnalysisReportContent
+        result={result}
+        logicExpanded={logicExpanded}
+        onToggleLogic={() => setLogicExpanded((current) => !current)}
+        actionSlot={(
+          <>
+            <button
+              type="button"
+              onClick={handleShareImage}
+              disabled={shareBusy}
+              className="rounded-lg border border-primary/35 bg-primary/10 px-2.5 py-1.5 text-xs text-primary transition hover:border-primary/60 hover:bg-primary/16 hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {shareBusy ? '生成中...' : '🖼️ 生成图片'}
+            </button>
+            <button type="button" onClick={onRetry} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-white/60 transition hover:border-white/30 hover:text-white">
+              🔄 重新分析
+            </button>
+            <button type="button" onClick={onClose} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-white/40 transition hover:border-white/30 hover:text-white/70">
+              ✕ 关闭
+            </button>
+          </>
         )}
+      />
+
+      {shareNotice ? (
+        <div className="mt-3 rounded-xl border border-sky-400/20 bg-sky-500/8 px-3.5 py-2.5 text-xs text-sky-100/85">
+          {shareNotice}
+        </div>
+      ) : null}
+
+      {shareError ? (
+        <div className="mt-3 rounded-xl border border-rose-400/25 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-100/85">
+          {shareError}
+        </div>
+      ) : null}
+
+      <div ref={shareCardWrapRef} aria-hidden className="pointer-events-none fixed left-[-20000px] top-0 z-[-1]">
+        {sharePayload ? <AIAnalysisShareCard payload={sharePayload} /> : null}
       </div>
-
-      {/* ⚠️ 风险提示 */}
-      {Array.isArray(analysis.risk_warnings) && analysis.risk_warnings.length > 0 && (
-        <div className="mt-4 rounded-xl border border-rose-400/25 bg-rose-500/8 px-4 py-3">
-          <div className="mb-2 text-xs font-semibold text-rose-200/90">⚠️ 风险提示</div>
-          {analysis.risk_warnings.map((w, i) => (
-            <p key={i} className="mt-1.5 text-[12px] leading-relaxed text-rose-200/70 first:mt-0">⚠️ {w}</p>
-          ))}
-        </div>
-      )}
-
-      {/* 📋 交易建议表格 */}
-      {ts.action_suggestion && (
-        <div className="mt-4 rounded-xl border border-sky-400/20 bg-sky-500/5 px-4 py-3">
-          <div className="mb-2 text-xs font-semibold text-sky-200/90">📋 交易建议</div>
-          <p className="text-[13px] leading-relaxed text-white/80">{ts.action_suggestion}</p>
-          <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 md:grid-cols-4">
-            <MetricMini label="建议买价" value={`${entryZone.low ?? '--'} ~ ${entryZone.high ?? '--'}`} emphasis tooltip="建议的买入价格区间" />
-            <MetricMini label="止损位" value={`${stopLoss.price || '--'}${stopLoss.pct != null ? `(${stopLoss.pct}%)` : ''}`} accent="down" tooltip="跌破此价位应考虑止损" />
-            <MetricMini label="目标位" value={`${takeProfit.price || '--'}${takeProfit.pct != null ? `(+${takeProfit.pct}%)` : ''}`} accent="up" tooltip="预期盈利目标价位" />
-            <MetricMini label="仓位建议" value={`${ts.position_size_pct || '--'}`} tooltip="占总资金的比例建议" />
-          </div>
-          {ts.time_horizon && (
-            <div className="mt-2 text-[11px] text-white/45">投资周期：{ts.time_horizon}</div>
-          )}
-        </div>
-      )}
-
-      {/* ── 触发条件（第二步新增）── */}
-      {analysis.action_trigger && (analysis.action_trigger.buy_trigger || analysis.action_trigger.sell_trigger) && (
-        <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/5 px-4 py-3">
-          <div className="mb-2 text-xs font-semibold text-amber-200/90">🎯 执行触发条件</div>
-          {analysis.action_trigger.buy_trigger && (
-            <div className="mt-1.5 flex items-start gap-2 first:mt-0">
-              <span className="mt-0.5 text-xs">🟢</span>
-              <div>
-                <span className="text-[11px] font-medium text-white/50">买入触发</span>
-                <p className="mt-0.5 text-[13px] leading-relaxed text-red-300/80">{analysis.action_trigger.buy_trigger}</p>
-              </div>
-            </div>
-          )}
-          {analysis.action_trigger.sell_trigger && (
-            <div className="mt-2.5 flex items-start gap-2 first:mt-0">
-              <span className="mt-0.5 text-xs">🔴</span>
-              <div>
-                <span className="text-[11px] font-medium text-white/50">卖出触发</span>
-                <p className="mt-0.5 text-[13px] leading-relaxed text-emerald-300/80">{analysis.action_trigger.sell_trigger}</p>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── 关键催化因素（第二步新增）── */}
-      {Array.isArray(analysis.key_catalysts) && analysis.key_catalysts.length > 0 && (
-        <div className="mt-4 rounded-xl border border-sky-400/15 bg-sky-500/[0.04] px-4 py-3">
-          <div className="mb-2 text-xs font-semibold text-sky-200/90">✨ 潜在催化因素</div>
-          {analysis.key_catalysts.map((c, i) => (
-            <p key={i} className="mt-1.5 text-[12px] leading-relaxed text-sky-200/65 first:mt-0">💡 {c}</p>
-          ))}
-        </div>
-      )}
-
-      {/* 持仓参考 */}
-      {dc.portfolio === 'has_position' && (
-        <div className="mt-3 rounded-lg border border-emerald-400/15 bg-emerald-500/5 px-3.5 py-2.5 text-[12px] text-emerald-200/80">
-          💡 你当前持有该股票，AI 已结合持仓盈亏给出针对性建议。
-        </div>
-      )}
-
-      {/* 免责声明 */}
-      <div className="mt-4 rounded-lg bg-black/20 px-3.5 py-2.5 text-center text-[11px] text-white/30">
-        ⚠️ AI 分析仅供参考，不构成任何投资建议。市场有风险，投资需谨慎。
-      </div>
-
-      {/* 分析时间 */}
-      {analysis.data_timestamp && (
-        <div className="mt-2 text-center text-[10px] text-white/20">
-          分析时间：{new Date(analysis.data_timestamp).toLocaleString('zh-CN', { hour12: false })}
-        </div>
-      )}
-    </section>
+    </>
   )
 }
-
 // ── AI 分析历史面板（可折叠，默认收起）──
 
 function hasSignalPerformanceReturn(perf) {

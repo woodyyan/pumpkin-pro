@@ -499,8 +499,8 @@ const MIN_QUERY_LEN = 2
 const MAX_RESULTS = 8
 
 export default function MyApp({ Component, pageProps, router }) {
-  // /admin 使用独立布局，不显示主站导航
-  if (router.pathname === '/admin') {
+  // /admin 和分享图预览页使用独立布局，不显示主站导航
+  if (router.pathname === '/admin' || router.pathname === '/share/ai-analysis-preview') {
     return <Component {...pageProps} />
   }
 

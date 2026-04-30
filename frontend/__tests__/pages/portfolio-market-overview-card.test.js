@@ -37,4 +37,33 @@ describe('portfolio market overview card structure', () => {
     assert.doesNotMatch(cardBody, /label="已实现盈亏"[^>]*>\s*<SummaryRow/)
     assert.doesNotMatch(cardBody, /label="累计盈亏"[^>]*>\s*<SummaryRow/)
   })
+
+  it('reuses MarketOverviewCard for single-market summaries', () => {
+    const summarySectionMatch = pageSource.match(/function SummarySection\(\{ summary \}\) \{[\s\S]*?^\}/m)
+    if (!summarySectionMatch) {
+      assert.fail('SummarySection not found')
+    }
+    const sectionBody = summarySectionMatch[0]
+
+    assert.match(sectionBody, /const overviewBlocks = buildPortfolioOverviewBlocks\(summary\)/)
+    assert.match(sectionBody, /singleBlock \? <MarketOverviewCard block=\{singleBlock\} \/> : null/)
+  })
+
+  it('removes the standalone 6-card single-market metric grid', () => {
+    const summarySectionMatch = pageSource.match(/function SummarySection\(\{ summary \}\) \{[\s\S]*?^\}/m)
+    if (!summarySectionMatch) {
+      assert.fail('SummarySection not found')
+    }
+    const sectionBody = summarySectionMatch[0]
+    const singleMarketBody = sectionBody.split('const singleBlock = overviewBlocks[0] || null')[1]
+    if (!singleMarketBody) {
+      assert.fail('single-market branch not found')
+    }
+
+    assert.doesNotMatch(singleMarketBody, /grid-cols-2 md:grid-cols-3 xl:grid-cols-6/)
+    assert.doesNotMatch(singleMarketBody, /SummaryCard label="未实现盈亏"/)
+    assert.doesNotMatch(singleMarketBody, /SummaryCard label="已实现盈亏"/)
+    assert.doesNotMatch(singleMarketBody, /SummaryCard label="累计盈亏"/)
+    assert.doesNotMatch(singleMarketBody, /SummaryCard\s+label="最大单仓占比"\s+tooltip=\{FIELD_TIPS\.max_position_weight\}/)
+  })
 })

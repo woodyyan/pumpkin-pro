@@ -31,6 +31,7 @@ import {
   fetchPortfolioAttributionTrading,
   fetchPortfolioAttributionMarket,
 } from '../lib/portfolio-attribution.js'
+import { buildPortfolioOverviewBlocks } from '../lib/portfolio-summary.js'
 import { getPortfolioPageViewState } from '../lib/portfolio-page-view.js'
 import {
   readInvestmentProfileCache,
@@ -347,7 +348,7 @@ function SummaryCard({ label, tooltip, value, footnote, accent, valueClassName =
 
 function SummaryRow({ label, tooltip, value, valueClassName = 'text-white/85', footnote }) {
   return (
-    <div className="rounded-xl bg-black/20 px-3 py-2">
+    <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
       <div className="text-[11px] text-white/40">
         <LabelWithInfo label={label} tooltip={tooltip} />
       </div>
@@ -427,8 +428,7 @@ function SummarySection({ summary }) {
   if (!summary) return null
 
   const isMixed = summary.mixed_currency
-  const singleAmounts = summary.amounts
-  const marketBlocks = summary.amounts_by_market || []
+  const overviewBlocks = buildPortfolioOverviewBlocks(summary)
   const totalCapital = typeof summary.total_capital_amount === 'number' ? buildMoneyMetric(summary.total_capital_amount, '') : null
   const latestTradeText = summary.latest_trade_at
     ? new Date(summary.latest_trade_at).toLocaleDateString('zh-CN')
@@ -477,7 +477,7 @@ function SummarySection({ summary }) {
             <h3 className="text-sm font-semibold text-white/80">分市场总览</h3>
           </div>
           <div className="grid gap-3 xl:grid-cols-2">
-            {marketBlocks.map((block) => (
+            {overviewBlocks.map((block) => (
               <MarketOverviewCard key={block.scope} block={block} />
             ))}
           </div>
@@ -486,38 +486,21 @@ function SummarySection({ summary }) {
     )
   }
 
-  const exchange = summary.scope === 'HKEX' || singleAmounts?.currency_code === 'HKD' ? 'HKEX' : ''
-  const marketValue = buildMoneyMetric(singleAmounts?.market_value_amount, exchange)
-  const totalCost = buildMoneyMetric(singleAmounts?.total_cost_amount, exchange)
-  const unrealized = buildMoneyMetric(singleAmounts?.unrealized_pnl_amount, exchange, { signed: true })
-  const realized = buildMoneyMetric(singleAmounts?.realized_pnl_amount, exchange, { signed: true })
-  const total = buildMoneyMetric(singleAmounts?.total_pnl_amount, exchange, { signed: true })
-  const today = buildMoneyMetric(singleAmounts?.today_pnl_amount, exchange, { signed: true })
+  const singleBlock = overviewBlocks[0] || null
+  const exchange = singleBlock?.scope === 'HKEX' || singleBlock?.currency_code === 'HKD' ? 'HKEX' : ''
 
   return (
     <section className="mb-6 space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-        <SummaryCard label="总市值" tooltip={FIELD_TIPS.market_value} value={marketValue.main} footnote={marketValue.detail || `${summary.position_count || 0} 只标的`} />
-        <SummaryCard label="总成本" tooltip={FIELD_TIPS.total_cost} value={totalCost.main} footnote={totalCost.detail} />
-        <SummaryCard label="未实现盈亏" tooltip={FIELD_TIPS.unrealized_pnl} value={unrealized.main} footnote={unrealized.detail} valueClassName={(singleAmounts?.unrealized_pnl_amount || 0) >= 0 ? 'text-rose-400' : 'text-emerald-400'} />
-        <SummaryCard label="已实现盈亏" tooltip={FIELD_TIPS.realized_pnl} value={realized.main} footnote={realized.detail} valueClassName={(singleAmounts?.realized_pnl_amount || 0) >= 0 ? 'text-rose-400' : 'text-emerald-400'} />
-        <SummaryCard label="累计盈亏" tooltip={FIELD_TIPS.total_pnl} value={total.main} footnote={total.detail} valueClassName={(singleAmounts?.total_pnl_amount || 0) >= 0 ? 'text-rose-400' : 'text-emerald-400'} />
-        <SummaryCard label="今日盈亏" tooltip={FIELD_TIPS.today_pnl} value={today.main} footnote={today.detail} valueClassName={(singleAmounts?.today_pnl_amount || 0) >= 0 ? 'text-rose-400' : 'text-emerald-400'} />
+      <div className="grid gap-3">
+        {singleBlock ? <MarketOverviewCard block={singleBlock} /> : null}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <SummaryCard
           label="盈利 / 亏损"
           tooltip={FIELD_TIPS.profit_loss_count}
           value={<span><span className="text-rose-300">{summary.profit_position_count || 0}</span> / <span className="text-emerald-300">{summary.loss_position_count || 0}</span></span>}
           footnote="按单只股票累计盈亏口径"
-        />
-        <SummaryCard
-          label="最大单仓占比"
-          tooltip={FIELD_TIPS.max_position_weight}
-          value={`${((summary.max_position_weight_ratio || 0) * 100).toFixed(1)}%`}
-          valueClassName={(summary.max_position_weight_ratio || 0) >= 0.3 ? 'text-amber-400' : 'text-white/90'}
-          footnote="单市场口径"
         />
         <SummaryCard
           label="账户总资金（设置）"

@@ -61,21 +61,6 @@ const SCOPE_OPTIONS = [
   { value: 'HKEX', label: '港股' },
 ]
 
-const SORT_OPTIONS = [
-  { value: 'market_value', label: '市值' },
-  { value: 'today_pnl', label: '今日盈亏' },
-  { value: 'total_pnl', label: '累计盈亏' },
-  { value: 'unrealized_pnl', label: '未实现盈亏' },
-  { value: 'holding_days', label: '持仓天数' },
-  { value: 'last_trade', label: '最近交易' },
-]
-
-const PNL_FILTER_OPTIONS = [
-  { value: 'all', label: '全部' },
-  { value: 'profit', label: '盈利' },
-  { value: 'loss', label: '亏损' },
-]
-
 const CURVE_RANGE_OPTIONS = [
   { value: '7D', label: '7 天' },
   { value: '30D', label: '30 天' },
@@ -1459,17 +1444,9 @@ function RiskSection({ riskMetrics }) {
 function Toolbar({
   scope,
   setScope,
-  sortBy,
-  setSortBy,
-  sortOrder,
-  setSortOrder,
-  pnlFilter,
-  setPnlFilter,
-  keyword,
-  setKeyword,
 }) {
   return (
-    <section className="mb-5 space-y-3">
+    <section className="mb-5">
       <div className="-mx-1 overflow-x-auto pb-1 sm:mx-0 sm:overflow-visible sm:pb-0">
         <div className="inline-flex min-w-full items-center gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-1 sm:min-w-0">
           {SCOPE_OPTIONS.map((opt) => (
@@ -1486,48 +1463,6 @@ function Toolbar({
               {opt.label}
             </button>
           ))}
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <input
-          type="text"
-          placeholder="搜索代码或名称..."
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2 text-sm text-white placeholder-white/25 outline-none transition focus:border-primary/40 focus:ring-1 focus:ring-primary/20 sm:max-w-[240px] sm:text-xs sm:py-1.5"
-        />
-
-        <div className="grid grid-cols-[minmax(0,1fr)_42px_minmax(0,1fr)] gap-2 sm:flex sm:items-center sm:gap-2">
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            className="min-w-0 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/75 outline-none transition focus:border-primary/40 cursor-pointer sm:text-xs sm:py-1.5"
-          >
-            {SORT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-
-          <button
-            type="button"
-            onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
-            className="rounded-xl border border-white/10 bg-white/[0.04] px-0 py-2 text-sm text-white/60 transition hover:text-white/90 sm:w-10 sm:text-xs sm:py-1.5"
-            title={sortOrder === 'desc' ? '当前降序，点击切换为升序' : '当前升序，点击切换为降序'}
-            aria-label={sortOrder === 'desc' ? '切换为升序' : '切换为降序'}
-          >
-            {sortOrder === 'desc' ? '↓' : '↑'}
-          </button>
-
-          <select
-            value={pnlFilter}
-            onChange={(e) => setPnlFilter(e.target.value)}
-            className="min-w-0 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/75 outline-none transition focus:border-primary/40 cursor-pointer sm:text-xs sm:py-1.5"
-          >
-            {PNL_FILTER_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
         </div>
       </div>
     </section>
@@ -1549,11 +1484,7 @@ export default function PortfolioPage() {
   const [attributionDetailError, setAttributionDetailError] = useState(EMPTY_ATTRIBUTION_DETAIL_ERROR)
 
   const [scope, setScope] = useState('ALL')
-  const [sortBy, setSortBy] = useState('market_value')
-  const [sortOrder, setSortOrder] = useState('desc')
-  const [pnlFilter, setPnlFilter] = useState('all')
   const [curveRange, setCurveRange] = useState('30D')
-  const [keyword, setKeyword] = useState('')
   const [investmentProfile, setInvestmentProfile] = useState(null)
   const [tradeDrawer, setTradeDrawer] = useState(() => createTradeDrawerState('ASHARE'))
   const [priceAutoFilled, setPriceAutoFilled] = useState(false)
@@ -1610,10 +1541,6 @@ export default function PortfolioPage() {
       const [result, summaryResult] = await Promise.all([
         fetchPortfolioDashboard({
           scope,
-          sort_by: sortBy,
-          sort_order: sortOrder,
-          pnl_filter: pnlFilter,
-          keyword,
           curve_range: curveRange,
         }),
         fetchPortfolioAttributionSummary(attributionQuery).catch((err) => ({ __error: err })),
@@ -1638,7 +1565,7 @@ export default function PortfolioPage() {
       setLoading(false)
       setAttributionLoading(false)
     }
-  }, [buildAttributionQuery, curveRange, keyword, loadRiskMetrics, pnlFilter, scope, sortBy, sortOrder])
+  }, [buildAttributionQuery, curveRange, loadRiskMetrics, scope])
 
   const ensureAttributionDetails = useCallback(async (keys = []) => {
     const requestedKeys = Array.from(new Set((Array.isArray(keys) ? keys : [keys]).filter((key) => ATTRIBUTION_FETCHERS[key])))
@@ -2171,10 +2098,6 @@ export default function PortfolioPage() {
 
         <Toolbar
           scope={scope} setScope={setScope}
-          sortBy={sortBy} setSortBy={setSortBy}
-          sortOrder={sortOrder} setSortOrder={setSortOrder}
-          pnlFilter={pnlFilter} setPnlFilter={setPnlFilter}
-          keyword={keyword} setKeyword={setKeyword}
         />
 
         {pageViewState.initialLoading && (

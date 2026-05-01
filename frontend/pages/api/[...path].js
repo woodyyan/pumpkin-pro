@@ -5,7 +5,7 @@ export const config = {
 };
 
 const DEFAULT_BACKEND_API_URL = 'http://localhost:8080';
-const FORWARDED_REQUEST_HEADERS = ['content-type', 'accept', 'authorization'];
+export const FORWARDED_REQUEST_HEADERS = ['content-type', 'accept', 'authorization', 'user-agent', 'x-forwarded-for', 'x-real-ip'];
 
 export default async function handler(req, res) {
   const backendApiUrl = (process.env.BACKEND_API_URL || DEFAULT_BACKEND_API_URL).replace(/\/$/, '');
@@ -41,7 +41,7 @@ export default async function handler(req, res) {
   }
 }
 
-function buildForwardHeaders(req) {
+export function buildForwardHeaders(req) {
   const headers = {};
   FORWARDED_REQUEST_HEADERS.forEach((headerName) => {
     const value = req.headers[headerName];

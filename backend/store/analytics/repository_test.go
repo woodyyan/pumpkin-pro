@@ -149,6 +149,74 @@ func TestGetDeviceAnalytics(t *testing.T) {
 	}
 }
 
+func TestGetDeviceAnalyticsIgnoresAPIErrors(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewRepository(db)
+	now := time.Now().UTC()
+
+	// Insert real user page_view records
+	snaps := []DeviceSnapshot{
+		{UserID: "u1", VisitorID: "v1", Source: "page_view", DeviceType: "desktop", OSFamily: "macOS", BrowserFamily: "Chrome", CreatedAt: now.AddDate(0, 0, -1)},
+		{UserID: "u2", VisitorID: "v2", Source: "auth", DeviceType: "mobile", OSFamily: "iOS", BrowserFamily: "Safari", CreatedAt: now.AddDate(0, 0, -1)},
+	}
+	for _, s := range snaps {
+		if err := db.Create(&s).Error; err != nil {
+			t.Fatalf("seed snapshot: %v", err)
+		}
+	}
+
+	// Insert api_error noise that should be IGNORED
+	noise := []DeviceSnapshot{
+		{UserID: "", VisitorID: "v99", Source: "api_error", DeviceType: "unknown", OSFamily: "unknown", BrowserFamily: "node", CreatedAt: now.AddDate(0, 0, -1)},
+		{UserID: "", VisitorID: "v98", Source: "api_error", DeviceType: "unknown", OSFamily: "unknown", BrowserFamily: "unknown", CreatedAt: now.AddDate(0, 0, -2)},
+	}
+	for _, s := range noise {
+		if err := db.Create(&s).Error; err != nil {
+			t.Fatalf("seed noise snapshot: %v", err)
+		}
+	}
+
+	ctx := context.Background()
+	since := now.AddDate(0, 0, -10)
+
+	result, err := repo.GetDeviceAnalytics(ctx, since)
+	if err != nil {
+		t.Fatalf("GetDeviceAnalytics error: %v", err)
+	}
+
+	// Browser: only Chrome and Safari should appear; "node" must NOT appear
+	var hasNode bool
+	var chromeCount int64
+	for _, b := range result.BrowserFamilies {
+		if b.Category == "node" {
+			hasNode = true
+		}
+		if b.Category == "Chrome" {
+			chromeCount = b.Count
+		}
+	}
+	if hasNode {
+		t.Error("browser families should not contain 'node' from api_error sources")
+	}
+	if chromeCount != 1 {
+		t.Errorf("Chrome count = %d, want 1", chromeCount)
+	}
+
+	// Device types: only desktop and mobile; no unknown from api_error
+	for _, d := range result.DeviceTypes {
+		if d.Category == "unknown" {
+			t.Error("device types should not contain 'unknown' from api_error sources")
+		}
+	}
+
+	// OS: only macOS and iOS; no unknown from api_error
+	for _, o := range result.OSFamilies {
+		if o.Category == "unknown" {
+			t.Error("os families should not contain 'unknown' from api_error sources")
+		}
+	}
+}
+
 func TestGetDeviceAnalyticsEmpty(t *testing.T) {
 	db := setupTestDB(t)
 	repo := NewRepository(db)
@@ -177,8 +245,24 @@ func TestGetTopActiveUsersWithDevices(t *testing.T) {
 	seedDeviceSnapshots(t, db)
 	seedAuthAuditLogs(t, db)
 
+	now := time.Now().UTC()
+	// Insert api_error noise for u1 that is MORE recent than the page_view record.
+	// This tests that GetTopActiveUsersWithDevices ignores api_error sources.
+	noise := DeviceSnapshot{
+		UserID:        "u1",
+		VisitorID:     "v99",
+		Source:        "api_error",
+		DeviceType:    "unknown",
+		OSFamily:      "unknown",
+		BrowserFamily: "node",
+		CreatedAt:     now.AddDate(0, 0, -1),
+	}
+	if err := db.Create(&noise).Error; err != nil {
+		t.Fatalf("seed api_error noise: %v", err)
+	}
+
 	ctx := context.Background()
-	since := time.Now().UTC().AddDate(0, 0, -10)
+	since := now.AddDate(0, 0, -10)
 
 	users, err := repo.GetTopActiveUsersWithDevices(ctx, since, 20)
 	if err != nil {
@@ -200,12 +284,12 @@ func TestGetTopActiveUsersWithDevices(t *testing.T) {
 	if users[0].Email != "alice@example.com" {
 		t.Errorf("u1 email = %s, want alice@example.com", users[0].Email)
 	}
-	// u1's most recent device is Chrome on macOS
+	// u1's most recent device must come from page_view/auth, NOT the more recent api_error noise
 	if users[0].Browser != "Chrome" {
-		t.Errorf("u1 browser = %s, want Chrome", users[0].Browser)
+		t.Errorf("u1 browser = %s, want Chrome (api_error 'node' should be ignored)", users[0].Browser)
 	}
 	if users[0].OS != "macOS" {
-		t.Errorf("u1 os = %s, want macOS", users[0].OS)
+		t.Errorf("u1 os = %s, want macOS (api_error 'unknown' should be ignored)", users[0].OS)
 	}
 	// u3 has no email, should be empty string
 	for _, u := range users {

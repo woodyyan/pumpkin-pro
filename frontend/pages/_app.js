@@ -5,6 +5,7 @@ import { useRouter } from 'next/router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { AuthProvider, useAuth } from '../lib/auth-context'
+import { buildPageViewHeaders } from '../lib/pageview'
 import changelogData from '../data/changelog.json'
 import NavSearchBox from '../components/NavSearchBox'
 
@@ -98,7 +99,7 @@ function reportPageView(path) {
   captureUtmParams()
   fetch('/api/analytics/pageview', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildPageViewHeaders(),
     body: JSON.stringify({
       page_path: path,
       visitor_id: getVisitorId(),

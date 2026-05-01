@@ -113,6 +113,11 @@ func (r *Repository) InsertDeviceSnapshot(ctx context.Context, record *DeviceSna
 func (r *Repository) GetDeviceAnalytics(ctx context.Context, since time.Time) (*DeviceAnalyticsResult, error) {
 	result := &DeviceAnalyticsResult{}
 
+	// Only count real user interactions (page views and auth events).
+	// Exclude api_error sources which often come from server-to-server calls,
+	// health checks, or scrapers with misleading UA strings like "node-fetch".
+	sourceFilter := "source IN ('page_view', 'auth')"
+
 	// Device type breakdown (distinct visitor_id)
 	var deviceRows []struct {
 		Category string
@@ -120,7 +125,7 @@ func (r *Repository) GetDeviceAnalytics(ctx context.Context, since time.Time) (*
 	}
 	err := r.db.WithContext(ctx).Model(&DeviceSnapshot{}).
 		Select("device_type as category, COUNT(DISTINCT visitor_id) as count").
-		Where("created_at >= ? AND device_type != ?", since, "unknown").
+		Where("created_at >= ? AND device_type != ? AND "+sourceFilter, since, "unknown").
 		Group("device_type").
 		Scan(&deviceRows).Error
 	if err != nil {
@@ -135,7 +140,7 @@ func (r *Repository) GetDeviceAnalytics(ctx context.Context, since time.Time) (*
 	}
 	err = r.db.WithContext(ctx).Model(&DeviceSnapshot{}).
 		Select("os_family as category, COUNT(DISTINCT visitor_id) as count").
-		Where("created_at >= ? AND os_family != ?", since, "unknown").
+		Where("created_at >= ? AND os_family != ? AND "+sourceFilter, since, "unknown").
 		Group("os_family").
 		Scan(&osRows).Error
 	if err != nil {
@@ -150,7 +155,7 @@ func (r *Repository) GetDeviceAnalytics(ctx context.Context, since time.Time) (*
 	}
 	err = r.db.WithContext(ctx).Model(&DeviceSnapshot{}).
 		Select("browser_family as category, COUNT(DISTINCT visitor_id) as count").
-		Where("created_at >= ? AND browser_family != ?", since, "unknown").
+		Where("created_at >= ? AND browser_family != ? AND "+sourceFilter, since, "unknown").
 		Group("browser_family").
 		Scan(&browserRows).Error
 	if err != nil {
@@ -192,12 +197,14 @@ func (r *Repository) GetTopActiveUsersWithDevices(ctx context.Context, since tim
 		return []TopActiveUserDevice{}, nil
 	}
 
-	// Get the most recent device snapshot for each user
+	// Get the most recent device snapshot for each user.
+	// Only consider page_view and auth sources to avoid api_error noise
+	// (server-to-server calls, health checks, scrapers) polluting the result.
 	results := make([]TopActiveUserDevice, 0, len(activeUsers))
 	for _, u := range activeUsers {
 		var snap DeviceSnapshot
 		err := r.db.WithContext(ctx).Model(&DeviceSnapshot{}).
-			Where("user_id = ? AND created_at >= ?", u.UserID, since).
+			Where("user_id = ? AND created_at >= ? AND source IN ('page_view', 'auth')", u.UserID, since).
 			Order("created_at DESC").
 			First(&snap).Error
 

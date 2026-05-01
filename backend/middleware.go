@@ -75,8 +75,9 @@ func (a *appServer) loggingMiddleware(next http.Handler) http.Handler {
 			}
 		}()
 
-		// Async device snapshot for API errors
-		a.writeDeviceSnapshotAsync("", "", "api_error", "", r.UserAgent())
+		// Note: we intentionally do NOT record device snapshots for API errors.
+		// API errors often come from server-to-server calls, health checks, or
+		// scrapers with UA strings like "node-fetch" that pollute device analytics.
 	})
 }
 

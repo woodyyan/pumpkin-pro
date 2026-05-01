@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("requests", reason="screener.quadrant 依赖 requests")
 
-from screener.quadrant import _classify_a_share_board, _compute_daily_metrics, _safe_momentum
+from screener.quadrant import _classify_a_share_board, _compute_daily_metrics, _latest_cached_close, _safe_momentum
 
 
 def test_classify_a_share_board():
@@ -72,3 +72,50 @@ def test_compute_daily_metrics_std_60d_falls_back_to_full_window_when_under_60_d
     expected_std = float(close.pct_change().dropna().std())
 
     assert metrics["std_60d"] == pytest.approx(expected_std)
+
+
+class StubDailyBarCache:
+    def __init__(self, bars):
+        self.bars = bars
+
+    def get_stock_bars(self, code):
+        return self.bars.get(code)
+
+
+def test_latest_cached_close_uses_latest_positive_close():
+    cache = StubDailyBarCache({
+        "600519": [
+            {"date": "2026-04-16", "close": 101.2},
+            {"date": "2026-04-17", "close": 0},
+            {"date": "2026-04-20", "close": 103.4},
+        ]
+    })
+
+    close_price, trade_date = _latest_cached_close(cache, "600519")
+
+    assert close_price == pytest.approx(103.4)
+    assert trade_date == "2026-04-20"
+
+
+def test_latest_cached_close_skips_missing_or_bad_prices():
+    cache = StubDailyBarCache({
+        "00700": [
+            {"date": "2026-04-18", "close": 412.0},
+            {"date": "2026-04-21", "close": None},
+            {"date": "2026-04-22", "close": "bad"},
+        ]
+    })
+
+    close_price, trade_date = _latest_cached_close(cache, "00700")
+
+    assert close_price == pytest.approx(412.0)
+    assert trade_date == "2026-04-18"
+
+
+def test_latest_cached_close_returns_empty_when_unavailable():
+    cache = StubDailyBarCache({"000001": [{"date": "2026-04-20", "close": 0}]})
+
+    close_price, trade_date = _latest_cached_close(cache, "000001")
+
+    assert close_price == 0
+    assert trade_date == ""

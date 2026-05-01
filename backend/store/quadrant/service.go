@@ -33,11 +33,64 @@ func (s *Service) SetPriceResolver(r PriceResolver) {
 
 var rankingSnapshotLocation = time.FixedZone("CST", 8*60*60)
 
+const (
+	recentSnapshotRepairLookbackDays = 14
+	snapshotPriceHintMaxGapDays      = 3
+)
+
+type snapshotPriceHint struct {
+	ClosePrice float64
+	TradeDate  string
+}
+
 func rankingSnapshotDate(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
 	return t.In(rankingSnapshotLocation).Format("2006-01-02")
+}
+
+func snapshotPriceHintKey(code, exchange string) string {
+	return strings.ToUpper(strings.TrimSpace(exchange)) + "\x00" + strings.TrimSpace(code)
+}
+
+func validPriceTradeDate(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if _, err := time.ParseInLocation("2006-01-02", value, rankingSnapshotLocation); err != nil {
+		return ""
+	}
+	return value
+}
+
+func priceHintUsableForSnapshot(hint snapshotPriceHint, snapshotDate string) (float64, string) {
+	if hint.ClosePrice <= 0 {
+		return 0, ""
+	}
+	tradeDate := validPriceTradeDate(hint.TradeDate)
+	if tradeDate == "" {
+		return 0, ""
+	}
+	snapDate, snapErr := time.ParseInLocation("2006-01-02", snapshotDate, rankingSnapshotLocation)
+	hintDate, hintErr := time.ParseInLocation("2006-01-02", tradeDate, rankingSnapshotLocation)
+	if snapErr != nil || hintErr != nil || hintDate.After(snapDate) {
+		return 0, ""
+	}
+	gapDays := int(snapDate.Sub(hintDate).Hours() / 24)
+	if gapDays > snapshotPriceHintMaxGapDays {
+		return 0, ""
+	}
+	return hint.ClosePrice, tradeDate
+}
+
+func recentSnapshotRepairFromDate(snapshotDate string) string {
+	parsed, err := time.ParseInLocation("2006-01-02", snapshotDate, rankingSnapshotLocation)
+	if err != nil {
+		return ""
+	}
+	return parsed.AddDate(0, 0, -recentSnapshotRepairLookbackDays).Format("2006-01-02")
 }
 
 // BulkSave writes all quadrant scores from the Quant callback.
@@ -73,6 +126,7 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 	}
 
 	records := make([]QuadrantScoreRecord, 0, len(input.Items))
+	priceHints := make(map[string]snapshotPriceHint, len(input.Items))
 	for _, item := range input.Items {
 		code := strings.TrimSpace(item.Code)
 		if code == "" {
@@ -81,6 +135,12 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 		itemExchange := strings.TrimSpace(item.Exchange)
 		if itemExchange == "" {
 			itemExchange = "SZSE"
+		}
+		if item.ClosePrice > 0 {
+			priceHints[snapshotPriceHintKey(code, itemExchange)] = snapshotPriceHint{
+				ClosePrice: item.ClosePrice,
+				TradeDate:  validPriceTradeDate(item.PriceTradeDate),
+			}
 		}
 		records = append(records, QuadrantScoreRecord{
 			Code: code, Name: strings.TrimSpace(item.Name), Exchange: itemExchange,
@@ -186,7 +246,7 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 	log.Printf("[quadrant] BulkSave COMPLETE: exchange=%s status=%s log_id=%s", exchange, status, logID)
 
 	// Save ranking snapshots (best-effort; failure does not affect BulkSave result)
-	s.saveRankingSnapshotsBestEffort(ctx, records, computedAt)
+	s.saveRankingSnapshotsBestEffortWithHints(ctx, records, computedAt, priceHints)
 
 	return totalCount, nil
 }
@@ -372,6 +432,10 @@ func selectSnapshotRecords(records []QuadrantScoreRecord, limit int) []QuadrantS
 // saveRankingSnapshotsBestEffort saves daily ranking snapshots using the active market-specific ranking rules.
 // This is best-effort: errors are logged but not propagated to the caller.
 func (s *Service) saveRankingSnapshotsBestEffort(ctx context.Context, records []QuadrantScoreRecord, computedAt time.Time) {
+	s.saveRankingSnapshotsBestEffortWithHints(ctx, records, computedAt, nil)
+}
+
+func (s *Service) saveRankingSnapshotsBestEffortWithHints(ctx context.Context, records []QuadrantScoreRecord, computedAt time.Time, priceHints map[string]snapshotPriceHint) {
 	selectedRecords := selectSnapshotRecords(records, 50)
 	if len(selectedRecords) == 0 {
 		return
@@ -380,25 +444,102 @@ func (s *Service) saveRankingSnapshotsBestEffort(ctx context.Context, records []
 	now := time.Now().UTC()
 	dateStr := rankingSnapshotDate(computedAt)
 	snaps := make([]RankingSnapshot, 0, len(selectedRecords))
+	missingPrices := 0
 	for i, r := range selectedRecords {
 		closePrice := 0.0
-		if s.priceResolver != nil {
+		priceTradeDate := ""
+		if hint, ok := priceHints[snapshotPriceHintKey(r.Code, r.Exchange)]; ok && hint.ClosePrice > 0 {
+			closePrice = hint.ClosePrice
+			priceTradeDate = hint.TradeDate
+		}
+		if closePrice <= 0 && s.priceResolver != nil {
 			closePrice = s.priceResolver(ctx, r.Code, r.Exchange, dateStr)
+			if closePrice > 0 {
+				priceTradeDate = dateStr
+			}
+		}
+		if closePrice <= 0 {
+			missingPrices++
 		}
 		snaps = append(snaps, RankingSnapshot{
-			Code:         r.Code,
-			Name:         r.Name,
-			Exchange:     r.Exchange,
-			Rank:         i + 1,
-			Opportunity:  r.Opportunity,
-			Risk:         r.Risk,
-			ClosePrice:   closePrice,
-			SnapshotDate: dateStr,
-			CreatedAt:    now,
+			Code:           r.Code,
+			Name:           r.Name,
+			Exchange:       r.Exchange,
+			Rank:           i + 1,
+			Opportunity:    r.Opportunity,
+			Risk:           r.Risk,
+			ClosePrice:     closePrice,
+			PriceTradeDate: priceTradeDate,
+			SnapshotDate:   dateStr,
+			CreatedAt:      now,
 		})
 	}
 	if err := s.repo.UpsertSnapshots(ctx, snaps); err != nil {
 		fmt.Printf("[quadrant] WARNING: failed to save ranking snapshots: %v\n", err)
+		return
+	}
+	log.Printf("[quadrant] ranking snapshots saved: date=%s count=%d missing_close_price=%d", dateStr, len(snaps), missingPrices)
+	s.repairRecentMissingSnapshotPricesBestEffort(ctx, selectedRecords, dateStr, priceHints)
+}
+
+func (s *Service) repairRecentMissingSnapshotPricesBestEffort(ctx context.Context, records []QuadrantScoreRecord, snapshotDate string, priceHints map[string]snapshotPriceHint) {
+	if len(records) == 0 || strings.TrimSpace(snapshotDate) == "" {
+		return
+	}
+	allowedCodes := make(map[string]bool, len(records))
+	exchangeSet := map[string]bool{}
+	for _, record := range records {
+		allowedCodes[strings.TrimSpace(record.Code)] = true
+		exchangeSet[strings.TrimSpace(record.Exchange)] = true
+	}
+	exchanges := make([]string, 0, len(exchangeSet))
+	for exchange := range exchangeSet {
+		if exchange != "" {
+			exchanges = append(exchanges, exchange)
+		}
+	}
+	fromDate := recentSnapshotRepairFromDate(snapshotDate)
+	missing, err := s.repo.FindMissingSnapshotPrices(ctx, exchanges, fromDate, 500)
+	if err != nil || len(missing) == 0 {
+		if err != nil {
+			log.Printf("[quadrant] ranking snapshot repair scan failed: %v", err)
+		}
+		return
+	}
+
+	updated := 0
+	stillMissing := 0
+	for _, snap := range missing {
+		if !allowedCodes[strings.TrimSpace(snap.Code)] {
+			continue
+		}
+		closePrice := 0.0
+		priceTradeDate := ""
+		if hint, ok := priceHints[snapshotPriceHintKey(snap.Code, snap.Exchange)]; ok {
+			if hint.TradeDate == "" && snap.SnapshotDate == snapshotDate && hint.ClosePrice > 0 {
+				closePrice = hint.ClosePrice
+			} else {
+				closePrice, priceTradeDate = priceHintUsableForSnapshot(hint, snap.SnapshotDate)
+			}
+		}
+		if closePrice <= 0 && s.priceResolver != nil {
+			closePrice = s.priceResolver(ctx, snap.Code, snap.Exchange, snap.SnapshotDate)
+			if closePrice > 0 {
+				priceTradeDate = snap.SnapshotDate
+			}
+		}
+		if closePrice <= 0 {
+			stillMissing++
+			continue
+		}
+		if err := s.repo.UpdateSnapshotPrice(ctx, snap.ID, closePrice, priceTradeDate); err != nil {
+			log.Printf("[quadrant] ranking snapshot repair update failed: id=%d code=%s err=%v", snap.ID, snap.Code, err)
+			continue
+		}
+		updated++
+	}
+	if updated > 0 || stillMissing > 0 {
+		log.Printf("[quadrant] ranking snapshot repair done: date=%s updated=%d still_missing=%d", snapshotDate, updated, stillMissing)
 	}
 }
 

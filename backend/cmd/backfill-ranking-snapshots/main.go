@@ -434,7 +434,10 @@ func applyBackfillPlans(ctx context.Context, db *gorm.DB, plans []backfillPlan) 
 		for _, plan := range plans {
 			result := tx.Model(&quadrant.RankingSnapshot{}).
 				Where("id = ?", plan.SnapshotID).
-				Update("close_price", plan.NewPrice)
+				Updates(map[string]any{
+					"close_price":      plan.NewPrice,
+					"price_trade_date": plan.MatchedTradeDate,
+				})
 			if result.Error != nil {
 				return result.Error
 			}

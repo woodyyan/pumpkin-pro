@@ -65,7 +65,7 @@ class TestFinite:
 _FLOAT_KEYS = {
     "opportunity", "risk", "trend", "flow", "revision",
     "liquidity", "volatility", "drawdown", "crowding",
-    "avg_amount_5d",
+    "avg_amount_5d", "close_price",
 }
 
 

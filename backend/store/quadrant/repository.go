@@ -326,7 +326,7 @@ func (r *Repository) UpsertSnapshot(ctx context.Context, snap RankingSnapshot) e
 			{Name: "code"},
 		},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"name", "rank", "opportunity", "risk", "close_price",
+			"name", "rank", "opportunity", "risk", "close_price", "price_trade_date",
 		}),
 	}).Create(&snap).Error
 }
@@ -434,6 +434,40 @@ func (r *Repository) GetClosePriceOnDate(ctx context.Context, code string, dateS
 		return 0, err
 	}
 	return snap.ClosePrice, nil
+}
+
+func (r *Repository) FindMissingSnapshotPrices(ctx context.Context, exchanges []string, fromDate string, limit int) ([]RankingSnapshot, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	query := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
+		Where("close_price <= ?", 0).
+		Order("snapshot_date DESC, exchange ASC, rank ASC, id ASC").
+		Limit(limit)
+	if len(exchanges) > 0 {
+		query = query.Where("exchange IN ?", exchanges)
+	}
+	if strings.TrimSpace(fromDate) != "" {
+		query = query.Where("snapshot_date >= ?", fromDate)
+	}
+	var snaps []RankingSnapshot
+	if err := query.Find(&snaps).Error; err != nil {
+		return nil, err
+	}
+	return snaps, nil
+}
+
+func (r *Repository) UpdateSnapshotPrice(ctx context.Context, id int64, closePrice float64, priceTradeDate string) error {
+	if id <= 0 || closePrice <= 0 {
+		return nil
+	}
+	updates := map[string]any{"close_price": closePrice}
+	if strings.TrimSpace(priceTradeDate) != "" {
+		updates["price_trade_date"] = strings.TrimSpace(priceTradeDate)
+	}
+	return r.db.WithContext(ctx).Model(&RankingSnapshot{}).
+		Where("id = ?", id).
+		Updates(updates).Error
 }
 
 // GetEarliestAvailableClosePrice returns the earliest positive close_price on or after a date.

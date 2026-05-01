@@ -104,6 +104,8 @@ type BulkSaveItem struct {
 	Crowding                float64 `json:"crowding"`
 	AvgAmount5d             float64 `json:"avg_amount_5d"`      // 近5日均成交额（万元）
 	Exchange                string  `json:"exchange,omitempty"` // "SSE"/"SZSE"(默认)/"HKEX"
+	ClosePrice              float64 `json:"close_price,omitempty"`
+	PriceTradeDate          string  `json:"price_trade_date,omitempty"`
 	Board                   string  `json:"board,omitempty"`
 	RankingScore            float64 `json:"ranking_score,omitempty"`
 	GlobalRankScore         float64 `json:"global_rank_score,omitempty"`
@@ -179,16 +181,17 @@ type RankingItem struct {
 // RankingSnapshot captures a daily snapshot of top opportunity-zone stocks.
 // Used to compute consecutive appearance days and cumulative returns.
 type RankingSnapshot struct {
-	ID           int64     `gorm:"primaryKey;autoIncrement"`
-	Code         string    `gorm:"size:10;not null;uniqueIndex:udx_snap_date_code"`
-	Name         string    `gorm:"size:128;not null;default:''"`
-	Exchange     string    `gorm:"size:8;not null;default:'SZSE'"`
-	Rank         int       `gorm:"not null"`
-	Opportunity  float64   `gorm:"not null"`
-	Risk         float64   `gorm:"not null"`
-	ClosePrice   float64   `gorm:"not null;default:0"`                              // 当日收盘价（元/HKD）
-	SnapshotDate string    `gorm:"size:10;not null;uniqueIndex:udx_snap_date_code"` // 格式 "2026-04-15"
-	CreatedAt    time.Time `gorm:"not null"`
+	ID             int64     `gorm:"primaryKey;autoIncrement"`
+	Code           string    `gorm:"size:10;not null;uniqueIndex:udx_snap_date_code"`
+	Name           string    `gorm:"size:128;not null;default:''"`
+	Exchange       string    `gorm:"size:8;not null;default:'SZSE'"`
+	Rank           int       `gorm:"not null"`
+	Opportunity    float64   `gorm:"not null"`
+	Risk           float64   `gorm:"not null"`
+	ClosePrice     float64   `gorm:"not null;default:0"`                              // 当日收盘价（元/HKD）
+	PriceTradeDate string    `gorm:"size:10;not null;default:''"`                     // 实际价格对应交易日（可能早于 snapshot_date）
+	SnapshotDate   string    `gorm:"size:10;not null;uniqueIndex:udx_snap_date_code"` // 格式 "2026-04-15"
+	CreatedAt      time.Time `gorm:"not null"`
 }
 
 func (RankingSnapshot) TableName() string { return "quadrant_ranking_snapshots" }

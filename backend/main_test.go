@@ -641,8 +641,11 @@ func TestNewQuadrantPriceResolver(t *testing.T) {
 	if got := resolver(ctx, "600519", "SSE", "2026-04-17"); got != 123.45 {
 		t.Fatalf("resolver returned %.2f; want 123.45", got)
 	}
+	if got := resolver(ctx, "600519", "SSE", "2026-04-18"); got != 123.45 {
+		t.Fatalf("resolver should fall back to previous A-share trade date, got %.2f; want 123.45", got)
+	}
 	if got := resolver(ctx, "600519", "SSE", "2026-04-16"); got != 0 {
-		t.Fatalf("resolver on missing trade date returned %.2f; want 0", got)
+		t.Fatalf("resolver on missing prior trade date returned %.2f; want 0", got)
 	}
 	if got := resolver(ctx, "600519", "NYSE", "2026-04-17"); got != 0 {
 		t.Fatalf("resolver on unsupported exchange returned %.2f; want 0", got)
@@ -656,7 +659,7 @@ func TestQuadrantSnapshotTradeDates(t *testing.T) {
 		exchange  string
 		want      []string
 	}{
-		{name: "A-share only same day", tradeDate: "2026-04-23", exchange: "SSE", want: []string{"2026-04-23"}},
+		{name: "A-share adds prior days", tradeDate: "2026-04-23", exchange: "SSE", want: []string{"2026-04-23", "2026-04-22", "2026-04-21", "2026-04-20"}},
 		{name: "HK adds prior days", tradeDate: "2026-04-23", exchange: "HKEX", want: []string{"2026-04-23", "2026-04-22", "2026-04-21", "2026-04-20"}},
 		{name: "invalid date keeps original", tradeDate: "bad-date", exchange: "HKEX", want: []string{"bad-date"}},
 	}

@@ -647,11 +647,28 @@ def _sanitize_item(d: dict) -> dict:
         "liquidity", "volatility", "drawdown", "crowding",
         "avg_amount_5d", "ranking_score", "global_rank_score",
         "board_rank_score", "tradability_score", "risk_adjusted_momentum_60d",
+        "close_price",
     }
     for k in FLOAT_KEYS:
         if k in d and isinstance(d[k], float):
             d[k] = _finite(d[k], 0.0)
     return d
+
+
+def _latest_cached_close(cache: DailyBarCache, code: str) -> Tuple[float, str]:
+    """Return the latest positive close and trade date from the daily-bar cache."""
+    if cache is None or not code:
+        return 0.0, ""
+    bars = cache.get_stock_bars(code) or []
+    for bar in reversed(bars):
+        try:
+            close_price = float(bar.get("close", 0) or 0)
+        except (TypeError, ValueError):
+            close_price = 0.0
+        trade_date = str(bar.get("date", "") or "")
+        if close_price > 0 and trade_date:
+            return close_price, trade_date
+    return 0.0, ""
 
 
 def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
@@ -1078,10 +1095,13 @@ def compute_all_quadrant_scores(
             name = str(row.get("name", "")) if pd.notna(row.get("name")) else code
             # Determine exchange from A-share code prefix: 6xxxxx→SSE, 0/3xxxxx→SZSE
             _exchange = "SSE" if code.startswith("6") else "SZSE"
+            close_price, price_trade_date = _latest_cached_close(cache, code)
             item = {
                 "code": code,
                 "name": name,
                 "exchange": _exchange,
+                "close_price": close_price,
+                "price_trade_date": price_trade_date,
                 "opportunity": float(row["opportunity"]),
                 "risk": float(row["risk"]),
                 "quadrant": row["quadrant"],
@@ -1493,10 +1513,13 @@ def compute_hk_quadrant_scores(
     for _, row in merged.iterrows():
         code = str(row.get("code", ""))
         name = str(row.get("name", "")) if pd.notna(row.get("name")) else code
+        close_price, price_trade_date = _latest_cached_close(cache, code)
         item = {
             "code": code,
             "name": name,
             "exchange": "HKEX",
+            "close_price": close_price,
+            "price_trade_date": price_trade_date,
             "opportunity": float(row["opportunity"]),
             "risk": float(row["risk"]),
             "quadrant": row["quadrant"],

@@ -92,10 +92,8 @@ func quadrantSnapshotTradeDates(tradeDate string, exchange string) []string {
 	if err != nil {
 		return dates
 	}
-	if strings.EqualFold(strings.TrimSpace(exchange), "HKEX") {
-		for gap := 1; gap <= 3; gap++ {
-			dates = append(dates, parsed.AddDate(0, 0, -gap).Format("2006-01-02"))
-		}
+	for gap := 1; gap <= 3; gap++ {
+		dates = append(dates, parsed.AddDate(0, 0, -gap).Format("2006-01-02"))
 	}
 	return dates
 }

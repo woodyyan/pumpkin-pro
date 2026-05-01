@@ -1,6 +1,16 @@
 export const AI_ANALYSIS_SHARE_MAX_IMAGE_HEIGHT = 6000
 export const AI_ANALYSIS_SHARE_PIXEL_RATIO = 2
 
+const SHARE_FILENAME_TIME_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
+
 function cloneResult(result) {
   if (!result || typeof result !== 'object') return { analysis: null, meta: {} }
   try {
@@ -45,11 +55,17 @@ function sanitizeFilenameSegment(value, fallback = 'AI分析') {
 function formatFilenameTime(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'unknown-time'
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
+
+  const parts = SHARE_FILENAME_TIME_FORMATTER.formatToParts(date)
+  const partMap = Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]))
+
+  const year = partMap.year
+  const month = partMap.month
+  const day = partMap.day
+  const hours = partMap.hour
+  const minutes = partMap.minute
+
+  if (!year || !month || !day || !hours || !minutes) return 'unknown-time'
   return `${year}-${month}-${day}-${hours}${minutes}`
 }
 

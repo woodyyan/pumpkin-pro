@@ -2,6 +2,67 @@ import Head from 'next/head'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import MiniChart from '../components/MiniChart'
 
+// ── Simple Doughnut Chart (SVG) ──
+
+function DoughnutChart({ data, size = 140, strokeWidth = 18 }) {
+  if (!data || data.length === 0) return null
+  const total = data.reduce((sum, d) => sum + (d.count || 0), 0)
+  if (total === 0) return null
+
+  const radius = (size - strokeWidth) / 2
+  const circumference = 2 * Math.PI * radius
+  let offset = 0
+  const colors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#8b5cf6', '#14b8a6']
+
+  return (
+    <div className="flex flex-col items-center">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {data.map((item, i) => {
+          const pct = (item.count / total)
+          const dash = pct * circumference
+          const circle = (
+            <circle
+              key={i}
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              stroke={colors[i % colors.length]}
+              strokeWidth={strokeWidth}
+              strokeDasharray={`${dash} ${circumference - dash}`}
+              strokeDashoffset={-offset}
+              strokeLinecap="butt"
+              transform={`rotate(-90 ${size / 2} ${size / 2})`}
+            />
+          )
+          offset += dash
+          return circle
+        })}
+      </svg>
+    </div>
+  )
+}
+
+function CategoryLegend({ data }) {
+  const colors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#8b5cf6', '#14b8a6']
+  if (!data || data.length === 0) return null
+  return (
+    <div className="mt-3 space-y-1.5">
+      {data.map((item, i) => (
+        <div key={i} className="flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: colors[i % colors.length] }} />
+            <span className="text-white/60">{item.category}</span>
+          </div>
+          <div className="tabular-nums text-white/45">
+            {item.count} <span className="text-white/25">({(item.percentage || 0).toFixed(1)}%)</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 const ADMIN_SESSION_KEY = 'pumpkin_pro_admin_session'
 const REFRESH_INTERVAL = 60_000
 
@@ -507,6 +568,8 @@ function AdminDashboard({ session, onLogout }) {
   const [stats, setStats] = useState(null)
   const [analytics, setAnalytics] = useState(null)
   const [aiUsage, setAiUsage] = useState(null)
+  const [deviceAnalytics, setDeviceAnalytics] = useState(null)
+  const [deviceDays, setDeviceDays] = useState(30)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(null)
@@ -515,14 +578,16 @@ function AdminDashboard({ session, onLogout }) {
   const loadAll = useCallback(async () => {
     try {
       setError('')
-      const [statsData, analyticsData, aiUsageData] = await Promise.all([
+      const [statsData, analyticsData, aiUsageData, deviceData] = await Promise.all([
         adminFetch('/api/admin/stats'),
         adminFetch('/api/admin/analytics').catch(() => null),
         adminFetch('/api/admin/ai-usage?days=30&limit=120').catch(() => null),
+        adminFetch(`/api/admin/device-analytics?days=${deviceDays}`).catch(() => null),
       ])
       setStats(statsData)
       setAnalytics(analyticsData)
       setAiUsage(aiUsageData)
+      setDeviceAnalytics(deviceData)
       setLastRefresh(new Date())
     } catch (err) {
       if (err.status === 401) {
@@ -534,7 +599,7 @@ function AdminDashboard({ session, onLogout }) {
     } finally {
       setLoading(false)
     }
-  }, [onLogout])
+  }, [onLogout, deviceDays])
 
   useEffect(() => {
     loadAll()
@@ -680,7 +745,103 @@ function AdminDashboard({ session, onLogout }) {
               )}
             </section>
 
-            {/* Panel 6: Analytics (PV/UV) */}
+            {/* Panel 6: Device & Browser */}
+            {deviceAnalytics && (
+              <section>
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <h2 className="text-base font-semibold text-white/80">📱 设备与浏览器</h2>
+                  <div className="flex items-center gap-2">
+                    {([7, 30, 0]).map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => setDeviceDays(d)}
+                        className={`rounded-lg px-2.5 py-1 text-xs transition ${
+                          deviceDays === d
+                            ? 'bg-white/10 text-white'
+                            : 'text-white/40 hover:text-white/70'
+                        }`}
+                      >
+                        {d === 0 ? '全部' : `${d}日`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Device Type */}
+                  <div className="rounded-xl border border-white/8 bg-[#15171e] p-4">
+                    <div className="text-xs text-white/40 mb-3 text-center">设备类型</div>
+                    {deviceAnalytics.device_types && deviceAnalytics.device_types.length > 0 ? (
+                      <>
+                        <DoughnutChart data={deviceAnalytics.device_types} />
+                        <CategoryLegend data={deviceAnalytics.device_types} />
+                      </>
+                    ) : (
+                      <p className="text-xs text-white/25 text-center py-4">暂无数据</p>
+                    )}
+                  </div>
+
+                  {/* OS */}
+                  <div className="rounded-xl border border-white/8 bg-[#15171e] p-4">
+                    <div className="text-xs text-white/40 mb-3 text-center">操作系统</div>
+                    {deviceAnalytics.os_families && deviceAnalytics.os_families.length > 0 ? (
+                      <>
+                        <DoughnutChart data={deviceAnalytics.os_families} />
+                        <CategoryLegend data={deviceAnalytics.os_families} />
+                      </>
+                    ) : (
+                      <p className="text-xs text-white/25 text-center py-4">暂无数据</p>
+                    )}
+                  </div>
+
+                  {/* Browser */}
+                  <div className="rounded-xl border border-white/8 bg-[#15171e] p-4">
+                    <div className="text-xs text-white/40 mb-3 text-center">浏览器</div>
+                    {deviceAnalytics.browser_families && deviceAnalytics.browser_families.length > 0 ? (
+                      <>
+                        <DoughnutChart data={deviceAnalytics.browser_families} />
+                        <CategoryLegend data={deviceAnalytics.browser_families} />
+                      </>
+                    ) : (
+                      <p className="text-xs text-white/25 text-center py-4">暂无数据</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Top Active Users */}
+                {deviceAnalytics.top_active_users && deviceAnalytics.top_active_users.length > 0 && (
+                  <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-4">
+                    <div className="text-xs text-white/40 mb-3">最活跃用户浏览器偏好（Top {deviceAnalytics.top_active_users.length}）</div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs text-left">
+                        <thead>
+                          <tr className="border-b border-white/8 text-white/35">
+                            <th className="pb-2 pr-4 font-medium">用户邮箱</th>
+                            <th className="pb-2 pr-4 font-medium">活跃天数</th>
+                            <th className="pb-2 pr-4 font-medium">最后活跃</th>
+                            <th className="pb-2 pr-4 font-medium">浏览器</th>
+                            <th className="pb-2 font-medium">操作系统</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-white/65">
+                          {deviceAnalytics.top_active_users.map((u, i) => (
+                            <tr key={`${u.user_id}-${i}`} className="border-b border-white/[0.04] last:border-0">
+                              <td className="py-1.5 pr-4 text-white/70">{u.email || u.user_id?.slice(0, 12) || '-'}</td>
+                              <td className="py-1.5 pr-4 tabular-nums">{u.active_days} 天</td>
+                              <td className="py-1.5 pr-4 text-white/40 whitespace-nowrap">{u.last_active_at ? formatTimeAgo(u.last_active_at) : '-'}</td>
+                              <td className="py-1.5 pr-4">{u.browser || 'unknown'}</td>
+                              <td className="py-1.5">{u.os || 'unknown'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Panel 7: Analytics (PV/UV) */}
             {analytics && (
               <section>
                 <h2 className="text-base font-semibold text-white/80 mb-3">🌐 访问统计</h2>

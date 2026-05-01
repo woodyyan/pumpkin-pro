@@ -122,6 +122,30 @@ type appServer struct {
 	newsService         *live.NewsService
 }
 
+// writeDeviceSnapshotAsync parses UA and writes a device snapshot asynchronously.
+// It does not block the caller and silently ignores errors.
+func (a *appServer) writeDeviceSnapshotAsync(userID, visitorID, source, sourceID, ua string) {
+	go func() {
+		info := analytics.ParseUserAgent(ua)
+		record := &analytics.DeviceSnapshot{
+			UserID:         userID,
+			VisitorID:      visitorID,
+			Source:         source,
+			SourceID:       sourceID,
+			DeviceType:     info.DeviceType,
+			OSFamily:       info.OSFamily,
+			OSVersion:      info.OSVersion,
+			BrowserFamily:  info.BrowserFamily,
+			BrowserVersion: info.BrowserVersion,
+			RawUserAgent:   ua,
+			CreatedAt:      time.Now().UTC(),
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = a.analyticsRepo.InsertDeviceSnapshot(ctx, record)
+	}()
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -276,6 +300,10 @@ func (a *appServer) handleAuthRegister(w http.ResponseWriter, r *http.Request) {
 		a.writeAuthError(w, err)
 		return
 	}
+	// Async device snapshot for auth event
+	if result.User.ID != "" {
+		a.writeDeviceSnapshotAsync(result.User.ID, "", "auth", "", r.UserAgent())
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -293,6 +321,10 @@ func (a *appServer) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.writeAuthError(w, err)
 		return
+	}
+	// Async device snapshot for auth event
+	if result.User.ID != "" {
+		a.writeDeviceSnapshotAsync(result.User.ID, "", "auth", "", r.UserAgent())
 	}
 	writeJSON(w, http.StatusOK, result)
 }
@@ -312,6 +344,10 @@ func (a *appServer) handleAuthRefresh(w http.ResponseWriter, r *http.Request) {
 		a.writeAuthError(w, err)
 		return
 	}
+	// Async device snapshot for auth event
+	if result.User.ID != "" {
+		a.writeDeviceSnapshotAsync(result.User.ID, "", "auth", "", r.UserAgent())
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -322,9 +358,14 @@ func (a *appServer) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	var input auth.LogoutInput
 	_ = json.NewDecoder(r.Body).Decode(&input)
-	if err := a.authService.Logout(r.Context(), currentUserID(r), input, auth.ClientIP(r), r.UserAgent()); err != nil {
+	uid := currentUserID(r)
+	if err := a.authService.Logout(r.Context(), uid, input, auth.ClientIP(r), r.UserAgent()); err != nil {
 		a.writeAuthError(w, err)
 		return
+	}
+	// Async device snapshot for auth event
+	if uid != "" {
+		a.writeDeviceSnapshotAsync(uid, "", "auth", "", r.UserAgent())
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -2244,6 +2285,8 @@ func (a *appServer) handlePageView(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		_ = a.analyticsRepo.Insert(context.Background(), record)
 	}()
+	// Async device snapshot
+	a.writeDeviceSnapshotAsync(userID, record.VisitorID, "page_view", record.ID, r.UserAgent())
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -3301,6 +3344,8 @@ func main() {
 	mux.HandleFunc("/api/admin/ai-config", server.withSuperAdminAuth(server.handleAdminAIConfig))
 	mux.HandleFunc("/api/admin/ai-config/test", server.withSuperAdminAuth(server.handleAdminAIConfigTest))
 	mux.HandleFunc("/api/admin/ai-usage", server.withSuperAdminAuth(server.handleAdminAITokenUsage))
+
+	mux.HandleFunc("/api/admin/device-analytics", server.withSuperAdminAuth(server.handleAdminDeviceAnalytics))
 
 	mux.HandleFunc("/api/analytics/pageview", server.withOptionalAuth(server.handlePageView))
 

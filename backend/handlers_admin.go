@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
+	"github.com/woodyyan/pumpkin-pro/backend/store/analytics"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 )
 
@@ -374,4 +376,61 @@ func (a *appServer) handleAdminQuadrantTrigger(w http.ResponseWriter, r *http.Re
 		"results": results,
 		"message": fmt.Sprintf("已触发 %d 个市场的四象限计算", len(triggered)),
 	})
+}
+
+// handleAdminDeviceAnalytics returns device/browser/OS analytics for the admin panel.
+// GET /api/admin/device-analytics?days=30
+func (a *appServer) handleAdminDeviceAnalytics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+
+	days := 30
+	if raw := strings.TrimSpace(r.URL.Query().Get("days")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 0 || value > 365 {
+			writeError(w, http.StatusBadRequest, "days 参数无效")
+			return
+		}
+		days = value
+	}
+
+	var since time.Time
+	if days == 0 {
+		since = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	} else {
+		since = time.Now().UTC().AddDate(0, 0, -days)
+	}
+
+	ctx := r.Context()
+	result, err := a.analyticsRepo.GetDeviceAnalytics(ctx, since)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "获取设备分析数据失败")
+		return
+	}
+
+	// Ensure non-nil arrays
+	if result.DeviceTypes == nil {
+		result.DeviceTypes = []analytics.CategoryCount{}
+	}
+	if result.OSFamilies == nil {
+		result.OSFamilies = []analytics.CategoryCount{}
+	}
+	if result.BrowserFamilies == nil {
+		result.BrowserFamilies = []analytics.CategoryCount{}
+	}
+
+	// Fetch top active users with their devices
+	topUsers, err := a.analyticsRepo.GetTopActiveUsersWithDevices(ctx, since, 20)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "获取活跃用户数据失败")
+		return
+	}
+	if topUsers == nil {
+		topUsers = []analytics.TopActiveUserDevice{}
+	}
+	result.TopActiveUsers = topUsers
+
+	writeJSON(w, http.StatusOK, result)
 }

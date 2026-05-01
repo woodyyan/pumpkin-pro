@@ -13,5 +13,8 @@ func (Migrator) Name() string {
 }
 
 func (Migrator) AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(&PageViewRecord{})
+	if err := db.AutoMigrate(&PageViewRecord{}); err != nil {
+		return err
+	}
+	return db.AutoMigrate(&DeviceSnapshot{})
 }

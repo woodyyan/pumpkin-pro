@@ -41,3 +41,27 @@ type DeviceStats struct {
 	Mobile  int64 `json:"mobile"`
 	Tablet  int64 `json:"tablet"`
 }
+
+// ── Device Analytics types for admin dashboard ──
+
+type CategoryCount struct {
+	Category   string  `json:"category"`
+	Count      int64   `json:"count"`
+	Percentage float64 `json:"percentage"`
+}
+
+type TopActiveUserDevice struct {
+	UserID       string `json:"user_id"`
+	Email        string `json:"email"`
+	ActiveDays   int    `json:"active_days"`
+	LastActiveAt string `json:"last_active_at"`
+	Browser      string `json:"browser"`
+	OS           string `json:"os"`
+}
+
+type DeviceAnalyticsResult struct {
+	DeviceTypes    []CategoryCount       `json:"device_types"`
+	OSFamilies     []CategoryCount       `json:"os_families"`
+	BrowserFamilies []CategoryCount      `json:"browser_families"`
+	TopActiveUsers []TopActiveUserDevice `json:"top_active_users"`
+}

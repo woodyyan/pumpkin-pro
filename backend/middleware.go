@@ -74,6 +74,9 @@ func (a *appServer) loggingMiddleware(next http.Handler) http.Handler {
 				log.Printf("[api-error] failed to persist: %v", err)
 			}
 		}()
+
+		// Async device snapshot for API errors
+		a.writeDeviceSnapshotAsync("", "", "api_error", "", r.UserAgent())
 	})
 }
 

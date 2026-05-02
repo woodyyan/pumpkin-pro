@@ -108,15 +108,12 @@ const FIELD_TIPS = {
   position_count: '当前筛选范围内仍持有仓位的股票数量。只有持仓数量大于 0 的标的才会统计在内。',
   profit_loss_count: '按单只股票的累计盈亏划分：累计盈亏大于 0 计为盈利，小于 0 计为亏损。',
   max_position_weight: '单只股票在当前组合市值中的最高占比，用来观察仓位是否过于集中。',
-  latest_trade: '最近一笔有效持仓交易的发生时间，包含买入、卖出和手动调均价。',
-  total_capital: '来自设置页的“账户总资金”，表示你计划用于投资的总预算，目前用于辅助判断资金利用率。',
   market_value: '按最新行情估算的当前持仓总价值。持股数量 × 最新价格。',
   total_cost: '当前仍持有仓位对应的总投入成本，不含已经卖出的部分。',
   unrealized_pnl: '浮动盈亏。表示如果你现在按最新价格卖出当前持仓，理论上还能赚或亏多少。因为还没真正卖出，所以叫“未实现”。',
   realized_pnl: '已落袋的盈亏。只统计已经通过卖出真正确认下来的收益或亏损。',
   total_pnl: '累计盈亏 = 已实现盈亏 + 未实现盈亏，用来看这只股票或这个组合截至当前一共赚了还是亏了。',
   today_pnl: '按昨收和最新价估算的当日盈亏，用来看今天这一交易日你的持仓变动。',
-  capital_usage: '资金利用率 = 当前持仓市值 / 设置页账户总资金。暂时只在人民币单市场口径下展示，避免跨币种误导。',
   equity_curve: '按每日持仓快照生成的组合市值变化曲线，用来观察整体资产走势。',
   allocation: '展示当前前几大持仓占组合市值的比例，方便快速判断仓位分散或集中情况。',
   position_detail: '按股票维度查看当前持仓、成本、现价、市值和盈亏表现，点击后会打开对应个股详情页。',
@@ -312,22 +309,13 @@ function buildMoneyMetric(value, exchange, { signed = false, compact = true } = 
   }
 }
 
-function SummaryCard({ label, tooltip, value, footnote, accent, valueClassName = 'text-white/90', labelExtra }) {
+function ProfitLossCount({ profit = 0, loss = 0 }) {
   return (
-    <div className={`rounded-2xl border p-4 sm:p-4.5 min-h-[112px] flex flex-col justify-between ${accent || 'border-white/10 bg-white/[0.03]'}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="text-[11px] font-medium text-white/45 tracking-wide">
-          <LabelWithInfo label={label} tooltip={tooltip} />
-        </div>
-        {labelExtra ? <div className="shrink-0">{labelExtra}</div> : null}
-      </div>
-      <div className={`mt-2 text-base sm:text-lg font-semibold leading-snug tracking-tight break-words ${valueClassName}`}>
-        {value}
-      </div>
-      {footnote ? (
-        <div className="mt-2 text-[11px] text-white/35 break-all leading-relaxed">{footnote}</div>
-      ) : <div />}
-    </div>
+    <span className="inline-flex items-center gap-1.5">
+      <span>盈利 <span className="text-rose-300">{Number(profit || 0)}</span></span>
+      <span className="text-white/20">/</span>
+      <span>亏损 <span className="text-emerald-300">{Number(loss || 0)}</span></span>
+    </span>
   )
 }
 
@@ -352,6 +340,7 @@ function MarketOverviewCard({ block }) {
   const pnlOption = MARKET_PNL_OPTIONS.find((o) => o.value === selectedPnl) || MARKET_PNL_OPTIONS[2]
   const pnlAmount = block[pnlOption.amountKey]
   const pnlMetric = buildMoneyMetric(pnlAmount, block.scope, { signed: true })
+  const hasProfitLossCount = block.profit_position_count != null || block.loss_position_count != null
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
@@ -359,8 +348,17 @@ function MarketOverviewCard({ block }) {
         <div>
           <div className="text-xs font-semibold text-white/70">{block.scope_label} 持仓</div>
           <div className="mt-1 text-xl font-semibold text-white/95 tracking-tight">{marketValue.main}</div>
-          <div className="mt-1 text-[11px] text-white/35 inline-flex items-center gap-1.5">
+          <div className="mt-1 text-[11px] text-white/35 inline-flex items-center gap-1.5 flex-wrap">
             <span>总市值 · {block.position_count || 0} 只标的</span>
+            {hasProfitLossCount ? (
+              <>
+                <span className="text-white/20">·</span>
+                <span className="inline-flex items-center gap-1">
+                  <ProfitLossCount profit={block.profit_position_count} loss={block.loss_position_count} />
+                  <InfoTip text={FIELD_TIPS.profit_loss_count} />
+                </span>
+              </>
+            ) : null}
             <InfoTip text={FIELD_TIPS.market_value} />
           </div>
         </div>
@@ -380,18 +378,21 @@ function MarketOverviewCard({ block }) {
         />
         <SummaryRow
           label={
-            <select
-              value={selectedPnl}
-              onChange={(e) => setSelectedPnl(e.target.value)}
-              className="appearance-none bg-transparent text-white/50 text-[11px] border border-white/10 rounded px-1.5 py-0.5 cursor-pointer hover:border-white/25 focus:outline-none focus:border-white/30"
-              aria-label="选择盈亏指标"
-            >
-              {MARKET_PNL_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value} className="bg-[#1a1a1e] text-white/80 text-[11px]">
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+            <span className="relative inline-flex items-center rounded-lg border border-primary/35 bg-primary/[0.10] shadow-[0_0_0_1px_rgba(255,255,255,0.04)] transition hover:border-primary/60 hover:bg-primary/[0.16] focus-within:border-primary/70 focus-within:ring-2 focus-within:ring-primary/20">
+              <select
+                value={selectedPnl}
+                onChange={(e) => setSelectedPnl(e.target.value)}
+                className="appearance-none bg-transparent py-1 pl-2 pr-6 text-[11px] font-semibold text-white/85 cursor-pointer focus:outline-none"
+                aria-label="选择盈亏指标"
+              >
+                {MARKET_PNL_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value} className="bg-[#1a1a1e] text-white/80 text-[11px]">
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-primary" aria-hidden="true">▾</span>
+            </span>
           }
           tooltip={FIELD_TIPS[pnlOption.tipKey]}
           value={pnlMetric.main}
@@ -414,52 +415,17 @@ function SummarySection({ summary }) {
 
   const isMixed = summary.mixed_currency
   const overviewBlocks = buildPortfolioOverviewBlocks(summary)
-  const totalCapital = typeof summary.total_capital_amount === 'number' ? buildMoneyMetric(summary.total_capital_amount, '') : null
-  const latestTradeText = summary.latest_trade_at
-    ? new Date(summary.latest_trade_at).toLocaleDateString('zh-CN')
-    : '暂无'
 
   if (isMixed) {
     return (
       <section className="mb-6 space-y-4">
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <SummaryCard
-            label="持仓标的"
-            tooltip={FIELD_TIPS.position_count}
-            value={`${summary.position_count || 0} 只`}
-            footnote="全部市场统一统计"
-          />
-          <SummaryCard
-            label="盈利 / 亏损"
-            tooltip={FIELD_TIPS.profit_loss_count}
-            value={<span><span className="text-rose-300">{summary.profit_position_count || 0}</span> / <span className="text-emerald-300">{summary.loss_position_count || 0}</span></span>}
-            footnote="按单只股票累计盈亏口径"
-          />
-          <SummaryCard
-            label="最大单仓占比"
-            tooltip={FIELD_TIPS.max_position_weight}
-            value={`${((summary.max_position_weight_ratio || 0) * 100).toFixed(1)}%`}
-            valueClassName={(summary.max_position_weight_ratio || 0) >= 0.3 ? 'text-amber-400' : 'text-white/90'}
-            footnote="跨市场不做汇率折算，仅作仓位集中度参考"
-          />
-          <SummaryCard
-            label="最近交易"
-            tooltip={FIELD_TIPS.latest_trade}
-            value={latestTradeText}
-            footnote="最近一笔有效交易时间"
-          />
-          <SummaryCard
-            label="账户总资金（设置）"
-            tooltip={FIELD_TIPS.total_capital}
-            value={totalCapital ? totalCapital.main : '未设置'}
-            footnote={totalCapital ? '来自设置页，作为组合预算参考，不参与 A/H 汇总折算' : <Link href="/settings" className="text-primary hover:text-primary/80 underline">去设置页补充账户总资金</Link>}
-            accent="border-primary/20 bg-primary/[0.06]"
-          />
-        </div>
-
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
-          <div className="mb-4">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-white/80">分市场总览</h3>
+            <div className="inline-flex items-center gap-1 text-[11px] text-white/40">
+              <ProfitLossCount profit={summary.profit_position_count} loss={summary.loss_position_count} />
+              <InfoTip text={FIELD_TIPS.profit_loss_count} />
+            </div>
           </div>
           <div className="grid gap-3 xl:grid-cols-2">
             {overviewBlocks.map((block) => (
@@ -472,36 +438,11 @@ function SummarySection({ summary }) {
   }
 
   const singleBlock = overviewBlocks[0] || null
-  const exchange = singleBlock?.scope === 'HKEX' || singleBlock?.currency_code === 'HKD' ? 'HKEX' : ''
 
   return (
     <section className="mb-6 space-y-4">
       <div className="grid gap-3">
         {singleBlock ? <MarketOverviewCard block={singleBlock} /> : null}
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <SummaryCard
-          label="盈利 / 亏损"
-          tooltip={FIELD_TIPS.profit_loss_count}
-          value={<span><span className="text-rose-300">{summary.profit_position_count || 0}</span> / <span className="text-emerald-300">{summary.loss_position_count || 0}</span></span>}
-          footnote="按单只股票累计盈亏口径"
-        />
-        <SummaryCard
-          label="账户总资金（设置）"
-          tooltip={FIELD_TIPS.total_capital}
-          value={totalCapital ? totalCapital.main : '未设置'}
-          footnote={totalCapital ? totalCapital.detail || '来自设置页，用于辅助评估资金使用情况' : <Link href="/settings" className="text-primary hover:text-primary/80 underline">去设置页补充账户总资金</Link>}
-          accent="border-primary/20 bg-primary/[0.06]"
-        />
-        <SummaryCard
-          label="资金利用率"
-          tooltip={FIELD_TIPS.capital_usage}
-          value={summary.capital_usage_ratio != null ? `${(summary.capital_usage_ratio * 100).toFixed(1)}%` : '—'}
-          valueClassName={summary.capital_usage_ratio != null && summary.capital_usage_ratio >= 0.85 ? 'text-amber-400' : 'text-white/90'}
-          footnote={summary.capital_usage_ratio != null ? '当前持仓市值 / 设置页账户总资金' : (exchange === 'HKEX' ? '港股视图暂不做汇率折算，因此不展示资金利用率' : '需先在设置页填写账户总资金')}
-        />
-        <SummaryCard label="最近交易" tooltip={FIELD_TIPS.latest_trade} value={latestTradeText} footnote="最近一笔有效交易时间" />
       </div>
     </section>
   )

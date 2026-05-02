@@ -23,6 +23,8 @@ describe('buildPortfolioOverviewBlocks', () => {
       scope: 'ASHARE',
       mixed_currency: false,
       position_count: 3,
+      profit_position_count: 2,
+      loss_position_count: 1,
       max_position_weight_ratio: 0.42,
       amounts: {
         currency_code: 'CNY',
@@ -49,6 +51,8 @@ describe('buildPortfolioOverviewBlocks', () => {
       total_pnl_amount: 20000,
       today_pnl_amount: 1500,
       position_count: 3,
+      profit_position_count: 2,
+      loss_position_count: 1,
       max_position_weight_ratio: 0.42,
     })
   })
@@ -58,6 +62,8 @@ describe('buildPortfolioOverviewBlocks', () => {
       scope: 'ALL',
       mixed_currency: false,
       position_count: 1,
+      profit_position_count: 1,
+      loss_position_count: 0,
       max_position_weight_ratio: 0.68,
       amounts: {
         currency_code: 'HKD',
@@ -75,6 +81,8 @@ describe('buildPortfolioOverviewBlocks', () => {
     assert.equal(blocks[0].scope_label, '港股')
     assert.equal(blocks[0].currency_symbol, 'HK$')
     assert.equal(blocks[0].position_count, 1)
+    assert.equal(blocks[0].profit_position_count, 1)
+    assert.equal(blocks[0].loss_position_count, 0)
     assert.equal(blocks[0].max_position_weight_ratio, 0.68)
   })
 

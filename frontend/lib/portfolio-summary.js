@@ -49,6 +49,8 @@ export function buildPortfolioOverviewBlocks(summary) {
     total_pnl_amount: normalizeNumber(summary.amounts.total_pnl_amount),
     today_pnl_amount: normalizeNumber(summary.amounts.today_pnl_amount),
     position_count: Number(summary.position_count || 0),
+    profit_position_count: Number(summary.profit_position_count || 0),
+    loss_position_count: Number(summary.loss_position_count || 0),
     max_position_weight_ratio: normalizeNumber(summary.max_position_weight_ratio),
   }]
 }

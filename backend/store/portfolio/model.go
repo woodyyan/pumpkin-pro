@@ -55,10 +55,10 @@ func (PortfolioRecord) TableName() string {
 
 type PortfolioEventRecord struct {
 	ID                 string    `gorm:"primaryKey;size:36"`
-	UserID             string    `gorm:"size:36;not null;index:idx_portfolio_event_user_symbol_date,priority:1"`
+	UserID             string    `gorm:"size:36;not null;index:idx_portfolio_event_user_symbol_date,priority:1;index:idx_portfolio_event_user_trade_date,priority:1"`
 	Symbol             string    `gorm:"size:16;not null;index:idx_portfolio_event_user_symbol_date,priority:2"`
 	EventType          string    `gorm:"size:32;not null;index"`
-	TradeDate          string    `gorm:"size:10;not null;index:idx_portfolio_event_user_symbol_date,priority:3"`
+	TradeDate          string    `gorm:"size:10;not null;index:idx_portfolio_event_user_symbol_date,priority:3;index:idx_portfolio_event_user_trade_date,priority:2"`
 	EffectiveAt        time.Time `gorm:"not null;index"`
 	Quantity           float64   `gorm:"not null;default:0"`
 	Price              float64   `gorm:"not null;default:0"`
@@ -66,7 +66,7 @@ type PortfolioEventRecord struct {
 	ManualAvgCostPrice float64   `gorm:"not null;default:0"`
 	Note               string    `gorm:"type:text;not null;default:''"`
 	Source             string    `gorm:"size:24;not null;default:'manual'"`
-	IsVoided           bool      `gorm:"not null;default:false;index"`
+	IsVoided           bool      `gorm:"not null;default:false;index;index:idx_portfolio_event_user_trade_date,priority:3"`
 	VoidedByEventID    string    `gorm:"size:36;not null;default:''"`
 	BeforeShares       float64   `gorm:"not null;default:0"`
 	BeforeAvgCostPrice float64   `gorm:"not null;default:0"`
@@ -299,6 +299,34 @@ type PortfolioCurvePayload struct {
 	Series        []PortfolioCurveSeries `json:"series"`
 }
 
+type PortfolioPnlCalendarDay struct {
+	Date              string   `json:"date"`
+	Day               int      `json:"day"`
+	Scope             string   `json:"scope"`
+	CurrencyCode      string   `json:"currency_code"`
+	HasData           bool     `json:"has_data"`
+	IsToday           bool     `json:"is_today"`
+	PnlAmount         float64  `json:"pnl_amount"`
+	PnlRate           *float64 `json:"pnl_rate,omitempty"`
+	MarketValueAmount float64  `json:"market_value_amount"`
+	BaseAmount        float64  `json:"base_amount"`
+	RealizedPnlAmount float64  `json:"realized_pnl_amount"`
+	HoldingPnlAmount  float64  `json:"holding_pnl_amount"`
+	PositionCount     int      `json:"position_count"`
+}
+
+type PortfolioPnlCalendarPayload struct {
+	Scope          string                    `json:"scope"`
+	ScopeLabel     string                    `json:"scope_label"`
+	Year           int                       `json:"year"`
+	Month          int                       `json:"month"`
+	CurrencyCode   string                    `json:"currency_code"`
+	MixedCurrency  bool                      `json:"mixed_currency"`
+	Days           []PortfolioPnlCalendarDay `json:"days"`
+	MonthPnlAmount float64                   `json:"month_pnl_amount"`
+	MonthPnlRate   *float64                  `json:"month_pnl_rate,omitempty"`
+}
+
 type PortfolioDashboardFilters struct {
 	Scope      string `json:"scope"`
 	SortBy     string `json:"sort_by"`
@@ -374,6 +402,12 @@ type PortfolioDashboardQuery struct {
 type PortfolioCurveQuery struct {
 	Scope string
 	Range string
+}
+
+type PortfolioPnlCalendarQuery struct {
+	Scope string
+	Year  int
+	Month int
 }
 
 type PortfolioRecentEventsQuery struct {

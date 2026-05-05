@@ -3,6 +3,7 @@ import Link from 'next/link'
 import Head from 'next/head'
 import InfoTip, { LabelWithInfo } from '../components/InfoTip'
 import PortfolioAttributionSection from '../components/PortfolioAttributionSection'
+import PortfolioPnlCalendar from '../components/PortfolioPnlCalendar'
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import {
@@ -33,6 +34,13 @@ import {
 } from '../lib/portfolio-attribution.js'
 import { buildPortfolioOverviewBlocks } from '../lib/portfolio-summary.js'
 import { getPortfolioPageViewState } from '../lib/portfolio-page-view.js'
+import {
+  fetchPortfolioPnlCalendar,
+  formatCalendarDate,
+  getCalendarMonthFromDate,
+  resolveAvailableCalendarScopes,
+  resolveDefaultCalendarScope,
+} from '../lib/portfolio-pnl-calendar.js'
 import {
   readInvestmentProfileCache,
   subscribeInvestmentProfileUpdates,
@@ -1428,6 +1436,14 @@ export default function PortfolioPage() {
 
   const [scope, setScope] = useState('ALL')
   const [curveRange, setCurveRange] = useState('30D')
+  const [calendarScope, setCalendarScope] = useState('ASHARE')
+  const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthFromDate())
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(() => formatCalendarDate())
+  const [calendarDisplayMetric, setCalendarDisplayMetric] = useState('amount')
+  const [pnlCalendar, setPnlCalendar] = useState(null)
+  const [pnlCalendarLoading, setPnlCalendarLoading] = useState(false)
+  const [pnlCalendarError, setPnlCalendarError] = useState('')
+  const [pnlCalendarRefreshVersion, setPnlCalendarRefreshVersion] = useState(0)
   const [investmentProfile, setInvestmentProfile] = useState(null)
   const [tradeDrawer, setTradeDrawer] = useState(() => createTradeDrawerState('ASHARE'))
   const [priceAutoFilled, setPriceAutoFilled] = useState(false)
@@ -1467,6 +1483,27 @@ export default function PortfolioPage() {
     }
   }, [scope])
 
+  const loadPnlCalendar = useCallback(async (overrides = {}) => {
+    const nextScope = overrides.scope || calendarScope
+    const nextMonth = overrides.month || calendarMonth
+    setPnlCalendarLoading(true)
+    setPnlCalendarError('')
+    try {
+      const result = await fetchPortfolioPnlCalendar({
+        scope: nextScope,
+        year: nextMonth.year,
+        month: nextMonth.month,
+      })
+      setPnlCalendar(result)
+      return result
+    } catch (err) {
+      setPnlCalendarError(err.message || '加载盈亏日历失败')
+      return null
+    } finally {
+      setPnlCalendarLoading(false)
+    }
+  }, [calendarMonth, calendarScope])
+
   const load = useCallback(async ({ refreshRisk = false } = {}) => {
     setLoading(true)
     setAttributionLoading(true)
@@ -1490,6 +1527,7 @@ export default function PortfolioPage() {
       ])
 
       setData(result)
+      setPnlCalendarRefreshVersion((prev) => prev + 1)
       if (refreshRisk) {
         loadRiskMetrics()
       }
@@ -1577,6 +1615,32 @@ export default function PortfolioPage() {
   useEffect(() => {
     loadRiskMetrics()
   }, [loadRiskMetrics])
+
+  const availableCalendarScopes = useMemo(() => resolveAvailableCalendarScopes(data?.summary), [data?.summary])
+
+  useEffect(() => {
+    if (!ready || !isLoggedIn || !data?.summary) return
+    const nextScope = resolveDefaultCalendarScope(scope, data.summary)
+    setCalendarScope((prev) => {
+      if (scope === 'ALL' && availableCalendarScopes.includes(prev)) return prev
+      return nextScope
+    })
+  }, [availableCalendarScopes, data?.summary, isLoggedIn, ready, scope])
+
+  useEffect(() => {
+    if (!ready || !isLoggedIn || !data?.summary) return
+    loadPnlCalendar()
+  }, [calendarMonth.month, calendarMonth.year, calendarScope, data?.summary, isLoggedIn, loadPnlCalendar, pnlCalendarRefreshVersion, ready])
+
+  const handleCalendarMonthChange = useCallback((nextMonth) => {
+    if (!nextMonth?.year || !nextMonth?.month) return
+    setCalendarMonth(nextMonth)
+    setSelectedCalendarDate(`${nextMonth.year}-${String(nextMonth.month).padStart(2, '0')}-01`)
+  }, [])
+
+  const handleCalendarScopeChange = useCallback((nextScope) => {
+    setCalendarScope(nextScope)
+  }, [])
 
   useEffect(() => {
     if (!ready || !isLoggedIn) {
@@ -2064,6 +2128,23 @@ export default function PortfolioPage() {
             allocationItems={data?.allocation_preview}
             curveRange={curveRange}
             setCurveRange={setCurveRange}
+          />
+        ) : null}
+
+        {pageViewState.hasDashboardData ? (
+          <PortfolioPnlCalendar
+            data={pnlCalendar}
+            loading={pnlCalendarLoading}
+            error={pnlCalendarError}
+            scope={calendarScope}
+            availableScopes={availableCalendarScopes}
+            selectedDate={selectedCalendarDate}
+            displayMetric={calendarDisplayMetric}
+            onScopeChange={handleCalendarScopeChange}
+            onMonthChange={handleCalendarMonthChange}
+            onDateSelect={setSelectedCalendarDate}
+            onDisplayMetricChange={setCalendarDisplayMetric}
+            onRetry={() => loadPnlCalendar()}
           />
         ) : null}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"gorm.io/gorm"
 )
 
@@ -277,17 +278,61 @@ func (r *Repository) DeletePositionDailySnapshotsByUser(ctx context.Context, use
 }
 
 func (r *Repository) ListDailySnapshots(ctx context.Context, userID string, scopes []string, fromDate string) ([]PortfolioDailySnapshotRecord, error) {
+	return r.ListDailySnapshotsInRange(ctx, userID, scopes, fromDate, "")
+}
+
+func (r *Repository) ListDailySnapshotsInRange(ctx context.Context, userID string, scopes []string, startDate, endDate string) ([]PortfolioDailySnapshotRecord, error) {
 	query := r.db.WithContext(ctx).
 		Where("user_id = ?", userID)
 	if len(scopes) > 0 {
 		query = query.Where("scope IN ?", scopes)
 	}
-	if fromDate != "" {
-		query = query.Where("snapshot_date >= ?", fromDate)
+	if startDate != "" {
+		query = query.Where("snapshot_date >= ?", startDate)
+	}
+	if endDate != "" {
+		query = query.Where("snapshot_date <= ?", endDate)
 	}
 	var records []PortfolioDailySnapshotRecord
 	err := query.Order("snapshot_date ASC, scope ASC").Find(&records).Error
 	return records, err
+}
+
+func (r *Repository) SumRealizedPnlByTradeDate(ctx context.Context, userID string, scopes []string, startDate, endDate string) (map[string]float64, error) {
+	query := r.db.WithContext(ctx).
+		Where("user_id = ? AND is_voided = ? AND realized_pnl_amount != 0", userID, false)
+	if startDate != "" {
+		query = query.Where("trade_date >= ?", startDate)
+	}
+	if endDate != "" {
+		query = query.Where("trade_date <= ?", endDate)
+	}
+
+	var records []PortfolioEventRecord
+	if err := query.Find(&records).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]float64)
+	for _, record := range records {
+		if !scopeMatchesAnyExchange(scopes, live.ExchangeFromSymbol(record.Symbol)) {
+			continue
+		}
+		result[record.TradeDate] += record.RealizedPnlAmount
+	}
+	return result, nil
+}
+
+func scopeMatchesAnyExchange(scopes []string, exchange string) bool {
+	if len(scopes) == 0 {
+		return true
+	}
+	for _, scope := range scopes {
+		if scopeMatchesExchange(scope, exchange) {
+			return true
+		}
+	}
+	return false
 }
 
 // ── Investment Profile ──

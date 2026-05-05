@@ -365,6 +365,93 @@ func TestServiceDeleteRebuildsHistoricalSnapshots(t *testing.T) {
 	}
 }
 
+func TestServiceGetPnlCalendarBuildsMonthDays(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	now := time.Now().UTC()
+	if err := svc.repo.UpsertDailySnapshot(ctx, &PortfolioDailySnapshotRecord{
+		ID: "calendar-day", UserID: "calendar-user", Scope: PortfolioScopeAShare, SnapshotDate: "2026-05-05",
+		CurrencyCode: "CNY", MarketValueAmount: 11000, TotalCostAmount: 10000, TodayPnlAmount: 1000, PositionCount: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertDailySnapshot failed: %v", err)
+	}
+
+	payload, err := svc.GetPnlCalendar(ctx, "calendar-user", PortfolioPnlCalendarQuery{Scope: PortfolioScopeAShare, Year: 2026, Month: 5})
+	if err != nil {
+		t.Fatalf("GetPnlCalendar failed: %v", err)
+	}
+	if len(payload.Days) != 31 {
+		t.Fatalf("expected 31 days, got %d", len(payload.Days))
+	}
+	if payload.Days[0].Date != "2026-05-01" || payload.Days[30].Date != "2026-05-31" {
+		t.Fatalf("expected full May date range, got first=%s last=%s", payload.Days[0].Date, payload.Days[30].Date)
+	}
+	if payload.CurrencyCode != "CNY" || payload.Scope != PortfolioScopeAShare {
+		t.Fatalf("unexpected payload identity: %+v", payload)
+	}
+}
+
+func TestServiceGetPnlCalendarCombinesHoldingAndRealizedPnl(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	now := time.Now().UTC()
+	if err := svc.repo.UpsertDailySnapshot(ctx, &PortfolioDailySnapshotRecord{
+		ID: "calendar-combine", UserID: "calendar-combine-user", Scope: PortfolioScopeAShare, SnapshotDate: "2026-05-10",
+		CurrencyCode: "CNY", MarketValueAmount: 10100, TotalCostAmount: 10000, TodayPnlAmount: 100, PositionCount: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertDailySnapshot failed: %v", err)
+	}
+	if err := svc.repo.CreateEvent(ctx, &PortfolioEventRecord{
+		ID: "calendar-realized", UserID: "calendar-combine-user", Symbol: "600519.SH", EventType: EventTypeSell,
+		TradeDate: "2026-05-10", EffectiveAt: now, RealizedPnlAmount: 50, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateEvent failed: %v", err)
+	}
+
+	payload, err := svc.GetPnlCalendar(ctx, "calendar-combine-user", PortfolioPnlCalendarQuery{Scope: PortfolioScopeAShare, Year: 2026, Month: 5})
+	if err != nil {
+		t.Fatalf("GetPnlCalendar failed: %v", err)
+	}
+	day := payload.Days[9]
+	if day.Date != "2026-05-10" {
+		t.Fatalf("expected May 10 at index 9, got %s", day.Date)
+	}
+	if day.PnlAmount != 150 || day.HoldingPnlAmount != 100 || day.RealizedPnlAmount != 50 {
+		t.Fatalf("expected combined pnl 150 from 100 + 50, got %+v", day)
+	}
+}
+
+func TestServiceGetPnlCalendarCalculatesRateFromBaseAmount(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	now := time.Now().UTC()
+	if err := svc.repo.UpsertDailySnapshot(ctx, &PortfolioDailySnapshotRecord{
+		ID: "calendar-rate", UserID: "calendar-rate-user", Scope: PortfolioScopeAShare, SnapshotDate: "2026-05-12",
+		CurrencyCode: "CNY", MarketValueAmount: 11000, TotalCostAmount: 9500, TodayPnlAmount: 1000, PositionCount: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertDailySnapshot failed: %v", err)
+	}
+
+	payload, err := svc.GetPnlCalendar(ctx, "calendar-rate-user", PortfolioPnlCalendarQuery{Scope: PortfolioScopeAShare, Year: 2026, Month: 5})
+	if err != nil {
+		t.Fatalf("GetPnlCalendar failed: %v", err)
+	}
+	day := payload.Days[11]
+	if day.BaseAmount != 10000 {
+		t.Fatalf("expected base 10000, got %v", day.BaseAmount)
+	}
+	if day.PnlRate == nil || *day.PnlRate != 0.1 {
+		t.Fatalf("expected pnl rate 0.1, got %+v", day.PnlRate)
+	}
+}
+
+func TestServiceGetPnlCalendarRejectsAllScope(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	if _, err := svc.GetPnlCalendar(ctx, "calendar-invalid", PortfolioPnlCalendarQuery{Scope: PortfolioScopeAll, Year: 2026, Month: 5}); err == nil {
+		t.Fatal("expected ALL scope to be rejected")
+	}
+}
+
 func TestServiceDeleteReturnsNotFoundWhenMissing(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
 	if _, err := svc.Delete(ctx, "missing-user", "600519.SH"); err != ErrNotFound {

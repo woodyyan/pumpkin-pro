@@ -891,6 +891,40 @@ func (s *Service) GetEquityCurve(ctx context.Context, userID string, query Portf
 	return s.buildEquityCurvePayload(ctx, userID, query)
 }
 
+func (s *Service) GetPnlCalendar(ctx context.Context, userID string, query PortfolioPnlCalendarQuery) (*PortfolioPnlCalendarPayload, error) {
+	query, err := normalizePnlCalendarQuery(query)
+	if err != nil {
+		return nil, err
+	}
+	startDate, endDate, dayCount := monthDateRange(query.Year, query.Month)
+	scopes := []string{query.Scope}
+	snapshots, err := s.repo.ListDailySnapshotsInRange(ctx, userID, scopes, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+	realizedByDate, err := s.repo.SumRealizedPnlByTradeDate(ctx, userID, scopes, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+	days, monthPnl, monthBase, currencyCode := buildPnlCalendarDays(query, snapshots, realizedByDate, dayCount)
+	var monthRate *float64
+	if monthBase > 0 {
+		value := monthPnl / monthBase
+		monthRate = &value
+	}
+	return &PortfolioPnlCalendarPayload{
+		Scope:          query.Scope,
+		ScopeLabel:     scopeLabel(query.Scope),
+		Year:           query.Year,
+		Month:          query.Month,
+		CurrencyCode:   currencyCode,
+		MixedCurrency:  false,
+		Days:           days,
+		MonthPnlAmount: monthPnl,
+		MonthPnlRate:   monthRate,
+	}, nil
+}
+
 func (s *Service) ListRecentEventsByUser(ctx context.Context, userID string, query PortfolioRecentEventsQuery) ([]PortfolioRecentEventItem, error) {
 	scope, err := normalizePortfolioScope(query.Scope)
 	if err != nil {
@@ -1121,6 +1155,118 @@ func (s *Service) buildEquityCurvePayload(ctx context.Context, userID string, qu
 		MixedCurrency: len(series) > 1,
 		Series:        series,
 	}, nil
+}
+
+func normalizePnlCalendarQuery(query PortfolioPnlCalendarQuery) (PortfolioPnlCalendarQuery, error) {
+	scope := strings.ToUpper(strings.TrimSpace(query.Scope))
+	if scope == "" {
+		scope = PortfolioScopeAShare
+	}
+	if scope != PortfolioScopeAShare && scope != PortfolioScopeHK {
+		return PortfolioPnlCalendarQuery{}, fmt.Errorf("invalid pnl calendar scope: %s", query.Scope)
+	}
+	now := time.Now().In(shanghaiLocation())
+	if query.Year == 0 {
+		query.Year = now.Year()
+	}
+	if query.Month == 0 {
+		query.Month = int(now.Month())
+	}
+	if query.Year < 2000 || query.Year > 2100 {
+		return PortfolioPnlCalendarQuery{}, fmt.Errorf("invalid pnl calendar year: %d", query.Year)
+	}
+	if query.Month < 1 || query.Month > 12 {
+		return PortfolioPnlCalendarQuery{}, fmt.Errorf("invalid pnl calendar month: %d", query.Month)
+	}
+	query.Scope = scope
+	return query, nil
+}
+
+func monthDateRange(year int, month int) (string, string, int) {
+	loc := shanghaiLocation()
+	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, loc)
+	end := start.AddDate(0, 1, -1)
+	return start.Format("2006-01-02"), end.Format("2006-01-02"), end.Day()
+}
+
+func buildPnlCalendarDays(query PortfolioPnlCalendarQuery, snapshots []PortfolioDailySnapshotRecord, realizedByDate map[string]float64, dayCount int) ([]PortfolioPnlCalendarDay, float64, float64, string) {
+	snapshotByDate := make(map[string]PortfolioDailySnapshotRecord, len(snapshots))
+	currencyCode := defaultCurrencyCodeForScope(query.Scope)
+	for _, snapshot := range snapshots {
+		snapshotByDate[snapshot.SnapshotDate] = snapshot
+		if strings.TrimSpace(snapshot.CurrencyCode) != "" {
+			currencyCode = snapshot.CurrencyCode
+		}
+	}
+
+	today := time.Now().In(shanghaiLocation()).Format("2006-01-02")
+	days := make([]PortfolioPnlCalendarDay, 0, dayCount)
+	monthPnl := 0.0
+	monthBase := 0.0
+	for day := 1; day <= dayCount; day++ {
+		date := fmt.Sprintf("%04d-%02d-%02d", query.Year, query.Month, day)
+		snapshot, hasSnapshot := snapshotByDate[date]
+		realized := realizedByDate[date]
+		holdingPnl := 0.0
+		marketValue := 0.0
+		totalCost := 0.0
+		positionCount := 0
+		if hasSnapshot {
+			holdingPnl = snapshot.TodayPnlAmount
+			marketValue = snapshot.MarketValueAmount
+			totalCost = snapshot.TotalCostAmount
+			positionCount = snapshot.PositionCount
+		}
+		pnlAmount := holdingPnl + realized
+		baseAmount := computeDailyPnlBase(marketValue, holdingPnl, totalCost)
+		days = append(days, PortfolioPnlCalendarDay{
+			Date:              date,
+			Day:               day,
+			Scope:             query.Scope,
+			CurrencyCode:      currencyCode,
+			HasData:           hasSnapshot || realized != 0,
+			IsToday:           date == today,
+			PnlAmount:         pnlAmount,
+			PnlRate:           computeDailyPnlRate(pnlAmount, marketValue, holdingPnl, totalCost),
+			MarketValueAmount: marketValue,
+			BaseAmount:        baseAmount,
+			RealizedPnlAmount: realized,
+			HoldingPnlAmount:  holdingPnl,
+			PositionCount:     positionCount,
+		})
+		monthPnl += pnlAmount
+		if baseAmount > 0 {
+			monthBase += baseAmount
+		}
+	}
+	return days, monthPnl, monthBase, currencyCode
+}
+
+func computeDailyPnlBase(marketValueAmount, holdingPnlAmount, totalCostAmount float64) float64 {
+	base := marketValueAmount - holdingPnlAmount
+	if base > 0 {
+		return base
+	}
+	if totalCostAmount > 0 {
+		return totalCostAmount
+	}
+	return 0
+}
+
+func computeDailyPnlRate(pnlAmount, marketValueAmount, holdingPnlAmount, totalCostAmount float64) *float64 {
+	base := computeDailyPnlBase(marketValueAmount, holdingPnlAmount, totalCostAmount)
+	if base <= 0 {
+		return nil
+	}
+	value := pnlAmount / base
+	return &value
+}
+
+func defaultCurrencyCodeForScope(scope string) string {
+	if scope == PortfolioScopeHK {
+		return "HKD"
+	}
+	return "CNY"
 }
 
 func buildEventStats(events []PortfolioEventRecord) map[string]*portfolioEventStats {

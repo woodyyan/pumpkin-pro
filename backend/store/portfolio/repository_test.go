@@ -195,6 +195,65 @@ func TestDeleteUserSnapshotsHelpers(t *testing.T) {
 	}
 }
 
+func TestRepositoryListDailySnapshotsInRangeFiltersScopeAndDate(t *testing.T) {
+	repo, ctx := setupPortfolioDB(t)
+	now := time.Now().UTC()
+	records := []*PortfolioDailySnapshotRecord{
+		{ID: "cal-a-1", UserID: "calendar-user", Scope: PortfolioScopeAShare, SnapshotDate: "2026-05-01", CurrencyCode: "CNY", TodayPnlAmount: 100, CreatedAt: now, UpdatedAt: now},
+		{ID: "cal-a-2", UserID: "calendar-user", Scope: PortfolioScopeAShare, SnapshotDate: "2026-05-31", CurrencyCode: "CNY", TodayPnlAmount: 200, CreatedAt: now, UpdatedAt: now},
+		{ID: "cal-hk", UserID: "calendar-user", Scope: PortfolioScopeHK, SnapshotDate: "2026-05-10", CurrencyCode: "HKD", TodayPnlAmount: 300, CreatedAt: now, UpdatedAt: now},
+		{ID: "cal-prev", UserID: "calendar-user", Scope: PortfolioScopeAShare, SnapshotDate: "2026-04-30", CurrencyCode: "CNY", TodayPnlAmount: 400, CreatedAt: now, UpdatedAt: now},
+	}
+	for _, record := range records {
+		if err := repo.UpsertDailySnapshot(ctx, record); err != nil {
+			t.Fatalf("UpsertDailySnapshot failed: %v", err)
+		}
+	}
+
+	items, err := repo.ListDailySnapshotsInRange(ctx, "calendar-user", []string{PortfolioScopeAShare}, "2026-05-01", "2026-05-31")
+	if err != nil {
+		t.Fatalf("ListDailySnapshotsInRange failed: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 A-share May snapshots, got %d: %+v", len(items), items)
+	}
+	if items[0].SnapshotDate != "2026-05-01" || items[1].SnapshotDate != "2026-05-31" {
+		t.Fatalf("expected sorted May dates, got %+v", items)
+	}
+	for _, item := range items {
+		if item.Scope != PortfolioScopeAShare {
+			t.Fatalf("expected only ASHARE snapshots, got %s", item.Scope)
+		}
+	}
+}
+
+func TestRepositorySumRealizedPnlByTradeDateFiltersVoidedAndScope(t *testing.T) {
+	repo, ctx := setupPortfolioDB(t)
+	now := time.Now().UTC()
+	events := []*PortfolioEventRecord{
+		{ID: "realized-a-1", UserID: "calendar-realized", Symbol: "600519.SH", EventType: EventTypeSell, TradeDate: "2026-05-10", EffectiveAt: now, RealizedPnlAmount: 100, CreatedAt: now, UpdatedAt: now},
+		{ID: "realized-a-2", UserID: "calendar-realized", Symbol: "000001.SZ", EventType: EventTypeSell, TradeDate: "2026-05-10", EffectiveAt: now, RealizedPnlAmount: -30, CreatedAt: now, UpdatedAt: now},
+		{ID: "realized-hk", UserID: "calendar-realized", Symbol: "00700.HK", EventType: EventTypeSell, TradeDate: "2026-05-10", EffectiveAt: now, RealizedPnlAmount: 900, CreatedAt: now, UpdatedAt: now},
+		{ID: "realized-voided", UserID: "calendar-realized", Symbol: "600519.SH", EventType: EventTypeSell, TradeDate: "2026-05-11", EffectiveAt: now, RealizedPnlAmount: 500, IsVoided: true, CreatedAt: now, UpdatedAt: now},
+	}
+	for _, event := range events {
+		if err := repo.CreateEvent(ctx, event); err != nil {
+			t.Fatalf("CreateEvent failed: %v", err)
+		}
+	}
+
+	result, err := repo.SumRealizedPnlByTradeDate(ctx, "calendar-realized", []string{PortfolioScopeAShare}, "2026-05-01", "2026-05-31")
+	if err != nil {
+		t.Fatalf("SumRealizedPnlByTradeDate failed: %v", err)
+	}
+	if result["2026-05-10"] != 70 {
+		t.Fatalf("expected A-share realized pnl 70, got %v", result["2026-05-10"])
+	}
+	if _, ok := result["2026-05-11"]; ok {
+		t.Fatalf("expected voided event to be ignored, got %+v", result)
+	}
+}
+
 func TestListByUserFiltersZeroShares(t *testing.T) {
 	repo, ctx := setupPortfolioDB(t)
 	now := time.Now().UTC()

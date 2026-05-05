@@ -2801,6 +2801,45 @@ func (a *appServer) handlePortfolioEquityCurve(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, payload)
 }
 
+func (a *appServer) handlePortfolioPnlCalendar(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	now := time.Now()
+	query := portfolio.PortfolioPnlCalendarQuery{
+		Scope: strings.TrimSpace(r.URL.Query().Get("scope")),
+		Year:  now.Year(),
+		Month: int(now.Month()),
+	}
+	if rawYear := strings.TrimSpace(r.URL.Query().Get("year")); rawYear != "" {
+		parsed, err := strconv.Atoi(rawYear)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid year")
+			return
+		}
+		query.Year = parsed
+	}
+	if rawMonth := strings.TrimSpace(r.URL.Query().Get("month")); rawMonth != "" {
+		parsed, err := strconv.Atoi(rawMonth)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid month")
+			return
+		}
+		query.Month = parsed
+	}
+	payload, err := a.portfolioService.GetPnlCalendar(r.Context(), currentUserID(r), query)
+	if err != nil {
+		if strings.Contains(err.Error(), "invalid pnl calendar") {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
 func (a *appServer) handlePortfolioRecentEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
@@ -3315,6 +3354,7 @@ func main() {
 	// Portfolio Dashboard
 	mux.HandleFunc("/api/portfolio/dashboard", server.withRequiredAuth(server.handlePortfolioDashboard))
 	mux.HandleFunc("/api/portfolio/equity-curve", server.withRequiredAuth(server.handlePortfolioEquityCurve))
+	mux.HandleFunc("/api/portfolio/pnl-calendar", server.withRequiredAuth(server.handlePortfolioPnlCalendar))
 	mux.HandleFunc("/api/portfolio/events/recent", server.withRequiredAuth(server.handlePortfolioRecentEvents))
 	mux.HandleFunc("/api/portfolio/allocation", server.withRequiredAuth(server.handlePortfolioAllocation))
 	mux.HandleFunc("/api/portfolio/ai-context", server.withRequiredAuth(server.handlePortfolioAIContext))

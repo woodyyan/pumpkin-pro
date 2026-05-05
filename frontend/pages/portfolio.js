@@ -76,6 +76,17 @@ const CURVE_RANGE_OPTIONS = [
   { value: 'ALL', label: '全部' },
 ]
 
+const ALLOCATION_PIE_COLORS = [
+  '#f97316',
+  '#ef4444',
+  '#38bdf8',
+  '#a855f7',
+  '#22c55e',
+  '#facc15',
+  '#fb7185',
+  '#14b8a6',
+]
+
 const EMPTY_ATTRIBUTION = {
   summary: null,
   stocks: null,
@@ -1203,45 +1214,91 @@ function EquityCurveSection({ curve, curveRange, setCurveRange }) {
   )
 }
 
-function AllocationBar({ allocationItems }) {
+function getAllocationPieColor(index) {
+  return ALLOCATION_PIE_COLORS[index % ALLOCATION_PIE_COLORS.length]
+}
+
+function AllocationPie({ allocationItems }) {
   if (!allocationItems || allocationItems.length === 0) return null
 
   const totalMarketValue = allocationItems.reduce((sum, it) => sum + (it.market_value_amount || 0), 0)
+  let cursor = 0
+  const radius = 74
+  const circumference = 2 * Math.PI * radius
+  const segments = allocationItems.map((item, index) => {
+    const ratio = totalMarketValue > 0 ? (item.market_value_amount || 0) / totalMarketValue : 0
+    const segment = {
+      item,
+      ratio,
+      start: cursor,
+      color: getAllocationPieColor(index),
+    }
+    cursor += ratio
+    return segment
+  })
 
   return (
     <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
       <h3 className="text-sm font-semibold text-white/80 mb-4 flex items-center gap-2">
-        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 3a9 9 0 1 0 9 9h-9V3z"/><path d="M13 3.2V11h7.8A9 9 0 0 0 13 3.2z"/></svg>
         <LabelWithInfo label="持仓分布" tooltip={FIELD_TIPS.allocation} />
       </h3>
-      <div className="space-y-2.5">
-        {allocationItems.map((item) => {
-          const ratio = totalMarketValue > 0 ? (item.market_value_amount || 0) / totalMarketValue : 0
-          const pctStr = `${(ratio * 100).toFixed(1)}%`
-          return (
-            <div key={item.symbol}>
-              <div className="flex items-center justify-between mb-1 text-xs">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <Link href={`/live-trading/${item.symbol}`} className="font-mono font-medium text-white/80 hover:text-primary transition truncate">
-                    {item.symbol}
-                  </Link>
-                  <span className="text-white/30 truncate max-w-[80px]">{item.name}</span>
-                  {exchangeTag(item.exchange)}
-                </div>
-                <div className="flex items-center gap-2 shrink-0 ml-2">
-                  <span className="text-white/50 font-mono text-[10px]">{pctStr}</span>
-                  <span className="text-white/65 text-[11px] w-20 text-right">{formatCompactNumber(item.market_value_amount)}</span>
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] sm:items-center xl:grid-cols-1 2xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <div className="relative mx-auto w-full max-w-[220px]">
+          <svg viewBox="0 0 220 220" className="w-full drop-shadow-[0_18px_40px_rgba(0,0,0,0.35)]" role="img" aria-label="持仓分布环形饼图">
+            <circle cx="110" cy="110" r={radius} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="42" />
+            {totalMarketValue > 0 ? segments.map(({ item, ratio, start, color }) => {
+              const pctStr = `${(ratio * 100).toFixed(1)}%`
+              if (ratio <= 0) return null
+              return (
+                <circle
+                  key={item.symbol}
+                  cx="110"
+                  cy="110"
+                  r={radius}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth="42"
+                  strokeDasharray={`${(ratio * circumference).toFixed(3)} ${circumference.toFixed(3)}`}
+                  strokeDashoffset={(-start * circumference).toFixed(3)}
+                  strokeLinecap="butt"
+                  transform="rotate(-90 110 110)"
+                  style={{ outline: '1px solid transparent' }}
+                >
+                  <title>{`${item.symbol} ${item.name || ''} ${pctStr}`}</title>
+                </circle>
+              )
+            }) : null}
+            <circle cx="110" cy="110" r="45" fill="rgba(10,15,25,0.76)" stroke="transparent" strokeWidth="1" />
+          </svg>
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+            <span className="text-[10px] text-white/35">合计市值</span>
+            <span className="mt-1 max-w-[88px] truncate text-xs font-semibold text-white/80">{totalMarketValue > 0 ? formatCompactNumber(totalMarketValue) : '--'}</span>
+          </div>
+        </div>
+        <div className="space-y-2.5">
+          {segments.map(({ item, ratio, color }) => {
+            const pctStr = `${(ratio * 100).toFixed(1)}%`
+            return (
+              <div key={item.symbol} className="rounded-xl border border-white/[0.06] bg-black/15 px-3 py-2">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                    <Link href={`/live-trading/${item.symbol}`} className="font-mono font-medium text-white/80 hover:text-primary transition truncate">
+                      {item.symbol}
+                    </Link>
+                    <span className="text-white/30 truncate max-w-[80px]">{item.name}</span>
+                    {exchangeTag(item.exchange)}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 ml-2">
+                    <span className="text-white/50 font-mono text-[10px]">{pctStr}</span>
+                    <span className="text-white/65 text-[11px] w-20 text-right">{formatCompactNumber(item.market_value_amount)}</span>
+                  </div>
                 </div>
               </div>
-              <div className="h-1.5 rounded-full bg-white/[0.05] overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-primary/70 to-primary/40 transition-all duration-500"
-                  style={{ width: pctStr }}
-                />
-              </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
     </section>
   )
@@ -1255,7 +1312,7 @@ function PortfolioChartsSection({ curve, allocationItems, curveRange, setCurveRa
   return (
     <section className="grid gap-4 xl:grid-cols-[1.45fr_1fr]">
       <EquityCurveSection curve={curve} curveRange={curveRange} setCurveRange={setCurveRange} />
-      <AllocationBar allocationItems={allocationItems} />
+      <AllocationPie allocationItems={allocationItems} />
     </section>
   )
 }

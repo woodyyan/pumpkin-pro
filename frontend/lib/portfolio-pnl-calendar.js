@@ -17,6 +17,19 @@ export function formatCalendarPnlAmount(value, exchange = 'ASHARE') {
   return `${sign}${symbol}${abs.toLocaleString('zh-CN', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`
 }
 
+export function formatCalendarCellPnlAmount(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '--'
+  const sign = value > 0 ? '+' : value < 0 ? '-' : ''
+  const abs = Math.abs(value)
+  if (abs >= 1e8) {
+    return `${sign}${(abs / 1e8).toFixed(abs >= 1e9 ? 1 : 2)}亿`
+  }
+  if (abs >= 1e4) {
+    return `${sign}${(abs / 1e4).toFixed(abs >= 1e6 ? 1 : 2)}万`
+  }
+  return `${sign}${abs.toLocaleString('zh-CN', { maximumFractionDigits: 0 })}`
+}
+
 export function formatCalendarPnlRate(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '--'
   const sign = value > 0 ? '+' : value < 0 ? '-' : ''

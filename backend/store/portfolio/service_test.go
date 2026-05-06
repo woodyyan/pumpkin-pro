@@ -67,6 +67,26 @@ func buildStubBars(code string, closes map[string]float64) []DailyBarRecord {
 	return items
 }
 
+func seedPnlCalendarTradingContext(t *testing.T, svc *Service, userID, symbol string, closes map[string]float64) {
+	t.Helper()
+	now := time.Now().UTC()
+	if err := svc.repo.Upsert(context.Background(), &PortfolioRecord{
+		ID:              "position-" + userID + "-" + symbol,
+		UserID:          userID,
+		Symbol:          symbol,
+		Shares:          100,
+		AvgCostPrice:    10,
+		TotalCostAmount: 1000,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}); err != nil {
+		t.Fatalf("seed portfolio record failed: %v", err)
+	}
+	svc.historyReader = &stubHistoryReader{bars: map[string][]DailyBarRecord{
+		historyCodeFromSymbol(symbol): buildStubBars(historyCodeFromSymbol(symbol), closes),
+	}}
+}
+
 func TestServiceCreateBuyEventBuildsWeightedAverage(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
 
@@ -367,6 +387,7 @@ func TestServiceDeleteRebuildsHistoricalSnapshots(t *testing.T) {
 
 func TestServiceGetPnlCalendarBuildsMonthDays(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
+	seedPnlCalendarTradingContext(t, svc, "calendar-user", "600519.SH", map[string]float64{"2026-05-05": 11})
 	now := time.Now().UTC()
 	if err := svc.repo.UpsertDailySnapshot(ctx, &PortfolioDailySnapshotRecord{
 		ID: "calendar-day", UserID: "calendar-user", Scope: PortfolioScopeAShare, SnapshotDate: "2026-05-05",
@@ -391,8 +412,60 @@ func TestServiceGetPnlCalendarBuildsMonthDays(t *testing.T) {
 	}
 }
 
+func TestServiceGetPnlCalendarHidesAShareHolidaySnapshots(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	seedPnlCalendarTradingContext(t, svc, "calendar-ashare-holiday", "600519.SH", map[string]float64{"2026-05-06": 11})
+	now := time.Now().UTC()
+	for _, date := range []string{"2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05"} {
+		if err := svc.repo.UpsertDailySnapshot(ctx, &PortfolioDailySnapshotRecord{
+			ID: "ashare-holiday-" + date, UserID: "calendar-ashare-holiday", Scope: PortfolioScopeAShare, SnapshotDate: date,
+			CurrencyCode: "CNY", MarketValueAmount: 9000, TotalCostAmount: 10000, TodayPnlAmount: -100, PositionCount: 1,
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("UpsertDailySnapshot failed: %v", err)
+		}
+	}
+
+	payload, err := svc.GetPnlCalendar(ctx, "calendar-ashare-holiday", PortfolioPnlCalendarQuery{Scope: PortfolioScopeAShare, Year: 2026, Month: 5})
+	if err != nil {
+		t.Fatalf("GetPnlCalendar failed: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		day := payload.Days[i]
+		if day.HasData || day.PnlAmount != 0 || day.PnlRate != nil {
+			t.Fatalf("expected A-share holiday %s to be blank, got %+v", day.Date, day)
+		}
+	}
+	if payload.MonthPnlAmount != 0 {
+		t.Fatalf("expected holiday pnl excluded from month total, got %v", payload.MonthPnlAmount)
+	}
+}
+
+func TestServiceGetPnlCalendarHidesHKHolidaySnapshots(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	seedPnlCalendarTradingContext(t, svc, "calendar-hk-holiday", "00700.HK", map[string]float64{"2026-05-04": 410})
+	now := time.Now().UTC()
+	if err := svc.repo.UpsertDailySnapshot(ctx, &PortfolioDailySnapshotRecord{
+		ID: "hk-holiday", UserID: "calendar-hk-holiday", Scope: PortfolioScopeHK, SnapshotDate: "2026-05-01",
+		CurrencyCode: "HKD", MarketValueAmount: 9000, TotalCostAmount: 10000, TodayPnlAmount: -300, PositionCount: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertDailySnapshot failed: %v", err)
+	}
+
+	payload, err := svc.GetPnlCalendar(ctx, "calendar-hk-holiday", PortfolioPnlCalendarQuery{Scope: PortfolioScopeHK, Year: 2026, Month: 5})
+	if err != nil {
+		t.Fatalf("GetPnlCalendar failed: %v", err)
+	}
+	day := payload.Days[0]
+	if day.Date != "2026-05-01" || day.HasData || day.PnlAmount != 0 || day.PnlRate != nil {
+		t.Fatalf("expected HK holiday to be blank, got %+v", day)
+	}
+}
+
 func TestServiceGetPnlCalendarCombinesHoldingAndRealizedPnl(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
+	seedPnlCalendarTradingContext(t, svc, "calendar-combine-user", "600519.SH", map[string]float64{"2026-05-10": 10.1})
 	now := time.Now().UTC()
 	if err := svc.repo.UpsertDailySnapshot(ctx, &PortfolioDailySnapshotRecord{
 		ID: "calendar-combine", UserID: "calendar-combine-user", Scope: PortfolioScopeAShare, SnapshotDate: "2026-05-10",
@@ -423,6 +496,7 @@ func TestServiceGetPnlCalendarCombinesHoldingAndRealizedPnl(t *testing.T) {
 
 func TestServiceGetPnlCalendarCalculatesRateFromBaseAmount(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
+	seedPnlCalendarTradingContext(t, svc, "calendar-rate-user", "600519.SH", map[string]float64{"2026-05-12": 11})
 	now := time.Now().UTC()
 	if err := svc.repo.UpsertDailySnapshot(ctx, &PortfolioDailySnapshotRecord{
 		ID: "calendar-rate", UserID: "calendar-rate-user", Scope: PortfolioScopeAShare, SnapshotDate: "2026-05-12",

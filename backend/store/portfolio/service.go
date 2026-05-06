@@ -906,7 +906,11 @@ func (s *Service) GetPnlCalendar(ctx context.Context, userID string, query Portf
 	if err != nil {
 		return nil, err
 	}
-	days, monthPnl, monthBase, currencyCode := buildPnlCalendarDays(query, snapshots, realizedByDate, dayCount)
+	tradingDates, err := s.resolvePnlCalendarTradingDates(ctx, userID, query.Scope, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+	days, monthPnl, monthBase, currencyCode := buildPnlCalendarDays(query, snapshots, realizedByDate, tradingDates, dayCount)
 	var monthRate *float64
 	if monthBase > 0 {
 		value := monthPnl / monthBase
@@ -1189,7 +1193,64 @@ func monthDateRange(year int, month int) (string, string, int) {
 	return start.Format("2006-01-02"), end.Format("2006-01-02"), end.Day()
 }
 
-func buildPnlCalendarDays(query PortfolioPnlCalendarQuery, snapshots []PortfolioDailySnapshotRecord, realizedByDate map[string]float64, dayCount int) ([]PortfolioPnlCalendarDay, float64, float64, string) {
+func (s *Service) resolvePnlCalendarTradingDates(ctx context.Context, userID, scope, startDate, endDate string) (map[string]struct{}, error) {
+	records, err := s.repo.ListByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	events, err := s.repo.ListActiveEventsByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	symbols := uniquePortfolioSymbols(records, events)
+	codes := make([]string, 0, len(symbols))
+	seen := map[string]struct{}{}
+	for _, symbol := range symbols {
+		normalizedSymbol, exchange := normalizeAttributionSymbol(symbol)
+		if normalizedSymbol == "" || !scopeMatchesExchange(scope, exchange) {
+			continue
+		}
+		code := historyCodeFromSymbol(normalizedSymbol)
+		if code == "" {
+			continue
+		}
+		if _, ok := seen[code]; ok {
+			continue
+		}
+		seen[code] = struct{}{}
+		codes = append(codes, code)
+	}
+	if len(codes) == 0 {
+		return map[string]struct{}{}, nil
+	}
+
+	historyReader := s.historyReader
+	if historyReader == nil {
+		historyRepo, err := NewRiskDBRepository()
+		if err != nil {
+			return nil, err
+		}
+		historyReader = historyRepo
+	}
+	barsByCode, err := historyReader.GetDailyBars(ctx, codes, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+
+	tradingDates := map[string]struct{}{}
+	for _, bars := range barsByCode {
+		for _, bar := range bars {
+			if bar.Date < startDate || bar.Date > endDate || bar.Close <= 0 {
+				continue
+			}
+			tradingDates[bar.Date] = struct{}{}
+		}
+	}
+	return tradingDates, nil
+}
+
+func buildPnlCalendarDays(query PortfolioPnlCalendarQuery, snapshots []PortfolioDailySnapshotRecord, realizedByDate map[string]float64, tradingDates map[string]struct{}, dayCount int) ([]PortfolioPnlCalendarDay, float64, float64, string) {
 	snapshotByDate := make(map[string]PortfolioDailySnapshotRecord, len(snapshots))
 	currencyCode := defaultCurrencyCodeForScope(query.Scope)
 	for _, snapshot := range snapshots {
@@ -1205,17 +1266,21 @@ func buildPnlCalendarDays(query PortfolioPnlCalendarQuery, snapshots []Portfolio
 	monthBase := 0.0
 	for day := 1; day <= dayCount; day++ {
 		date := fmt.Sprintf("%04d-%02d-%02d", query.Year, query.Month, day)
+		_, isTradingDate := tradingDates[date]
 		snapshot, hasSnapshot := snapshotByDate[date]
-		realized := realizedByDate[date]
+		realized := 0.0
 		holdingPnl := 0.0
 		marketValue := 0.0
 		totalCost := 0.0
 		positionCount := 0
-		if hasSnapshot {
-			holdingPnl = snapshot.TodayPnlAmount
-			marketValue = snapshot.MarketValueAmount
-			totalCost = snapshot.TotalCostAmount
-			positionCount = snapshot.PositionCount
+		if isTradingDate {
+			realized = realizedByDate[date]
+			if hasSnapshot {
+				holdingPnl = snapshot.TodayPnlAmount
+				marketValue = snapshot.MarketValueAmount
+				totalCost = snapshot.TotalCostAmount
+				positionCount = snapshot.PositionCount
+			}
 		}
 		pnlAmount := holdingPnl + realized
 		baseAmount := computeDailyPnlBase(marketValue, holdingPnl, totalCost)
@@ -1224,7 +1289,7 @@ func buildPnlCalendarDays(query PortfolioPnlCalendarQuery, snapshots []Portfolio
 			Day:               day,
 			Scope:             query.Scope,
 			CurrencyCode:      currencyCode,
-			HasData:           hasSnapshot || realized != 0,
+			HasData:           isTradingDate && (hasSnapshot || realized != 0),
 			IsToday:           date == today,
 			PnlAmount:         pnlAmount,
 			PnlRate:           computeDailyPnlRate(pnlAmount, marketValue, holdingPnl, totalCost),

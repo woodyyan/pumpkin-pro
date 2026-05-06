@@ -1,5 +1,6 @@
 import InfoTip, { LabelWithInfo } from './InfoTip'
 import {
+  formatCalendarCellPnlAmount,
   formatCalendarPnlAmount,
   formatCalendarPnlRate,
   getCalendarPnlColor,
@@ -68,8 +69,9 @@ function CalendarMetricValue({ day, metric, scope }) {
     return <span className="text-white/18">--</span>
   }
   const value = metric === 'rate' ? day.pnl_rate : day.pnl_amount
-  const text = metric === 'rate' ? formatCalendarPnlRate(value) : formatCalendarPnlAmount(value, scope)
-  return <span className={getCalendarPnlColor(value)}>{text}</span>
+  const text = metric === 'rate' ? formatCalendarPnlRate(value) : formatCalendarCellPnlAmount(value)
+  const title = metric === 'rate' ? text : formatCalendarPnlAmount(value, scope)
+  return <span className={getCalendarPnlColor(value)} title={title}>{text}</span>
 }
 
 export default function PortfolioPnlCalendar({
@@ -204,7 +206,7 @@ export default function PortfolioPnlCalendar({
         <div className="mt-1 grid grid-cols-7 gap-1.5 sm:gap-2">
           {grid.map((cell) => {
             if (!cell.inMonth) {
-              return <div key={cell.key} className="min-h-[58px] rounded-xl border border-white/[0.03] bg-white/[0.01] sm:min-h-[72px]" />
+              return <div key={cell.key} className="min-h-[68px] rounded-xl border border-white/[0.03] bg-white/[0.01] sm:min-h-[72px]" />
             }
             const day = cell.data || { date: cell.date, day: cell.day, has_data: false }
             const isSelected = selectedDate === cell.date
@@ -213,7 +215,7 @@ export default function PortfolioPnlCalendar({
                 key={cell.key}
                 type="button"
                 onClick={() => onDateSelect?.(cell.date)}
-                className={`min-h-[58px] rounded-xl border p-1.5 text-left transition sm:min-h-[72px] sm:p-2 ${
+                className={`min-h-[68px] rounded-xl border p-1 text-left transition sm:min-h-[72px] sm:p-2 ${
                   isSelected
                     ? 'border-primary/45 bg-primary/[0.10] shadow-[0_0_0_1px_rgba(245,158,11,0.12)]'
                     : day.is_today
@@ -225,7 +227,7 @@ export default function PortfolioPnlCalendar({
                   <span className={`text-[11px] font-medium ${day.is_today ? 'text-primary' : 'text-white/55'}`}>{cell.day}</span>
                   {day.is_today ? <span className="rounded-full bg-primary/15 px-1 text-[9px] text-primary">今</span> : null}
                 </div>
-                <div className="mt-2 truncate text-[10px] font-semibold tabular-nums sm:text-[11px]">
+                <div className="mt-2 whitespace-normal break-words text-center text-[10px] font-semibold leading-tight tabular-nums sm:text-[11px]">
                   <CalendarMetricValue day={day} metric={displayMetric} scope={scope} />
                 </div>
               </button>

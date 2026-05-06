@@ -58,4 +58,11 @@ describe('PortfolioPnlCalendar helpers', () => {
     assert.deepEqual(helpers.getSelectedDay(data, '2026-05-05'), { date: '2026-05-05', pnl_amount: 10 })
     assert.equal(helpers.getSelectedDay(data, '2026-05-06'), null)
   })
+
+  it('keeps mobile calendar numbers readable without truncation', () => {
+    assert.doesNotMatch(source, /truncate/)
+    assert.match(source, /formatCalendarCellPnlAmount/)
+    assert.match(source, /whitespace-normal break-words text-center/)
+    assert.match(source, /min-h-\[68px\]/)
+  })
 })

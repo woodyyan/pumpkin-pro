@@ -9,7 +9,7 @@ const transformedSource = source
 
 const helpers = new Function(
   'requestJson',
-  `${transformedSource}; return { fetchPortfolioPnlCalendar, formatCalendarPnlAmount, formatCalendarPnlRate, getCalendarPnlColor, resolveDefaultCalendarScope, resolveAvailableCalendarScopes };`
+  `${transformedSource}; return { fetchPortfolioPnlCalendar, formatCalendarCellPnlAmount, formatCalendarPnlAmount, formatCalendarPnlRate, getCalendarPnlColor, resolveDefaultCalendarScope, resolveAvailableCalendarScopes };`
 )((path, init, fallback) => Promise.resolve({ path, init, fallback }))
 
 describe('portfolio pnl calendar helpers', () => {
@@ -25,6 +25,12 @@ describe('portfolio pnl calendar helpers', () => {
   it('formats A-share and HK pnl amounts with signs', () => {
     assert.equal(helpers.formatCalendarPnlAmount(1234.5, 'ASHARE'), '+¥1,234.50')
     assert.equal(helpers.formatCalendarPnlAmount(-123.45, 'HKEX'), '-HK$123.45')
+  })
+
+  it('formats compact cell pnl amounts for narrow calendar cells', () => {
+    assert.equal(helpers.formatCalendarCellPnlAmount(1234.5), '+1,235')
+    assert.equal(helpers.formatCalendarCellPnlAmount(-12345.67), '-1.23万')
+    assert.equal(helpers.formatCalendarCellPnlAmount(123456789), '+1.23亿')
   })
 
   it('formats missing pnl rate as placeholder', () => {

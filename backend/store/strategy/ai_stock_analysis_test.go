@@ -45,14 +45,14 @@ func makeFullMarket() map[string]any {
 // 完整 fundamentals 数据（happy path）
 func makeFullFund() map[string]any {
 	return map[string]any{
-		"_valid":                true,
-		"market_cap_text":       "2.25万亿",
-		"pe_ttm":                28.5,
-		"pb":                    8.50,
-		"peg":                   1.20,
-		"dividend_yield":        2.50,
-		"net_profit_text":       "净利润：780亿",
-		"revenue_text":         "营业收入：1500亿",
+		"_valid":                  true,
+		"market_cap_text":         "2.25万亿",
+		"pe_ttm":                  28.5,
+		"pb":                      8.50,
+		"peg":                     1.20,
+		"dividend_yield":          2.50,
+		"net_profit_text":         "净利润：780亿",
+		"revenue_text":            "营业收入：1500亿",
 		"shares_outstanding_text": "12.5亿股",
 	}
 }
@@ -60,25 +60,25 @@ func makeFullFund() map[string]any {
 // 完整 technical 数据
 func makeFullTechnical() map[string]any {
 	return map[string]any{
-		"_valid":                  true,
-		"ma5":                     1750.0,
-		"ma20":                    1720.0,
-		"ma60":                    1700.0,
-		"ma200":                   1650.0,
-		"ma_status":               "多头排列",
-		"rsi14":                   58.0,
-		"rsi14_status":            "中性偏强",
-		"macd":                    15.0,
-		"macd_signal":            10.0,
-		"macd_histogram":         5.0,
-		"bollinger_upper":        1850.0,
-		"bollinger_middle":       1780.0,
-		"bollinger_lower":        1710.0,
-		"bollinger_bandwidth":     8.0,
-		"bollinger_percent_b":     60.0,
-		"change_pct_60d":          12.5,
-		"volatility_20d":          22.0,
-		"volume_ma5_to_ma20":      1.3,
+		"_valid":              true,
+		"ma5":                 1750.0,
+		"ma20":                1720.0,
+		"ma60":                1700.0,
+		"ma200":               1650.0,
+		"ma_status":           "多头排列",
+		"rsi14":               58.0,
+		"rsi14_status":        "中性偏强",
+		"macd":                15.0,
+		"macd_signal":         10.0,
+		"macd_histogram":      5.0,
+		"bollinger_upper":     1850.0,
+		"bollinger_middle":    1780.0,
+		"bollinger_lower":     1710.0,
+		"bollinger_bandwidth": 8.0,
+		"bollinger_percent_b": 60.0,
+		"change_pct_60d":      12.5,
+		"volatility_20d":      22.0,
+		"volume_ma5_to_ma20":  1.3,
 	}
 }
 
@@ -101,6 +101,28 @@ func TestBuildStockUserPrompt_Market_FullData(t *testing.T) {
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Errorf("expected %q in prompt (full data)", expected)
+		}
+	}
+}
+
+func TestBuildStockUserPrompt_IncludesCompanyAboutContext(t *testing.T) {
+	input := makeStockInput()
+	input.Market = makeFullMarket()
+	input.SymbolMeta["business_summary"] = "贵州茅台主要从事茅台酒及系列酒的生产与销售，所属行业为食品饮料。"
+	input.SymbolMeta["industry_name"] = "食品饮料"
+	input.SymbolMeta["board_name"] = "主板"
+	input.SymbolMeta["listing_status"] = "LISTED"
+
+	prompt := buildStockUserPrompt(input, nil)
+	for _, expected := range []string{
+		"## 公司静态资料",
+		"业务简介：贵州茅台主要从事茅台酒及系列酒的生产与销售，所属行业为食品饮料。",
+		"所属行业：食品饮料",
+		"上市板块：主板",
+		"上市状态：LISTED",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Errorf("expected company about context %q", expected)
 		}
 	}
 }
@@ -132,8 +154,8 @@ func TestBuildStockUserPrompt_Market_TurnoverRate_Null(t *testing.T) {
 func TestBuildStockUserPrompt_Market_Volume_Null(t *testing.T) {
 	input := makeStockInput()
 	input.Market = map[string]any{
-		"price":         1800.50,
-		"change_pct":    1.23,
+		"price":      1800.50,
+		"change_pct": 1.23,
 		// volume 缺失
 		"turnover_rate": 3.45,
 		"open":          1790.00,
@@ -255,8 +277,8 @@ func TestBuildStockUserPrompt_Fundamentals_AllPresent(t *testing.T) {
 	for _, expected := range []string{
 		"PE TTM）：28.50",
 		"PB）：8.50",
-		"PEG 指数：1.20",       // PEG 有冒号（原始格式）
-		"股息收益率：2.50%",    // 股息率有冒号（原始格式）
+		"PEG 指数：1.20", // PEG 有冒号（原始格式）
+		"股息收益率：2.50%", // 股息率有冒号（原始格式）
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Errorf("expected %q in prompt (all present)", expected)
@@ -319,18 +341,18 @@ func TestBuildStockUserPrompt_MassiveMissing_MarketPlusFund(t *testing.T) {
 	}
 	// Fundamentals 多个 unavailable
 	input.Fundamentals = map[string]any{
-		"_valid":              true,
-		"market_cap_text":     "未知",
-		"pe_ttm":              0,
-		"pe_unavailable":      true,
-		"pb":                  0,
-		"pb_unavailable":      true,
-		"peg":                 "N/A",
-		"peg_unavailable":     true,
-		"dividend_yield":      0,
-		"div_yield_unavailable": true,
-		"net_profit_text":     "暂无",
-		"revenue_text":       "暂无",
+		"_valid":                  true,
+		"market_cap_text":         "未知",
+		"pe_ttm":                  0,
+		"pe_unavailable":          true,
+		"pb":                      0,
+		"pb_unavailable":          true,
+		"peg":                     "N/A",
+		"peg_unavailable":         true,
+		"dividend_yield":          0,
+		"div_yield_unavailable":   true,
+		"net_profit_text":         "暂无",
+		"revenue_text":            "暂无",
 		"shares_outstanding_text": "暂无",
 	}
 	// Technical 无效
@@ -373,8 +395,8 @@ func TestBuildStockUserPrompt_HappyPath_CompleteData(t *testing.T) {
 		"成交量：123456",
 		"换手率：3.45%",
 		"开盘价：1790.00",
-		"PE TTM）：28.50",   // 源码格式：全角右括号+全角冒号
-		"PB）：8.50",         // 源码格式：全角右括号+全角冒号
+		"PE TTM）：28.50", // 源码格式：全角右括号+全角冒号
+		"PB）：8.50",      // 源码格式：全角右括号+全角冒号
 		"MA5=1750.00",
 		"RSI14：58.00",
 		"贵州茅台",
@@ -393,8 +415,8 @@ func TestBuildStockUserPrompt_Market_ZeroVolumeIsValid(t *testing.T) {
 	input.Market = map[string]any{
 		"price":         1800.50,
 		"change_pct":    0.0,
-		"volume":        0,    // 停牌时 volume=0 是合法值
-		"turnover_rate": 0,    // 同理
+		"volume":        0, // 停牌时 volume=0 是合法值
+		"turnover_rate": 0, // 同理
 		"open":          1800.50,
 		"high":          1800.50,
 		"low":           1800.50,
@@ -416,18 +438,18 @@ func TestBuildStockUserPrompt_Fundamentals_AllUnavailable(t *testing.T) {
 	input := makeStockInput()
 	input.Market = makeFullMarket()
 	input.Fundamentals = map[string]any{
-		"_valid":              true,
-		"market_cap_text":     "未知",
-		"pe_ttm":              "N/A",
-		"pe_unavailable":      true,
-		"pb":                  "N/A",
-		"pb_unavailable":      true,
-		"peg":                 "N/A",
-		"peg_unavailable":     true,
-		"dividend_yield":      "N/A",
-		"div_yield_unavailable": true,
-		"net_profit_text":     "暂无",
-		"revenue_text":       "暂无",
+		"_valid":                  true,
+		"market_cap_text":         "未知",
+		"pe_ttm":                  "N/A",
+		"pe_unavailable":          true,
+		"pb":                      "N/A",
+		"pb_unavailable":          true,
+		"peg":                     "N/A",
+		"peg_unavailable":         true,
+		"dividend_yield":          "N/A",
+		"div_yield_unavailable":   true,
+		"net_profit_text":         "暂无",
+		"revenue_text":            "暂无",
 		"shares_outstanding_text": "暂无",
 	}
 

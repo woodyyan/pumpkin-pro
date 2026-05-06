@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
+	"github.com/woodyyan/pumpkin-pro/backend/store/companyprofile"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 	"github.com/woodyyan/pumpkin-pro/backend/store/signal"
@@ -808,6 +809,131 @@ func TestHandleStrategyDelete_WithRefs_Returns409(t *testing.T) {
 		if _, ok := ref["name"]; !ok {
 			t.Errorf("ref[%d] missing lowercase 'name' key; got keys: %v", i, ref)
 		}
+	}
+}
+
+func TestEnrichStockAnalysisCompanyProfile(t *testing.T) {
+	db := testutil.InMemoryDB(t)
+	testutil.AutoMigrateModels(t, db, &companyprofile.CompanyProfileRecord{}, &companyprofile.IndustryMappingRecord{})
+	repo := companyprofile.NewRepository(db)
+	a := &appServer{companyProfileService: companyprofile.NewService(repo)}
+	now := time.Now().UTC()
+	if err := repo.Upsert(context.Background(), companyprofile.CompanyProfileRecord{
+		Symbol:                "00700.HK",
+		Exchange:              "HKEX",
+		Code:                  "00700",
+		Name:                  "腾讯控股",
+		BoardName:             "港股主板",
+		RawIndustryName:       "软件服务",
+		IndustryName:          "软件服务",
+		IndustrySource:        "eastmoney_hk",
+		ListingStatus:         companyprofile.ListingStatusListed,
+		BusinessSummary:       "腾讯控股是一家以社交、游戏、金融科技及企业服务为核心业务的互联网公司。",
+		BusinessSummarySource: companyprofile.SummarySourceExtract,
+		ProfileStatus:         companyprofile.ProfileStatusComplete,
+		QualityFlags:          `[]`,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}); err != nil {
+		t.Fatalf("seed profile failed: %v", err)
+	}
+	input := strategy.StockAnalysisInput{SymbolMeta: map[string]any{"symbol": "00700.HK", "industry_name": "原有行业"}}
+	a.enrichStockAnalysisCompanyProfile(context.Background(), "00700.HK", &input)
+	if input.SymbolMeta["business_summary"] == "" {
+		t.Fatalf("business_summary not enriched: %#v", input.SymbolMeta)
+	}
+	if input.SymbolMeta["industry_name"] != "原有行业" {
+		t.Fatalf("existing industry_name should not be overwritten, got %#v", input.SymbolMeta["industry_name"])
+	}
+	if input.SymbolMeta["board_name"] != "港股主板" {
+		t.Fatalf("board_name not enriched: %#v", input.SymbolMeta)
+	}
+}
+
+func TestHandleLiveSymbolsAbout(t *testing.T) {
+	db := testutil.InMemoryDB(t)
+	testutil.AutoMigrateModels(t, db, &companyprofile.CompanyProfileRecord{}, &companyprofile.IndustryMappingRecord{})
+	repo := companyprofile.NewRepository(db)
+	svc := companyprofile.NewService(repo)
+	a := &appServer{companyProfileService: svc}
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if err := repo.Upsert(ctx, companyprofile.CompanyProfileRecord{
+		Symbol:                "600519.SH",
+		Exchange:              "SSE",
+		Code:                  "600519",
+		Name:                  "贵州茅台",
+		FullName:              "贵州茅台酒股份有限公司",
+		BoardName:             "主板",
+		RawIndustryName:       "食品饮料Ⅰ",
+		IndustryName:          "食品饮料",
+		IndustrySource:        "sw",
+		Website:               "https://www.moutaichina.com",
+		ListingStatus:         companyprofile.ListingStatusListed,
+		BusinessSummary:       "贵州茅台主要从事茅台酒及系列酒的生产与销售，所属行业为食品饮料。",
+		BusinessSummarySource: companyprofile.SummarySourceExtract,
+		ProfileStatus:         companyprofile.ProfileStatusComplete,
+		QualityFlags:          `[]`,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}); err != nil {
+		t.Fatalf("seed company profile failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/live/symbols/600519.SH/about", nil)
+	w := httptest.NewRecorder()
+	a.handleLiveSymbolsSubroutes(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; want 200; body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body failed: %v", err)
+	}
+	if body["has_profile"] != true {
+		t.Fatalf("has_profile = %v; want true", body["has_profile"])
+	}
+	profile, ok := body["profile"].(map[string]any)
+	if !ok {
+		t.Fatalf("profile missing or wrong type: %#v", body["profile"])
+	}
+	if profile["raw_industry_name"] != "食品饮料Ⅰ" || profile["industry_name"] != "食品饮料" {
+		t.Fatalf("industry fields = raw %v clean %v", profile["raw_industry_name"], profile["industry_name"])
+	}
+}
+
+func TestHandleLiveSymbolsAboutMissingInvalidAndMethod(t *testing.T) {
+	db := testutil.InMemoryDB(t)
+	testutil.AutoMigrateModels(t, db, &companyprofile.CompanyProfileRecord{}, &companyprofile.IndustryMappingRecord{})
+	a := &appServer{companyProfileService: companyprofile.NewService(companyprofile.NewRepository(db))}
+
+	missingReq := httptest.NewRequest(http.MethodGet, "/api/live/symbols/00700/about", nil)
+	missingW := httptest.NewRecorder()
+	a.handleLiveSymbolsSubroutes(missingW, missingReq)
+	if missingW.Code != http.StatusOK {
+		t.Fatalf("missing status = %d; want 200", missingW.Code)
+	}
+	var missingBody map[string]any
+	if err := json.NewDecoder(missingW.Body).Decode(&missingBody); err != nil {
+		t.Fatalf("decode missing body failed: %v", err)
+	}
+	if missingBody["has_profile"] != false {
+		t.Fatalf("missing has_profile = %v; want false", missingBody["has_profile"])
+	}
+
+	invalidReq := httptest.NewRequest(http.MethodGet, "/api/live/symbols/ABC/about", nil)
+	invalidW := httptest.NewRecorder()
+	a.handleLiveSymbolsSubroutes(invalidW, invalidReq)
+	if invalidW.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status = %d; want 400", invalidW.Code)
+	}
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/live/symbols/600519.SH/about", nil)
+	postW := httptest.NewRecorder()
+	a.handleLiveSymbolsSubroutes(postW, postReq)
+	if postW.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("method status = %d; want 405", postW.Code)
 	}
 }
 

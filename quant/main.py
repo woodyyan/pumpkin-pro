@@ -14,6 +14,7 @@ from config import EXECUTION_PRICE
 from data.data_loader import DataLoader, generate_sample_data
 from data.fundamentals import get_symbol_fundamentals
 from data.news import get_symbol_news
+from data.company_profile import fetch_a_share_company_profile, fetch_hk_company_profile, normalize_symbol
 from data.scripts.akshare_loader import fetch_stock_data, resolve_stock_name_with_debug
 from engine.backtest_engine import BacktestEngine
 from result.metrics import PerformanceMetrics
@@ -78,6 +79,11 @@ class RuntimeStrategyPayload(BaseModel):
 class ScreenerFilterRange(BaseModel):
     min: Optional[float] = None
     max: Optional[float] = None
+
+
+class CompanyProfileSyncRequest(BaseModel):
+    symbols: List[str] = Field(default_factory=list)
+    limit: int = Field(default=0, ge=0)
 
 
 class ScreenerScanRequest(BaseModel):
@@ -158,6 +164,24 @@ def screener_scan(req: ScreenerScanRequest):
     except Exception as exc:
         logger.exception("选股筛选异常")
         raise HTTPException(status_code=500, detail=f"选股筛选失败: {exc}") from exc
+
+
+@app.post("/api/company-profiles/sync")
+def sync_company_profiles(req: CompanyProfileSyncRequest):
+    items = []
+    errors = []
+    symbols = req.symbols[: req.limit] if req.limit and req.limit > 0 else req.symbols
+    for symbol in symbols:
+        try:
+            normalized, exchange, _ = normalize_symbol(symbol)
+            if exchange == "HKEX":
+                items.append(fetch_hk_company_profile(normalized))
+            else:
+                items.append(fetch_a_share_company_profile(normalized))
+        except Exception as exc:
+            logger.warning("公司资料采集失败 symbol=%s error=%s", symbol, exc)
+            errors.append({"symbol": symbol, "error": str(exc)})
+    return {"items": items, "errors": errors, "count": len(items), "failed_count": len(errors)}
 
 
 @app.get("/api/fundamentals/{symbol}")

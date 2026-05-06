@@ -725,7 +725,10 @@ function AdminDashboard({ session, onLogout }) {
               </div>
             </section>
 
-            {/* Panel 5: Signals & Webhook */}
+            {/* Panel 5: Company Profiles */}
+            <CompanyProfilesAdminPanel />
+
+            {/* Panel 6: Signals & Webhook */}
             <section>
               <h2 className="text-base font-semibold text-white/80 mb-3">🔔 信号与 Webhook</h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -1231,6 +1234,97 @@ function formatTimeAgo(s) {
     if (diffMin < 60) return `${diffMin}分钟前`
     return `${Math.floor(diffMin / 60)}小时前`
   } catch { return '' }
+}
+
+function CompanyProfilesAdminPanel() {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
+
+  const loadData = useCallback(async () => {
+    try {
+      const d = await adminFetch('/api/admin/company-profiles')
+      setData(d)
+      setError('')
+    } catch (err) {
+      setError(err.message || '加载公司资料统计失败')
+    }
+  }, [])
+
+  useEffect(() => {
+    loadData()
+    const timer = setInterval(loadData, 15000)
+    return () => clearInterval(timer)
+  }, [loadData])
+
+  const triggerRefresh = async () => {
+    setLoading(true)
+    setNotice('')
+    setError('')
+    try {
+      await adminFetch('/api/admin/company-profiles/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exchange: 'ALL' }),
+      })
+      setNotice('已开始刷新公司静态资料，面板会自动更新进度。')
+      await loadData()
+    } catch (err) {
+      setError(err.message || '触发刷新失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const refresh = data?.refresh || {}
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-white/80">🏢 公司资料管理</h2>
+          <p className="mt-1 text-xs text-white/40">覆盖率、失败项与手动刷新。刷新会从 Quant 自动采集并写入本地库。</p>
+        </div>
+        <button
+          type="button"
+          disabled={loading || refresh.running}
+          onClick={triggerRefresh}
+          className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {refresh.running ? '刷新中...' : loading ? '触发中...' : '一键更新静态资料'}
+        </button>
+      </div>
+      {notice && <div className="mb-3 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-200">{notice}</div>}
+      {error && <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">{error}</div>}
+      {refresh.error && <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs leading-5 text-rose-200">刷新失败：{refresh.error}</div>}
+      {refresh.message && !refresh.error && <div className="mb-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-xs text-white/55">{refresh.message}</div>}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {(data?.coverage || []).map((row) => (
+          <StatCard key={row.exchange} label={`${row.exchange}覆盖`} value={`${Math.round((row.coverage_rate || 0) * 100)}%`} sub={`${row.profile_count || 0}/${row.universe_count || 0}`} />
+        ))}
+        <StatCard label="刷新状态" value={refresh.status || 'idle'} sub={refresh.running ? `进度 ${refresh.success_count || 0}/${refresh.total_count || 0}` : (refresh.finished_at ? `完成 ${formatAdminDateTime(refresh.finished_at)}` : '等待触发')} />
+        <StatCard label="新股发现" value={refresh.new_count || 0} />
+        <StatCard label="退市标记" value={refresh.delisted_count || 0} />
+      </div>
+      <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-4">
+        <div className="mb-3 text-xs text-white/40">失败项 / 待补全（最近 30 条）</div>
+        {(data?.failures || []).length === 0 ? (
+          <p className="text-xs text-white/25">暂无失败项。</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead><tr className="border-b border-white/8 text-white/35"><th className="pb-2 pr-3">代码</th><th className="pb-2 pr-3">名称</th><th className="pb-2 pr-3">市场</th><th className="pb-2 pr-3">状态</th><th className="pb-2">标记</th></tr></thead>
+              <tbody className="text-white/65">
+                {data.failures.map((item) => (
+                  <tr key={item.symbol} className="border-b border-white/[0.04] last:border-0"><td className="py-2 pr-3 font-mono">{item.symbol}</td><td className="py-2 pr-3">{item.name || '--'}</td><td className="py-2 pr-3">{item.exchange}</td><td className="py-2 pr-3">{item.profile_status}</td><td className="py-2">{(item.quality_flags || []).join(', ') || '--'}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
+  )
 }
 
 function QuadrantAdminPanel() {

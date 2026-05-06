@@ -381,6 +381,25 @@ func buildStockUserPrompt(input *StockAnalysisInput, profile *portfolio.Investme
 	if v := mkt["low"]; v != nil {
 		fmt.Fprintf(&sb, "- 最低价：%.2f\n", asFloat(v))
 	}
+	businessSummary, _ := sm["business_summary"].(string)
+	industryName, _ := sm["industry_name"].(string)
+	boardName, _ := sm["board_name"].(string)
+	listingStatus, _ := sm["listing_status"].(string)
+	if strings.TrimSpace(businessSummary) != "" || strings.TrimSpace(industryName) != "" || strings.TrimSpace(boardName) != "" {
+		sb.WriteString("\n## 公司静态资料\n")
+		if strings.TrimSpace(businessSummary) != "" {
+			fmt.Fprintf(&sb, "- 业务简介：%s\n", businessSummary)
+		}
+		if strings.TrimSpace(industryName) != "" {
+			fmt.Fprintf(&sb, "- 所属行业：%s\n", industryName)
+		}
+		if strings.TrimSpace(boardName) != "" {
+			fmt.Fprintf(&sb, "- 上市板块：%s\n", boardName)
+		}
+		if strings.TrimSpace(listingStatus) != "" {
+			fmt.Fprintf(&sb, "- 上市状态：%s\n", listingStatus)
+		}
+	}
 
 	// 技术指标
 	techValid := boolField(input.Technical, "_valid")

@@ -8,7 +8,9 @@ import AIAnalysisReportContent from '../../components/AIAnalysisReportContent'
 import AIAnalysisShareCard from '../../components/AIAnalysisShareCard'
 import SymbolNewsPanel from '../../components/SymbolNewsPanel'
 import SymbolNewsSummaryCard from '../../components/SymbolNewsSummaryCard'
+import CompanyAboutPanel from '../../components/CompanyAboutPanel'
 import { requestJson } from '../../lib/api'
+import { fetchCompanyAbout } from '../../lib/company-about'
 import { buildAINewsContext } from '../../lib/symbol-news-ui'
 import { useAuth } from '../../lib/auth-context'
 import { isAuthRequiredError } from '../../lib/auth-storage'
@@ -65,6 +67,7 @@ const SUPPORT_LOOKBACK_DAYS = 120
 const MA_LOOKBACK_DAYS = 240
 const SIGNAL_MAX_ATTEMPTS = 4
 const SIGNAL_BACKOFF_STEPS = ['1 分钟', '5 分钟', '15 分钟']
+const SHOW_COMPANY_ABOUT_ENTRY = false
 
 export function createPortfolioDangerMenuState() {
   return { open: false }
@@ -146,6 +149,11 @@ export default function LiveTradingDetailPage() {
   const [error, setError] = useState('')
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState('')
+  const [aboutOpen, setAboutOpen] = useState(false)
+  const [aboutPayload, setAboutPayload] = useState(null)
+  const [aboutLoading, setAboutLoading] = useState(false)
+  const [aboutError, setAboutError] = useState('')
+  const [aboutLoadedSymbol, setAboutLoadedSymbol] = useState('')
 
   // ── AI 分析状态 ──
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
@@ -351,6 +359,31 @@ export default function LiveTradingDetailPage() {
     } catch {
       setPortfolioData(null)
     }
+  }
+
+  const loadCompanyAbout = async (sym) => {
+    if (!sym) return
+    if (aboutLoadedSymbol === sym && aboutPayload) return
+    setAboutLoading(true)
+    try {
+      const data = await fetchCompanyAbout(sym)
+      setAboutPayload(data)
+      setAboutLoadedSymbol(sym)
+      setAboutError('')
+    } catch (err) {
+      setAboutError(err.message || '关于信息暂不可用')
+      if (aboutLoadedSymbol !== sym) setAboutPayload(null)
+    } finally {
+      setAboutLoading(false)
+    }
+  }
+
+  const toggleCompanyAbout = () => {
+    setAboutOpen((prev) => {
+      const next = !prev
+      if (next) loadCompanyAbout(symbol)
+      return next
+    })
   }
 
   const loadNewsSummary = async (sym, { force = false } = {}) => {
@@ -946,6 +979,11 @@ export default function LiveTradingDetailPage() {
     setNewsSummary(null)
     setNewsError('')
     setNewsUpdatedAt('')
+    setAboutOpen(false)
+    setAboutPayload(null)
+    setAboutLoading(false)
+    setAboutError('')
+    setAboutLoadedSymbol('')
     newsSummaryRefreshRef.current = { symbol: '', refreshedAt: 0 }
     newsPanelRefreshRef.current = 0
   }, [symbol, authIdentityKey, exchange])
@@ -1184,7 +1222,7 @@ export default function LiveTradingDetailPage() {
         <section className="rounded-2xl border border-border bg-card p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <h1 className="text-2xl font-semibold tracking-tight text-white">
                   {symbolName ? `${symbolName}（${symbol}）` : symbol}
                 </h1>
@@ -1223,6 +1261,16 @@ export default function LiveTradingDetailPage() {
                     className="inline-flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary/20"
                   >
                     + 关注
+                  </button>
+                ) : null}
+                {SHOW_COMPANY_ABOUT_ENTRY ? (
+                  <button
+                    type="button"
+                    aria-expanded={aboutOpen ? 'true' : 'false'}
+                    onClick={toggleCompanyAbout}
+                    className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${aboutOpen ? 'border-primary/45 bg-primary/12 text-primary' : 'border-white/10 bg-white/[0.04] text-white/58 hover:border-white/20 hover:text-white/78'}`}
+                  >
+                    关于
                   </button>
                 ) : null}
               </div>
@@ -1400,6 +1448,15 @@ export default function LiveTradingDetailPage() {
             </div>
           )}
         </section>
+
+        {aboutOpen && (
+          <CompanyAboutPanel
+            payload={aboutPayload}
+            loading={aboutLoading}
+            error={aboutError}
+            onClose={() => setAboutOpen(false)}
+          />
+        )}
 
         <SymbolNewsSummaryCard
           summary={newsSummary}

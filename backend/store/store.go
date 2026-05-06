@@ -5,13 +5,14 @@ import (
 
 	"github.com/woodyyan/pumpkin-pro/backend/config"
 	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
+	"github.com/woodyyan/pumpkin-pro/backend/store/analysis_history"
 	"github.com/woodyyan/pumpkin-pro/backend/store/analytics"
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
-	"github.com/woodyyan/pumpkin-pro/backend/store/fundcache"
-	"github.com/woodyyan/pumpkin-pro/backend/store/analysis_history"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backup"
+	"github.com/woodyyan/pumpkin-pro/backend/store/companyprofile"
 	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
+	"github.com/woodyyan/pumpkin-pro/backend/store/fundcache"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
@@ -44,6 +45,7 @@ func New(cfg config.DBConfig) (*Store, error) {
 		admin.NewMigrator(),
 		backtest.NewMigrator(),
 		portfolio.NewMigrator(),
+		companyprofile.NewMigrator(),
 		quadrant.NewMigrator(),
 		screener.NewMigrator(),
 		analytics.NewMigrator(),

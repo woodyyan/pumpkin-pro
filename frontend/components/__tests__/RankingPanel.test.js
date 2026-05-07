@@ -54,7 +54,7 @@ function formatMetaDateTime(value) {
 
 function buildRankingMetaSummary(meta, currentExchange = 'ASHARE') {
   const exchange = meta?.exchange || currentExchange
-  const parts = [exchange === 'HKEX' ? '港股榜单来自机会区' : 'A股榜单按精选评分排序']
+  const parts = [exchange === 'HKEX' ? '港股榜单来自机会区' : 'A股榜单按主板 / 创业板 / 科创板均衡筛选，兼顾精选评分与板块分散']
   if (meta?.computed_at) {
     parts.push(`数据日期：${formatMetaDateTime(meta.computed_at)}`)
   }
@@ -225,7 +225,7 @@ describe('ranking meta summary', () => {
 
   it('builds A-share header copy with data date and TOP count', () => {
     const summary = buildRankingMetaSummary(SAMPLE_META)
-    assert.ok(summary.includes('A股榜单按精选评分排序'))
+    assert.ok(summary.includes('A股榜单按主板 / 创业板 / 科创板均衡筛选，兼顾精选评分与板块分散'))
     assert.ok(summary.includes('数据日期：'))
     assert.ok(summary.includes('当前展示 TOP20 只'))
     assert.ok(!summary.includes('机会区共'))
@@ -237,7 +237,7 @@ describe('ranking meta summary', () => {
   })
 
   it('falls back to exchange-specific source description when meta is missing', () => {
-    assert.equal(buildRankingMetaSummary(null), 'A股榜单按精选评分排序')
+    assert.equal(buildRankingMetaSummary(null), 'A股榜单按主板 / 创业板 / 科创板均衡筛选，兼顾精选评分与板块分散')
     assert.equal(buildRankingMetaSummary(null, 'HKEX'), '港股榜单来自机会区')
   })
 })

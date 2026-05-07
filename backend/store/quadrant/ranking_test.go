@@ -398,6 +398,73 @@ func TestGetRanking_AShareUsesRankingScoreOutsideOpportunityZone(t *testing.T) {
 	}
 }
 
+func TestGetRanking_AShareAppliesBoardQuotas(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	records := make([]QuadrantScoreRecord, 0, 60)
+	for i := 0; i < 20; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("600%03d", i), "MAIN", "机会", 90-float64(i)*0.1, 80, 20, 12000))
+	}
+	for i := 0; i < 20; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("300%03d", i), "CHINEXT", "机会", 80-float64(i)*0.1, 75, 20, 12000))
+	}
+	for i := 0; i < 20; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("688%03d", i), "STAR", "机会", 100-float64(i)*0.1, 70, 20, 12000))
+	}
+	seedOpportunityRecords(t, repo, records)
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking failed: %v", err)
+	}
+	if len(resp.Items) != 20 {
+		t.Fatalf("expected 20 items, got %d", len(resp.Items))
+	}
+	counts := map[string]int{}
+	for _, item := range resp.Items {
+		counts[item.Board]++
+	}
+	if counts[aShareBoardMain] != 10 || counts[aShareBoardChiNext] != 6 || counts[aShareBoardStar] != 4 {
+		t.Fatalf("expected MAIN/CHINEXT/STAR = 10/6/4, got %#v", counts)
+	}
+}
+
+func TestSelectSnapshotRecords_MatchesGetRankingAShareQuota(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	records := make([]QuadrantScoreRecord, 0, 45)
+	for i := 0; i < 15; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("600%03d", i), "MAIN", "机会", 95-float64(i)*0.1, 80, 20, 12000))
+	}
+	for i := 0; i < 15; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("300%03d", i), "CHINEXT", "机会", 85-float64(i)*0.1, 75, 20, 12000))
+	}
+	for i := 0; i < 15; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("688%03d", i), "STAR", "机会", 100-float64(i)*0.1, 70, 20, 12000))
+	}
+	seedOpportunityRecords(t, repo, records)
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking failed: %v", err)
+	}
+	snapshotRecords := selectSnapshotRecords(records, 20)
+	if len(resp.Items) != len(snapshotRecords) {
+		t.Fatalf("expected realtime and snapshot lengths to match, got %d vs %d", len(resp.Items), len(snapshotRecords))
+	}
+	for i := range snapshotRecords {
+		if resp.Items[i].Code != snapshotRecords[i].Code {
+			t.Fatalf("expected realtime and snapshot record %d to match, got %s vs %s", i, resp.Items[i].Code, snapshotRecords[i].Code)
+		}
+	}
+}
+
 func TestGetRanking_HKEXKeepsOpportunitySortingWithRankingScorePresent(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
@@ -425,34 +492,42 @@ func TestGetRanking_HKEXKeepsOpportunitySortingWithRankingScorePresent(t *testin
 	}
 }
 
-func TestApplyBoardCap_LimitsSingleBoardToHalf(t *testing.T) {
-	records := make([]QuadrantScoreRecord, 0, 25)
-	for i := 0; i < 15; i++ {
-		records = append(records, makeAShareRankingRecord(fmt.Sprintf("600%03d", i), "MAIN", "机会", float64(100-i), 80, 20, 12000))
+func countSelectedBoards(records []QuadrantScoreRecord) map[string]int {
+	counts := map[string]int{}
+	for _, record := range records {
+		counts[normalizeAShareRankingBoard(record)]++
 	}
-	for i := 0; i < 5; i++ {
-		records = append(records, makeAShareRankingRecord(fmt.Sprintf("300%03d", i), "CHINEXT", "机会", float64(85-i), 75, 20, 12000))
+	return counts
+}
+
+func TestSelectAShareBalancedRanking_UsesTargetQuotas(t *testing.T) {
+	records := make([]QuadrantScoreRecord, 0, 60)
+	for i := 0; i < 20; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("600%03d", i), "MAIN", "机会", float64(90-i), 80, 20, 12000))
 	}
-	for i := 0; i < 5; i++ {
-		records = append(records, makeAShareRankingRecord(fmt.Sprintf("688%03d", i), "STAR", "机会", float64(80-i), 70, 20, 12000))
+	for i := 0; i < 20; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("300%03d", i), "CHINEXT", "机会", float64(80-i), 75, 20, 12000))
+	}
+	for i := 0; i < 20; i++ {
+		records = append(records, makeAShareRankingRecord(fmt.Sprintf("688%03d", i), "STAR", "机会", 100-float64(i)*0.1, 70, 20, 12000))
 	}
 
-	selected := applyBoardCap(records, 20, 0.5)
+	selected := selectAShareBalancedRanking(records, 20)
 	if len(selected) != 20 {
 		t.Fatalf("expected 20 records, got %d", len(selected))
 	}
-	mainCount := 0
-	for _, record := range selected {
-		if record.Board == "MAIN" {
-			mainCount++
-		}
+	counts := countSelectedBoards(selected)
+	if counts[aShareBoardMain] != 10 || counts[aShareBoardChiNext] != 6 || counts[aShareBoardStar] != 4 {
+		t.Fatalf("expected MAIN/CHINEXT/STAR = 10/6/4, got %#v", counts)
 	}
-	if mainCount > 10 {
-		t.Fatalf("expected MAIN board <= 10, got %d", mainCount)
+	for i := 0; i < len(selected)-1; i++ {
+		if selected[i].RankingScore < selected[i+1].RankingScore {
+			t.Fatalf("expected final list sorted by ranking_score desc at index %d: %.1f < %.1f", i, selected[i].RankingScore, selected[i+1].RankingScore)
+		}
 	}
 }
 
-func TestApplyBoardCap_FillsBackWhenBoardCoverageInsufficient(t *testing.T) {
+func TestSelectAShareBalancedRanking_FillsBackWhenBoardCoverageInsufficient(t *testing.T) {
 	records := make([]QuadrantScoreRecord, 0, 20)
 	for i := 0; i < 18; i++ {
 		records = append(records, makeAShareRankingRecord(fmt.Sprintf("600%03d", i), "MAIN", "机会", float64(100-i), 80, 20, 12000))
@@ -461,9 +536,27 @@ func TestApplyBoardCap_FillsBackWhenBoardCoverageInsufficient(t *testing.T) {
 		records = append(records, makeAShareRankingRecord(fmt.Sprintf("300%03d", i), "CHINEXT", "机会", float64(70-i), 75, 20, 12000))
 	}
 
-	selected := applyBoardCap(records, 20, 0.5)
+	selected := selectAShareBalancedRanking(records, 20)
 	if len(selected) != 20 {
-		t.Fatalf("expected light cap to fill back to 20, got %d", len(selected))
+		t.Fatalf("expected quota fallback to fill back to 20, got %d", len(selected))
+	}
+	counts := countSelectedBoards(selected)
+	if counts[aShareBoardMain] != 18 || counts[aShareBoardChiNext] != 2 {
+		t.Fatalf("expected MAIN/CHINEXT = 18/2 when other boards are insufficient, got %#v", counts)
+	}
+}
+
+func TestSelectAShareBalancedRanking_InfersBoardFromCodeWhenBoardMissing(t *testing.T) {
+	records := []QuadrantScoreRecord{
+		makeAShareRankingRecord("600100", "", "机会", 90, 80, 20, 12000),
+		makeAShareRankingRecord("300100", "", "机会", 89, 80, 20, 12000),
+		makeAShareRankingRecord("688100", "", "机会", 88, 80, 20, 12000),
+	}
+
+	selected := selectAShareBalancedRanking(records, 3)
+	counts := countSelectedBoards(selected)
+	if counts[aShareBoardMain] != 1 || counts[aShareBoardChiNext] != 1 || counts[aShareBoardStar] != 1 {
+		t.Fatalf("expected board inference by code to select one per board for limit=3, got %#v", counts)
 	}
 }
 

@@ -306,7 +306,7 @@ function formatMetaDateTime(value) {
 
 function buildRankingMetaSummary(meta, currentExchange = 'ASHARE') {
   const exchange = meta?.exchange || currentExchange
-  const parts = [exchange === 'HKEX' ? '港股榜单来自机会区' : 'A股榜单按精选评分排序']
+  const parts = [exchange === 'HKEX' ? '港股榜单来自机会区' : 'A股榜单按主板 / 创业板 / 科创板均衡筛选，兼顾精选评分与板块分散']
   if (meta?.computed_at) {
     parts.push(`数据日期：${formatMetaDateTime(meta.computed_at)}`)
   }

@@ -312,47 +312,140 @@ func mustMarshal(v any) string {
 	return string(b)
 }
 
-func applyBoardCap(records []QuadrantScoreRecord, limit int, maxShare float64) []QuadrantScoreRecord {
+const (
+	aShareBoardMain    = "MAIN"
+	aShareBoardChiNext = "CHINEXT"
+	aShareBoardStar    = "STAR"
+	aShareBoardOther   = "OTHER"
+)
+
+type boardQuotaTarget struct {
+	Board string
+	Share float64
+}
+
+var aShareRankingBoardTargets = []boardQuotaTarget{
+	{Board: aShareBoardMain, Share: 0.5},
+	{Board: aShareBoardChiNext, Share: 0.3},
+	{Board: aShareBoardStar, Share: 0.2},
+}
+
+func normalizeAShareRankingBoard(record QuadrantScoreRecord) string {
+	board := strings.ToUpper(strings.TrimSpace(record.Board))
+	switch board {
+	case aShareBoardMain, aShareBoardChiNext, aShareBoardStar:
+		return board
+	}
+
+	code := strings.TrimSpace(record.Code)
+	switch {
+	case strings.HasPrefix(code, "688"), strings.HasPrefix(code, "689"):
+		return aShareBoardStar
+	case strings.HasPrefix(code, "300"), strings.HasPrefix(code, "301"):
+		return aShareBoardChiNext
+	case strings.HasPrefix(code, "600"), strings.HasPrefix(code, "601"), strings.HasPrefix(code, "603"), strings.HasPrefix(code, "605"),
+		strings.HasPrefix(code, "000"), strings.HasPrefix(code, "001"), strings.HasPrefix(code, "002"), strings.HasPrefix(code, "003"):
+		return aShareBoardMain
+	default:
+		return aShareBoardOther
+	}
+}
+
+func calculateBoardTargetCounts(limit int, targets []boardQuotaTarget) map[string]int {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	counts := make(map[string]int, len(targets))
+	allocated := 0
+	for _, target := range targets {
+		count := int(math.Floor(float64(limit) * target.Share))
+		if count < 0 {
+			count = 0
+		}
+		counts[target.Board] = count
+		allocated += count
+	}
+
+	remaining := limit - allocated
+	for remaining > 0 && len(targets) > 0 {
+		for _, target := range targets {
+			if remaining == 0 {
+				break
+			}
+			counts[target.Board]++
+			remaining--
+		}
+	}
+	return counts
+}
+
+func rankingRecordKey(record QuadrantScoreRecord) string {
+	return strings.TrimSpace(record.Exchange) + "|" + strings.TrimSpace(record.Code)
+}
+
+func sortByRankingScore(records []QuadrantScoreRecord) {
+	sort.SliceStable(records, func(i, j int) bool {
+		if records[i].RankingScore == records[j].RankingScore {
+			if records[i].Risk == records[j].Risk {
+				if records[i].AvgAmount5d == records[j].AvgAmount5d {
+					return rankingRecordKey(records[i]) < rankingRecordKey(records[j])
+				}
+				return records[i].AvgAmount5d > records[j].AvgAmount5d
+			}
+			return records[i].Risk < records[j].Risk
+		}
+		return records[i].RankingScore > records[j].RankingScore
+	})
+}
+
+func selectAShareBalancedRanking(records []QuadrantScoreRecord, limit int) []QuadrantScoreRecord {
 	if limit <= 0 {
 		limit = 20
 	}
 	if len(records) == 0 {
 		return []QuadrantScoreRecord{}
 	}
-	if maxShare <= 0 || maxShare > 1 {
-		maxShare = 0.5
-	}
-	capPerBoard := int(math.Ceil(float64(limit) * maxShare))
-	if capPerBoard < 1 {
-		capPerBoard = 1
+
+	sorted := append([]QuadrantScoreRecord(nil), records...)
+	sortByRankingScore(sorted)
+	targetCounts := calculateBoardTargetCounts(limit, aShareRankingBoardTargets)
+	buckets := make(map[string][]QuadrantScoreRecord, len(aShareRankingBoardTargets))
+	for _, record := range sorted {
+		board := normalizeAShareRankingBoard(record)
+		if _, ok := targetCounts[board]; ok {
+			buckets[board] = append(buckets[board], record)
+		}
 	}
 
 	selected := make([]QuadrantScoreRecord, 0, limit)
-	skipped := make([]QuadrantScoreRecord, 0)
-	counts := map[string]int{}
-
-	for _, record := range records {
-		board := strings.TrimSpace(record.Board)
-		if board == "" {
-			board = "OTHER"
-		}
-		if counts[board] >= capPerBoard {
-			skipped = append(skipped, record)
-			continue
-		}
-		selected = append(selected, record)
-		counts[board]++
-		if len(selected) == limit {
-			return selected
+	selectedKeys := make(map[string]bool, limit)
+	for _, target := range aShareRankingBoardTargets {
+		bucket := buckets[target.Board]
+		targetCount := targetCounts[target.Board]
+		for i := 0; i < len(bucket) && i < targetCount && len(selected) < limit; i++ {
+			key := rankingRecordKey(bucket[i])
+			if selectedKeys[key] {
+				continue
+			}
+			selected = append(selected, bucket[i])
+			selectedKeys[key] = true
 		}
 	}
 
-	for _, record := range skipped {
-		selected = append(selected, record)
+	for _, record := range sorted {
 		if len(selected) == limit {
 			break
 		}
+		key := rankingRecordKey(record)
+		if selectedKeys[key] {
+			continue
+		}
+		selected = append(selected, record)
+		selectedKeys[key] = true
 	}
+
+	sortByRankingScore(selected)
 	return selected
 }
 
@@ -397,16 +490,7 @@ func selectSnapshotRecords(records []QuadrantScoreRecord, limit int) []QuadrantS
 			filtered = append(filtered, record)
 		}
 		if hasNonZeroRankingScore(filtered) {
-			sort.Slice(filtered, func(i, j int) bool {
-				if filtered[i].RankingScore == filtered[j].RankingScore {
-					if filtered[i].Risk == filtered[j].Risk {
-						return filtered[i].AvgAmount5d > filtered[j].AvgAmount5d
-					}
-					return filtered[i].Risk < filtered[j].Risk
-				}
-				return filtered[i].RankingScore > filtered[j].RankingScore
-			})
-			return applyBoardCap(filtered, limit, 0.5)
+			return selectAShareBalancedRanking(filtered, limit)
 		}
 		records = filtered
 	}
@@ -818,7 +902,7 @@ func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*
 			return nil, err
 		}
 		if hasRankingScore {
-			records = applyBoardCap(records, limit, 0.5)
+			records = selectAShareBalancedRanking(records, limit)
 		} else if len(records) > limit {
 			records = records[:limit]
 		}

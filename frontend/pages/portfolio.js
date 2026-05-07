@@ -2188,6 +2188,22 @@ export default function PortfolioPage() {
           />
         ) : null}
 
+        {data?.positions && (
+          <section>
+            <div className="flex items-center justify-between mb-3 gap-3">
+              <h3 className="text-sm font-semibold text-white/75 flex items-center gap-2">
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+                <LabelWithInfo label="持仓明细" tooltip={FIELD_TIPS.position_detail} />
+                <span className="text-[10px] font-normal text-white/30">
+                  {data.positions.length} 只{scopeLabel(scope)}
+                </span>
+              </h3>
+              <div className="text-[11px] text-white/30 hidden sm:block">每一行都支持直接买入、卖出和调均价</div>
+            </div>
+            <PositionTable positions={data.positions} onNavigate={handleNavigate} onAction={openTradeDrawer} />
+          </section>
+        )}
+
         {pageViewState.hasDashboardData ? (
           <PortfolioPnlCalendar
             data={pnlCalendar}
@@ -2221,22 +2237,6 @@ export default function PortfolioPage() {
         />
 
         {riskMetrics && <RiskSection riskMetrics={riskMetrics} />}
-
-        {data?.positions && (
-          <section>
-            <div className="flex items-center justify-between mb-3 gap-3">
-              <h3 className="text-sm font-semibold text-white/75 flex items-center gap-2">
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
-                <LabelWithInfo label="持仓明细" tooltip={FIELD_TIPS.position_detail} />
-                <span className="text-[10px] font-normal text-white/30">
-                  {data.positions.length} 只{scopeLabel(scope)}
-                </span>
-              </h3>
-              <div className="text-[11px] text-white/30 hidden sm:block">每一行都支持直接买入、卖出和调均价</div>
-            </div>
-            <PositionTable positions={data.positions} onNavigate={handleNavigate} onAction={openTradeDrawer} />
-          </section>
-        )}
 
         {data?.recent_events_preview && (
           <RecentEventsSection events={data.recent_events_preview} />

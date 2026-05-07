@@ -1,6 +1,18 @@
 import Head from 'next/head'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import MiniChart from '../components/MiniChart'
+import {
+  BACKUP_STATUS_COLORS,
+  BACKUP_TRIGGER_LABELS,
+  buildBackupHistoryNote,
+  buildBackupJobBanner,
+  buildBackupStatusCards,
+  formatBackupBytes,
+  formatBackupDuration,
+  getBackupCosMeta,
+  resolveBackupTriggerButton,
+  shouldPollBackupStatus,
+} from '../lib/backup-ui'
 
 // ── Simple Doughnut Chart (SVG) ──
 
@@ -1993,38 +2005,12 @@ function UserFunnelPanel() {
 
 // ── Backup Panel (数据备份) ──
 
-const BACKUP_TRIGGER_LABELS = {
-  quadrant_callback: '四象限回调',
-  scheduled_fallback: '保底定时',
-  manual: '手动触发',
-}
-
-const BACKUP_STATUS_COLORS = {
-  success: 'text-emerald-400',
-  partial: 'text-amber-400',
-  failed: 'text-rose-400',
-  skipped: 'text-white/40',
-  never: 'text-white/30',
-}
-
-function formatBytes(bytes) {
-  if (bytes == null) return '--'
-  if (bytes < 1024) return `${bytes}B`
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)}KB`
-  return `${(bytes / 1048576).toFixed(1)}MB`
-}
-
-function formatDuration(ms) {
-  if (ms == null || ms === 0) return '--'
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(1)}s`
-}
-
 function BackupPanel() {
   const [status, setStatus] = useState(null)
   const [history, setHistory] = useState(null)
   const [stats, setStats] = useState(null)
   const [triggering, setTriggering] = useState(false)
+  const pollTimerRef = useRef(null)
 
   const loadData = useCallback(async () => {
     try {
@@ -2045,6 +2031,24 @@ function BackupPanel() {
     return () => clearInterval(timer)
   }, [loadData])
 
+  useEffect(() => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+    if (shouldPollBackupStatus(status)) {
+      pollTimerRef.current = setTimeout(() => {
+        loadData()
+      }, 2000)
+    }
+    return () => {
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current)
+        pollTimerRef.current = null
+      }
+    }
+  }, [status, loadData])
+
   const handleTrigger = async () => {
     if (!window.confirm('确定要立即执行一次备份吗？')) return
     setTriggering(true)
@@ -2057,19 +2061,38 @@ function BackupPanel() {
 
   if (!status && !history) return null
 
+  const cards = buildBackupStatusCards(status, stats)
+  const jobBanner = buildBackupJobBanner(status)
+  const triggerButton = resolveBackupTriggerButton({ triggering, status })
+  const cosMeta = getBackupCosMeta(status?.cos_status)
+
   return (
     <section>
       <h2 className="text-base font-semibold text-white/80 mb-3">📦 数据备份</h2>
 
       {/* Status Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-        <StatCard label="状态" value={status?.status ?? '--'} sub={BACKUP_TRIGGER_LABELS[status?.last_trigger_type] || ''} />
-        <StatCard label="主库大小" value={formatBytes(status?.pumpkin_size_bytes)} />
-        <StatCard label="A 股缓存" value={formatBytes(status?.cache_a_size_bytes)} />
-        <StatCard label="港股缓存" value={formatBytes(status?.cache_hk_size_bytes)} />
-        <StatCard label="COS 同步" value={status?.cos_uploaded ? '✅' : '⏸'} sub={stats?.cloud_enabled ? '已配置' : '未配置'} />
-        <StatCard label="耗时" value={formatDuration(status?.duration_ms)} />
+        <StatCard label="状态" value={cards.overall.value} sub={cards.overall.sub} />
+        <StatCard label="主库大小" value={cards.sizes.pumpkin} />
+        <StatCard label="A 股缓存" value={cards.sizes.cacheA} />
+        <StatCard label="港股缓存" value={cards.sizes.cacheHK} />
+        <StatCard label="COS 同步" value={cards.cos.value} sub={cards.cos.sub} />
+        <StatCard label="耗时" value={cards.duration} />
       </div>
+
+      {jobBanner && (
+        <div className={`mt-3 rounded-xl border px-3 py-2 text-xs ${
+          jobBanner.tone === 'danger'
+            ? 'bg-rose-500/10 border-rose-400/20 text-rose-200'
+            : jobBanner.tone === 'warning'
+              ? 'bg-amber-500/10 border-amber-400/20 text-amber-200'
+              : jobBanner.tone === 'success'
+                ? 'bg-emerald-500/10 border-emerald-400/20 text-emerald-200'
+                : 'bg-sky-500/10 border-sky-400/20 text-sky-100'
+        }`}>
+          {jobBanner.text}
+        </div>
+      )}
 
       {/* Error Message */}
       {status?.error_msg && (
@@ -2078,14 +2101,23 @@ function BackupPanel() {
         </div>
       )}
 
+      {status?.cos_error_msg && status?.cos_status !== 'success' && (
+        <div className={`mt-3 rounded-xl border px-3 py-2 text-xs ${cosMeta.tone} border-white/10 bg-white/[0.03]`}>
+          COS: {status.cos_error_msg}
+        </div>
+      )}
+
       {/* Storage Stats */}
       {stats && (
         <div className="mt-3 flex gap-6 text-xs text-white/40">
-          <span>本地: {formatBytes(stats.local_total_bytes)} ({stats.local_file_count} 文件 · 保留{stats.local_retention_days}天)</span>
+          <span>本地: {formatBackupBytes(stats.local_total_bytes)} ({stats.local_file_count} 文件 · 保留{stats.local_retention_days}天)</span>
           {stats.cloud_enabled && (
-            <span>云端: {formatBytes(stats.cloud_total_bytes)} ({stats.cloud_file_count} 文件)</span>
+            <span>云端: {formatBackupBytes(stats.cloud_total_bytes)} ({stats.cloud_file_count} 文件)</span>
           )}
         </div>
+      )}
+      {stats?.cloud_error_msg && (
+        <div className="mt-2 text-xs text-amber-200">云端统计获取失败: {stats.cloud_error_msg}</div>
       )}
 
       {/* Manual Trigger */}
@@ -2093,15 +2125,15 @@ function BackupPanel() {
         <h3 className="text-sm font-medium text-white/55">最近备份记录</h3>
         <button
           type="button"
-          disabled={triggering}
+          disabled={triggerButton.disabled}
           onClick={handleTrigger}
           className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-            triggering
+            triggerButton.disabled
               ? 'border-white/10 bg-white/5 text-white/30 cursor-not-allowed'
               : 'border-emerald-400/30 bg-emerald-500/8 text-emerald-300 hover:bg-emerald-500/15 hover:border-emerald-400/50'
           }`}
         >
-          {triggering ? '备份中...' : '🔄 立即备份'}
+          {triggerButton.label}
         </button>
       </div>
 
@@ -2131,12 +2163,12 @@ function BackupPanel() {
                   <td className="py-1.5 pl-4 whitespace-nowrap tabular-nums text-white/35">{row.triggered_at}</td>
                   <td className="py-1.5 px-3 text-white/50">{BACKUP_TRIGGER_LABELS[row.trigger_type] || row.trigger_type}</td>
                   <td className={`py-1.5 px-3 font-medium ${BACKUP_STATUS_COLORS[row.status] || ''}`}>{row.status}</td>
-                  <td className="py-1.5 px-3 text-right tabular-nums">{formatBytes(row.pumpkin_size_bytes)}</td>
-                  <td className="py-1.5 px-3 text-right tabular-nums">{formatBytes(row.cache_a_size_bytes + row.cache_hk_size_bytes)}</td>
-                  <td className="py-1.5 px-3 text-center">{row.cos_uploaded ? '✅' : '-'}</td>
-                  <td className="py-1.5 px-3 text-right tabular-nums text-white/35">{formatDuration(row.duration_ms)}</td>
+                  <td className="py-1.5 px-3 text-right tabular-nums">{formatBackupBytes(row.pumpkin_size_bytes)}</td>
+                  <td className="py-1.5 px-3 text-right tabular-nums">{formatBackupBytes(row.cache_a_size_bytes + row.cache_hk_size_bytes)}</td>
+                  <td className={`py-1.5 px-3 text-center ${getBackupCosMeta(row.cos_status).tone}`}>{getBackupCosMeta(row.cos_status).symbol}</td>
+                  <td className="py-1.5 px-3 text-right tabular-nums text-white/35">{formatBackupDuration(row.duration_ms)}</td>
                   <td className="py-1.5 pr-4 text-white/25 max-w-[200px] truncate" title={row.error_msg}>
-                    {row.integrity_check !== 'ok' ? (row.error_msg || '-') : (row.integrity_check === 'ok' ? '✅ 校验通过' : '-')}
+                    {buildBackupHistoryNote(row)}
                   </td>
                 </tr>
               ))}

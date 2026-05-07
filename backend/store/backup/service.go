@@ -13,21 +13,43 @@ import (
 	"time"
 
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
+)
+
+const (
+	BackupStatusSuccess = "success"
+	BackupStatusPartial = "partial"
+	BackupStatusFailed  = "failed"
+	BackupStatusSkipped = "skipped"
+	BackupStatusNever   = "never"
+
+	BackupCOSStatusDisabled  = "disabled"
+	BackupCOSStatusNever     = "never"
+	BackupCOSStatusPending   = "pending"
+	BackupCOSStatusUploading = "uploading"
+	BackupCOSStatusSuccess   = "success"
+	BackupCOSStatusPartial   = "partial"
+	BackupCOSStatusFailed    = "failed"
+	BackupCOSStatusSkipped   = "skipped"
+
+	BackupJobStatusIdle    = "idle"
+	BackupJobStatusQueued  = "queued"
+	BackupJobStatusRunning = "running"
 )
 
 // Service orchestrates database backups (local + optional COS).
 type Service struct {
 	repo *Repository
-	db   *gorm.DB // main GORM DB instance for pumpkin.db
+	db   *gorm.DB
 
 	// Paths (absolute or relative to CWD)
-	dbPath          string // path to pumpkin.db (for hot backup)
-	backupDir       string // local backup output directory
-	cacheADir       string // directory containing quadrant_cache.db
-	cacheHKDir      string // directory containing quadrant_cache_hk.db
-	retentionDays   int    // local retention in days
-	cooldownMinutes int    // minimum minutes between backups
+	dbPath          string
+	backupDir       string
+	cacheADir       string
+	cacheHKDir      string
+	retentionDays   int
+	cooldownMinutes int
 
 	// COS configuration (empty = disabled)
 	cosBucket    string
@@ -36,8 +58,12 @@ type Service struct {
 	cosSecretID  string
 	cosSecretKey string
 
+	cloudClient CloudStorageClient
+	now         func() time.Time
+
 	mu           sync.Mutex
 	lastBackupAt time.Time
+	job          *BackupJobState
 }
 
 // ServiceConfig holds all configurable parameters.
@@ -57,15 +83,50 @@ type ServiceConfig struct {
 	COSSecretKey string
 }
 
+// BackupResult is returned from a single Run() invocation.
+type BackupResult struct {
+	TriggerType     string
+	Status          string
+	PumpkinFile     string
+	PumpkinSize     int64
+	CacheAFile      string
+	CacheASize      int64
+	CacheHKFile     string
+	CacheHKSize     int64
+	COSUploaded     bool
+	COSStatus       string
+	COSErrorMessage string
+	IntegrityCheck  string
+	ErrorMessage    string
+	DurationMS      int64
+}
+
+type BackupJobState struct {
+	ID          string
+	Status      string
+	Phase       string
+	TriggerType string
+	Message     string
+	StartedAt   time.Time
+	FinishedAt  time.Time
+}
+
+type backupArtifact struct {
+	localName    string
+	localPath    string
+	contentType  string
+	displayLabel string
+}
+
 // NewService creates a new backup service.
 func NewService(repo *Repository, db *gorm.DB, cfg ServiceConfig) *Service {
 	if cfg.RetentionDays <= 0 {
 		cfg.RetentionDays = 7
 	}
 	if cfg.CooldownMinutes <= 0 {
-		cfg.CooldownMinutes = 120 // 2h default
+		cfg.CooldownMinutes = 120
 	}
-	return &Service{
+	svc := &Service{
 		repo:            repo,
 		db:              db,
 		dbPath:          cfg.DBPath,
@@ -74,77 +135,176 @@ func NewService(repo *Repository, db *gorm.DB, cfg ServiceConfig) *Service {
 		cacheHKDir:      cfg.CacheHKDir,
 		retentionDays:   cfg.RetentionDays,
 		cooldownMinutes: cfg.CooldownMinutes,
-		cosBucket:       cfg.COSBucket,
-		cosRegion:       cfg.COSRegion,
-		cosPrefix:       cfg.COSPrefix,
-		cosSecretID:     cfg.COSSecretID,
-		cosSecretKey:    cfg.COSSecretKey,
+		cosBucket:       strings.TrimSpace(cfg.COSBucket),
+		cosRegion:       strings.TrimSpace(cfg.COSRegion),
+		cosPrefix:       normalizeCOSPrefix(cfg.COSPrefix),
+		cosSecretID:     strings.TrimSpace(cfg.COSSecretID),
+		cosSecretKey:    strings.TrimSpace(cfg.COSSecretKey),
+		now:             time.Now,
 	}
+	if svc.cosEnabled() {
+		svc.cloudClient = NewCOSCloudStorageClient(svc.cosBucket, svc.cosRegion, svc.cosSecretID, svc.cosSecretKey)
+	}
+	return svc
 }
 
-// BackupResult is returned from a single Run() invocation.
-type BackupResult struct {
-	TriggerType    string // populated by recordAndFinish, used for display
-	Status         string
-	PumpkinFile    string
-	PumpkinSize    int64
-	CacheAFile     string
-	CacheASize     int64
-	CacheHKFile    string
-	CacheHKSize    int64
-	COSUploaded    bool
-	IntegrityCheck string
-	ErrorMessage   string
-	DurationMS     int64
-}
-
-// Run executes a full backup cycle. It is safe to call concurrently —
-// if a cooldown is active it returns early with status "skipped".
+// Run executes a full backup cycle synchronously.
 func (s *Service) Run(ctx context.Context, triggerType string) (*BackupResult, error) {
-	start := time.Now()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	job, skip := s.beginJob(triggerType, BackupJobStatusRunning, "preparing", "开始执行备份")
+	if skip != nil {
+		return skip, nil
+	}
+	return s.executeRun(ctx, job.ID, triggerType), nil
+}
 
-	// Cooldown check
+// TriggerAsync schedules a manual backup and returns immediately.
+func (s *Service) TriggerAsync(ctx context.Context, triggerType string) (*BackupTriggerResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	job, resp := s.beginAsyncJob(triggerType)
+	if job == nil {
+		return resp, nil
+	}
+	go func(jobID string, trigger string) {
+		s.setJobProgress(jobID, BackupJobStatusRunning, "preparing", "开始执行备份")
+		s.executeRun(context.Background(), jobID, trigger)
+	}(job.ID, triggerType)
+	return resp, nil
+}
+
+func (s *Service) beginAsyncJob(triggerType string) (*BackupJobState, *BackupTriggerResponse) {
+	now := s.now()
+
 	s.mu.Lock()
-	if !s.lastBackupAt.IsZero() && time.Since(s.lastBackupAt) < time.Duration(s.cooldownMinutes)*time.Minute {
-		s.mu.Unlock()
-		log.Printf("[backup] skipped: cooldown active (last %s, < %dm)",
-			s.lastBackupAt.Format(time.RFC3339), s.cooldownMinutes)
-		return &BackupResult{Status: "skipped"}, nil
-	}
-	s.mu.Unlock()
+	defer s.mu.Unlock()
 
-	result := &BackupResult{
-		Status:      "success",
+	if err := s.hydrateLastBackupAtLocked(); err != nil {
+		return nil, &BackupTriggerResponse{
+			Accepted:         false,
+			Reason:           "state_error",
+			Message:          fmt.Sprintf("读取备份状态失败: %v", err),
+			CurrentJobStatus: s.currentJobStatusLocked(),
+		}
+	}
+	if s.hasActiveJobLocked() {
+		job := s.cloneJobLocked()
+		return nil, &BackupTriggerResponse{
+			Accepted:            false,
+			Reason:              "running",
+			Message:             "已有备份任务在执行，请等待当前任务完成",
+			JobID:               job.ID,
+			CurrentJobStatus:    job.Status,
+			CurrentJobPhase:     job.Phase,
+			CurrentJobStartedAt: formatTimePtr(job.StartedAt),
+		}
+	}
+	if next := s.nextAllowedAtLocked(now); next != nil {
+		return nil, &BackupTriggerResponse{
+			Accepted:         false,
+			Reason:           "cooldown",
+			Message:          fmt.Sprintf("冷却中，请在 %s 后重试", next.Local().Format("2006-01-02 15:04:05")),
+			CurrentJobStatus: BackupJobStatusIdle,
+			NextAllowedAt:    formatTimePtr(*next),
+		}
+	}
+
+	job := &BackupJobState{
+		ID:          newBackupJobID(triggerType),
+		Status:      BackupJobStatusQueued,
+		Phase:       "queued",
 		TriggerType: triggerType,
+		Message:     "备份任务已入队，等待执行",
+		StartedAt:   now,
+	}
+	s.job = job
+
+	return s.cloneJobLocked(), &BackupTriggerResponse{
+		Accepted:            true,
+		Reason:              "accepted",
+		Message:             "备份任务已受理，后台开始执行",
+		JobID:               job.ID,
+		CurrentJobStatus:    job.Status,
+		CurrentJobPhase:     job.Phase,
+		CurrentJobStartedAt: formatTimePtr(job.StartedAt),
+	}
+}
+
+func (s *Service) beginJob(triggerType, status, phase, message string) (*BackupJobState, *BackupResult) {
+	now := s.now()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.hydrateLastBackupAtLocked(); err != nil {
+		return nil, &BackupResult{Status: BackupStatusFailed, ErrorMessage: fmt.Sprintf("load latest backup state: %v", err)}
+	}
+	if s.hasActiveJobLocked() {
+		return nil, &BackupResult{Status: BackupStatusSkipped, ErrorMessage: "backup already running"}
+	}
+	if next := s.nextAllowedAtLocked(now); next != nil {
+		return nil, &BackupResult{Status: BackupStatusSkipped, ErrorMessage: fmt.Sprintf("cooldown active until %s", next.Local().Format("2006-01-02 15:04:05"))}
 	}
 
-	// Ensure backup directory exists
+	job := &BackupJobState{
+		ID:          newBackupJobID(triggerType),
+		Status:      status,
+		Phase:       phase,
+		TriggerType: triggerType,
+		Message:     message,
+		StartedAt:   now,
+	}
+	s.job = job
+	return s.cloneJobLocked(), nil
+}
+
+func (s *Service) executeRun(ctx context.Context, jobID, triggerType string) *BackupResult {
+	start := s.now()
+	result := &BackupResult{
+		Status:      BackupStatusSuccess,
+		TriggerType: triggerType,
+		COSStatus:   s.defaultCOSStatus(),
+	}
+
+	defer func() {
+		result.DurationMS = s.now().Sub(start).Milliseconds()
+		s.recordAndFinish(triggerType, result, start)
+		s.finishJob(jobID, result)
+		log.Printf("[backup] %s | trigger=%s | pumpkin=%dKB | cache_a=%dKB | cache_hk=%dKB | cos=%s | %.1fs",
+			result.Status, triggerType,
+			result.PumpkinSize/1024, result.CacheASize/1024, result.CacheHKSize/1024,
+			result.COSStatus, float64(result.DurationMS)/1000)
+	}()
+
+	s.setJobProgress(jobID, BackupJobStatusRunning, "prepare_dir", "准备本地备份目录")
 	if err := os.MkdirAll(s.backupDir, 0755); err != nil {
-		result.Status = "failed"
+		result.Status = BackupStatusFailed
 		result.ErrorMessage = fmt.Sprintf("create backup dir: %v", err)
-		s.recordAndFinish(ctx, triggerType, result, start)
-		return result, nil
+		return result
 	}
 
-	timestamp := time.Now().Format("20060102_150405")
+	timestamp := s.now().Format("20060102_150405")
 
-	// 1. Hot-backup pumpkin.db using SQLite online backup API
+	s.setJobProgress(jobID, BackupJobStatusRunning, "backup_pumpkin", "备份主库 pumpkin.db")
 	pumpkinFile, pumpkinSize, err := s.hotBackupPumpkin(timestamp)
 	if err != nil {
 		log.Printf("[backup] pumpkin hot-backup failed: %v", err)
-		result.Status = "partial"
+		result.Status = BackupStatusPartial
 		result.ErrorMessage += fmt.Sprintf("pumpkin: %v; ", err)
 	} else {
 		result.PumpkinFile = pumpkinFile
 		result.PumpkinSize = pumpkinSize
 	}
 
-	// 2. Cold-copy + gzip cache databases
+	s.setJobProgress(jobID, BackupJobStatusRunning, "backup_cache_a", "压缩 A 股缓存数据库")
 	cacheAFile, cacheASize, err := s.compressCacheDB("quadrant_cache.db", s.cacheADir, "cache_a", timestamp)
 	if err != nil {
 		log.Printf("[backup] cache_a copy failed: %v", err)
-		if result.Status == "success" {
-			result.Status = "partial"
+		if result.Status == BackupStatusSuccess {
+			result.Status = BackupStatusPartial
 		}
 		result.ErrorMessage += fmt.Sprintf("cache_a: %v; ", err)
 	} else {
@@ -152,11 +312,12 @@ func (s *Service) Run(ctx context.Context, triggerType string) (*BackupResult, e
 		result.CacheASize = cacheASize
 	}
 
+	s.setJobProgress(jobID, BackupJobStatusRunning, "backup_cache_hk", "压缩港股缓存数据库")
 	cacheHKFile, cacheHKSize, err := s.compressCacheDB("quadrant_cache_hk.db", s.cacheHKDir, "cache_hk", timestamp)
 	if err != nil {
 		log.Printf("[backup] cache_hk copy failed: %v", err)
-		if result.Status == "success" {
-			result.Status = "partial"
+		if result.Status == BackupStatusSuccess {
+			result.Status = BackupStatusPartial
 		}
 		result.ErrorMessage += fmt.Sprintf("cache_hk: %v; ", err)
 	} else {
@@ -164,45 +325,161 @@ func (s *Service) Run(ctx context.Context, triggerType string) (*BackupResult, e
 		result.CacheHKSize = cacheHKSize
 	}
 
-	// 3. Integrity check on pumpkin backup (if succeeded)
 	if result.PumpkinFile != "" {
+		s.setJobProgress(jobID, BackupJobStatusRunning, "integrity_check", "校验主库备份完整性")
 		ic, icErr := s.integrityCheck(result.PumpkinFile)
 		result.IntegrityCheck = ic
-		if ic == "failed" {
-			result.Status = "partial"
+		if ic == BackupStatusFailed {
+			result.Status = BackupStatusPartial
 			if icErr != nil {
 				result.ErrorMessage += fmt.Sprintf("integrity_check failed: %v; ", icErr)
 			} else {
 				result.ErrorMessage += "integrity_check failed; "
 			}
 		}
-	} else if result.PumpkinFile == "" {
-		result.IntegrityCheck = "skipped"
+	} else {
+		result.IntegrityCheck = BackupCOSStatusSkipped
 	}
 
-	// 4. Cleanup old local backups
+	if !result.hasLocalArtifacts() {
+		result.Status = BackupStatusFailed
+	}
+
+	s.setJobProgress(jobID, BackupJobStatusRunning, "cleanup_local", "清理过期本地备份")
 	s.cleanupOldBackups()
 
-	// 5. Upload to COS (if configured)
 	if s.cosEnabled() {
-		uploaded := s.uploadToCOS(ctx, result)
-		result.COSUploaded = uploaded
+		s.uploadToCOS(ctx, jobID, result)
 	} else {
+		result.COSStatus = BackupCOSStatusDisabled
+		result.COSErrorMessage = ""
 		log.Printf("[backup] COS not configured, skipping cloud upload")
 	}
 
-	result.DurationMS = time.Since(start).Milliseconds()
-	s.recordAndFinish(ctx, triggerType, result, start)
-
-	log.Printf("[backup] ✅ %s | trigger=%s | pumpkin=%dKB | cache_a=%dKB | cache_hk=%dKB | cos=%v | %.1fs",
-		result.Status, triggerType,
-		result.PumpkinSize/1024, result.CacheASize/1024, result.CacheHKSize/1024,
-		result.COSUploaded, float64(result.DurationMS)/1000)
-
-	return result, nil
+	return result
 }
 
-// ── Internal methods ──
+// GetStatus returns summary of the latest backup for the admin panel.
+func (s *Service) GetStatus(ctx context.Context) (*BackupStatusResponse, error) {
+	latest, err := s.repo.GetLatest()
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &BackupStatusResponse{
+		Status:           BackupStatusNever,
+		COSStatus:        s.defaultCOSStatus(),
+		CurrentJobStatus: BackupJobStatusIdle,
+	}
+	if latest != nil {
+		resp.LastBackupAt = formatTimePtr(latest.TriggeredAt)
+		resp.LastTriggerType = latest.TriggerType
+		resp.Status = latest.Status
+		resp.PumpkinSize = latest.PumpkinSize
+		resp.CacheASize = latest.CacheASize
+		resp.CacheHKSize = latest.CacheHKSize
+		resp.COSUploaded = latest.COSUploaded
+		resp.COSStatus = latest.COSStatus
+		if resp.COSStatus == "" {
+			resp.COSStatus = s.defaultCOSStatus()
+		}
+		resp.COSErrorMsg = latest.COSErrorMessage
+		resp.DurationMS = latest.DurationMS
+		resp.ErrorMsg = latest.ErrorMessage
+	}
+
+	s.mu.Lock()
+	_ = s.hydrateLastBackupAtLocked()
+	job := s.cloneJobLocked()
+	next := s.nextAllowedAtLocked(s.now())
+	s.mu.Unlock()
+
+	if job != nil {
+		resp.CurrentJobID = job.ID
+		resp.CurrentJobStatus = job.Status
+		resp.CurrentJobPhase = job.Phase
+		resp.CurrentJobTriggerType = job.TriggerType
+		resp.CurrentJobMessage = job.Message
+		resp.CurrentJobStartedAt = formatTimePtr(job.StartedAt)
+		resp.CurrentJobFinishedAt = formatTimePtr(job.FinishedAt)
+	}
+	if next != nil {
+		resp.NextAllowedAt = formatTimePtr(*next)
+	}
+
+	return resp, nil
+}
+
+// GetHistory returns recent backup logs for the admin panel.
+func (s *Service) GetHistory(limit int) ([]BackupHistoryItem, error) {
+	records, err := s.repo.ListRecent(limit)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]BackupHistoryItem, len(records))
+	for i, r := range records {
+		items[i] = BackupHistoryItem{
+			ID:             r.ID,
+			TriggeredAt:    r.TriggeredAt.Local().Format("2006-01-02 15:04:05"),
+			TriggerType:    r.TriggerType,
+			Status:         r.Status,
+			PumpkinSize:    r.PumpkinSize,
+			CacheASize:     r.CacheASize,
+			CacheHKSize:    r.CacheHKSize,
+			COSUploaded:    r.COSUploaded,
+			COSStatus:      firstNonEmpty(r.COSStatus, s.defaultCOSStatus()),
+			COSErrorMsg:    r.COSErrorMessage,
+			IntegrityCheck: r.IntegrityCheck,
+			ErrorMsg:       r.ErrorMessage,
+			DurationMS:     r.DurationMS,
+		}
+	}
+	return items, nil
+}
+
+// GetStorageStats returns local + cloud storage usage information.
+func (s *Service) GetStorageStats(ctx context.Context) (*BackupStorageStats, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	stats := &BackupStorageStats{
+		LocalRetentionDays: s.retentionDays,
+		CloudEnabled:       s.cosEnabled(),
+	}
+
+	entries, err := os.ReadDir(s.backupDir)
+	if err == nil {
+		for _, e := range entries {
+			if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			info, ferr := e.Info()
+			if ferr == nil {
+				stats.LocalTotalBytes += info.Size()
+				stats.LocalFileCount++
+			}
+		}
+	}
+
+	if !s.cosEnabled() {
+		return stats, nil
+	}
+	if s.cloudClient == nil {
+		stats.CloudErrorMsg = "cloud storage client not initialized"
+		return stats, nil
+	}
+	objects, err := s.cloudClient.List(ctx, s.cosPrefix)
+	if err != nil {
+		stats.CloudErrorMsg = err.Error()
+		return stats, nil
+	}
+	for _, object := range objects {
+		stats.CloudFileCount++
+		stats.CloudTotalBytes += object.Size
+	}
+	return stats, nil
+}
 
 func (s *Service) hotBackupPumpkin(timestamp string) (string, int64, error) {
 	if s.dbPath == "" {
@@ -246,20 +523,16 @@ func (s *Service) hotBackupPumpkin(timestamp string) (string, int64, error) {
 
 func (s *Service) compressCacheDB(dbFilename, sourceDir, prefix, timestamp string) (string, int64, error) {
 	sourcePath := filepath.Join(sourceDir, dbFilename)
-
-	// Check source exists
 	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
 		return "", 0, fmt.Errorf("source not found: %s", sourcePath)
 	}
 
-	// Read source
 	srcF, err := os.Open(sourcePath)
 	if err != nil {
 		return "", 0, fmt.Errorf("open: %w", err)
 	}
 	defer srcF.Close()
 
-	// Write gzipped copy
 	destName := fmt.Sprintf("%s_%s.db.gz", prefix, timestamp)
 	destPath := filepath.Join(s.backupDir, destName)
 
@@ -271,7 +544,7 @@ func (s *Service) compressCacheDB(dbFilename, sourceDir, prefix, timestamp strin
 
 	gzW := gzip.NewWriter(dstF)
 	if _, err := io.Copy(gzW, srcF); err != nil {
-		gzW.Close()
+		_ = gzW.Close()
 		return "", 0, fmt.Errorf("compress: %w", err)
 	}
 	if err := gzW.Close(); err != nil {
@@ -291,24 +564,23 @@ func (s *Service) integrityCheck(filePath string) (string, error) {
 	fullPath := filepath.Join(s.backupDir, filePath)
 	db, err := gorm.Open(sqlite.Open(fullPath+"?mode=ro"), &gorm.Config{})
 	if err != nil {
-		return "failed", err
+		return BackupStatusFailed, err
 	}
 	var result string
 	row := db.Raw("PRAGMA integrity_check").Row()
 	if err := row.Scan(&result); err != nil {
-		return "failed", err
+		return BackupStatusFailed, err
 	}
 	sqlDB, _ := db.DB()
-	sqlDB.Close()
+	_ = sqlDB.Close()
 	if result == "ok" {
 		return "ok", nil
 	}
-	return "failed", fmt.Errorf(result)
+	return BackupStatusFailed, fmt.Errorf(result)
 }
 
 func (s *Service) cleanupOldBackups() {
-	cutoff := time.Now().AddDate(0, 0, -s.retentionDays)
-
+	cutoff := s.now().AddDate(0, 0, -s.retentionDays)
 	entries, err := os.ReadDir(s.backupDir)
 	if err != nil {
 		log.Printf("[backup] cleanup: cannot read dir: %v", err)
@@ -339,132 +611,229 @@ func (s *Service) cleanupOldBackups() {
 }
 
 func (s *Service) cosEnabled() bool {
-	return s.cosBucket != "" && s.cosSecretID != "" && s.cosSecretKey != ""
+	return s.cosBucket != "" && s.cosRegion != "" && s.cosSecretID != "" && s.cosSecretKey != ""
 }
 
-func (s *Service) uploadToCOS(ctx context.Context, result *BackupResult) bool {
-	// COS upload will be implemented once cos SDK dependency is added.
-	// For now, log and return false — will be wired up after `go get`.
-	files := []struct{ localName string }{}
+func (s *Service) uploadToCOS(ctx context.Context, jobID string, result *BackupResult) {
+	artifacts := s.collectArtifacts(result)
+	if len(artifacts) == 0 {
+		result.COSStatus = BackupCOSStatusSkipped
+		result.COSErrorMessage = "no local artifacts available for cloud upload"
+		return
+	}
+	if s.cloudClient == nil {
+		result.COSStatus = BackupCOSStatusFailed
+		result.COSErrorMessage = "cloud storage client not initialized"
+		return
+	}
+
+	s.setJobProgress(jobID, BackupJobStatusRunning, "uploading_cloud", fmt.Sprintf("上传 %d 个备份文件到 COS", len(artifacts)))
+	result.COSStatus = BackupCOSStatusUploading
+
+	successCount := 0
+	var failures []string
+	for _, artifact := range artifacts {
+		if err := s.cloudClient.Upload(ctx, s.objectKey(artifact.localName), artifact.localPath, artifact.contentType); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", artifact.displayLabel, err))
+			continue
+		}
+		successCount++
+	}
+
+	switch {
+	case successCount == len(artifacts):
+		result.COSUploaded = true
+		result.COSStatus = BackupCOSStatusSuccess
+	case successCount > 0:
+		result.COSUploaded = true
+		result.COSStatus = BackupCOSStatusPartial
+	default:
+		result.COSUploaded = false
+		result.COSStatus = BackupCOSStatusFailed
+	}
+	result.COSErrorMessage = strings.Join(failures, "; ")
+}
+
+func (s *Service) collectArtifacts(result *BackupResult) []backupArtifact {
+	artifacts := make([]backupArtifact, 0, 3)
 	if result.PumpkinFile != "" {
-		files = append(files, struct{ localName string }{result.PumpkinFile})
+		artifacts = append(artifacts, backupArtifact{
+			localName:    result.PumpkinFile,
+			localPath:    filepath.Join(s.backupDir, result.PumpkinFile),
+			contentType:  "application/x-sqlite3",
+			displayLabel: "pumpkin",
+		})
 	}
 	if result.CacheAFile != "" {
-		files = append(files, struct{ localName string }{result.CacheAFile})
+		artifacts = append(artifacts, backupArtifact{
+			localName:    result.CacheAFile,
+			localPath:    filepath.Join(s.backupDir, result.CacheAFile),
+			contentType:  "application/gzip",
+			displayLabel: "cache_a",
+		})
 	}
 	if result.CacheHKFile != "" {
-		files = append(files, struct{ localName string }{result.CacheHKFile})
+		artifacts = append(artifacts, backupArtifact{
+			localName:    result.CacheHKFile,
+			localPath:    filepath.Join(s.backupDir, result.CacheHKFile),
+			contentType:  "application/gzip",
+			displayLabel: "cache_hk",
+		})
 	}
-
-	log.Printf("[backup-cos] %d files pending upload (SDK integration next step)", len(files))
-	return false // TODO: wire up COS SDK
+	return artifacts
 }
 
-func (s *Service) recordAndFinish(ctx context.Context, triggerType string, result *BackupResult, start time.Time) {
-	// Record to DB
-	record := BackupLogRecord{
-		TriggeredAt:    start,
-		TriggerType:    triggerType,
-		Status:         result.Status,
-		PumpkinFile:    result.PumpkinFile,
-		PumpkinSize:    result.PumpkinSize,
-		CacheAFile:     result.CacheAFile,
-		CacheASize:     result.CacheASize,
-		CacheHKFile:    result.CacheHKFile,
-		CacheHKSize:    result.CacheHKSize,
-		COSUploaded:    result.COSUploaded,
-		IntegrityCheck: result.IntegrityCheck,
-		ErrorMessage:   result.ErrorMessage,
-		DurationMS:     result.DurationMS,
-		CreatedAt:      time.Now(),
+func (s *Service) objectKey(localName string) string {
+	if s.cosPrefix == "" {
+		return localName
 	}
-	if err := s.repo.Insert(&record); err != nil {
-		log.Printf("[backup] failed to record log: %v", err)
+	return s.cosPrefix + localName
+}
+
+func (s *Service) recordAndFinish(triggerType string, result *BackupResult, start time.Time) {
+	record := BackupLogRecord{
+		TriggeredAt:     start,
+		TriggerType:     triggerType,
+		Status:          result.Status,
+		PumpkinFile:     result.PumpkinFile,
+		PumpkinSize:     result.PumpkinSize,
+		CacheAFile:      result.CacheAFile,
+		CacheASize:      result.CacheASize,
+		CacheHKFile:     result.CacheHKFile,
+		CacheHKSize:     result.CacheHKSize,
+		COSUploaded:     result.COSUploaded,
+		COSStatus:       result.COSStatus,
+		COSErrorMessage: result.COSErrorMessage,
+		IntegrityCheck:  result.IntegrityCheck,
+		ErrorMessage:    result.ErrorMessage,
+		DurationMS:      result.DurationMS,
+		CreatedAt:       s.now(),
+	}
+	if s.repo != nil {
+		if err := s.repo.Insert(&record); err != nil {
+			log.Printf("[backup] failed to record log: %v", err)
+		}
 	}
 
-	// Update last backup time
 	s.mu.Lock()
 	s.lastBackupAt = start
 	s.mu.Unlock()
 }
 
-// ── Admin API helpers ──
+func (s *Service) finishJob(jobID string, result *BackupResult) {
+	message := "备份完成"
+	if result.Status == BackupStatusPartial {
+		message = "备份部分成功"
+	}
+	if result.Status == BackupStatusFailed {
+		message = firstNonEmpty(result.ErrorMessage, "备份失败")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.job == nil || s.job.ID != jobID {
+		return
+	}
+	s.job.Status = result.Status
+	s.job.Phase = "completed"
+	s.job.Message = message
+	s.job.FinishedAt = s.now()
+}
 
-// GetStatus returns summary of the latest backup for the admin panel.
-func (s *Service) GetStatus(ctx context.Context) (*BackupStatusResponse, error) {
+func (s *Service) setJobProgress(jobID, status, phase, message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.job == nil || s.job.ID != jobID {
+		return
+	}
+	s.job.Status = status
+	s.job.Phase = phase
+	s.job.Message = message
+}
+
+func (s *Service) hasActiveJobLocked() bool {
+	if s.job == nil {
+		return false
+	}
+	return s.job.Status == BackupJobStatusQueued || s.job.Status == BackupJobStatusRunning
+}
+
+func (s *Service) currentJobStatusLocked() string {
+	if s.job == nil {
+		return BackupJobStatusIdle
+	}
+	return s.job.Status
+}
+
+func (s *Service) cloneJobLocked() *BackupJobState {
+	if s.job == nil {
+		return nil
+	}
+	copy := *s.job
+	return &copy
+}
+
+func (s *Service) hydrateLastBackupAtLocked() error {
+	if !s.lastBackupAt.IsZero() || s.repo == nil {
+		return nil
+	}
 	latest, err := s.repo.GetLatest()
 	if err != nil {
-		return nil, err
-	}
-
-	resp := BackupStatusResponse{
-		Status: "never",
+		return err
 	}
 	if latest != nil {
-		ts := latest.TriggeredAt.Local().Format("2006-01-02 15:04:05")
-		resp.LastBackupAt = &ts
-		resp.LastTriggerType = latest.TriggerType
-		resp.Status = latest.Status
-		resp.PumpkinSize = latest.PumpkinSize
-		resp.CacheASize = latest.CacheASize
-		resp.CacheHKSize = latest.CacheHKSize
-		resp.COSUploaded = latest.COSUploaded
-		resp.DurationMS = latest.DurationMS
-		resp.ErrorMsg = latest.ErrorMessage
+		s.lastBackupAt = latest.TriggeredAt
 	}
-	return &resp, nil
+	return nil
 }
 
-// GetHistory returns recent backup logs for the admin panel.
-func (s *Service) GetHistory(limit int) ([]BackupHistoryItem, error) {
-	records, err := s.repo.ListRecent(limit)
-	if err != nil {
-		return nil, err
+func (s *Service) nextAllowedAtLocked(now time.Time) *time.Time {
+	if s.lastBackupAt.IsZero() {
+		return nil
 	}
+	next := s.lastBackupAt.Add(time.Duration(s.cooldownMinutes) * time.Minute)
+	if now.Before(next) {
+		return &next
+	}
+	return nil
+}
 
-	items := make([]BackupHistoryItem, len(records))
-	for i, r := range records {
-		items[i] = BackupHistoryItem{
-			ID:             r.ID,
-			TriggeredAt:    r.TriggeredAt.Local().Format("2006-01-02 15:04:05"),
-			TriggerType:    r.TriggerType,
-			Status:         r.Status,
-			PumpkinSize:    r.PumpkinSize,
-			CacheASize:     r.CacheASize,
-			CacheHKSize:    r.CacheHKSize,
-			COSUploaded:    r.COSUploaded,
-			IntegrityCheck: r.IntegrityCheck,
-			ErrorMsg:       r.ErrorMessage,
-			DurationMS:     r.DurationMS,
+func (s *Service) defaultCOSStatus() string {
+	if s.cosEnabled() {
+		return BackupCOSStatusNever
+	}
+	return BackupCOSStatusDisabled
+}
+
+func (r *BackupResult) hasLocalArtifacts() bool {
+	return r.PumpkinFile != "" || r.CacheAFile != "" || r.CacheHKFile != ""
+}
+
+func normalizeCOSPrefix(prefix string) string {
+	prefix = strings.TrimSpace(prefix)
+	prefix = strings.Trim(prefix, "/")
+	if prefix == "" {
+		return ""
+	}
+	return prefix + "/"
+}
+
+func newBackupJobID(triggerType string) string {
+	return fmt.Sprintf("%s-%s", triggerType, uuid.NewString())
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
 		}
 	}
-	return items, nil
+	return ""
 }
 
-// GetStorageStats returns local + cloud storage usage information.
-func (s *Service) GetStorageStats(ctx context.Context) (*BackupStorageStats, error) {
-	stats := &BackupStorageStats{
-		LocalRetentionDays: s.retentionDays,
-		LocalFileCount:     0,
-		LocalTotalBytes:    0,
-		CloudEnabled:       s.cosEnabled(),
+func formatTimePtr(ts time.Time) *string {
+	if ts.IsZero() {
+		return nil
 	}
-
-	entries, err := os.ReadDir(s.backupDir)
-	if err == nil {
-		for _, e := range entries {
-			if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-				continue
-			}
-			info, ferr := e.Info()
-			if ferr == nil {
-				stats.LocalTotalBytes += info.Size()
-				stats.LocalFileCount++
-			}
-		}
-	}
-
-	return stats, nil
+	formatted := ts.Local().Format("2006-01-02 15:04:05")
+	return &formatted
 }
-
-func ctxBackground() context.Context { return context.Background() }

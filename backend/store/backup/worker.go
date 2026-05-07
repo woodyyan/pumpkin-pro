@@ -8,13 +8,14 @@ import (
 )
 
 const (
-	defaultBackupWorkerHour   = 4  // 04:00 CST fallback trigger
+	defaultBackupWorkerHour   = 4 // 04:00 CST fallback trigger
 	defaultBackupWorkerMinute = 0
 )
 
 // Worker manages dual-trigger backup scheduling:
-//   Trigger A: callback from quadrant worker (onQuadrantComplete)
-//   Trigger B: scheduled fallback at fixed time every day
+//
+//	Trigger A: callback from quadrant worker (onQuadrantComplete)
+//	Trigger B: scheduled fallback at fixed time every day
 type Worker struct {
 	service *Service
 	mu      sync.Mutex

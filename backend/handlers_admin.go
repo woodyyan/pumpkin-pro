@@ -258,16 +258,16 @@ func (a *appServer) handleAdminBackupTrigger(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
 		return
 	}
-	result, err := a.backupService.Run(r.Context(), "manual")
+	result, err := a.backupService.TriggerAsync(r.Context(), "manual")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "手动备份失败: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":     true,
-		"status": result.Status,
-		"result": result,
-	})
+	statusCode := http.StatusAccepted
+	if !result.Accepted {
+		statusCode = http.StatusConflict
+	}
+	writeJSON(w, statusCode, result)
 }
 
 // handleAdminBackupStats returns storage usage statistics (local + cloud).

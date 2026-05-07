@@ -579,6 +579,28 @@ function PositionTable({ positions, onNavigate, onAction }) {
   )
 }
 
+function PositionDetailPanel({ positions, scope, onNavigate, onAction }) {
+  if (!positions) return null
+
+  return (
+    <section className="flex h-full min-h-0 flex-col rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-white/75">
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+          <LabelWithInfo label="持仓明细" tooltip={FIELD_TIPS.position_detail} />
+          <span className="text-[10px] font-normal text-white/30">
+            {positions.length} 只{scopeLabel(scope)}
+          </span>
+        </h3>
+        <div className="hidden text-[11px] text-white/30 sm:block">每一行都支持直接买入、卖出和调均价</div>
+      </div>
+      <div className="min-h-0 flex-1 xl:overflow-y-auto xl:pr-1 custom-scrollbar">
+        <PositionTable positions={positions} onNavigate={onNavigate} onAction={onAction} />
+      </div>
+    </section>
+  )
+}
+
 function TradeMetric({ label, value, valueClassName = 'text-white/90', footnote }) {
   return (
     <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
@@ -1304,15 +1326,70 @@ function AllocationPie({ allocationItems }) {
   )
 }
 
-function PortfolioChartsSection({ curve, allocationItems, curveRange, setCurveRange }) {
-  if ((!curve?.series || curve.series.length === 0) && (!allocationItems || allocationItems.length === 0)) {
+function PortfolioCoreDashboardSection({
+  positions,
+  scope,
+  onNavigate,
+  onPositionAction,
+  curve,
+  allocationItems,
+  curveRange,
+  setCurveRange,
+  showDashboardPanels,
+  pnlCalendar,
+  pnlCalendarLoading,
+  pnlCalendarError,
+  calendarScope,
+  availableCalendarScopes,
+  selectedCalendarDate,
+  calendarDisplayMetric,
+  onCalendarScopeChange,
+  onCalendarMonthChange,
+  onCalendarDateSelect,
+  onCalendarDisplayMetricChange,
+  onCalendarRetry,
+}) {
+  const hasPositions = Boolean(positions)
+  const hasAllocation = Boolean(allocationItems && allocationItems.length > 0)
+  const hasCurve = Boolean(curve?.series && curve.series.length > 0)
+  const hasCalendar = Boolean(showDashboardPanels)
+
+  if (!hasPositions && !hasAllocation && !hasCurve && !hasCalendar) {
     return null
   }
 
   return (
-    <section className="grid gap-4 xl:grid-cols-[1.45fr_1fr]">
-      <EquityCurveSection curve={curve} curveRange={curveRange} setCurveRange={setCurveRange} />
-      <AllocationPie allocationItems={allocationItems} />
+    <section className="space-y-4" aria-label="持仓核心看板区">
+      {(hasPositions || hasAllocation) ? (
+        <div className="grid items-stretch gap-4 xl:grid-cols-[1.45fr_1fr]">
+          {hasPositions ? (
+            <PositionDetailPanel positions={positions} scope={scope} onNavigate={onNavigate} onAction={onPositionAction} />
+          ) : null}
+          {hasAllocation ? <AllocationPie allocationItems={allocationItems} /> : null}
+        </div>
+      ) : null}
+
+      {(hasCurve || hasCalendar) ? (
+        <div className="grid items-stretch gap-4 xl:grid-cols-[1.45fr_1fr]">
+          {hasCurve ? <EquityCurveSection curve={curve} curveRange={curveRange} setCurveRange={setCurveRange} /> : null}
+          {hasCalendar ? (
+            <PortfolioPnlCalendar
+              data={pnlCalendar}
+              loading={pnlCalendarLoading}
+              error={pnlCalendarError}
+              scope={calendarScope}
+              availableScopes={availableCalendarScopes}
+              selectedDate={selectedCalendarDate}
+              displayMetric={calendarDisplayMetric}
+              onScopeChange={onCalendarScopeChange}
+              onMonthChange={onCalendarMonthChange}
+              onDateSelect={onCalendarDateSelect}
+              onDisplayMetricChange={onCalendarDisplayMetricChange}
+              onRetry={onCalendarRetry}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </section>
   )
 }
@@ -2179,47 +2256,29 @@ export default function PortfolioPage() {
 
         {data?.summary && <SummarySection summary={data.summary} />}
 
-        {pageViewState.hasDashboardData ? (
-          <PortfolioChartsSection
-            curve={data?.equity_curve_preview}
-            allocationItems={data?.allocation_preview}
-            curveRange={curveRange}
-            setCurveRange={setCurveRange}
-          />
-        ) : null}
-
-        {data?.positions && (
-          <section>
-            <div className="flex items-center justify-between mb-3 gap-3">
-              <h3 className="text-sm font-semibold text-white/75 flex items-center gap-2">
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
-                <LabelWithInfo label="持仓明细" tooltip={FIELD_TIPS.position_detail} />
-                <span className="text-[10px] font-normal text-white/30">
-                  {data.positions.length} 只{scopeLabel(scope)}
-                </span>
-              </h3>
-              <div className="text-[11px] text-white/30 hidden sm:block">每一行都支持直接买入、卖出和调均价</div>
-            </div>
-            <PositionTable positions={data.positions} onNavigate={handleNavigate} onAction={openTradeDrawer} />
-          </section>
-        )}
-
-        {pageViewState.hasDashboardData ? (
-          <PortfolioPnlCalendar
-            data={pnlCalendar}
-            loading={pnlCalendarLoading}
-            error={pnlCalendarError}
-            scope={calendarScope}
-            availableScopes={availableCalendarScopes}
-            selectedDate={selectedCalendarDate}
-            displayMetric={calendarDisplayMetric}
-            onScopeChange={handleCalendarScopeChange}
-            onMonthChange={handleCalendarMonthChange}
-            onDateSelect={setSelectedCalendarDate}
-            onDisplayMetricChange={setCalendarDisplayMetric}
-            onRetry={() => loadPnlCalendar()}
-          />
-        ) : null}
+        <PortfolioCoreDashboardSection
+          positions={data?.positions}
+          scope={scope}
+          onNavigate={handleNavigate}
+          onPositionAction={openTradeDrawer}
+          curve={data?.equity_curve_preview}
+          allocationItems={data?.allocation_preview}
+          curveRange={curveRange}
+          setCurveRange={setCurveRange}
+          showDashboardPanels={pageViewState.hasDashboardData}
+          pnlCalendar={pnlCalendar}
+          pnlCalendarLoading={pnlCalendarLoading}
+          pnlCalendarError={pnlCalendarError}
+          calendarScope={calendarScope}
+          availableCalendarScopes={availableCalendarScopes}
+          selectedCalendarDate={selectedCalendarDate}
+          calendarDisplayMetric={calendarDisplayMetric}
+          onCalendarScopeChange={handleCalendarScopeChange}
+          onCalendarMonthChange={handleCalendarMonthChange}
+          onCalendarDateSelect={setSelectedCalendarDate}
+          onCalendarDisplayMetricChange={setCalendarDisplayMetric}
+          onCalendarRetry={() => loadPnlCalendar()}
+        />
 
         <PortfolioAttributionSection
           loading={attributionLoading}

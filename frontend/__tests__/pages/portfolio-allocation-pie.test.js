@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 
 const pageSource = readFileSync(new URL('../../pages/portfolio.js', import.meta.url), 'utf8')
 const allocationPieStart = pageSource.indexOf('function AllocationPie')
-const allocationPieEnd = pageSource.indexOf('function PortfolioChartsSection')
+const allocationPieEnd = pageSource.indexOf('function PortfolioCoreDashboardSection')
 const allocationPieSource = allocationPieStart >= 0 && allocationPieEnd > allocationPieStart
   ? pageSource.slice(allocationPieStart, allocationPieEnd)
   : ''
@@ -29,8 +29,15 @@ describe('portfolio allocation pie chart', () => {
     assert.match(allocationPieSource, /exchangeTag\(item\.exchange\)/)
   })
 
-  it('uses AllocationPie in the portfolio charts section', () => {
-    assert.match(pageSource, /<AllocationPie allocationItems=\{allocationItems\} \/>/)
+  it('uses AllocationPie in the portfolio core dashboard section', () => {
+    const coreDashboardStart = pageSource.indexOf('function PortfolioCoreDashboardSection')
+    const coreDashboardEnd = pageSource.indexOf('// ── 风险仪表盘 ──')
+    const coreDashboardSource = coreDashboardStart >= 0 && coreDashboardEnd > coreDashboardStart
+      ? pageSource.slice(coreDashboardStart, coreDashboardEnd)
+      : ''
+    assert.ok(coreDashboardSource, 'PortfolioCoreDashboardSection component not found')
+    assert.match(coreDashboardSource, /<AllocationPie allocationItems=\{allocationItems\} \/>/)
+    assert.doesNotMatch(pageSource, /function PortfolioChartsSection/)
     assert.doesNotMatch(pageSource, /<AllocationBar allocationItems=\{allocationItems\} \/>/)
   })
 })

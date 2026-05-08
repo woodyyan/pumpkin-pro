@@ -101,11 +101,13 @@ func (r *Repository) Search(ctx context.Context, query string, limit int) ([]Sea
 	if query == "" || limit <= 0 {
 		return []SearchResult{}, nil
 	}
-	pattern := "%" + query + "%"
+	normalizedQuery := normalizeQuadrantStockName(query)
+	pattern := "%" + strings.TrimSpace(query) + "%"
+	normalizedPattern := "%" + normalizedQuery + "%"
 	var records []QuadrantScoreRecord
 	err := r.db.WithContext(ctx).
 		Select("code, name, exchange").
-		Where("name LIKE ? OR code LIKE ?", pattern, pattern).
+		Where("name LIKE ? OR REPLACE(name, ' ', '') LIKE ? OR code LIKE ?", pattern, normalizedPattern, pattern).
 		Order("LENGTH(code) ASC").
 		Limit(limit).
 		Find(&records).Error

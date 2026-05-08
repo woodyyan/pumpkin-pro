@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ func (s *Service) SetPriceResolver(r PriceResolver) {
 }
 
 var rankingSnapshotLocation = time.FixedZone("CST", 8*60*60)
+var chineseNameWhitespaceRE = regexp.MustCompile(`([\p{Han}\p{Lo}Ａ-Ｚａ-ｚ０-９])\s+([\p{Han}\p{Lo}Ａ-Ｚａ-ｚ０-９])`)
 
 const (
 	recentSnapshotRepairLookbackDays = 14
@@ -143,7 +145,7 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 			}
 		}
 		records = append(records, QuadrantScoreRecord{
-			Code: code, Name: strings.TrimSpace(item.Name), Exchange: itemExchange,
+			Code: code, Name: normalizeQuadrantStockName(item.Name), Exchange: itemExchange,
 			Opportunity: item.Opportunity, Risk: item.Risk, Quadrant: strings.TrimSpace(item.Quadrant),
 			Trend: item.Trend, Flow: item.Flow, Revision: item.Revision,
 			Liquidity: item.Liquidity, Volatility: item.Volatility,
@@ -768,6 +770,20 @@ func (s *Service) Search(ctx context.Context, q string, limit int) ([]SearchResu
 		return []SearchResult{}, nil
 	}
 	return s.repo.Search(ctx, q, limit)
+}
+
+func normalizeQuadrantStockName(name string) string {
+	normalized := strings.TrimSpace(name)
+	if normalized == "" {
+		return ""
+	}
+	for {
+		updated := chineseNameWhitespaceRE.ReplaceAllString(normalized, `${1}${2}`)
+		if updated == normalized {
+			return updated
+		}
+		normalized = updated
+	}
 }
 
 // ── Admin Overview ──

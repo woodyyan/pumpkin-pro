@@ -14,11 +14,11 @@ import (
 )
 
 const (
-	defaultWorkerHour     = 2  // 凌晨 2 点触发
+	defaultWorkerHour     = 2 // 凌晨 2 点触发
 	defaultWorkerMinute   = 0
 	workerMaxAttempts     = 3
 	workerCallbackTimeout = 30 * time.Minute // Quant 计算超时
-	workerHTTPTimeout     = 10 * time.Second  // 触发 HTTP 请求超时
+	workerHTTPTimeout     = 10 * time.Second // 触发 HTTP 请求超时
 )
 
 var workerBackoffs = []time.Duration{5 * time.Minute, 10 * time.Minute}
@@ -53,9 +53,9 @@ func NewWorker(service *Service, cfg WorkerConfig, notifier webhookNotifier) *Wo
 	callbackURL := strings.TrimRight(cfg.BackendBaseURL, "/") + "/api/quadrant/bulk-save"
 
 	return &Worker{
-		service:     service,
-		quantURL:    quantURL,
-		callbackURL: callbackURL,
+		service:       service,
+		quantURL:      quantURL,
+		callbackURL:   callbackURL,
 		signalService: notifier,
 	}
 }
@@ -126,8 +126,8 @@ func (w *Worker) runWithRetry(ctx context.Context) {
 				err = waitErr
 			}
 		} else {
-		log.Printf("[quadrant-worker] ⚠️ A-share trigger failed on attempt %d: %v", attempt, err)
-	}
+			log.Printf("[quadrant-worker] ⚠️ A-share trigger failed on attempt %d: %v", attempt, err)
+		}
 
 		w.mu.Lock()
 		w.lastError = err.Error()
@@ -191,7 +191,7 @@ func (w *Worker) triggerCompute(ctx context.Context) error {
 		Status:    "running",
 		Current:   0,
 		Total:     5000, // estimated A-share total
-		TaskLogID:  fmt.Sprintf("qcl-%d", now.UnixMilli()),
+		TaskLogID: fmt.Sprintf("qcl-%d", now.UnixMilli()),
 		UpdatedAt: now,
 	})
 	// NOTE: We do NOT write a "running" task log here. BulkSave() is responsible
@@ -233,7 +233,7 @@ func (w *Worker) triggerHKCompute(ctx context.Context) {
 		Status:    "running",
 		Current:   0,
 		Total:     2600, // estimated HK total
-		TaskLogID:  fmt.Sprintf("qcl-%d", now.UnixMilli()),
+		TaskLogID: fmt.Sprintf("qcl-%d", now.UnixMilli()),
 		UpdatedAt: now,
 	})
 	// NOTE: No "running" task log here — BulkSave() handles the final terminal log.
@@ -291,9 +291,9 @@ func (w *Worker) waitForCompletion(ctx context.Context) error {
 				return nil
 			}
 			if time.Now().After(deadline) {
-			SetProgressTerminal("ASHARE", "timeout", "回调超时（30min），数据可能已在后台完成")
-			return fmt.Errorf("callback timeout after %s", workerCallbackTimeout)
-		}
+				SetProgressTerminal("ASHARE", "timeout", "回调超时（30min），数据可能已在后台完成")
+				return fmt.Errorf("callback timeout after %s", workerCallbackTimeout)
+			}
 		}
 	}
 }

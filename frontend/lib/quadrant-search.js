@@ -32,7 +32,7 @@ export function updateQuadrantSearchEntry(state, market, patch = {}) {
 }
 
 export function normalizeQuadrantSearchQuery(query) {
-  return String(query || '').trim()
+  return normalizeQuadrantSearchName(String(query || '').trim())
 }
 
 export function normalizeQuadrantStockCode(code, market) {
@@ -83,7 +83,7 @@ export function searchQuadrantStocks(stocks, query, market, limit = QUADRANT_SEA
 
 function getQuadrantMatchRank(stock, queryLower, normalizedQueryCode, compactQueryCode, market) {
   const name = String(stock?.n || '').trim()
-  const nameLower = name.toLowerCase()
+  const nameLower = normalizeQuadrantSearchName(name).toLowerCase()
   const normalizedCode = normalizeQuadrantStockCode(stock?.c, market)
   const compactCode = trimLeadingZeros(normalizedCode)
 
@@ -133,4 +133,15 @@ function trimLeadingZeros(code) {
   const text = String(code || '')
   const trimmed = text.replace(/^0+/, '')
   return trimmed || '0'
+}
+
+function normalizeQuadrantSearchName(text) {
+  let normalized = String(text || '').trim()
+  if (!normalized) return ''
+  const chineseGap = /([\u3400-\u9fff\uf900-\ufaff\uff21-\uff3a\uff41-\uff5a\uff10-\uff19])\s+([\u3400-\u9fff\uf900-\ufaff\uff21-\uff3a\uff41-\uff5a\uff10-\uff19])/g
+  while (chineseGap.exec(normalized)) {
+    normalized = normalized.replace(chineseGap, '$1$2')
+    chineseGap.lastIndex = 0
+  }
+  return normalized
 }

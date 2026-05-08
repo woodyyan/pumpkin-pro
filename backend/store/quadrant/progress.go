@@ -21,7 +21,7 @@ type ComputeProgress struct {
 
 // progressState holds all in-memory progress data, keyed by exchange.
 var (
-	progressMu   sync.RWMutex
+	progressMu  sync.RWMutex
 	progressMap map[string]*ComputeProgress // key: "ASHARE" or "HKEX"
 )
 
@@ -80,9 +80,9 @@ func SetProgressTerminal(exchange, status, errorMsg string) {
 	} else {
 		// No prior state (e.g., trigger failed before any progress)
 		progressMap[exchange] = &ComputeProgress{
-			Exchange: exchange,
-			Status:   status,
-			ErrorMsg: errorMsg,
+			Exchange:  exchange,
+			Status:    status,
+			ErrorMsg:  errorMsg,
 			UpdatedAt: time.Now(),
 		}
 	}

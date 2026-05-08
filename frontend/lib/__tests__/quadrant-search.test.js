@@ -18,6 +18,8 @@ const A_STOCKS = [
   { c: '600516', n: '贵州燃气', o: 71.5, r: 36.2, q: '中性' },
   { c: '000001', n: '平安银行', o: 68.2, r: 32.5, q: '机会' },
   { c: '300750', n: '宁德时代', o: 88.1, r: 41.7, q: '拥挤' },
+  { c: '000858', n: '五 粮 液', o: 90.6, r: 22.1, q: '机会' },
+  { c: '000002', n: '万  科Ａ', o: 77.3, r: 35.4, q: '机会' },
 ]
 
 const HK_STOCKS = [
@@ -62,6 +64,16 @@ describe('quadrant search helpers', () => {
     const results = searchQuadrantStocks(HK_STOCKS, '腾讯', 'HKEX')
     assert.equal(results.length, 1)
     assert.equal(results[0].c, '00700')
+  })
+
+  it('matches Chinese names even when stored names contain spaces', () => {
+    const results = searchQuadrantStocks(A_STOCKS, '五粮液', 'ASHARE')
+    assert.equal(results[0].c, '000858')
+  })
+
+  it('matches full-width A-share names after removing Chinese spacing', () => {
+    const results = searchQuadrantStocks(A_STOCKS, '万科Ａ', 'ASHARE')
+    assert.equal(results[0].c, '000002')
   })
 
   it('returns empty results for short queries', () => {

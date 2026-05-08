@@ -24,7 +24,8 @@ func setupSearchDB(t *testing.T) (*Repository, context.Context) {
 		{Code: "600519", Name: "贵州茅台", Exchange: "SSE", Opportunity: 0.8, Risk: 0.3, Quadrant: "机会", ComputedAt: now},
 		{Code: "600516", Name: "贵州茅台酒厂(集团)技术公司债", Exchange: "SSE", Opportunity: 0.5, Risk: 0.6, Quadrant: "中性", ComputedAt: now},
 		{Code: "000001", Name: "平安银行", Exchange: "SZSE", Opportunity: 0.6, Risk: 0.4, Quadrant: "机会", ComputedAt: now},
-		{Code: "000002", Name: "万科A", Exchange: "SZSE", Opportunity: 0.4, Risk: 0.7, Quadrant: "防御", ComputedAt: now},
+		{Code: "000002", Name: "万  科Ａ", Exchange: "SZSE", Opportunity: 0.4, Risk: 0.7, Quadrant: "防御", ComputedAt: now},
+		{Code: "000858", Name: "五 粮 液", Exchange: "SZSE", Opportunity: 0.82, Risk: 0.28, Quadrant: "机会", ComputedAt: now},
 		{Code: "601318", Name: "中国平安", Exchange: "SSE", Opportunity: 0.7, Risk: 0.35, Quadrant: "机会", ComputedAt: now},
 		{Code: "600036", Name: "招商银行", Exchange: "SSE", Opportunity: 0.65, Risk: 0.38, Quadrant: "机会", ComputedAt: now},
 		{Code: "00700", Name: "腾讯控股", Exchange: "HKEX", Opportunity: 0.75, Risk: 0.25, Quadrant: "机会", ComputedAt: now},
@@ -73,6 +74,37 @@ func TestSearch_ExactNameMatch(t *testing.T) {
 	}
 }
 
+func TestSearch_NormalizedChineseNameMatch(t *testing.T) {
+	repo, ctx := setupSearchDB(t)
+	results, err := repo.Search(ctx, "五粮液", 10)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result")
+	}
+	if results[0].Code != "000858" {
+		t.Fatalf("expected code 000858, got %s", results[0].Code)
+	}
+	if results[0].Name != "五 粮 液" {
+		t.Fatalf("expected stored display name 五 粮 液, got %s", results[0].Name)
+	}
+}
+
+func TestSearch_NormalizedFullWidthNameMatch(t *testing.T) {
+	repo, ctx := setupSearchDB(t)
+	results, err := repo.Search(ctx, "万科Ａ", 10)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result")
+	}
+	if results[0].Code != "000002" {
+		t.Fatalf("expected code 000002, got %s", results[0].Code)
+	}
+}
+
 func TestSearch_PrefixFuzzyMatch(t *testing.T) {
 	repo, ctx := setupSearchDB(t)
 	results, err := repo.Search(ctx, "贵", 10)
@@ -98,11 +130,19 @@ func TestSearch_CodePrefix(t *testing.T) {
 	found519 := false
 	found516 := false
 	for _, r := range results {
-		if r.Code == "600519" { found519 = true }
-		if r.Code == "600516" { found516 = true }
+		if r.Code == "600519" {
+			found519 = true
+		}
+		if r.Code == "600516" {
+			found516 = true
+		}
 	}
-	if !found519 { t.Error("expected 600519 in results") }
-	if !found516 { t.Error("expected 600516 in results") }
+	if !found519 {
+		t.Error("expected 600519 in results")
+	}
+	if !found516 {
+		t.Error("expected 600516 in results")
+	}
 }
 
 func TestSearch_EmptyQuery_ReturnsEmpty(t *testing.T) {
@@ -176,9 +216,9 @@ func TestFindByExchange_AShareOnly(t *testing.T) {
 			t.Errorf("unexpected exchange in A-share filter: %s", r.Exchange)
 		}
 	}
-	// Should have 6 A-share records (excluding 2 HK stocks)
-	if len(records) != 6 {
-		t.Errorf("expected 6 A-share records, got %d", len(records))
+	// Should have 7 A-share records (excluding 2 HK stocks)
+	if len(records) != 7 {
+		t.Errorf("expected 7 A-share records, got %d", len(records))
 	}
 }
 
@@ -204,7 +244,7 @@ func TestFindByExchange_EmptyList_ReturnsAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindByExchange failed: %v", err)
 	}
-	if len(records) != 8 {
-		t.Errorf("expected all 8 records, got %d", len(records))
+	if len(records) != 9 {
+		t.Errorf("expected all 9 records, got %d", len(records))
 	}
 }

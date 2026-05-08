@@ -226,6 +226,44 @@ func TestQuadrantService_BulkSave(t *testing.T) {
 	}
 }
 
+func TestQuadrantService_BulkSave_NormalizesChineseNameWhitespace(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	s := NewService(repo)
+
+	input := BulkSaveInput{
+		Items: []BulkSaveItem{
+			{Code: "000858", Name: "五 粮 液", Exchange: "SZSE", Opportunity: 0.8, Risk: 0.2, Quadrant: "机会"},
+			{Code: "000002", Name: "万  科Ａ", Exchange: "SZSE", Opportunity: 0.6, Risk: 0.4, Quadrant: "机会"},
+			{Code: "000025", Name: "CHEVALIER INT'L", Exchange: "HKEX", Opportunity: 0.5, Risk: 0.5, Quadrant: "中性"},
+		},
+		ComputedAt: "2026-05-08T08:00:00Z",
+	}
+
+	_, err := s.BulkSave(context.Background(), input)
+	if err != nil {
+		t.Fatalf("BulkSave failed: %v", err)
+	}
+
+	records, err := repo.FindBySymbols(context.Background(), []string{"000858", "000002", "000025"})
+	if err != nil {
+		t.Fatalf("FindBySymbols failed: %v", err)
+	}
+	byCode := map[string]QuadrantScoreRecord{}
+	for _, record := range records {
+		byCode[record.Code] = record
+	}
+	if byCode["000858"].Name != "五粮液" {
+		t.Fatalf("expected 五粮液, got %q", byCode["000858"].Name)
+	}
+	if byCode["000002"].Name != "万科Ａ" {
+		t.Fatalf("expected 万科Ａ, got %q", byCode["000002"].Name)
+	}
+	if byCode["000025"].Name != "CHEVALIER INT'L" {
+		t.Fatalf("expected English spacing preserved, got %q", byCode["000025"].Name)
+	}
+}
+
 func TestQuadrantService_BulkSave_EmptyItems(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()

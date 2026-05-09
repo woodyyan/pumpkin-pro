@@ -17,6 +17,17 @@ type Config struct {
 	AdminSeed          AdminSeedConfig
 	AI                 AIConfig
 	Backup             BackupConfig
+	FactorLab          FactorLabConfig
+}
+
+type FactorLabConfig struct {
+	DailyComputeEnabled bool
+	ComputeHour         int
+	ComputeMinute       int
+	PythonBin           string
+	Phase1ScriptPath    string
+	ProgressInterval    int
+	TimeoutMinutes      int
 }
 
 // BackupConfig holds database backup settings.
@@ -107,6 +118,15 @@ func Load() Config {
 			COSSecretID:     getEnv("COS_SECRET_ID", ""),
 			COSSecretKey:    getEnv("COS_SECRET_KEY", ""),
 		},
+		FactorLab: FactorLabConfig{
+			DailyComputeEnabled: getEnvAsBool("FACTOR_LAB_DAILY_COMPUTE_ENABLED", true),
+			ComputeHour:         getEnvAsInt("FACTOR_LAB_COMPUTE_HOUR", 20),
+			ComputeMinute:       getEnvAsInt("FACTOR_LAB_COMPUTE_MINUTE", 30),
+			PythonBin:           getEnv("FACTOR_LAB_PYTHON_BIN", "python3"),
+			Phase1ScriptPath:    getEnv("FACTOR_LAB_PHASE1_SCRIPT", "quant/scripts/compute_factor_lab_phase1.py"),
+			ProgressInterval:    getEnvAsInt("FACTOR_LAB_PROGRESS_INTERVAL", 500),
+			TimeoutMinutes:      getEnvAsInt("FACTOR_LAB_TIMEOUT_MINUTES", 60),
+		},
 	}
 }
 
@@ -128,6 +148,21 @@ func getEnvAsInt(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return parsed
+}
+
+func getEnvAsBool(key string, defaultValue bool) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if value == "" {
+		return defaultValue
+	}
+	switch value {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return defaultValue
+	}
 }
 
 func trimTrailingSlash(raw string) string {

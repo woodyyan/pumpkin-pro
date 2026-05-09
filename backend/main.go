@@ -22,10 +22,10 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backup"
 	"github.com/woodyyan/pumpkin-pro/backend/store/companyprofile"
+	"github.com/woodyyan/pumpkin-pro/backend/store/factorlab"
+	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
 	"github.com/woodyyan/pumpkin-pro/backend/store/fundcache"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
-
-	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 	"github.com/woodyyan/pumpkin-pro/backend/store/screener"
@@ -3358,6 +3358,18 @@ func main() {
 	})
 	backupWorker := backup.NewWorker(backupService)
 	backupWorker.Start(context.Background())
+
+	factorLabWorker := factorlab.NewWorker(factorlab.WorkerConfig{
+		Enabled:          cfg.FactorLab.DailyComputeEnabled,
+		DBPath:           cfg.DB.Path,
+		PythonBin:        cfg.FactorLab.PythonBin,
+		Phase1ScriptPath: cfg.FactorLab.Phase1ScriptPath,
+		Hour:             cfg.FactorLab.ComputeHour,
+		Minute:           cfg.FactorLab.ComputeMinute,
+		Timeout:          time.Duration(cfg.FactorLab.TimeoutMinutes) * time.Minute,
+		ProgressInterval: cfg.FactorLab.ProgressInterval,
+	})
+	factorLabWorker.Start(context.Background())
 
 	signalEvaluator := signal.NewEvaluator(signalService, liveService, strategyService, signal.EvaluatorConfig{
 		QuantServiceURL: cfg.QuantServiceURL,

@@ -342,7 +342,10 @@ def beta_against_index(stock_returns: list[tuple[str, float]], index_returns: di
     stock_mean = sum(stock_values) / len(stock_values)
     index_mean = sum(index_values) / len(index_values)
     variance = sum((item - index_mean) ** 2 for item in index_values)
-    if variance == 0:
+    # A constant or nearly constant benchmark makes beta undefined. Use a
+    # tolerance instead of exact equality so tiny floating-point residue cannot
+    # turn an undefined beta into an unstable huge value.
+    if variance <= 1e-12:
         return None, len(pairs)
     covariance = sum((stock_values[i] - stock_mean) * (index_values[i] - index_mean) for i in range(len(pairs)))
     return covariance / variance, len(pairs)

@@ -27,13 +27,15 @@ def make_bars(count=260, start_close=10.0):
     return bars
 
 
-def test_beta_against_index_with_sufficient_samples():
-    stock_returns = [(f"d{i}", 0.02) for i in range(200)]
-    index_returns = {f"d{i}": 0.01 for i in range(200)}
+def test_beta_against_index_returns_none_when_benchmark_variance_is_zero():
+    stock_returns = [(f"d{i}", i / 10000) for i in range(200)]
+    index_returns = {f"d{i}": 0.0 for i in range(200)}
     beta, samples = module.beta_against_index(stock_returns, index_returns, min_samples=10)
     assert samples == 200
-    assert beta is None  # index variance is zero
+    assert beta is None
 
+
+def test_beta_against_index_with_sufficient_samples():
     stock_returns = [(f"d{i}", i / 10000) for i in range(200)]
     index_returns = {f"d{i}": i / 20000 for i in range(200)}
     beta, samples = module.beta_against_index(stock_returns, index_returns, min_samples=10)

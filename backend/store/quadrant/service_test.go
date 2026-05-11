@@ -15,6 +15,12 @@ func setupQuadrantTest(t *testing.T) (*Repository, func()) {
 		&QuadrantScoreRecord{},
 		&ComputeLogRecord{},
 		&RankingSnapshot{},
+		&RankingPortfolioDefinition{},
+		&RankingPortfolioSnapshot{},
+		&RankingPortfolioSnapshotConstituent{},
+		&RankingPortfolioMarketPrice{},
+		&RankingPortfolioBenchmarkPrice{},
+		&RankingPortfolioResult{},
 	)
 	return NewRepository(db), func() {}
 }

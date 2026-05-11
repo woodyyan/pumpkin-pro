@@ -17,6 +17,7 @@ import {
 
 const QuadrantChart = dynamic(() => import('../components/QuadrantChart'), { ssr: false })
 const RankingPanel = dynamic(() => import('../components/RankingPanel'), { ssr: false })
+const RankingPortfolioPanel = dynamic(() => import('../components/RankingPortfolioPanel'), { ssr: false })
 
 const POLL_MS = 5000
 const MARKET_OVERVIEW_POLL_MS = 5000
@@ -40,6 +41,8 @@ export default function LiveTradingOverviewPage() {
   const [rankingData, setRankingData] = useState(null)
   const [rankingLoading, setRankingLoading] = useState(false)
   const [rankingExchange, setRankingExchange] = useState('ASHARE') // independent tab state for ranking
+  const [rankingPortfolioData, setRankingPortfolioData] = useState(null)
+  const [rankingPortfolioLoading, setRankingPortfolioLoading] = useState(false)
   const [quadrantSearchState, setQuadrantSearchState] = useState(() => createQuadrantSearchState())
 
   const privateAccessReady = ready && isLoggedIn
@@ -157,6 +160,18 @@ export default function LiveTradingOverviewPage() {
     }
   }
 
+  const loadRankingPortfolio = async () => {
+    try {
+      setRankingPortfolioLoading(true)
+      const data = await requestJson('/api/quadrant/ranking-portfolio')
+      setRankingPortfolioData(data)
+    } catch {
+      // Ranking portfolio loading is non-critical
+    } finally {
+      setRankingPortfolioLoading(false)
+    }
+  }
+
   const handleRankingExchangeChange = (newExchange) => {
     if (newExchange === rankingExchange) return
     setRankingExchange(newExchange)
@@ -204,6 +219,7 @@ export default function LiveTradingOverviewPage() {
     if (!ready) return
     loadPublicData()
     loadRanking(rankingExchange)
+    loadRankingPortfolio()
     if (privateAccessReady) {
       loadPrivateData({ bootstrap: true })
     } else {
@@ -217,6 +233,7 @@ export default function LiveTradingOverviewPage() {
     if (!ready) return
     const timer = setInterval(() => {
       loadPublicData()
+      loadRankingPortfolio()
       if (privateAccessReady) {
         loadPrivateData()
       }
@@ -512,6 +529,8 @@ export default function LiveTradingOverviewPage() {
       </section>
 
       {/* AI Ranking (卧龙AI精选) */}
+      <RankingPortfolioPanel data={rankingPortfolioData} loading={rankingPortfolioLoading} />
+
       <RankingPanel
         items={rankingData?.items}
         meta={rankingData?.meta}

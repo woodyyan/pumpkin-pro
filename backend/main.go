@@ -83,6 +83,30 @@ func newQuadrantPriceResolver(liveRepo *live.Repository) quadrant.PriceResolver 
 	}
 }
 
+func newQuadrantBenchmarkPriceResolver(marketClient *live.MarketClient) quadrant.BenchmarkPriceResolver {
+	return func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
+		if marketClient == nil || strings.TrimSpace(tradeDate) == "" {
+			return 0, ""
+		}
+		bars, err := marketClient.FetchBenchmarkDailyBars(ctx, benchmark, 10)
+		if err != nil || len(bars) == 0 {
+			return 0, ""
+		}
+		candidateDates := quadrantSnapshotTradeDates(tradeDate, "SSE")
+		for _, candidateDate := range candidateDates {
+			for i := len(bars) - 1; i >= 0; i-- {
+				if strings.TrimSpace(bars[i].Date) != candidateDate {
+					continue
+				}
+				if bars[i].Close > 0 {
+					return bars[i].Close, candidateDate
+				}
+			}
+		}
+		return 0, ""
+	}
+}
+
 func quadrantSnapshotTradeDates(tradeDate string, exchange string) []string {
 	tradeDate = strings.TrimSpace(tradeDate)
 	if tradeDate == "" {
@@ -3084,6 +3108,20 @@ func (a *appServer) handleQuadrantRanking(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (a *appServer) handleQuadrantRankingPortfolio(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+
+	resp, err := a.quadrantService.GetRankingPortfolio(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // ── Stock Search handler ──
 
 func (a *appServer) handleSearchStocks(w http.ResponseWriter, r *http.Request) {
@@ -3309,6 +3347,7 @@ func main() {
 
 	liveRepo := live.NewRepository(storeInstance.DB)
 	liveService := live.NewService(liveRepo)
+	liveMarketClient := live.NewMarketClient()
 
 	signalRepo := signal.NewRepository(storeInstance.DB)
 	signalService := signal.NewService(signalRepo, signal.ServiceConfig{
@@ -3334,6 +3373,7 @@ func main() {
 	quadrantRepo := quadrant.NewRepository(storeInstance.DB)
 	quadrantService := quadrant.NewService(quadrantRepo)
 	quadrantService.SetPriceResolver(newQuadrantPriceResolver(liveRepo))
+	quadrantService.SetBenchmarkPriceResolver(newQuadrantBenchmarkPriceResolver(liveMarketClient))
 	quadrantWorker := quadrant.NewWorker(quadrantService, quadrant.WorkerConfig{
 		QuantServiceURL: cfg.QuantServiceURL,
 		BackendBaseURL:  cfg.BackendCallbackURL,
@@ -3491,6 +3531,7 @@ func main() {
 	mux.HandleFunc("/api/quadrant/bulk-save", server.handleQuadrantBulkSave)
 	mux.HandleFunc("/api/quadrant/status", server.handleQuadrantStatus)
 	mux.HandleFunc("/api/quadrant/ranking", server.handleQuadrantRanking)
+	mux.HandleFunc("/api/quadrant/ranking-portfolio", server.handleQuadrantRankingPortfolio)
 
 	mux.HandleFunc("/api/search", server.withOptionalAuth(server.handleSearchStocks))
 

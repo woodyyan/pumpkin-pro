@@ -10,5 +10,15 @@ func NewMigrator() Migrator { return Migrator{} }
 func (Migrator) Name() string { return "quadrant" }
 
 func (Migrator) AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(&QuadrantScoreRecord{}, &ComputeLogRecord{}, &RankingSnapshot{})
+	return db.AutoMigrate(
+		&QuadrantScoreRecord{},
+		&ComputeLogRecord{},
+		&RankingSnapshot{},
+		&RankingPortfolioDefinition{},
+		&RankingPortfolioSnapshot{},
+		&RankingPortfolioSnapshotConstituent{},
+		&RankingPortfolioMarketPrice{},
+		&RankingPortfolioBenchmarkPrice{},
+		&RankingPortfolioResult{},
+	)
 }

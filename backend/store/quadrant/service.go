@@ -16,11 +16,16 @@ import (
 // Implemented by the live-store module; returns 0 if unavailable.
 type PriceResolver func(ctx context.Context, code string, exchange string, tradeDate string) float64
 
+// BenchmarkPriceResolver resolves the benchmark closing price for the given trade date.
+// Returns close price and the actual trade date used.
+type BenchmarkPriceResolver func(ctx context.Context, benchmark string, tradeDate string) (float64, string)
+
 // Service provides business logic for quadrant scores.
 type Service struct {
-	repo          *Repository
-	priceResolver PriceResolver // optional, for snapshot close_price
-	worker        *Worker       // optional, injected for manual trigger
+	repo                   *Repository
+	priceResolver          PriceResolver          // optional, for snapshot close_price
+	benchmarkPriceResolver BenchmarkPriceResolver // optional, for ranking portfolio benchmark close
+	worker                 *Worker                // optional, injected for manual trigger
 }
 
 func NewService(repo *Repository) *Service {
@@ -30,6 +35,11 @@ func NewService(repo *Repository) *Service {
 // SetPriceResolver injects the price resolution callback (called during init).
 func (s *Service) SetPriceResolver(r PriceResolver) {
 	s.priceResolver = r
+}
+
+// SetBenchmarkPriceResolver injects the benchmark price resolution callback.
+func (s *Service) SetBenchmarkPriceResolver(r BenchmarkPriceResolver) {
+	s.benchmarkPriceResolver = r
 }
 
 var rankingSnapshotLocation = time.FixedZone("CST", 8*60*60)
@@ -249,6 +259,7 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 
 	// Save ranking snapshots (best-effort; failure does not affect BulkSave result)
 	s.saveRankingSnapshotsBestEffortWithHints(ctx, records, computedAt, priceHints)
+	s.saveRankingPortfolioBestEffort(ctx, records, computedAt, priceHints)
 
 	return totalCount, nil
 }

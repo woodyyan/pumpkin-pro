@@ -13,6 +13,12 @@ import {
   resolveBackupTriggerButton,
   shouldPollBackupStatus,
 } from '../lib/backup-ui'
+import {
+  adminFetch,
+  clearAdminResourceCache,
+  handleAdminActionError,
+  useAdminResource,
+} from '../lib/admin-data'
 
 // ── Simple Doughnut Chart (SVG) ──
 
@@ -76,27 +82,6 @@ function CategoryLegend({ data }) {
 }
 
 const REFRESH_INTERVAL = 60_000
-
-async function adminFetch(path, init = {}) {
-  const headers = new Headers(init?.headers || {})
-  headers.set('Accept', 'application/json')
-
-  const res = await fetch(path, { ...init, headers, credentials: 'same-origin' })
-  const text = await res.text()
-  let data = null
-  try {
-    data = JSON.parse(text)
-  } catch {
-    data = text
-  }
-
-  if (!res.ok) {
-    const err = new Error(data?.detail || '请求失败')
-    err.status = res.status
-    throw err
-  }
-  return data
-}
 
 // ── Login Form ──
 
@@ -295,9 +280,7 @@ function AIConfigMetric({ label, value, sub }) {
 }
 
 function AIProviderConfigPanel({ onUnauthorized }) {
-  const [view, setView] = useState(null)
   const [draft, setDraft] = useState(() => createAIConfigDraft(null))
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [banner, setBanner] = useState(null)
@@ -308,32 +291,29 @@ function AIProviderConfigPanel({ onUnauthorized }) {
     onUnauthorized?.()
   }, [onUnauthorized])
 
-  const loadConfig = useCallback(async ({ resetDraft = false } = {}) => {
-    try {
-      const data = await adminFetch('/api/admin/ai-config')
-      setView(data)
-      if (resetDraft || !initializedRef.current) {
-        setDraft(createAIConfigDraft(data))
-        initializedRef.current = true
-      }
-      if (resetDraft) {
-        setBanner(null)
-        setTestResult(null)
-      }
-    } catch (err) {
-      if (err.status === 401) {
-        handleUnauthorized()
-        return
-      }
-      setBanner({ tone: 'error', text: err.message || '加载 AI 配置失败' })
-    } finally {
-      setLoading(false)
-    }
-  }, [handleUnauthorized])
+  const aiConfigResource = useAdminResource({
+    key: 'admin:ai-config',
+    request: () => adminFetch('/api/admin/ai-config'),
+    staleMs: 30_000,
+    minIntervalMs: 3_000,
+    onUnauthorized: handleUnauthorized,
+    errorMessage: '加载 AI 配置失败',
+  })
+  const view = aiConfigResource.data
 
   useEffect(() => {
-    loadConfig({ resetDraft: true })
-  }, [loadConfig])
+    if (!view) return
+    if (!initializedRef.current) {
+      setDraft(createAIConfigDraft(view))
+      initializedRef.current = true
+    }
+  }, [view])
+
+  useEffect(() => {
+    if (aiConfigResource.error) {
+      setBanner({ tone: 'error', text: aiConfigResource.error })
+    }
+  }, [aiConfigResource.error])
 
   const health = testResult || view?.health
   const healthMeta = getAIConfigStatusMeta(health?.status)
@@ -363,16 +343,16 @@ function AIProviderConfigPanel({ onUnauthorized }) {
           is_enabled: draft.is_enabled,
         }),
       })
-      setView(data)
+      aiConfigResource.mutate(data)
       setDraft(createAIConfigDraft(data))
       setTestResult(null)
       setBanner({ tone: 'success', text: 'AI 配置已保存' })
     } catch (err) {
-      if (err.status === 401) {
-        handleUnauthorized()
+      const message = handleAdminActionError(err, handleUnauthorized, '保存 AI 配置失败')
+      if (!message) {
         return
       }
-      setBanner({ tone: 'error', text: err.message || '保存 AI 配置失败' })
+      setBanner({ tone: 'error', text: message })
     } finally {
       setSaving(false)
     }
@@ -408,17 +388,17 @@ function AIProviderConfigPanel({ onUnauthorized }) {
         text: result?.message || '测试完成',
       })
     } catch (err) {
-      if (err.status === 401) {
-        handleUnauthorized()
+      const message = handleAdminActionError(err, handleUnauthorized, '测试连接失败')
+      if (!message) {
         return
       }
-      setBanner({ tone: 'error', text: err.message || '测试连接失败' })
+      setBanner({ tone: 'error', text: message })
     } finally {
       setTesting(false)
     }
   }
 
-  if (loading && !view) {
+  if (aiConfigResource.loading && !view) {
     return (
       <section className="rounded-2xl border border-white/8 bg-[#111318] p-5">
         <div className="text-sm text-white/40">加载 AI 配置中…</div>
@@ -528,6 +508,7 @@ function AIProviderConfigPanel({ onUnauthorized }) {
         <button
           type="button"
           onClick={restoreSaved}
+          disabled={!view}
           className="rounded-2xl border border-white/12 bg-white/[0.04] px-4 py-3 text-sm font-medium text-white/72 transition hover:bg-white/[0.08]"
         >
           恢复已保存值
@@ -548,46 +529,37 @@ function AIProviderConfigPanel({ onUnauthorized }) {
 // ── Dashboard ──
 
 function AdminDashboard({ session, onLogout }) {
-  const [stats, setStats] = useState(null)
-  const [analytics, setAnalytics] = useState(null)
-  const [aiUsage, setAiUsage] = useState(null)
-  const [deviceAnalytics, setDeviceAnalytics] = useState(null)
   const [deviceDays, setDeviceDays] = useState(30)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [lastRefresh, setLastRefresh] = useState(null)
-  const timerRef = useRef(null)
-
-  const loadAll = useCallback(async () => {
-    try {
-      setError('')
+  const dashboardResource = useAdminResource({
+    key: `admin:dashboard:${deviceDays}`,
+    request: async () => {
       const [statsData, analyticsData, aiUsageData, deviceData] = await Promise.all([
         adminFetch('/api/admin/stats'),
         adminFetch('/api/admin/analytics').catch(() => null),
         adminFetch('/api/admin/ai-usage?days=30&limit=120').catch(() => null),
         adminFetch(`/api/admin/device-analytics?days=${deviceDays}`).catch(() => null),
       ])
-      setStats(statsData)
-      setAnalytics(analyticsData)
-      setAiUsage(aiUsageData)
-      setDeviceAnalytics(deviceData)
-      setLastRefresh(new Date())
-    } catch (err) {
-      if (err.status === 401) {
-        onLogout()
-        return
+      return {
+        stats: statsData,
+        analytics: analyticsData,
+        aiUsage: aiUsageData,
+        deviceAnalytics: deviceData,
       }
-      setError(err.message || '加载统计数据失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [onLogout, deviceDays])
+    },
+    staleMs: 20_000,
+    minIntervalMs: 5_000,
+    pollMs: REFRESH_INTERVAL,
+    onUnauthorized: onLogout,
+    errorMessage: '加载统计数据失败',
+  })
 
-  useEffect(() => {
-    loadAll()
-    timerRef.current = setInterval(loadAll, REFRESH_INTERVAL)
-    return () => clearInterval(timerRef.current)
-  }, [loadAll])
+  const stats = dashboardResource.data?.stats || null
+  const analytics = dashboardResource.data?.analytics || null
+  const aiUsage = dashboardResource.data?.aiUsage || null
+  const deviceAnalytics = dashboardResource.data?.deviceAnalytics || null
+  const error = dashboardResource.error
+  const loading = dashboardResource.loading
+  const lastRefresh = dashboardResource.loadedAt ? new Date(dashboardResource.loadedAt) : null
 
   const adminEmail = session?.admin?.email || '管理员'
   const logout = useCallback(() => {
@@ -708,7 +680,7 @@ function AdminDashboard({ session, onLogout }) {
             </section>
 
             {/* Panel 5: Company Profiles */}
-            <CompanyProfilesAdminPanel />
+            <CompanyProfilesAdminPanel onUnauthorized={onLogout} />
 
             {/* Panel 6: Signals & Webhook */}
             <section>
@@ -929,10 +901,10 @@ function AdminDashboard({ session, onLogout }) {
             )}
 
             {/* Panel 8: Quadrant Overview + Compute History (enhanced) */}
-            <QuadrantAdminPanel />
+            <QuadrantAdminPanel onUnauthorized={onLogout} />
 
             {/* Panel 9: User Feedback */}
-            <FeedbackPanel />
+            <FeedbackPanel onUnauthorized={onLogout} />
 
             {/* Panel 10: Audit */}
             <section>
@@ -945,13 +917,13 @@ function AdminDashboard({ session, onLogout }) {
             </section>
 
             {/* Panel 12: System Health (Error Monitoring) */}
-            <SystemHealthPanel />
+            <SystemHealthPanel onUnauthorized={onLogout} />
 
             {/* Panel 13: User Funnel */}
-            <UserFunnelPanel />
+            <UserFunnelPanel onUnauthorized={onLogout} />
 
             {/* Panel 14: 数据备份 */}
-            <BackupPanel />
+            <BackupPanel onUnauthorized={onLogout} />
 
             {/* Panel 11: AI 模型配置 */}
             <AIProviderConfigPanel onUnauthorized={onLogout} />
@@ -1210,32 +1182,26 @@ function formatTimeAgo(s) {
   } catch { return '' }
 }
 
-function CompanyProfilesAdminPanel() {
-  const [data, setData] = useState(null)
+function CompanyProfilesAdminPanel({ onUnauthorized }) {
   const [loading, setLoading] = useState(false)
   const [notice, setNotice] = useState('')
-  const [error, setError] = useState('')
-
-  const loadData = useCallback(async () => {
-    try {
-      const d = await adminFetch('/api/admin/company-profiles')
-      setData(d)
-      setError('')
-    } catch (err) {
-      setError(err.message || '加载公司资料统计失败')
-    }
-  }, [])
-
-  useEffect(() => {
-    loadData()
-    const timer = setInterval(loadData, 15000)
-    return () => clearInterval(timer)
-  }, [loadData])
+  const [actionError, setActionError] = useState('')
+  const resource = useAdminResource({
+    key: 'admin:company-profiles',
+    request: () => adminFetch('/api/admin/company-profiles'),
+    staleMs: 10_000,
+    minIntervalMs: 5_000,
+    pollMs: 15_000,
+    onUnauthorized,
+    errorMessage: '加载公司资料统计失败',
+  })
+  const data = resource.data
+  const error = resource.error
 
   const triggerRefresh = async () => {
     setLoading(true)
     setNotice('')
-    setError('')
+    setActionError('')
     try {
       await adminFetch('/api/admin/company-profiles/refresh', {
         method: 'POST',
@@ -1243,9 +1209,13 @@ function CompanyProfilesAdminPanel() {
         body: JSON.stringify({ exchange: 'ALL' }),
       })
       setNotice('已开始刷新公司静态资料，面板会自动更新进度。')
-      await loadData()
+      await resource.refresh()
     } catch (err) {
-      setError(err.message || '触发刷新失败')
+      const message = handleAdminActionError(err, onUnauthorized, '触发刷新失败')
+      setNotice('')
+      if (message) {
+        setActionError(message)
+      }
     } finally {
       setLoading(false)
     }
@@ -1269,6 +1239,7 @@ function CompanyProfilesAdminPanel() {
         </button>
       </div>
       {notice && <div className="mb-3 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-200">{notice}</div>}
+      {actionError && <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">{actionError}</div>}
       {error && <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">{error}</div>}
       {refresh.error && <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs leading-5 text-rose-200">刷新失败：{refresh.error}</div>}
       {refresh.message && !refresh.error && <div className="mb-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-xs text-white/55">{refresh.message}</div>}
@@ -1301,77 +1272,53 @@ function CompanyProfilesAdminPanel() {
   )
 }
 
-function QuadrantAdminPanel() {
-  const [overview, setOverview] = useState(null)
-  const [logs, setLogs] = useState(null)
+function QuadrantAdminPanel({ onUnauthorized }) {
   const [expandedLog, setExpandedLog] = useState(null)
-  const [progress, setProgress] = useState(null)          // { ASHARE: {...}, HKEX: {...} }
   const [triggering, setTriggering] = useState(false)
-
-  // ── Progress polling ──
-  useEffect(() => {
-    let timer = null
-    const fetchProgress = async () => {
-      try {
-        const data = await adminFetch('/api/admin/compute-status')
-        const prevStatus = progress ? { ASHARE: progress.ASHARE?.status, HKEX: progress.HKEX?.status } : null
-
-        setProgress(data)
-
-        // Auto-refresh overview + logs on terminal state transition
-        if (prevStatus && data) {
-          for (const ex of ['ASHARE', 'HKEX']) {
-            const wasRunning = prevStatus[ex] === 'running'
-            const isTerminal = data[ex]?.status === 'success' || data[ex]?.status === 'failed' || data[ex]?.status === 'timeout'
-            if (wasRunning && isTerminal) {
-              refreshAll()
-              break  // only need one refreshAll call
-            }
-          }
-        }
-      } catch { /* silent */ }
-    }
-    fetchProgress()
-    // Auto-poll every 5s when any exchange is running
-    timer = setInterval(() => {
-      if (progress) {
-        const anyRunning = Object.values(progress).some(p => p.status === 'running')
-        if (anyRunning) fetchProgress()
-      }
-    }, 5000)
-    return () => clearInterval(timer)
-  }, [progress?.ASHARE?.status, progress?.HKEX?.status])
-
-  const refreshAll = useCallback(async () => {
-    try {
-      const [ov, lg, pr] = await Promise.all([
+  const [actionError, setActionError] = useState('')
+  const resource = useAdminResource({
+    key: 'admin:quadrant',
+    request: async () => {
+      const [overview, logsPayload, progress] = await Promise.all([
         adminFetch('/api/admin/quadrant-overview').catch(() => null),
-        adminFetch('/api/admin/quadrant-logs').then((d) => d.items || []).catch(() => []),
+        adminFetch('/api/admin/quadrant-logs').catch(() => ({ items: [] })),
         adminFetch('/api/admin/compute-status').catch(() => null),
       ])
-      setOverview(ov)
-      setLogs(lg)
-      if (pr) setProgress(pr)
-    } catch { /* silent */ }
-  }, [])
-
-  // ── Load initial data ──
-  useEffect(() => { refreshAll() }, [refreshAll])
+      return {
+        overview,
+        logs: logsPayload?.items || [],
+        progress,
+      }
+    },
+    staleMs: 5_000,
+    minIntervalMs: 3_000,
+    pollMs: (payload) => {
+      const anyRunning = Object.values(payload?.progress || {}).some((item) => item?.status === 'running')
+      return anyRunning ? 5_000 : null
+    },
+    onUnauthorized,
+    errorMessage: '加载四象限数据失败',
+  })
+  const overview = resource.data?.overview || null
+  const logs = resource.data?.logs || null
+  const progress = resource.data?.progress || null
 
   // ── Manual trigger ──
   const handleTrigger = async (exchange) => {
     setTriggering(true)
+    setActionError('')
     try {
       await adminFetch('/api/admin/quadrant-trigger', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ exchange }),
       })
-      // Immediately refresh progress
-      const pr = await adminFetch('/api/admin/compute-status').catch(() => null)
-      if (pr) setProgress(pr)
+      await resource.refresh()
     } catch (err) {
-      alert('触发失败: ' + err.message)
+      const message = handleAdminActionError(err, onUnauthorized, '触发四象限计算失败')
+      if (message) {
+        setActionError(message)
+      }
     } finally {
       setTriggering(false)
     }
@@ -1437,6 +1384,11 @@ function QuadrantAdminPanel() {
   return (
     <section>
       <h2 className="text-base font-semibold text-white/80 mb-3">🔲 四象限数据总览</h2>
+      {(resource.error || actionError) && (
+        <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">
+          {actionError || resource.error}
+        </div>
+      )}
 
       {/* ════════════════ PROGRESS PANEL ════════════════ */}
       {progress && (
@@ -1461,7 +1413,7 @@ function QuadrantAdminPanel() {
               🔄 立即计算港股
             </button>
             <button
-              onClick={refreshAll}
+              onClick={() => resource.refresh()}
               className="ml-auto px-3 py-1.5 rounded-lg text-xs font-medium border border-white/10 hover:border-white/20 text-white/45 hover:text-white/65 transition"
             >
               刷新
@@ -1571,39 +1523,57 @@ const FB_CATEGORY_LABELS = { bug: '🐛 Bug', feature: '💡 功能建议', wish
 const FB_STATUS_LABELS = { pending: '待处理', resolved: '已处理', dismissed: '已忽略' }
 const FB_STATUS_COLORS = { pending: 'text-amber-300 bg-amber-500/10 border-amber-400/30', resolved: 'text-emerald-300 bg-emerald-500/10 border-emerald-400/30', dismissed: 'text-white/40 bg-white/5 border-white/10' }
 
-function FeedbackPanel() {
-  const [data, setData] = useState(null)
+function FeedbackPanel({ onUnauthorized }) {
   const [updating, setUpdating] = useState(null)
+  const [actionError, setActionError] = useState('')
+  const resource = useAdminResource({
+    key: 'admin:feedback',
+    request: () => adminFetch('/api/admin/feedback?limit=50'),
+    staleMs: 30_000,
+    minIntervalMs: 3_000,
+    onUnauthorized,
+    errorMessage: '加载反馈列表失败',
+  })
+  const data = resource.data || { items: [], total: 0, stats: null }
 
-  useEffect(() => {
-    adminFetch('/api/admin/feedback?limit=50')
-      .then((d) => setData(d))
-      .catch(() => setData({ items: [], total: 0, stats: null }))
-  }, [])
-
-  if (!data) return null
+  if (resource.loading && !resource.data) return null
 
   const stats = data.stats
   const items = data.items || []
 
   const handleUpdateStatus = async (id, status) => {
     setUpdating(id)
+    setActionError('')
     try {
       await adminFetch(`/api/admin/feedback/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       })
-      // Refresh
-      const refreshed = await adminFetch('/api/admin/feedback?limit=50')
-      setData(refreshed)
-    } catch { /* silent */ }
-    setUpdating(null)
+      await resource.refresh()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '更新反馈状态失败')
+      if (message) {
+        setActionError(message)
+      }
+    } finally {
+      setUpdating(null)
+    }
   }
 
   return (
     <section>
       <h2 className="text-base font-semibold text-white/80 mb-3">💬 用户反馈</h2>
+      {resource.error ? (
+        <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">
+          {resource.error}
+        </div>
+      ) : null}
+      {actionError ? (
+        <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">
+          {actionError}
+        </div>
+      ) : null}
       {stats ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           <StatCard label="总反馈" value={stats.total} />
@@ -1660,8 +1630,6 @@ function FeedbackPanel() {
 
 // ── System Health Panel (Error Monitoring) ──
 
-const STATUS_LABELS = { 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 409: 'Conflict', 429: 'Too Many Requests', 500: 'Internal Error', 502: 'Bad Gateway', 503: 'Service Unavailable', 504: 'Gateway Timeout' }
-
 function statusColor(code) {
   if (code >= 500) return 'text-rose-400 bg-rose-500/10 border-rose-400/25'
   return 'text-amber-300 bg-amber-500/10 border-amber-400/25'
@@ -1673,39 +1641,52 @@ function formatMS(ms) {
   return `${(ms / 1000).toFixed(1)}s`
 }
 
-function SystemHealthPanel() {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(true)
+function SystemHealthPanel({ onUnauthorized }) {
   const [logsExpanded, setLogsExpanded] = useState(false)
   const [logsData, setLogsData] = useState(null)
-
-  useEffect(() => {
-    adminFetch('/api/admin/system-health')
-      .then((d) => { setData(d); setLoading(false) })
-      .catch(() => { setLoading(false) })
-  }, [])
+  const [actionError, setActionError] = useState('')
+  const resource = useAdminResource({
+    key: 'admin:system-health',
+    request: () => adminFetch('/api/admin/system-health'),
+    staleMs: 20_000,
+    minIntervalMs: 5_000,
+    pollMs: 60_000,
+    onUnauthorized,
+    errorMessage: '获取系统健康数据失败',
+  })
+  const data = resource.data
 
   const loadMoreLogs = async () => {
+    setActionError('')
     try {
       const d = await adminFetch('/api/admin/system-health/logs?limit=200&offset=0')
       setLogsData(d)
       setLogsExpanded(true)
-    } catch { /* silent */ }
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '加载错误日志失败')
+      if (message) {
+        setActionError(message)
+      }
+    }
   }
 
   const handlePurge = async () => {
     if (!window.confirm('确定要清理历史错误日志吗？（保留最近 30 天）')) return
+    setActionError('')
     try {
       await adminFetch('/api/admin/system-health/purge', { method: 'POST' })
-      // Refresh
-      const refreshed = await adminFetch('/api/admin/system-health')
-      setData(refreshed)
+      await resource.refresh()
       setLogsData(null)
       setLogsExpanded(false)
-    } catch { /* silent */ }
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '清理历史错误日志失败')
+      if (message) {
+        setActionError(message)
+      }
+    }
   }
 
-  if (loading && !data) return null
+  if (resource.loading && !data) return null
 
   const summary = data?.error_summary || {}
   const topEndpoints = data?.top_error_endpoints || []
@@ -1715,6 +1696,16 @@ function SystemHealthPanel() {
   return (
     <section>
       <h2 className="text-base font-semibold text-white/80 mb-3">🖥️ 系统健康（错误监控）</h2>
+      {resource.error ? (
+        <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">
+          {resource.error}
+        </div>
+      ) : null}
+      {actionError ? (
+        <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">
+          {actionError}
+        </div>
+      ) : null}
 
       {/* Error Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
@@ -1863,17 +1854,28 @@ function convRate(prev, curr) {
   return ((curr / prev) * 100).toFixed(1) + '%'
 }
 
-function UserFunnelPanel() {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(true)
+function UserFunnelPanel({ onUnauthorized }) {
+  const resource = useAdminResource({
+    key: 'admin:user-funnel',
+    request: () => adminFetch('/api/admin/user-funnel'),
+    staleMs: 60_000,
+    minIntervalMs: 10_000,
+    onUnauthorized,
+    errorMessage: '获取用户漏斗数据失败',
+  })
+  const data = resource.data
 
-  useEffect(() => {
-    adminFetch('/api/admin/user-funnel')
-      .then((d) => { setData(d); setLoading(false) })
-      .catch(() => { setLoading(false) })
-  }, [])
-
-  if (loading && !data) return null
+  if (resource.loading && !data) return null
+  if (resource.error && !data) {
+    return (
+      <section>
+        <h2 className="text-base font-semibold text-white/80 mb-3">📊 用户转化漏斗</h2>
+        <div className="rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          {resource.error}
+        </div>
+      </section>
+    )
+  }
   const steps = data?.steps || []
   if (steps.length === 0) return null
 
@@ -1967,58 +1969,48 @@ function UserFunnelPanel() {
 
 // ── Backup Panel (数据备份) ──
 
-function BackupPanel() {
-  const [status, setStatus] = useState(null)
-  const [history, setHistory] = useState(null)
-  const [stats, setStats] = useState(null)
+function BackupPanel({ onUnauthorized }) {
   const [triggering, setTriggering] = useState(false)
-  const pollTimerRef = useRef(null)
-
-  const loadData = useCallback(async () => {
-    try {
-      const [s, h, st] = await Promise.all([
+  const [actionError, setActionError] = useState('')
+  const resource = useAdminResource({
+    key: 'admin:backup',
+    request: async () => {
+      const [status, historyPayload, stats] = await Promise.all([
         adminFetch('/api/admin/backup-status').catch(() => null),
-        adminFetch('/api/admin/backup-history?limit=7').then(d => d.items || []).catch(() => []),
+        adminFetch('/api/admin/backup-history?limit=7').catch(() => ({ items: [] })),
         adminFetch('/api/admin/backup-stats').catch(() => null),
       ])
-      setStatus(s)
-      setHistory(h)
-      setStats(st)
-    } catch { /* silent */ }
-  }, [])
-
-  useEffect(() => {
-    loadData()
-    const timer = setInterval(loadData, 120_000) // backup panel refreshes less frequently
-    return () => clearInterval(timer)
-  }, [loadData])
-
-  useEffect(() => {
-    if (pollTimerRef.current) {
-      clearTimeout(pollTimerRef.current)
-      pollTimerRef.current = null
-    }
-    if (shouldPollBackupStatus(status)) {
-      pollTimerRef.current = setTimeout(() => {
-        loadData()
-      }, 2000)
-    }
-    return () => {
-      if (pollTimerRef.current) {
-        clearTimeout(pollTimerRef.current)
-        pollTimerRef.current = null
+      return {
+        status,
+        history: historyPayload?.items || [],
+        stats,
       }
-    }
-  }, [status, loadData])
+    },
+    staleMs: 15_000,
+    minIntervalMs: 3_000,
+    pollMs: (payload) => (shouldPollBackupStatus(payload?.status) ? 2_000 : 120_000),
+    onUnauthorized,
+    errorMessage: '加载备份数据失败',
+  })
+  const status = resource.data?.status || null
+  const history = resource.data?.history || null
+  const stats = resource.data?.stats || null
 
   const handleTrigger = async () => {
     if (!window.confirm('确定要立即执行一次备份吗？')) return
     setTriggering(true)
+    setActionError('')
     try {
       await adminFetch('/api/admin/backup-trigger', { method: 'POST' })
-      await loadData()
-    } catch { /* silent */ }
-    setTriggering(false)
+      await resource.refresh()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '触发备份失败')
+      if (message) {
+        setActionError(message)
+      }
+    } finally {
+      setTriggering(false)
+    }
   }
 
   if (!status && !history) return null
@@ -2031,6 +2023,16 @@ function BackupPanel() {
   return (
     <section>
       <h2 className="text-base font-semibold text-white/80 mb-3">📦 数据备份</h2>
+      {resource.error ? (
+        <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">
+          {resource.error}
+        </div>
+      ) : null}
+      {actionError ? (
+        <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">
+          {actionError}
+        </div>
+      ) : null}
 
       {/* Status Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
@@ -2147,6 +2149,14 @@ function BackupPanel() {
 export default function AdminPage() {
   const [session, setSession] = useState(null)
   const [ready, setReady] = useState(false)
+  const handleLogin = useCallback((result) => {
+    clearAdminResourceCache()
+    setSession(result)
+  }, [])
+  const handleLogout = useCallback(() => {
+    clearAdminResourceCache()
+    setSession(null)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -2155,7 +2165,10 @@ export default function AdminPage() {
         if (active) setSession(data)
       })
       .catch(() => {
-        if (active) setSession(null)
+        if (active) {
+          clearAdminResourceCache()
+          setSession(null)
+        }
       })
       .finally(() => {
         if (active) setReady(true)
@@ -2184,9 +2197,9 @@ export default function AdminPage() {
         <meta name="robots" content="noindex, nofollow" />
       </Head>
       {session ? (
-        <AdminDashboard session={session} onLogout={() => setSession(null)} />
+        <AdminDashboard session={session} onLogout={handleLogout} />
       ) : (
-        <AdminLoginForm onLogin={(result) => setSession(result)} />
+        <AdminLoginForm onLogin={handleLogin} />
       )}
     </>
   )

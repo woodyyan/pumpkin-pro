@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const pageSource = readFileSync(new URL('../../pages/admin.js', import.meta.url), 'utf8')
+const adminDataSource = readFileSync(new URL('../../lib/admin-data.js', import.meta.url), 'utf8')
 
 describe('admin ai config panel integration', () => {
   it('renders the AI config panel ahead of AI usage stats', () => {
@@ -15,14 +16,16 @@ describe('admin ai config panel integration', () => {
     assert.ok(configIndex < usageIndex, 'AI config panel should appear before usage stats')
   })
 
-  it('wires load, save and test requests to dedicated admin endpoints', () => {
-    assert.match(pageSource, /\/api\/admin\/ai-config/)
-    assert.match(pageSource, /\/api\/admin\/ai-config\/test/)
-    assert.match(pageSource, /credentials: 'same-origin'/)
-    assert.match(pageSource, /method: 'PUT'/)
-    assert.match(pageSource, /method: 'POST'/)
+  it('wires load, save and test requests through the shared admin data layer', () => {
+    assert.match(pageSource, /from '\.\.\/lib\/admin-data'/)
+    assert.match(pageSource, /useAdminResource\(\{/)
+    assert.match(pageSource, /adminFetch\('\/api\/admin\/ai-config'/)
+    assert.match(pageSource, /adminFetch\('\/api\/admin\/ai-config\/test'/)
+    assert.match(pageSource, /handleAdminActionError/)
     assert.match(pageSource, /恢复已保存值/)
     assert.match(pageSource, /留空表示保持当前 key/)
+    assert.match(adminDataSource, /credentials: 'same-origin'/)
+    assert.match(adminDataSource, /export async function adminFetch/)
   })
 
   it('boots admin session from backend cookie instead of localStorage token', () => {

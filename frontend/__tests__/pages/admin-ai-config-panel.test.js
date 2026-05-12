@@ -18,10 +18,18 @@ describe('admin ai config panel integration', () => {
   it('wires load, save and test requests to dedicated admin endpoints', () => {
     assert.match(pageSource, /\/api\/admin\/ai-config/)
     assert.match(pageSource, /\/api\/admin\/ai-config\/test/)
+    assert.match(pageSource, /credentials: 'same-origin'/)
     assert.match(pageSource, /method: 'PUT'/)
     assert.match(pageSource, /method: 'POST'/)
     assert.match(pageSource, /恢复已保存值/)
     assert.match(pageSource, /留空表示保持当前 key/)
+  })
+
+  it('boots admin session from backend cookie instead of localStorage token', () => {
+    assert.match(pageSource, /adminFetch\('\/api\/admin\/session'\)/)
+    assert.match(pageSource, /adminFetch\('\/api\/admin\/logout', \{ method: 'POST' \}\)/)
+    assert.doesNotMatch(pageSource, /localStorage\.getItem\(ADMIN_SESSION_KEY\)/)
+    assert.doesNotMatch(pageSource, /Authorization', `Bearer \$\{session\.tokens\.access_token\}`/)
   })
 
   it('shows effective source and health states for admins', () => {

@@ -104,11 +104,8 @@ func (s *Service) Login(ctx context.Context, input AdminLoginInput) (*AdminLogin
 			Email:    record.Email,
 			Nickname: record.Nickname,
 		},
-		Tokens: AdminTokens{
-			AccessToken: token,
-			ExpiresIn:   int64(expiresIn.Seconds()),
-			TokenType:   "Bearer",
-		},
+		ExpiresIn:   int64(expiresIn.Seconds()),
+		AccessToken: token,
 	}, nil
 }
 
@@ -120,6 +117,7 @@ func (s *Service) buildAccessToken(record *SuperAdminRecord) (string, time.Durat
 	claims := AdminAccessClaims{
 		AdminID:   record.ID,
 		Email:     record.Email,
+		Nickname:  record.Nickname,
 		Role:      "super_admin",
 		IssuedAt:  now.Unix(),
 		ExpiresAt: expireAt.Unix(),

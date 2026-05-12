@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,6 +36,8 @@ import (
 )
 
 var supportedDataSources = []string{"online", "csv", "sample"}
+
+const adminSessionCookieName = "pumpkin_pro_admin_session"
 
 func buildQuadrantSnapshotSymbol(code, exchange string) string {
 	normalizedCode := strings.ToUpper(strings.TrimSpace(code))
@@ -2272,6 +2275,9 @@ func (a *appServer) withSuperAdminAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := parseBearerToken(r.Header.Get("Authorization"))
 		if token == "" {
+			token = readAdminSessionCookie(r)
+		}
+		if token == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"code": "ADMIN_AUTH_REQUIRED", "detail": "需要超级管理员登录"})
 			return
 		}
@@ -2309,7 +2315,96 @@ func (a *appServer) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	setAdminSessionCookie(w, r, result.AccessToken, time.Duration(result.ExpiresIn)*time.Second)
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *appServer) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	clearAdminSessionCookie(w, r)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *appServer) handleAdminSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	token := readAdminSessionCookie(r)
+	if token == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"code": "ADMIN_AUTH_REQUIRED", "detail": "需要超级管理员登录"})
+		return
+	}
+	claims, err := a.adminService.ParseAdminToken(token)
+	if err != nil {
+		clearAdminSessionCookie(w, r)
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"code": "ADMIN_AUTH_REQUIRED", "detail": "超管登录已失效，请重新登录"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"admin": map[string]any{
+			"id": claims.AdminID,
+			"email": claims.Email,
+			"nickname": claims.Nickname,
+		},
+		"expires_at": claims.ExpiresAt,
+	})
+}
+
+func readAdminSessionCookie(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	cookie, err := r.Cookie(adminSessionCookieName)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cookie.Value)
+}
+
+func setAdminSessionCookie(w http.ResponseWriter, r *http.Request, token string, ttl time.Duration) {
+	if strings.TrimSpace(token) == "" {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     adminSessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   requestHasTLS(r),
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(ttl.Seconds()),
+		Expires:  time.Now().UTC().Add(ttl),
+	})
+}
+
+func clearAdminSessionCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     adminSessionCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   requestHasTLS(r),
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0).UTC(),
+	})
+}
+
+func requestHasTLS(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	if subtle.ConstantTimeCompare([]byte(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))), []byte("https")) == 1 {
+		return true
+	}
+	return subtle.ConstantTimeCompare([]byte(strings.TrimSpace(r.Header.Get("X-Forwarded-Ssl"))), []byte("on")) == 1
 }
 
 func (a *appServer) handleAdminStats(w http.ResponseWriter, r *http.Request) {
@@ -3513,6 +3608,8 @@ func main() {
 	mux.HandleFunc("/api/live/symbols/", server.withOptionalAuth(server.handleLiveSymbolsSubroutes))
 
 	mux.HandleFunc("/api/admin/login", server.handleAdminLogin)
+	mux.HandleFunc("/api/admin/logout", server.handleAdminLogout)
+	mux.HandleFunc("/api/admin/session", server.handleAdminSession)
 	mux.HandleFunc("/api/admin/stats", server.withSuperAdminAuth(server.handleAdminStats))
 	mux.HandleFunc("/api/admin/analytics", server.withSuperAdminAuth(server.handleAdminAnalytics))
 	mux.HandleFunc("/api/admin/system-health", server.withSuperAdminAuth(server.handleAdminSystemHealth))

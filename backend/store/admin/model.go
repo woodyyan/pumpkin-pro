@@ -28,19 +28,15 @@ type AdminLoginInput struct {
 }
 
 type AdminLoginResult struct {
-	Admin  AdminProfile `json:"admin"`
-	Tokens AdminTokens  `json:"tokens"`
-}
-
-type AdminTokens struct {
-	AccessToken string `json:"access_token"`
-	ExpiresIn   int64  `json:"expires_in"`
-	TokenType   string `json:"token_type"`
+	Admin       AdminProfile `json:"admin"`
+	ExpiresIn   int64        `json:"expires_in"`
+	AccessToken string       `json:"-"`
 }
 
 type AdminAccessClaims struct {
 	AdminID   string `json:"aid"`
 	Email     string `json:"email"`
+	Nickname  string `json:"nickname"`
 	Role      string `json:"role"`
 	IssuedAt  int64  `json:"iat"`
 	ExpiresAt int64  `json:"exp"`

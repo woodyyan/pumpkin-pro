@@ -5,7 +5,7 @@ export const config = {
 };
 
 const DEFAULT_BACKEND_API_URL = 'http://localhost:8080';
-export const FORWARDED_REQUEST_HEADERS = ['content-type', 'accept', 'authorization', 'user-agent', 'x-forwarded-for', 'x-real-ip'];
+export const FORWARDED_REQUEST_HEADERS = ['content-type', 'accept', 'authorization', 'cookie', 'user-agent', 'x-forwarded-for', 'x-real-ip'];
 
 export default async function handler(req, res) {
   const backendApiUrl = (process.env.BACKEND_API_URL || DEFAULT_BACKEND_API_URL).replace(/\/$/, '');
@@ -26,6 +26,7 @@ export default async function handler(req, res) {
 
     res.status(upstreamResponse.status);
     res.setHeader('Content-Type', upstreamContentType);
+    copySetCookieHeaders(upstreamResponse, res);
 
     if (upstreamResponse.ok || upstreamContentType.includes('application/json')) {
       res.send(responseText);
@@ -50,6 +51,17 @@ export function buildForwardHeaders(req) {
     }
   });
   return headers;
+}
+
+function copySetCookieHeaders(upstreamResponse, res) {
+  const header = upstreamResponse.headers.get('set-cookie');
+  if (!header) return;
+  res.setHeader('Set-Cookie', splitSetCookieHeader(header));
+}
+
+export function splitSetCookieHeader(value) {
+  if (!value) return [];
+  return value.split(/,(?=\s*[^;=]+=[^;]+)/g).map((item) => item.trim()).filter(Boolean);
 }
 
 function shouldReadBody(method) {

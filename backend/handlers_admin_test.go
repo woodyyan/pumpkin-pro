@@ -98,3 +98,83 @@ func TestHandleAdminBackupTriggerConflict(t *testing.T) {
 		t.Fatalf("expected cooldown reason, got %s", body.Reason)
 	}
 }
+
+func TestHandleAdminLoginSetsSessionCookie(t *testing.T) {
+	db := testutil.InMemoryDB(t)
+	if err := admin.NewMigrator().AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate admin models: %v", err)
+	}
+	svc := admin.NewService(admin.NewRepository(db), admin.ServiceConfig{JWTSecret: "test-secret", AccessTTL: time.Hour})
+	if err := svc.SeedAdmin(t.Context(), "admin@example.com", "password123"); err != nil {
+		t.Fatalf("seed admin: %v", err)
+	}
+	server := &appServer{adminService: svc}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/login", strings.NewReader(`{"email":"admin@example.com","password":"password123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+
+	server.handleAdminLogin(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+	result := resp.Result()
+	defer result.Body.Close()
+	var found bool
+	for _, cookie := range result.Cookies() {
+		if cookie.Name == adminSessionCookieName {
+			found = true
+			if !cookie.HttpOnly {
+				t.Fatalf("expected admin cookie to be HttpOnly")
+			}
+			if cookie.Value == "" {
+				t.Fatalf("expected admin cookie value")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected admin session cookie")
+	}
+	var body map[string]any
+	if err := json.NewDecoder(result.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := body["access_token"]; ok {
+		t.Fatalf("login response should not expose access_token")
+	}
+}
+
+func TestWithSuperAdminAuthAcceptsCookie(t *testing.T) {
+	db := testutil.InMemoryDB(t)
+	if err := admin.NewMigrator().AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate admin models: %v", err)
+	}
+	svc := admin.NewService(admin.NewRepository(db), admin.ServiceConfig{JWTSecret: "test-secret", AccessTTL: time.Hour})
+	if err := svc.SeedAdmin(t.Context(), "admin@example.com", "password123"); err != nil {
+		t.Fatalf("seed admin: %v", err)
+	}
+	login, err := svc.Login(t.Context(), admin.AdminLoginInput{Email: "admin@example.com", Password: "password123"})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	server := &appServer{adminService: svc}
+
+	called := false
+	handler := server.withSuperAdminAuth(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/stats", nil)
+	req.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: login.AccessToken})
+	resp := httptest.NewRecorder()
+
+	handler(resp, req)
+
+	if !called {
+		t.Fatalf("expected next handler to be called")
+	}
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+}

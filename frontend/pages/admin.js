@@ -75,40 +75,13 @@ function CategoryLegend({ data }) {
   )
 }
 
-const ADMIN_SESSION_KEY = 'pumpkin_pro_admin_session'
 const REFRESH_INTERVAL = 60_000
 
-function readAdminSession() {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = window.localStorage.getItem(ADMIN_SESSION_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed?.tokens?.access_token || !parsed?.admin) return null
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-function writeAdminSession(session) {
-  if (typeof window === 'undefined') return
-  if (!session) {
-    window.localStorage.removeItem(ADMIN_SESSION_KEY)
-    return
-  }
-  window.localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(session))
-}
-
 async function adminFetch(path, init = {}) {
-  const session = readAdminSession()
   const headers = new Headers(init?.headers || {})
   headers.set('Accept', 'application/json')
-  if (session?.tokens?.access_token) {
-    headers.set('Authorization', `Bearer ${session.tokens.access_token}`)
-  }
 
-  const res = await fetch(path, { ...init, headers })
+  const res = await fetch(path, { ...init, headers, credentials: 'same-origin' })
   const text = await res.text()
   let data = null
   try {
@@ -147,7 +120,6 @@ function AdminLoginForm({ onLogin }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password }),
       })
-      writeAdminSession(result)
       onLogin(result)
     } catch (err) {
       setError(err.message || '登录失败')
@@ -333,7 +305,6 @@ function AIProviderConfigPanel({ onUnauthorized }) {
   const initializedRef = useRef(false)
 
   const handleUnauthorized = useCallback(() => {
-    writeAdminSession(null)
     onUnauthorized?.()
   }, [onUnauthorized])
 
@@ -603,7 +574,6 @@ function AdminDashboard({ session, onLogout }) {
       setLastRefresh(new Date())
     } catch (err) {
       if (err.status === 401) {
-        writeAdminSession(null)
         onLogout()
         return
       }
@@ -620,6 +590,9 @@ function AdminDashboard({ session, onLogout }) {
   }, [loadAll])
 
   const adminEmail = session?.admin?.email || '管理员'
+  const logout = useCallback(() => {
+    adminFetch('/api/admin/logout', { method: 'POST' }).catch(() => null).finally(() => onLogout())
+  }, [onLogout])
 
   return (
     <div className="min-h-screen bg-[#0a0b0f] text-white">
@@ -639,10 +612,7 @@ function AdminDashboard({ session, onLogout }) {
             <span className="text-white/60">{adminEmail}</span>
             <button
               type="button"
-              onClick={() => {
-                writeAdminSession(null)
-                onLogout()
-              }}
+              onClick={logout}
               className="rounded-lg border border-white/15 px-3 py-1 text-sm text-white/70 transition hover:border-white/30 hover:text-white"
             >
               退出
@@ -2187,9 +2157,20 @@ export default function AdminPage() {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const cached = readAdminSession()
-    if (cached) setSession(cached)
-    setReady(true)
+    let active = true
+    adminFetch('/api/admin/session')
+      .then((data) => {
+        if (active) setSession(data)
+      })
+      .catch(() => {
+        if (active) setSession(null)
+      })
+      .finally(() => {
+        if (active) setReady(true)
+      })
+    return () => {
+      active = false
+    }
   }, [])
 
   if (!ready) {

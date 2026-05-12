@@ -867,14 +867,6 @@ function AdminDashboard({ session, onLogout }) {
                     </div>
                   </div>
                 )}
-                {/* Device breakdown */}
-                {analytics.devices && (analytics.devices.desktop + analytics.devices.mobile + analytics.devices.tablet > 0) && (
-                  <div className="mt-3 grid grid-cols-3 gap-3">
-                    <StatCard label="桌面端" value={analytics.devices.desktop} />
-                    <StatCard label="移动端" value={analytics.devices.mobile} />
-                    <StatCard label="平板" value={analytics.devices.tablet} />
-                  </div>
-                )}
               </section>
             )}
 

@@ -2475,7 +2475,6 @@ func (a *appServer) handleAdminAnalytics(w http.ResponseWriter, r *http.Request)
 	dailyPV, _ := a.analyticsRepo.DailyPV(ctx, 30)
 	dailyUV, _ := a.analyticsRepo.DailyUV(ctx, 30)
 	topPages, _ := a.analyticsRepo.TopPages(ctx, thirtyDaysAgo, 10)
-	devices, _ := a.analyticsRepo.DeviceBreakdown(ctx, thirtyDaysAgo)
 
 	if dailyPV == nil {
 		dailyPV = []analytics.DailyCount{}
@@ -2486,16 +2485,13 @@ func (a *appServer) handleAdminAnalytics(w http.ResponseWriter, r *http.Request)
 	if topPages == nil {
 		topPages = []analytics.PageRank{}
 	}
-	if devices == nil {
-		devices = &analytics.DeviceStats{}
-	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"today_pv": todayPV, "today_uv": todayUV,
 		"week_pv": weekPV, "week_uv": weekUV,
 		"month_pv": monthPV, "month_uv": monthUV,
 		"daily_pv": dailyPV, "daily_uv": dailyUV,
-		"top_pages": topPages, "devices": devices,
+		"top_pages": topPages,
 	})
 }
 

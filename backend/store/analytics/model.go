@@ -36,12 +36,6 @@ type PageRank struct {
 	Count    int64  `json:"count"`
 }
 
-type DeviceStats struct {
-	Desktop int64 `json:"desktop"`
-	Mobile  int64 `json:"mobile"`
-	Tablet  int64 `json:"tablet"`
-}
-
 // ── Device Analytics types for admin dashboard ──
 
 type CategoryCount struct {

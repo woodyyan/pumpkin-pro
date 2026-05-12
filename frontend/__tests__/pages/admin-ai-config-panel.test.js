@@ -32,6 +32,14 @@ describe('admin ai config panel integration', () => {
     assert.doesNotMatch(pageSource, /Authorization', `Bearer \$\{session\.tokens\.access_token\}`/)
   })
 
+  it('keeps device stats only in the dedicated device panel', () => {
+    assert.match(pageSource, /📱 设备与浏览器/)
+    assert.doesNotMatch(pageSource, /analytics\.devices/)
+    assert.doesNotMatch(pageSource, /StatCard label="桌面端"/)
+    assert.doesNotMatch(pageSource, /StatCard label="移动端"/)
+    assert.doesNotMatch(pageSource, /StatCard label="平板"/)
+  })
+
   it('shows effective source and health states for admins', () => {
     assert.match(pageSource, /AI_CONFIG_SOURCE_LABELS/)
     assert.match(pageSource, /AI_CONFIG_STATUS_META/)

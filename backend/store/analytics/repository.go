@@ -72,34 +72,6 @@ func (r *Repository) TopPages(ctx context.Context, since time.Time, limit int) (
 	return results, err
 }
 
-func (r *Repository) DeviceBreakdown(ctx context.Context, since time.Time) (*DeviceStats, error) {
-	type row struct {
-		Category string
-		Count    int64
-	}
-	var results []row
-	err := r.db.WithContext(ctx).Model(&PageViewRecord{}).
-		Select("CASE WHEN screen_width >= 1024 THEN 'desktop' WHEN screen_width >= 768 THEN 'tablet' ELSE 'mobile' END as category, COUNT(*) as count").
-		Where("created_at >= ? AND screen_width > 0", since).
-		Group("category").
-		Scan(&results).Error
-	if err != nil {
-		return nil, err
-	}
-	stats := &DeviceStats{}
-	for _, r := range results {
-		switch r.Category {
-		case "desktop":
-			stats.Desktop = r.Count
-		case "tablet":
-			stats.Tablet = r.Count
-		case "mobile":
-			stats.Mobile = r.Count
-		}
-	}
-	return stats, nil
-}
-
 func (r *Repository) DeleteOlderThan(ctx context.Context, before time.Time) error {
 	return r.db.WithContext(ctx).Where("created_at < ?", before).Delete(&PageViewRecord{}).Error
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -105,7 +106,7 @@ func TestHandleAdminLoginSetsSessionCookie(t *testing.T) {
 		t.Fatalf("auto migrate admin models: %v", err)
 	}
 	svc := admin.NewService(admin.NewRepository(db), admin.ServiceConfig{JWTSecret: "test-secret", AccessTTL: time.Hour})
-	if err := svc.SeedAdmin(t.Context(), "admin@example.com", "password123"); err != nil {
+	if err := svc.SeedAdmin(context.Background(), "admin@example.com", "password123"); err != nil {
 		t.Fatalf("seed admin: %v", err)
 	}
 	server := &appServer{adminService: svc}
@@ -151,10 +152,10 @@ func TestWithSuperAdminAuthAcceptsCookie(t *testing.T) {
 		t.Fatalf("auto migrate admin models: %v", err)
 	}
 	svc := admin.NewService(admin.NewRepository(db), admin.ServiceConfig{JWTSecret: "test-secret", AccessTTL: time.Hour})
-	if err := svc.SeedAdmin(t.Context(), "admin@example.com", "password123"); err != nil {
+	if err := svc.SeedAdmin(context.Background(), "admin@example.com", "password123"); err != nil {
 		t.Fatalf("seed admin: %v", err)
 	}
-	login, err := svc.Login(t.Context(), admin.AdminLoginInput{Email: "admin@example.com", Password: "password123"})
+	login, err := svc.Login(context.Background(), admin.AdminLoginInput{Email: "admin@example.com", Password: "password123"})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}

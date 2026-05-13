@@ -78,14 +78,8 @@ func (s *Service) saveRankingPortfolio(ctx context.Context, records []QuadrantSc
 		}
 
 		snapshotVersion := buildRankingPortfolioSnapshotVersion(snapshotDate)
-		var existingCount int64
-		if err := tx.Model(&RankingPortfolioSnapshot{}).
-			Where("definition_id = ? AND snapshot_version = ?", definition.ID, snapshotVersion).
-			Count(&existingCount).Error; err != nil {
-			return fmt.Errorf("check ranking portfolio snapshot version: %w", err)
-		}
-		if existingCount > 0 {
-			return nil
+		if err := deleteRankingPortfolioSnapshotVersion(tx, definition.ID, snapshotVersion); err != nil {
+			return err
 		}
 
 		currentConstituents := selectRankingPortfolioConstituents(records, definition.MaxHoldings)
@@ -209,6 +203,30 @@ func (s *Service) saveRankingPortfolio(ctx context.Context, records []QuadrantSc
 
 		return nil
 	})
+}
+
+func deleteRankingPortfolioSnapshotVersion(tx *gorm.DB, definitionID string, snapshotVersion string) error {
+	if err := tx.Where("definition_id = ? AND snapshot_version = ?", definitionID, snapshotVersion).
+		Delete(&RankingPortfolioResult{}).Error; err != nil {
+		return fmt.Errorf("delete ranking portfolio result: %w", err)
+	}
+	if err := tx.Where("definition_id = ? AND snapshot_version = ?", definitionID, snapshotVersion).
+		Delete(&RankingPortfolioBenchmarkPrice{}).Error; err != nil {
+		return fmt.Errorf("delete ranking portfolio benchmark price: %w", err)
+	}
+	if err := tx.Where("definition_id = ? AND snapshot_version = ?", definitionID, snapshotVersion).
+		Delete(&RankingPortfolioMarketPrice{}).Error; err != nil {
+		return fmt.Errorf("delete ranking portfolio market prices: %w", err)
+	}
+	if err := tx.Where("definition_id = ? AND snapshot_version = ?", definitionID, snapshotVersion).
+		Delete(&RankingPortfolioSnapshotConstituent{}).Error; err != nil {
+		return fmt.Errorf("delete ranking portfolio constituents: %w", err)
+	}
+	if err := tx.Where("definition_id = ? AND snapshot_version = ?", definitionID, snapshotVersion).
+		Delete(&RankingPortfolioSnapshot{}).Error; err != nil {
+		return fmt.Errorf("delete ranking portfolio snapshot: %w", err)
+	}
+	return nil
 }
 
 func selectRankingPortfolioConstituents(records []QuadrantScoreRecord, limit int) []RankingPortfolioConstituentItem {

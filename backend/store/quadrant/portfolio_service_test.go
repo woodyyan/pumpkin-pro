@@ -130,35 +130,79 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	}
 }
 
-func TestSaveRankingPortfolio_IdempotentBySnapshotVersion(t *testing.T) {
+func TestSaveRankingPortfolio_RebuildsSameSnapshotVersion(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
 	svc := NewService(repo)
 	ctx := context.Background()
+
+	benchmarkPrices := map[string]float64{"2026-05-06": 3000}
 	svc.SetBenchmarkPriceResolver(func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
-		return 3000, tradeDate
-	})
-	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
-		return 10
+		return benchmarkPrices[tradeDate], tradeDate
 	})
 
-	records := []QuadrantScoreRecord{
+	priceMap := map[string]float64{
+		snapshotPriceHintKey("600001", "SSE") + "@2026-05-06":  10,
+		snapshotPriceHintKey("000001", "SZSE") + "@2026-05-06": 20,
+		snapshotPriceHintKey("300001", "SZSE") + "@2026-05-06": 30,
+		snapshotPriceHintKey("600002", "SSE") + "@2026-05-06":  40,
+	}
+	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
+		return priceMap[snapshotPriceHintKey(code, exchange)+"@"+tradeDate]
+	})
+
+	computedAt := time.Date(2026, 5, 6, 15, 0, 0, 0, rankingSnapshotLocation)
+	badRecords := []QuadrantScoreRecord{
+		makeAShareRankingRecord("688001", "STAR", "机会", 99, 88, 10, 12000),
+		makeAShareRankingRecord("688002", "STAR", "机会", 98, 87, 10, 12000),
+	}
+	goodRecords := []QuadrantScoreRecord{
+		makeAShareRankingRecord("688001", "STAR", "机会", 99, 88, 10, 12000),
 		makeAShareRankingRecord("600001", "MAIN", "机会", 95, 84, 10, 12000),
 		makeAShareRankingRecord("000001", "MAIN", "机会", 94, 83, 10, 12000),
+		makeAShareRankingRecord("300001", "CHINEXT", "机会", 93, 82, 10, 12000),
+		makeAShareRankingRecord("600002", "MAIN", "机会", 92, 81, 10, 12000),
 	}
-	computedAt := time.Date(2026, 5, 6, 15, 0, 0, 0, rankingSnapshotLocation)
-	if err := svc.saveRankingPortfolio(ctx, records, computedAt, nil); err != nil {
+
+	if err := svc.saveRankingPortfolio(ctx, badRecords, computedAt, nil); err != nil {
 		t.Fatalf("first save failed: %v", err)
 	}
-	if err := svc.saveRankingPortfolio(ctx, records, computedAt, nil); err != nil {
+	if err := svc.saveRankingPortfolio(ctx, goodRecords, computedAt, nil); err != nil {
 		t.Fatalf("second save failed: %v", err)
 	}
 
-	var count int64
-	if err := repo.db.WithContext(ctx).Model(&RankingPortfolioSnapshot{}).Count(&count).Error; err != nil {
-		t.Fatalf("count snapshots failed: %v", err)
+	var snapshots []RankingPortfolioSnapshot
+	if err := repo.db.WithContext(ctx).
+		Where("definition_id = ?", defaultRankingPortfolioDefinitionID).
+		Order("id ASC").
+		Find(&snapshots).Error; err != nil {
+		t.Fatalf("load snapshots failed: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("expected 1 snapshot after idempotent save, got %d", count)
+	if len(snapshots) != 1 {
+		t.Fatalf("expected 1 rebuilt snapshot, got %d", len(snapshots))
+	}
+	if snapshots[0].ConstituentsCount != 4 || snapshots[0].HasShortfall {
+		t.Fatalf("expected rebuilt snapshot with 4 constituents, got %+v", snapshots[0])
+	}
+
+	var constituents []RankingPortfolioSnapshotConstituent
+	if err := repo.db.WithContext(ctx).
+		Where("definition_id = ? AND snapshot_version = ?", defaultRankingPortfolioDefinitionID, "2026-05-06").
+		Order("rank ASC").
+		Find(&constituents).Error; err != nil {
+		t.Fatalf("load constituents failed: %v", err)
+	}
+	if len(constituents) != 4 {
+		t.Fatalf("expected 4 rebuilt constituents, got %d", len(constituents))
+	}
+
+	var result RankingPortfolioResult
+	if err := repo.db.WithContext(ctx).
+		Where("definition_id = ? AND snapshot_version = ?", defaultRankingPortfolioDefinitionID, "2026-05-06").
+		First(&result).Error; err != nil {
+		t.Fatalf("load result failed: %v", err)
+	}
+	if result.CurrentConstituentCount != 4 || result.HasShortfall {
+		t.Fatalf("expected rebuilt result to expose 4 constituents, got %+v", result)
 	}
 }

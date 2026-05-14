@@ -138,6 +138,7 @@ type appServer struct {
 	adminService          *admin.Service
 	backupService         *backup.Service
 	backupWorker          *backup.Worker
+	factorLabService      *factorlab.Service
 	backtestService       *backtest.Service
 	screenerService       *screener.Service
 	analyticsRepo         *analytics.Repository
@@ -2346,8 +2347,8 @@ func (a *appServer) handleAdminSession(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"admin": map[string]any{
-			"id": claims.AdminID,
-			"email": claims.Email,
+			"id":       claims.AdminID,
+			"email":    claims.Email,
 			"nickname": claims.Nickname,
 		},
 		"expires_at": claims.ExpiresAt,
@@ -2493,6 +2494,45 @@ func (a *appServer) handleAdminAnalytics(w http.ResponseWriter, r *http.Request)
 		"daily_pv": dailyPV, "daily_uv": dailyUV,
 		"top_pages": topPages,
 	})
+}
+
+func (a *appServer) handleFactorLabMeta(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	if a.factorLabService == nil {
+		writeError(w, http.StatusServiceUnavailable, "因子实验室服务未初始化")
+		return
+	}
+	result, err := a.factorLabService.Meta(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *appServer) handleFactorLabScreener(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	if a.factorLabService == nil {
+		writeError(w, http.StatusServiceUnavailable, "因子实验室服务未初始化")
+		return
+	}
+	var req factorlab.FactorScreenerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	result, err := a.factorLabService.Screen(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (a *appServer) handleScreenerAIParse(w http.ResponseWriter, r *http.Request) {
@@ -3507,6 +3547,9 @@ func main() {
 	})
 	signalEvaluator.Start(context.Background())
 
+	factorLabRepo := factorlab.NewRepository(storeInstance.DB)
+	factorLabService := factorlab.NewService(factorLabRepo)
+
 	adminRepo := admin.NewRepository(storeInstance.DB)
 	adminService := admin.NewService(adminRepo, admin.ServiceConfig{
 		JWTSecret: strings.TrimSpace(cfg.Auth.JWTSecret),
@@ -3541,6 +3584,7 @@ func main() {
 		adminService:          adminService,
 		backupService:         backupService,
 		backupWorker:          backupWorker,
+		factorLabService:      factorLabService,
 		backtestService:       backtestService,
 		screenerService:       screenerService,
 		analyticsRepo:         analyticsRepo,
@@ -3648,6 +3692,9 @@ func main() {
 	mux.HandleFunc("/api/admin/backup-history", server.withSuperAdminAuth(server.handleAdminBackupHistory))
 	mux.HandleFunc("/api/admin/backup-trigger", server.withSuperAdminAuth(server.handleAdminBackupTrigger))
 	mux.HandleFunc("/api/admin/backup-stats", server.withSuperAdminAuth(server.handleAdminBackupStats))
+
+	mux.HandleFunc("/api/factor-lab/meta", server.withOptionalAuth(server.handleFactorLabMeta))
+	mux.HandleFunc("/api/factor-lab/screener", server.withOptionalAuth(server.handleFactorLabScreener))
 
 	mux.HandleFunc("/api/screener/scan", server.withOptionalAuth(server.handleScreenerScan))
 	mux.HandleFunc("/api/screener/ai-parse", server.withRequiredAuth(server.handleScreenerAIParse))

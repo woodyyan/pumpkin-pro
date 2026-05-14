@@ -2,7 +2,7 @@ import '../styles/globals.css'
 import Head from 'next/head'
 import Link from 'next/link'
 import { useRouter } from 'next/router'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { AuthProvider, useAuth } from '../lib/auth-context'
 import { buildPageViewHeaders } from '../lib/pageview'
@@ -17,6 +17,19 @@ const NAV_ITEMS = [
   { href: '/stock-picker', label: '选股器' },
   { href: '/factor-lab', label: '因子实验室' },
   { href: '/portfolio', label: '持仓管理' },
+  { href: '/changelog', label: '更新日志', badgeKey: 'changelog' },
+]
+
+const DESKTOP_NAV_ITEMS = [
+  { href: '/live-trading', label: '行情看板' },
+  { href: '/stock-picker', label: '选股器' },
+  { href: '/backtest', label: '回测引擎' },
+  { href: '/strategies', label: '策略库' },
+  { href: '/portfolio', label: '持仓管理' },
+]
+
+const DESKTOP_MORE_ITEMS = [
+  { href: '/factor-lab', label: '因子实验室' },
   { href: '/changelog', label: '更新日志', badgeKey: 'changelog' },
 ]
 
@@ -196,8 +209,8 @@ function AppLayout({ Component, pageProps }) {
             </Link>
 
             {/* Desktop nav items */}
-            <div className="hidden md:flex items-center space-x-2 text-base font-medium">
-              {NAV_ITEMS.map((item) => {
+            <div className="hidden md:flex items-center gap-2 text-base font-medium">
+              {DESKTOP_NAV_ITEMS.map((item) => {
                 const isActive = router.pathname === item.href
                 return (
                   <Link
@@ -210,14 +223,10 @@ function AppLayout({ Component, pageProps }) {
                     }`}
                   >
                     {item.label}
-                    {item.badgeKey === 'changelog' && unreadCount > 0 && (
-                      <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white leading-none">
-                        {unreadCount > 99 ? '99+' : unreadCount}
-                      </span>
-                    )}
                   </Link>
                 )
               })}
+              <DesktopMoreMenu items={DESKTOP_MORE_ITEMS} unreadCount={unreadCount} currentPath={router.pathname} />
             </div>
 
             {/* Right side: search + hamburger (mobile) + account */}
@@ -296,6 +305,91 @@ function AppLayout({ Component, pageProps }) {
         </footer>
       </div>
     </>
+  )
+}
+
+function DesktopMoreMenu({ items, unreadCount, currentPath }) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef(null)
+  const isActive = items.some((item) => item.href === currentPath)
+
+  useEffect(() => {
+    setOpen(false)
+  }, [currentPath])
+
+  useEffect(() => {
+    if (!open) return undefined
+
+    const onClickOutside = (event) => {
+      if (!menuRef.current?.contains(event.target)) {
+        setOpen(false)
+      }
+    }
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setOpen(false)
+      }
+    }
+
+    window.addEventListener('mousedown', onClickOutside)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('mousedown', onClickOutside)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
+  return (
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 transition ${
+          isActive
+            ? 'border-primary/50 bg-primary/15 text-white font-semibold shadow-[0_0_8px_rgba(230,126,34,0.15)]'
+            : 'border-transparent text-white/60 hover:border-white/10 hover:bg-white/5 hover:text-white'
+        }`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <span>更多</span>
+        {unreadCount > 0 ? (
+          <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white leading-none">
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        ) : null}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition ${open ? 'rotate-180' : ''}`}>
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      {open ? (
+        <div className="absolute right-0 mt-2 w-48 rounded-xl border border-white/10 bg-slate-950/95 p-2 shadow-2xl backdrop-blur">
+          {items.map((item) => {
+            const itemActive = currentPath === item.href
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm transition ${
+                  itemActive
+                    ? 'bg-primary/15 text-white'
+                    : 'text-white/70 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                <span>{item.label}</span>
+                {item.badgeKey === 'changelog' && unreadCount > 0 ? (
+                  <span className="ml-3 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white leading-none">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                ) : null}
+              </Link>
+            )
+          })}
+        </div>
+      ) : null}
+    </div>
   )
 }
 

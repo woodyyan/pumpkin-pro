@@ -1,38 +1,252 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { LabelWithInfo } from './InfoTip'
 import {
-  buildRankingPortfolioChartPoints,
+  buildRankingPortfolioChartSeriesData,
   formatRankingPortfolioCode,
+  formatRankingPortfolioDate,
   formatRankingPortfolioPercent,
   getRankingPortfolioPerformanceClass,
 } from '../lib/ranking-portfolio'
 
-function RankingPortfolioChart({ series = [], benchmarkLabel = '上证指数' }) {
-  const width = 720
-  const height = 240
-  const padding = 18
-  const { portfolio, benchmark, baselineY } = buildRankingPortfolioChartPoints(series, width, height, padding)
+const CHART_COLORS = {
+  portfolio: '#f59e0b',
+  benchmark: '#cbd5e1',
+  baseline: 'rgba(148,163,184,0.35)',
+  grid: 'rgba(148,163,184,0.10)',
+  border: 'rgba(148,163,184,0.20)',
+  text: 'rgba(255,255,255,0.72)',
+}
 
-  if (!series.length) {
+function formatChartTick(time) {
+  const formatted = formatRankingPortfolioDate(time)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(formatted)) return formatted
+
+  const [, month, day] = formatted.split('-')
+  return `${Number(month)}/${Number(day)}`
+}
+
+function buildTooltipPosition(point, container) {
+  const tooltipWidth = 196
+  const tooltipHeight = 106
+  const offset = 14
+  const maxLeft = Math.max((container?.clientWidth || 0) - tooltipWidth - 8, 8)
+  const maxTop = Math.max((container?.clientHeight || 0) - tooltipHeight - 8, 8)
+
+  return {
+    left: Math.min(Math.max(point.x + offset, 8), maxLeft),
+    top: Math.min(Math.max(point.y - tooltipHeight - offset, 8), maxTop),
+  }
+}
+
+function RankingPortfolioChart({ series = [], benchmarkLabel = '上证指数' }) {
+  const containerRef = useRef(null)
+  const chartRef = useRef(null)
+  const chartData = useMemo(() => buildRankingPortfolioChartSeriesData(series), [series])
+  const pointMap = useMemo(
+    () => Object.fromEntries(chartData.points.map((item) => [item.date, item])),
+    [chartData.points]
+  )
+  const [tooltip, setTooltip] = useState(null)
+
+  useEffect(() => {
+    if (!containerRef.current || !chartData.points.length) {
+      setTooltip(null)
+      if (chartRef.current) {
+        chartRef.current.remove()
+        chartRef.current = null
+      }
+      return undefined
+    }
+
+    let cleanup = () => {}
+    let cancelled = false
+
+    const render = async () => {
+      const { createChart, ColorType, CrosshairMode, LineStyle } = await import('lightweight-charts')
+      if (cancelled || !containerRef.current) return
+
+      if (chartRef.current) {
+        chartRef.current.remove()
+        chartRef.current = null
+      }
+
+      const chart = createChart(containerRef.current, {
+        width: containerRef.current.clientWidth || 720,
+        height: 280,
+        layout: {
+          background: { type: ColorType.Solid, color: 'transparent' },
+          textColor: CHART_COLORS.text,
+          fontSize: 11,
+        },
+        grid: {
+          vertLines: { color: CHART_COLORS.grid },
+          horzLines: { color: CHART_COLORS.grid },
+        },
+        rightPriceScale: {
+          borderColor: CHART_COLORS.border,
+          scaleMargins: { top: 0.14, bottom: 0.12 },
+          entireTextOnly: true,
+        },
+        timeScale: {
+          borderColor: CHART_COLORS.border,
+          timeVisible: true,
+          secondsVisible: false,
+          rightOffset: 2,
+          tickMarkFormatter: formatChartTick,
+        },
+        crosshair: {
+          mode: CrosshairMode.Normal,
+          vertLine: {
+            color: 'rgba(245,158,11,0.28)',
+            labelBackgroundColor: 'rgba(15,23,42,0.92)',
+          },
+          horzLine: {
+            color: 'rgba(245,158,11,0.22)',
+            labelBackgroundColor: 'rgba(15,23,42,0.92)',
+          },
+        },
+        localization: {
+          priceFormatter: (value) => formatRankingPortfolioPercent(value),
+        },
+        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+        handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
+      })
+
+      const baselineSeries = chart.addLineSeries({
+        color: CHART_COLORS.baseline,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        crosshairMarkerVisible: false,
+        lastValueVisible: false,
+        priceLineVisible: false,
+      })
+
+      const benchmarkSeries = chart.addLineSeries({
+        color: CHART_COLORS.benchmark,
+        lineWidth: 2,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        title: `${benchmarkLabel}累计收益`,
+      })
+
+      const portfolioSeries = chart.addLineSeries({
+        color: CHART_COLORS.portfolio,
+        lineWidth: 3,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        title: '模拟组合累计收益',
+      })
+
+      baselineSeries.setData(chartData.baseline)
+      benchmarkSeries.setData(chartData.benchmark)
+      portfolioSeries.setData(chartData.portfolio)
+      chart.timeScale().fitContent()
+      chartRef.current = chart
+
+      const updateTooltip = (point, item) => {
+        if (!point || !item || !containerRef.current) {
+          setTooltip(null)
+          return
+        }
+        const position = buildTooltipPosition(point, containerRef.current)
+        setTooltip({
+          left: position.left,
+          top: position.top,
+          point: item,
+        })
+      }
+
+      const handleCrosshairMove = (param) => {
+        if (!param?.point || !param?.time || !containerRef.current) {
+          setTooltip(null)
+          return
+        }
+
+        const bounds = {
+          width: containerRef.current.clientWidth || 0,
+          height: containerRef.current.clientHeight || 0,
+        }
+
+        if (param.point.x < 0 || param.point.y < 0 || param.point.x > bounds.width || param.point.y > bounds.height) {
+          setTooltip(null)
+          return
+        }
+
+        const item = pointMap[formatRankingPortfolioDate(param.time)] || null
+        updateTooltip(param.point, item)
+      }
+
+      const handleMouseLeave = () => setTooltip(null)
+      const resize = () => {
+        if (!containerRef.current || !chartRef.current) return
+        chartRef.current.applyOptions({ width: containerRef.current.clientWidth || 720 })
+        chartRef.current.timeScale().fitContent()
+      }
+
+      chart.subscribeCrosshairMove(handleCrosshairMove)
+      containerRef.current.addEventListener('mouseleave', handleMouseLeave)
+      window.addEventListener('resize', resize)
+
+      let resizeObserver = null
+      if (typeof ResizeObserver !== 'undefined') {
+        resizeObserver = new ResizeObserver(() => resize())
+        resizeObserver.observe(containerRef.current)
+      }
+
+      cleanup = () => {
+        chart.unsubscribeCrosshairMove(handleCrosshairMove)
+        containerRef.current?.removeEventListener('mouseleave', handleMouseLeave)
+        window.removeEventListener('resize', resize)
+        resizeObserver?.disconnect()
+        if (chartRef.current) {
+          chartRef.current.remove()
+          chartRef.current = null
+        }
+      }
+    }
+
+    render()
+    return () => {
+      cancelled = true
+      cleanup()
+    }
+  }, [benchmarkLabel, chartData.baseline, chartData.benchmark, chartData.points.length, chartData.portfolio, pointMap])
+
+  if (!chartData.points.length) {
     return (
-      <div className="flex min-h-[260px] items-center justify-center rounded-2xl border border-dashed border-border/70 bg-black/10 text-sm text-white/35 xl:h-full">
+      <div className="flex min-h-[300px] items-center justify-center rounded-2xl border border-dashed border-border/70 bg-black/10 text-sm text-white/35 xl:h-full">
         暂无模拟组合曲线
       </div>
     )
   }
 
   return (
-    <div className="min-h-[260px] overflow-hidden rounded-2xl border border-border/70 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.14),transparent_45%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] xl:h-full">
+    <div className="overflow-hidden rounded-2xl border border-border/70 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.14),transparent_45%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))]">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-white/6 px-4 py-3 text-[11px] text-white/55">
         <ChartLegendItem colorClass="bg-amber-400" label="模拟组合累计收益" />
         <ChartLegendItem colorClass="bg-slate-300" label={`${benchmarkLabel}累计收益`} />
+        <span className="text-white/30">横轴时间 · 纵轴累计收益</span>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-full min-h-[260px] w-full" role="img" aria-label="模拟组合与上证指数收益曲线" preserveAspectRatio="none">
-        <line x1="0" x2={width} y1={baselineY} y2={baselineY} stroke="rgba(255,255,255,0.12)" strokeDasharray="4 5" />
-        <path d={benchmark} fill="none" stroke="rgba(148,163,184,0.95)" strokeWidth="2.2" />
-        <path d={portfolio} fill="none" stroke="rgba(245,158,11,1)" strokeWidth="2.8" />
-      </svg>
+
+      <div className="relative px-2 pb-2 pt-3">
+        <div ref={containerRef} className="h-[280px] w-full" role="img" aria-label="模拟组合与基准累计收益图表" />
+        {tooltip ? (
+          <div
+            className="pointer-events-none absolute z-10 min-w-[180px] rounded-xl border border-white/10 bg-slate-950/94 px-3 py-2 shadow-2xl backdrop-blur"
+            style={{ left: tooltip.left, top: tooltip.top }}
+          >
+            <div className="text-[11px] text-white/42">{tooltip.point.date}</div>
+            <TooltipMetric label="模拟组合" value={tooltip.point.portfolioReturnPct} colorClass="bg-amber-400" />
+            <TooltipMetric label={benchmarkLabel} value={tooltip.point.benchmarkReturnPct} colorClass="bg-slate-300" />
+            <TooltipMetric label="超额收益" value={tooltip.point.excessReturnPct} colorClass="bg-sky-400" highlight />
+          </div>
+        ) : (
+          <div className="pointer-events-none absolute right-4 top-4 rounded-full border border-white/10 bg-black/35 px-2.5 py-1 text-[11px] text-white/38">
+            悬停查看明细
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -139,6 +353,18 @@ function ChartLegendItem({ colorClass, label }) {
     <div className="inline-flex items-center gap-2">
       <span className={`h-2.5 w-2.5 rounded-full ${colorClass}`} aria-hidden="true" />
       <span>{label}</span>
+    </div>
+  )
+}
+
+function TooltipMetric({ label, value, colorClass, highlight = false }) {
+  return (
+    <div className="mt-1.5 flex items-center justify-between gap-3 text-[11px] tabular-nums">
+      <div className="inline-flex items-center gap-2 text-white/62">
+        <span className={`h-2 w-2 rounded-full ${colorClass}`} aria-hidden="true" />
+        <span>{label}</span>
+      </div>
+      <div className={highlight ? getRankingPortfolioPerformanceClass(value) : 'text-white'}>{formatRankingPortfolioPercent(value)}</div>
     </div>
   )
 }

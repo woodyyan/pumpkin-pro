@@ -5,6 +5,20 @@ export function formatRankingPortfolioPercent(value, digits = 2) {
   return `${sign}${num.toFixed(digits)}%`
 }
 
+function parseRankingPortfolioNumber(value) {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : null
+}
+
+function resolveRankingPortfolioReturnPct(item, returnKey, navKey) {
+  const directValue = parseRankingPortfolioNumber(item?.[returnKey])
+  if (directValue !== null) return directValue
+
+  const nav = parseRankingPortfolioNumber(item?.[navKey])
+  if (nav === null) return null
+  return (nav - 1) * 100
+}
+
 export function getRankingPortfolioPerformanceClass(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'text-white/35'
   return Number(value) >= 0 ? 'text-rose-300' : 'text-emerald-300'
@@ -15,6 +29,28 @@ export function formatRankingPortfolioDateTime(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+export function formatRankingPortfolioDate(value) {
+  if (!value) return '--'
+  if (typeof value === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  if (typeof value === 'object' && value.year && value.month && value.day) {
+    return `${String(value.year).padStart(4, '0')}-${String(value.month).padStart(2, '0')}-${String(value.day).padStart(2, '0')}`
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '--'
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 export function formatRankingPortfolioCode(code, exchange) {
@@ -50,3 +86,59 @@ export function buildRankingPortfolioChartPoints(series, width, height, padding)
   }
 }
 
+export function normalizeRankingPortfolioSeries(series) {
+  if (!Array.isArray(series) || series.length === 0) return []
+
+  return [...series]
+    .filter((item) => item?.date)
+    .map((item) => ({
+      ...item,
+      __normalized_date: formatRankingPortfolioDate(item.date),
+    }))
+    .sort((left, right) => String(left.__normalized_date).localeCompare(String(right.__normalized_date)))
+    .map((item) => {
+      const portfolioReturnPct = resolveRankingPortfolioReturnPct(item, 'portfolio_return_pct', 'nav')
+      const benchmarkReturnPct = resolveRankingPortfolioReturnPct(item, 'benchmark_return_pct', 'benchmark_nav')
+      const excessReturnPct = parseRankingPortfolioNumber(item?.excess_return_pct)
+
+      return {
+        date: item.__normalized_date,
+        portfolioReturnPct,
+        benchmarkReturnPct,
+        excessReturnPct: excessReturnPct !== null ? excessReturnPct : (portfolioReturnPct !== null && benchmarkReturnPct !== null ? portfolioReturnPct - benchmarkReturnPct : null),
+      }
+    })
+    .filter((item) => item.portfolioReturnPct !== null || item.benchmarkReturnPct !== null)
+}
+
+export function buildRankingPortfolioChartSeriesData(series) {
+  const points = normalizeRankingPortfolioSeries(series)
+  if (!points.length) {
+    return {
+      points: [],
+      portfolio: [],
+      benchmark: [],
+      baseline: [],
+      latest: null,
+    }
+  }
+
+  return {
+    points,
+    portfolio: points
+      .filter((item) => item.portfolioReturnPct !== null)
+      .map((item) => ({ time: item.date, value: item.portfolioReturnPct })),
+    benchmark: points
+      .filter((item) => item.benchmarkReturnPct !== null)
+      .map((item) => ({ time: item.date, value: item.benchmarkReturnPct })),
+    baseline: points.map((item) => ({ time: item.date, value: 0 })),
+    latest: points[points.length - 1],
+  }
+}
+
+export function findRankingPortfolioPointByTime(series, time) {
+  const formattedTime = formatRankingPortfolioDate(time)
+  if (formattedTime === '--') return null
+  const points = normalizeRankingPortfolioSeries(series)
+  return points.find((item) => item.date === formattedTime) || null
+}

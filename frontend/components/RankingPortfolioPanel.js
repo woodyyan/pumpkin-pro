@@ -6,7 +6,12 @@ import {
   buildRankingPortfolioChartSeriesData,
   formatRankingPortfolioCode,
   formatRankingPortfolioDate,
+  formatRankingPortfolioDateTime,
   formatRankingPortfolioPercent,
+  formatRankingPortfolioReferencePrice,
+  formatRankingPortfolioWeight,
+  formatRankingPortfolioWeightChange,
+  getRankingPortfolioRebalanceActionLabel,
   getRankingPortfolioPerformanceClass,
 } from '../lib/ranking-portfolio'
 
@@ -242,11 +247,7 @@ function RankingPortfolioChart({ series = [], benchmarkLabel = '上证指数' })
             <TooltipMetric label={benchmarkLabel} value={tooltip.point.benchmarkReturnPct} colorClass="bg-slate-300" />
             <TooltipMetric label="超额收益" value={tooltip.point.excessReturnPct} colorClass="bg-sky-400" highlight />
           </div>
-        ) : (
-          <div className="pointer-events-none absolute right-4 top-4 rounded-full border border-white/10 bg-black/35 px-2.5 py-1 text-[11px] text-white/38">
-            悬停查看明细
-          </div>
-        )}
+        ) : null}
       </div>
     </div>
   )
@@ -262,6 +263,7 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
   const meta = data?.meta || null
   const series = Array.isArray(data?.series) ? data.series : []
   const constituents = Array.isArray(data?.constituents) ? data.constituents : []
+  const latestRebalance = data?.latest_rebalance && typeof data.latest_rebalance === 'object' ? data.latest_rebalance : null
   const benchmarkLabel = meta?.benchmark_name || meta?.benchmark_code || '上证指数'
 
   if (loading && !meta) {
@@ -334,6 +336,8 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
               </div>
             )}
           </div>
+
+          <LatestRebalanceDisclosure rebalance={latestRebalance} />
         </div>
       </div>
     </section>
@@ -401,5 +405,68 @@ function RankingPortfolioConstituentRow({ item }) {
     >
       {content}
     </a>
+  )
+}
+
+function LatestRebalanceDisclosure({ rebalance }) {
+  if (!rebalance) return null
+
+  const items = Array.isArray(rebalance?.items) ? rebalance.items : []
+  const changeCount = Number(rebalance?.change_count || items.length || 0)
+  const effectiveTime = formatRankingPortfolioDateTime(rebalance?.effective_time)
+  const tradeCostRate = Number(rebalance?.trade_cost_rate || 0)
+
+  return (
+    <details className="mt-3">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-full border border-white/10 bg-black/15 px-2.5 py-1 text-[11px] text-white/52 transition hover:border-white/18 hover:text-white/72 marker:hidden">
+        <span>最近一次调仓</span>
+        <span className="rounded-full bg-white/8 px-1.5 py-0.5 text-[10px] text-white/45">{changeCount}项</span>
+      </summary>
+
+      <div className="mt-2 rounded-xl border border-white/8 bg-white/[0.02] px-3 py-3">
+        <div className="text-[11px] leading-5 text-white/42">
+          生效时间：{effectiveTime}
+          {tradeCostRate > 0 ? ` · 含 ${formatRankingPortfolioPercent(tradeCostRate * 100, 2)} 交易成本` : ''}
+        </div>
+
+        {items.length ? (
+          <div className="mt-3 space-y-2">
+            {items.map((item) => (
+              <LatestRebalanceRow key={`${item.exchange}-${item.code}-${item.action}`} item={item} />
+            ))}
+          </div>
+        ) : (
+          <div className="mt-3 rounded-xl border border-dashed border-border/70 px-3 py-4 text-center text-sm text-white/35">
+            本次未发生调仓
+          </div>
+        )}
+      </div>
+    </details>
+  )
+}
+
+function LatestRebalanceRow({ item }) {
+  const isSell = String(item?.action || '').toLowerCase() === 'sell'
+  const badgeClass = isSell
+    ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+    : 'border-amber-300/20 bg-amber-500/10 text-amber-200'
+
+  return (
+    <div className="rounded-xl border border-white/5 bg-black/10 px-3 py-2.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] ${badgeClass}`}>{getRankingPortfolioRebalanceActionLabel(item?.action)}</span>
+            <span className="truncate text-sm font-medium text-white">{item?.name || '--'}</span>
+          </div>
+          <div className="mt-1 text-[11px] text-white/35">{formatRankingPortfolioCode(item?.code, item?.exchange)}</div>
+        </div>
+
+        <div className="text-right text-[11px] text-white/42">
+          <div>仓位 {formatRankingPortfolioWeightChange(item?.from_weight, item?.to_weight, 0)}</div>
+          <div className="mt-1">参考成本价 {formatRankingPortfolioReferencePrice(item?.reference_cost_price, item?.exchange)}</div>
+        </div>
+      </div>
+    </div>
   )
 }

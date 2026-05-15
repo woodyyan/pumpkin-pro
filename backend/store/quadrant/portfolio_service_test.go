@@ -6,6 +6,15 @@ import (
 	"time"
 )
 
+func TestBuildRankingPortfolioEffectiveTime_SkipsWeekend(t *testing.T) {
+	computedAt := time.Date(2026, 5, 8, 15, 0, 0, 0, rankingSnapshotLocation)
+	effectiveAt := buildRankingPortfolioEffectiveTime(computedAt)
+	want := time.Date(2026, 5, 11, 9, 30, 0, 0, rankingSnapshotLocation).UTC()
+	if !effectiveAt.Equal(want) {
+		t.Fatalf("effectiveAt = %s, want %s", effectiveAt.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+}
+
 func TestSelectRankingPortfolioConstituents_ExcludesStarAndUsesTopFour(t *testing.T) {
 	records := []QuadrantScoreRecord{
 		makeAShareRankingRecord("688001", "STAR", "机会", 99, 88, 10, 12000),
@@ -79,6 +88,8 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 		snapshotPriceHintKey("000001", "SZSE") + "@2026-05-07": 21,
 		snapshotPriceHintKey("300001", "SZSE") + "@2026-05-07": 33,
 		snapshotPriceHintKey("600002", "SSE") + "@2026-05-07":  44,
+		snapshotPriceHintKey("600003", "SSE") + "@2026-05-07":  50,
+		snapshotPriceHintKey("300002", "SZSE") + "@2026-05-07": 60,
 	}
 	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
 		return priceMap[snapshotPriceHintKey(code, exchange)+"@"+tradeDate]
@@ -93,10 +104,10 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	}
 	recordsDay2 := []QuadrantScoreRecord{
 		makeAShareRankingRecord("688001", "STAR", "机会", 99, 88, 10, 12000),
+		makeAShareRankingRecord("600003", "MAIN", "机会", 97, 86, 10, 12000),
+		makeAShareRankingRecord("300002", "CHINEXT", "机会", 96, 85, 10, 12000),
 		makeAShareRankingRecord("600001", "MAIN", "机会", 95, 84, 10, 12000),
 		makeAShareRankingRecord("000001", "MAIN", "机会", 94, 83, 10, 12000),
-		makeAShareRankingRecord("300001", "CHINEXT", "机会", 93, 82, 10, 12000),
-		makeAShareRankingRecord("600002", "MAIN", "机会", 92, 81, 10, 12000),
 	}
 
 	if err := svc.saveRankingPortfolio(ctx, recordsDay1, time.Date(2026, 5, 6, 15, 0, 0, 0, rankingSnapshotLocation), nil); err != nil {
@@ -127,6 +138,35 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	}
 	if resp.Meta.BatchID == "" || resp.Meta.MethodNote == "" {
 		t.Fatalf("expected batch id and method note, got %+v", resp.Meta)
+	}
+	wantEffectiveTime := time.Date(2026, 5, 8, 9, 30, 0, 0, rankingSnapshotLocation).UTC().Format(time.RFC3339)
+	if resp.Meta.HoldingsEffectiveTime != wantEffectiveTime {
+		t.Fatalf("holdings_effective_time = %s, want %s", resp.Meta.HoldingsEffectiveTime, wantEffectiveTime)
+	}
+	if resp.LatestRebalance == nil {
+		t.Fatal("expected latest rebalance payload")
+	}
+	if resp.LatestRebalance.EffectiveTime != wantEffectiveTime {
+		t.Fatalf("latest rebalance effective_time = %s, want %s", resp.LatestRebalance.EffectiveTime, wantEffectiveTime)
+	}
+	if resp.LatestRebalance.ChangeCount != 4 || len(resp.LatestRebalance.Items) != 4 {
+		t.Fatalf("expected 4 rebalance items, got %+v", resp.LatestRebalance)
+	}
+	itemsByCode := map[string]RankingPortfolioRebalanceItem{}
+	for _, item := range resp.LatestRebalance.Items {
+		itemsByCode[item.Code] = item
+	}
+	if item := itemsByCode["600002"]; item.Action != "sell" || item.FromWeight != 0.25 || item.ToWeight != 0 || item.ReferencePrice != 44 || item.ReferenceCostPrice != 43.9912 {
+		t.Fatalf("unexpected sell rebalance item: %+v", item)
+	}
+	if item := itemsByCode["300001"]; item.Action != "sell" || item.FromWeight != 0.25 || item.ToWeight != 0 || item.ReferencePrice != 33 || item.ReferenceCostPrice != 32.9934 {
+		t.Fatalf("unexpected sell rebalance item: %+v", item)
+	}
+	if item := itemsByCode["600003"]; item.Action != "buy" || item.FromWeight != 0 || item.ToWeight != 0.25 || item.ReferencePrice != 50 || item.ReferenceCostPrice != 50.01 {
+		t.Fatalf("unexpected buy rebalance item: %+v", item)
+	}
+	if item := itemsByCode["300002"]; item.Action != "buy" || item.FromWeight != 0 || item.ToWeight != 0.25 || item.ReferencePrice != 60 || item.ReferenceCostPrice != 60.012 {
+		t.Fatalf("unexpected buy rebalance item: %+v", item)
 	}
 }
 

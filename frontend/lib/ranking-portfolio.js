@@ -58,6 +58,25 @@ export function formatRankingPortfolioCode(code, exchange) {
   return String(code || '')
 }
 
+export function formatRankingPortfolioWeight(value, digits = 0) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return `${(Number(value) * 100).toFixed(digits)}%`
+}
+
+export function formatRankingPortfolioWeightChange(fromWeight, toWeight, digits = 0) {
+  return `${formatRankingPortfolioWeight(fromWeight, digits)} -> ${formatRankingPortfolioWeight(toWeight, digits)}`
+}
+
+export function formatRankingPortfolioReferencePrice(value, exchange) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  const prefix = String(exchange || '').toUpperCase() === 'HKEX' ? 'HK$' : '¥'
+  return `${prefix}${Number(value).toFixed(2)}`
+}
+
+export function getRankingPortfolioRebalanceActionLabel(action) {
+  return String(action || '').toLowerCase() === 'sell' ? '卖出' : '买入'
+}
+
 export function buildRankingPortfolioDetailSymbol(code, exchange) {
   const digits = String(code || '').replace(/\D/g, '')
   if (!digits) return ''

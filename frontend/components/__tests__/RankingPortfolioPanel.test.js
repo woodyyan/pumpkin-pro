@@ -9,7 +9,11 @@ import {
   buildRankingPortfolioChartSeriesData,
   findRankingPortfolioPointByTime,
   formatRankingPortfolioDate,
+  formatRankingPortfolioReferencePrice,
   formatRankingPortfolioPercent,
+  formatRankingPortfolioWeight,
+  formatRankingPortfolioWeightChange,
+  getRankingPortfolioRebalanceActionLabel,
   getRankingPortfolioPerformanceClass,
   normalizeRankingPortfolioSeries,
 } from '../../lib/ranking-portfolio.js'
@@ -143,6 +147,15 @@ describe('RankingPortfolioPanel helpers', () => {
     assert.equal(formatRankingPortfolioDate('invalid-date'), 'invalid-date')
   })
 
+  it('formats rebalance labels, weights and reference prices', () => {
+    assert.equal(getRankingPortfolioRebalanceActionLabel('sell'), '卖出')
+    assert.equal(getRankingPortfolioRebalanceActionLabel('buy'), '买入')
+    assert.equal(formatRankingPortfolioWeight(0.25), '25%')
+    assert.equal(formatRankingPortfolioWeightChange(0, 0.25), '0% -> 25%')
+    assert.equal(formatRankingPortfolioReferencePrice(43.9912, 'SSE'), '¥43.99')
+    assert.equal(formatRankingPortfolioReferencePrice(388.6, 'HKEX'), 'HK$388.60')
+  })
+
   it('builds detail symbols and hrefs for constituent links', () => {
     assert.equal(buildRankingPortfolioDetailSymbol('700', 'HKEX'), '00700.HK')
     assert.equal(buildRankingPortfolioDetailSymbol('600519', 'SSE'), '600519.SH')
@@ -173,5 +186,13 @@ describe('RankingPortfolioPanel source contract', () => {
     assert.match(panelSource, /target="_blank"/)
     assert.match(panelSource, /rel="noreferrer"/)
     assert.match(panelSource, /仓位/)
+  })
+
+  it('keeps latest rebalance collapsed behind a disclosure button', () => {
+    assert.match(panelSource, /最近一次调仓/)
+    assert.match(panelSource, /<details/)
+    assert.match(panelSource, /changeCount}项/)
+    assert.match(panelSource, /参考成本价/)
+    assert.match(panelSource, /本次未发生调仓/)
   })
 })

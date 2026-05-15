@@ -16,6 +16,13 @@ import (
 
 const defaultRankingPortfolioMethodNote = "模拟组合规则：每日收盘后取去除科创板后的卧龙AI精选 TOP4，下一交易日生效，收益按相邻有效交易日收盘价近似计算并扣除 0.02% 交易成本，不代表实际投资建议。"
 
+const rankingPortfolioTradeCostDisplayDigits = 6
+
+const (
+	rankingPortfolioEffectiveHour   = 9
+	rankingPortfolioEffectiveMinute = 30
+)
+
 func defaultRankingPortfolioDefinitionRecord(now time.Time) RankingPortfolioDefinition {
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -45,6 +52,27 @@ func buildRankingPortfolioSnapshotVersion(snapshotDate string) string {
 
 func buildRankingPortfolioBatchID(definitionID, snapshotVersion string) string {
 	return strings.TrimSpace(definitionID) + ":" + strings.TrimSpace(snapshotVersion)
+}
+
+func buildRankingPortfolioEffectiveTime(computedAt time.Time) time.Time {
+	if computedAt.IsZero() {
+		return time.Time{}
+	}
+	local := computedAt.In(rankingSnapshotLocation)
+	nextDay := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, rankingSnapshotLocation).AddDate(0, 0, 1)
+	for nextDay.Weekday() == time.Saturday || nextDay.Weekday() == time.Sunday {
+		nextDay = nextDay.AddDate(0, 0, 1)
+	}
+	return time.Date(
+		nextDay.Year(),
+		nextDay.Month(),
+		nextDay.Day(),
+		rankingPortfolioEffectiveHour,
+		rankingPortfolioEffectiveMinute,
+		0,
+		0,
+		rankingSnapshotLocation,
+	).UTC()
 }
 
 func (s *Service) saveRankingPortfolioBestEffort(ctx context.Context, records []QuadrantScoreRecord, computedAt time.Time, priceHints map[string]snapshotPriceHint) {
@@ -112,13 +140,14 @@ func (s *Service) saveRankingPortfolio(ctx context.Context, records []QuadrantSc
 		}
 
 		batchID := buildRankingPortfolioBatchID(definition.ID, snapshotVersion)
+		effectiveTime := buildRankingPortfolioEffectiveTime(computedAt)
 		snapshot := RankingPortfolioSnapshot{
 			DefinitionID:          definition.ID,
 			SnapshotVersion:       snapshotVersion,
 			BatchID:               batchID,
 			SnapshotDate:          snapshotDate,
 			RankingTime:           computedAt,
-			HoldingsEffectiveTime: computedAt,
+			HoldingsEffectiveTime: effectiveTime,
 			NavAsOfTime:           computedAt,
 			BenchmarkCode:         definition.BenchmarkCode,
 			BenchmarkName:         definition.BenchmarkName,
@@ -195,7 +224,7 @@ func (s *Service) saveRankingPortfolio(ctx context.Context, records []QuadrantSc
 				"benchmark_code", "benchmark_name", "latest_nav", "latest_benchmark_nav",
 				"latest_portfolio_return", "latest_benchmark_return", "latest_excess_return_pct",
 				"current_constituent_count", "has_shortfall", "warning_text", "method_note",
-				"series_json", "constituents_json", "updated_at",
+				"series_json", "constituents_json", "latest_rebalance_json", "updated_at",
 			}),
 		}).Create(result).Error; err != nil {
 			return fmt.Errorf("upsert ranking portfolio result: %w", err)
@@ -367,6 +396,106 @@ func (s *Service) resolveRankingPortfolioBenchmarkClose(ctx context.Context, ben
 	return closePrice, validPriceTradeDate(tradeDate)
 }
 
+func buildRankingPortfolioLatestRebalance(
+	definition RankingPortfolioDefinition,
+	currentSnapshot RankingPortfolioSnapshot,
+	current []RankingPortfolioConstituentItem,
+	previous []RankingPortfolioConstituentItem,
+	priceByKey map[string]RankingPortfolioMarketPrice,
+) *RankingPortfolioLatestRebalance {
+	currentByKey := make(map[string]RankingPortfolioConstituentItem, len(current))
+	for _, item := range current {
+		currentByKey[snapshotPriceHintKey(item.Code, item.Exchange)] = item
+	}
+	previousByKey := make(map[string]RankingPortfolioConstituentItem, len(previous))
+	for _, item := range previous {
+		previousByKey[snapshotPriceHintKey(item.Code, item.Exchange)] = item
+	}
+
+	keys := make([]string, 0, len(currentByKey)+len(previousByKey))
+	seen := make(map[string]struct{}, len(currentByKey)+len(previousByKey))
+	for key := range currentByKey {
+		keys = append(keys, key)
+		seen[key] = struct{}{}
+	}
+	for key := range previousByKey {
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	items := make([]RankingPortfolioRebalanceItem, 0, len(keys))
+	for _, key := range keys {
+		currentItem, hasCurrent := currentByKey[key]
+		previousItem, hasPrevious := previousByKey[key]
+		fromWeight := 0.0
+		toWeight := 0.0
+		baseItem := currentItem
+		if hasPrevious {
+			fromWeight = previousItem.Weight
+			baseItem = previousItem
+		}
+		if hasCurrent {
+			toWeight = currentItem.Weight
+			baseItem = currentItem
+		}
+		weightDiff := fromWeight - toWeight
+		if weightDiff < 0 {
+			weightDiff = -weightDiff
+		}
+		if weightDiff < 1e-9 {
+			continue
+		}
+
+		action := "buy"
+		costMultiplier := 1 + definition.TradeCostRate
+		if toWeight < fromWeight {
+			action = "sell"
+			costMultiplier = 1 - definition.TradeCostRate
+		}
+
+		priceRow := priceByKey[key]
+		referencePrice := roundRankingPortfolioFloat(priceRow.ClosePrice)
+		referenceCostPrice := 0.0
+		if referencePrice > 0 {
+			referenceCostPrice = roundRankingPortfolioFloat(referencePrice * costMultiplier)
+		}
+
+		items = append(items, RankingPortfolioRebalanceItem{
+			Action:             action,
+			Code:               baseItem.Code,
+			Name:               baseItem.Name,
+			Exchange:           baseItem.Exchange,
+			Board:              baseItem.Board,
+			FromWeight:         roundRankingPortfolioFloat(fromWeight),
+			ToWeight:           roundRankingPortfolioFloat(toWeight),
+			ReferencePrice:     referencePrice,
+			ReferenceCostPrice: referenceCostPrice,
+			PriceTradeDate:     priceRow.PriceTradeDate,
+		})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Action != items[j].Action {
+			return items[i].Action == "sell"
+		}
+		if items[i].Exchange != items[j].Exchange {
+			return items[i].Exchange < items[j].Exchange
+		}
+		return items[i].Code < items[j].Code
+	})
+
+	return &RankingPortfolioLatestRebalance{
+		SnapshotDate:  currentSnapshot.SnapshotDate,
+		RankingTime:   currentSnapshot.RankingTime.UTC().Format(time.RFC3339),
+		EffectiveTime: currentSnapshot.HoldingsEffectiveTime.UTC().Format(time.RFC3339),
+		TradeCostRate: roundRankingPortfolioCostRate(definition.TradeCostRate),
+		ChangeCount:   len(items),
+		Items:         items,
+	}
+}
+
 func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinition, latestSnapshotVersion string, now time.Time) (*RankingPortfolioResult, error) {
 	var snapshots []RankingPortfolioSnapshot
 	if err := tx.Where("definition_id = ?", definition.ID).
@@ -471,6 +600,18 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 	seriesJSON := mustMarshal(series)
 	constituentsJSON := mustMarshal(latestConstituents)
 	latestPoint := series[len(series)-1]
+	previousConstituents := []RankingPortfolioConstituentItem{}
+	if len(snapshots) > 1 {
+		previousConstituents = constituentsByVersion[snapshots[len(snapshots)-2].SnapshotVersion]
+	}
+	latestPriceByKey := map[string]RankingPortfolioMarketPrice{}
+	for _, row := range priceRows {
+		if row.SnapshotVersion != latestSnapshot.SnapshotVersion {
+			continue
+		}
+		latestPriceByKey[snapshotPriceHintKey(row.Code, row.Exchange)] = row
+	}
+	latestRebalanceJSON := mustMarshal(buildRankingPortfolioLatestRebalance(definition, latestSnapshot, latestConstituents, previousConstituents, latestPriceByKey))
 
 	return &RankingPortfolioResult{
 		DefinitionID:            definition.ID,
@@ -493,6 +634,7 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 		MethodNote:              latestSnapshot.MethodNote,
 		SeriesJSON:              seriesJSON,
 		ConstituentsJSON:        constituentsJSON,
+		LatestRebalanceJSON:     latestRebalanceJSON,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}, nil
@@ -553,6 +695,10 @@ func roundRankingPortfolioPct(value float64) float64 {
 	return mathRound(value, 4)
 }
 
+func roundRankingPortfolioCostRate(value float64) float64 {
+	return mathRound(value, rankingPortfolioTradeCostDisplayDigits)
+}
+
 func mathRound(value float64, digits int) float64 {
 	if digits < 0 {
 		return value
@@ -587,8 +733,9 @@ func (s *Service) GetRankingPortfolio(ctx context.Context) (*RankingPortfolioRes
 					LatestBenchmarkNav: 1,
 					MethodNote:         definition.MethodNote,
 				},
-				Series:       []RankingPortfolioSeriesPoint{},
-				Constituents: []RankingPortfolioConstituentItem{},
+				Series:          []RankingPortfolioSeriesPoint{},
+				Constituents:    []RankingPortfolioConstituentItem{},
+				LatestRebalance: nil,
 			}, nil
 		}
 		return nil, err
@@ -604,6 +751,12 @@ func (s *Service) GetRankingPortfolio(ctx context.Context) (*RankingPortfolioRes
 	if strings.TrimSpace(result.ConstituentsJSON) != "" {
 		if err := json.Unmarshal([]byte(result.ConstituentsJSON), &constituents); err != nil {
 			return nil, fmt.Errorf("decode ranking portfolio constituents: %w", err)
+		}
+	}
+	var latestRebalance *RankingPortfolioLatestRebalance
+	if strings.TrimSpace(result.LatestRebalanceJSON) != "" {
+		if err := json.Unmarshal([]byte(result.LatestRebalanceJSON), &latestRebalance); err != nil {
+			return nil, fmt.Errorf("decode ranking portfolio latest rebalance: %w", err)
 		}
 	}
 
@@ -631,7 +784,8 @@ func (s *Service) GetRankingPortfolio(ctx context.Context) (*RankingPortfolioRes
 			WarningText:              result.WarningText,
 			MethodNote:               result.MethodNote,
 		},
-		Series:       series,
-		Constituents: constituents,
+		Series:          series,
+		Constituents:    constituents,
+		LatestRebalance: latestRebalance,
 	}, nil
 }

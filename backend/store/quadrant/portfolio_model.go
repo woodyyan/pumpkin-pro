@@ -143,6 +143,7 @@ type RankingPortfolioResult struct {
 	MethodNote              string    `gorm:"type:text;not null;default:''"`
 	SeriesJSON              string    `gorm:"type:text;not null;default:'[]'"`
 	ConstituentsJSON        string    `gorm:"type:text;not null;default:'[]'"`
+	LatestRebalanceJSON     string    `gorm:"type:text;not null;default:''"`
 	CreatedAt               time.Time `gorm:"not null"`
 	UpdatedAt               time.Time `gorm:"not null"`
 }
@@ -175,6 +176,28 @@ type RankingPortfolioConstituentItem struct {
 	Risk         float64 `json:"risk,omitempty"`
 }
 
+type RankingPortfolioRebalanceItem struct {
+	Action             string  `json:"action"`
+	Code               string  `json:"code"`
+	Name               string  `json:"name"`
+	Exchange           string  `json:"exchange"`
+	Board              string  `json:"board,omitempty"`
+	FromWeight         float64 `json:"from_weight"`
+	ToWeight           float64 `json:"to_weight"`
+	ReferencePrice     float64 `json:"reference_price"`
+	ReferenceCostPrice float64 `json:"reference_cost_price"`
+	PriceTradeDate     string  `json:"price_trade_date,omitempty"`
+}
+
+type RankingPortfolioLatestRebalance struct {
+	SnapshotDate  string                          `json:"snapshot_date"`
+	RankingTime   string                          `json:"ranking_time"`
+	EffectiveTime string                          `json:"effective_time"`
+	TradeCostRate float64                         `json:"trade_cost_rate"`
+	ChangeCount   int                             `json:"change_count"`
+	Items         []RankingPortfolioRebalanceItem `json:"items"`
+}
+
 type RankingPortfolioMeta struct {
 	DefinitionID             string  `json:"definition_id"`
 	DefinitionCode           string  `json:"definition_code"`
@@ -200,7 +223,8 @@ type RankingPortfolioMeta struct {
 }
 
 type RankingPortfolioResponse struct {
-	Meta         RankingPortfolioMeta              `json:"meta"`
-	Series       []RankingPortfolioSeriesPoint     `json:"series"`
-	Constituents []RankingPortfolioConstituentItem `json:"constituents"`
+	Meta            RankingPortfolioMeta              `json:"meta"`
+	Series          []RankingPortfolioSeriesPoint     `json:"series"`
+	Constituents    []RankingPortfolioConstituentItem `json:"constituents"`
+	LatestRebalance *RankingPortfolioLatestRebalance  `json:"latest_rebalance,omitempty"`
 }

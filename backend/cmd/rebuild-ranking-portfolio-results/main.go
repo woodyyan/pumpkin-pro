@@ -27,18 +27,21 @@ var (
 )
 
 const (
-	defaultDefinitionID           = "wolong_ai_top4_ex_star_equal_v1"
-	defaultDefinitionCode         = "wolong-ai-top4-ex-star-equal"
-	defaultPortfolioName          = "卧龙AI精选模拟组合"
-	defaultBenchmarkCode          = "SHCI"
-	defaultBenchmarkName          = "上证指数"
-	defaultMethodNote             = "模拟组合规则：每日收盘后取去除科创板后的卧龙AI精选 TOP4，下一交易日生效，收益按相邻有效交易日收盘价近似计算并扣除 0.02% 交易成本，不代表实际投资建议。"
-	defaultWarningText            = "当日有效成分股不足 4 只"
-	defaultMaxHoldings            = 4
-	defaultTradeCostRate          = 0.0002
-	defaultLookbackPaddingDays    = 10
-	maxAllowedTradeGapDays        = 3
-	rebuildSnapshotHourInShanghai = 15
+	defaultDefinitionID              = "wolong_ai_top4_ex_star_equal_v1"
+	defaultDefinitionCode            = "wolong-ai-top4-ex-star-equal"
+	defaultPortfolioName             = "卧龙AI精选模拟组合"
+	defaultBenchmarkCode             = "SHCI"
+	defaultBenchmarkName             = "上证指数"
+	defaultMethodNote                = "模拟组合规则：每日收盘后取去除科创板后的卧龙AI精选 TOP4，下一交易日生效，收益按相邻有效交易日收盘价近似计算并扣除 0.02% 交易成本，不代表实际投资建议。"
+	defaultWarningText               = "当日有效成分股不足 4 只"
+	defaultMaxHoldings               = 4
+	defaultTradeCostRate             = 0.0002
+	rankingPortfolioTradeCostDigits  = 6
+	defaultLookbackPaddingDays       = 10
+	maxAllowedTradeGapDays           = 3
+	rebuildSnapshotHourInShanghai    = 15
+	rebuildEffectiveHourInShanghai   = 9
+	rebuildEffectiveMinuteInShanghai = 30
 )
 
 type cliOptions struct {
@@ -734,6 +737,18 @@ func rebuildSnapshotTime(snapshotDate string) (time.Time, error) {
 	return time.Date(day.Year(), day.Month(), day.Day(), rebuildSnapshotHourInShanghai, 0, 0, 0, shanghaiLocation).UTC(), nil
 }
 
+func buildRebuildEffectiveTime(snapshotTime time.Time) time.Time {
+	if snapshotTime.IsZero() {
+		return time.Time{}
+	}
+	local := snapshotTime.In(shanghaiLocation)
+	nextDay := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, shanghaiLocation).AddDate(0, 0, 1)
+	for nextDay.Weekday() == time.Saturday || nextDay.Weekday() == time.Sunday {
+		nextDay = nextDay.AddDate(0, 0, 1)
+	}
+	return time.Date(nextDay.Year(), nextDay.Month(), nextDay.Day(), rebuildEffectiveHourInShanghai, rebuildEffectiveMinuteInShanghai, 0, 0, shanghaiLocation).UTC()
+}
+
 func loadLatestPortfolioConstituentsBeforeDate(ctx context.Context, db *gorm.DB, definitionID string, snapshotDate string) ([]quadrant.RankingPortfolioConstituentItem, error) {
 	var previousSnapshot quadrant.RankingPortfolioSnapshot
 	err := db.WithContext(ctx).
@@ -816,13 +831,14 @@ func applySinglePlanTx(ctx context.Context, tx *gorm.DB, definition quadrant.Ran
 	}
 
 	snapshotVersion := plan.Date
+	effectiveTime := buildRebuildEffectiveTime(plan.SnapshotTime)
 	snapshot := quadrant.RankingPortfolioSnapshot{
 		DefinitionID:          definition.ID,
 		SnapshotVersion:       snapshotVersion,
 		BatchID:               buildBatchID(definition.ID, snapshotVersion),
 		SnapshotDate:          plan.Date,
 		RankingTime:           plan.SnapshotTime,
-		HoldingsEffectiveTime: plan.SnapshotTime,
+		HoldingsEffectiveTime: effectiveTime,
 		NavAsOfTime:           plan.SnapshotTime,
 		BenchmarkCode:         definition.BenchmarkCode,
 		BenchmarkName:         definition.BenchmarkName,
@@ -864,7 +880,7 @@ func applySinglePlanTx(ctx context.Context, tx *gorm.DB, definition quadrant.Ran
 			"benchmark_code", "benchmark_name", "latest_nav", "latest_benchmark_nav",
 			"latest_portfolio_return", "latest_benchmark_return", "latest_excess_return_pct",
 			"current_constituent_count", "has_shortfall", "warning_text", "method_note",
-			"series_json", "constituents_json", "updated_at",
+			"series_json", "constituents_json", "latest_rebalance_json", "updated_at",
 		}),
 	}).Create(result).Error; err != nil {
 		return nil, fmt.Errorf("upsert portfolio result: %w", err)
@@ -1083,6 +1099,18 @@ func buildResultForDateTx(ctx context.Context, tx *gorm.DB, definition quadrant.
 	latestSnapshot := snapshots[len(snapshots)-1]
 	latestConstituents := constituentsByVersion[latestSnapshot.SnapshotVersion]
 	latestPoint := series[len(series)-1]
+	previousConstituents := []quadrant.RankingPortfolioConstituentItem{}
+	if len(snapshots) > 1 {
+		previousConstituents = constituentsByVersion[snapshots[len(snapshots)-2].SnapshotVersion]
+	}
+	latestPriceByKey := map[string]quadrant.RankingPortfolioMarketPrice{}
+	for _, row := range priceRows {
+		if row.SnapshotVersion != latestSnapshot.SnapshotVersion {
+			continue
+		}
+		latestPriceByKey[snapshotPriceKey(row.Code, row.Exchange)] = row
+	}
+	latestRebalanceJSON := mustMarshal(buildLatestRebalance(definition, latestSnapshot, latestConstituents, previousConstituents, latestPriceByKey))
 
 	return &quadrant.RankingPortfolioResult{
 		DefinitionID:            definition.ID,
@@ -1105,9 +1133,110 @@ func buildResultForDateTx(ctx context.Context, tx *gorm.DB, definition quadrant.
 		MethodNote:              latestSnapshot.MethodNote,
 		SeriesJSON:              mustMarshal(series),
 		ConstituentsJSON:        mustMarshal(latestConstituents),
+		LatestRebalanceJSON:     latestRebalanceJSON,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}, nil
+}
+
+func buildLatestRebalance(
+	definition quadrant.RankingPortfolioDefinition,
+	currentSnapshot quadrant.RankingPortfolioSnapshot,
+	current []quadrant.RankingPortfolioConstituentItem,
+	previous []quadrant.RankingPortfolioConstituentItem,
+	priceByKey map[string]quadrant.RankingPortfolioMarketPrice,
+) *quadrant.RankingPortfolioLatestRebalance {
+	currentByKey := make(map[string]quadrant.RankingPortfolioConstituentItem, len(current))
+	for _, item := range current {
+		currentByKey[snapshotPriceKey(item.Code, item.Exchange)] = item
+	}
+	previousByKey := make(map[string]quadrant.RankingPortfolioConstituentItem, len(previous))
+	for _, item := range previous {
+		previousByKey[snapshotPriceKey(item.Code, item.Exchange)] = item
+	}
+
+	keys := make([]string, 0, len(currentByKey)+len(previousByKey))
+	seen := make(map[string]struct{}, len(currentByKey)+len(previousByKey))
+	for key := range currentByKey {
+		keys = append(keys, key)
+		seen[key] = struct{}{}
+	}
+	for key := range previousByKey {
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	items := make([]quadrant.RankingPortfolioRebalanceItem, 0, len(keys))
+	for _, key := range keys {
+		currentItem, hasCurrent := currentByKey[key]
+		previousItem, hasPrevious := previousByKey[key]
+		fromWeight := 0.0
+		toWeight := 0.0
+		baseItem := currentItem
+		if hasPrevious {
+			fromWeight = previousItem.Weight
+			baseItem = previousItem
+		}
+		if hasCurrent {
+			toWeight = currentItem.Weight
+			baseItem = currentItem
+		}
+		weightDiff := fromWeight - toWeight
+		if weightDiff < 0 {
+			weightDiff = -weightDiff
+		}
+		if weightDiff < 1e-9 {
+			continue
+		}
+
+		action := "buy"
+		costMultiplier := 1 + definition.TradeCostRate
+		if toWeight < fromWeight {
+			action = "sell"
+			costMultiplier = 1 - definition.TradeCostRate
+		}
+
+		priceRow := priceByKey[key]
+		referencePrice := roundFloat(priceRow.ClosePrice)
+		referenceCostPrice := 0.0
+		if referencePrice > 0 {
+			referenceCostPrice = roundFloat(referencePrice * costMultiplier)
+		}
+
+		items = append(items, quadrant.RankingPortfolioRebalanceItem{
+			Action:             action,
+			Code:               baseItem.Code,
+			Name:               baseItem.Name,
+			Exchange:           baseItem.Exchange,
+			Board:              baseItem.Board,
+			FromWeight:         roundFloat(fromWeight),
+			ToWeight:           roundFloat(toWeight),
+			ReferencePrice:     referencePrice,
+			ReferenceCostPrice: referenceCostPrice,
+			PriceTradeDate:     priceRow.PriceTradeDate,
+		})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Action != items[j].Action {
+			return items[i].Action == "sell"
+		}
+		if items[i].Exchange != items[j].Exchange {
+			return items[i].Exchange < items[j].Exchange
+		}
+		return items[i].Code < items[j].Code
+	})
+
+	return &quadrant.RankingPortfolioLatestRebalance{
+		SnapshotDate:  currentSnapshot.SnapshotDate,
+		RankingTime:   currentSnapshot.RankingTime.UTC().Format(time.RFC3339),
+		EffectiveTime: currentSnapshot.HoldingsEffectiveTime.UTC().Format(time.RFC3339),
+		TradeCostRate: roundTo(definition.TradeCostRate, rankingPortfolioTradeCostDigits),
+		ChangeCount:   len(items),
+		Items:         items,
+	}
 }
 
 func calculatePeriodReturn(holdings []quadrant.RankingPortfolioConstituentItem, prevPrices map[string]float64, currentPrices map[string]float64) float64 {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { LabelWithInfo } from './InfoTip'
 import {
+  buildRankingPortfolioDetailHref,
   buildRankingPortfolioChartSeriesData,
   formatRankingPortfolioCode,
   formatRankingPortfolioDate,
@@ -326,16 +327,7 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
 
           <div className="mt-3 space-y-2">
             {constituents.length ? constituents.map((item) => (
-              <div key={`${item.exchange}-${item.code}`} className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-white">{item.name}</div>
-                  <div className="mt-0.5 text-[11px] text-white/35">#{item.rank} · {formatRankingPortfolioCode(item.code, item.exchange)}</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-semibold text-white">{formatRankingPortfolioPercent((item.weight || 0) * 100, 0)}</div>
-                  <div className="mt-0.5 text-[11px] text-white/35">平权</div>
-                </div>
-              </div>
+              <RankingPortfolioConstituentRow key={`${item.exchange}-${item.code}`} item={item} />
             )) : (
               <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-white/35">
                 暂无成分股数据
@@ -377,5 +369,37 @@ function MetricCard({ label, tooltip, value, valueClass }) {
       </div>
       <div className={`mt-2 text-lg font-semibold tabular-nums ${valueClass}`}>{value}</div>
     </div>
+  )
+}
+
+function RankingPortfolioConstituentRow({ item }) {
+  const detailHref = buildRankingPortfolioDetailHref(item?.code, item?.exchange)
+  const content = (
+    <>
+      <div className="min-w-0">
+        <div className="truncate text-sm font-medium text-white transition group-hover:text-amber-100">{item?.name || '--'}</div>
+        <div className="mt-0.5 text-[11px] text-white/35">#{item?.rank} · {formatRankingPortfolioCode(item?.code, item?.exchange)}</div>
+      </div>
+      <div className="text-right">
+        <div className="text-sm font-semibold text-white">{formatRankingPortfolioPercent((item?.weight || 0) * 100, 0)}</div>
+        <div className="mt-0.5 text-[11px] text-white/35">仓位</div>
+      </div>
+    </>
+  )
+
+  if (!detailHref) {
+    return <div className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2">{content}</div>
+  }
+
+  return (
+    <a
+      href={detailHref}
+      target="_blank"
+      rel="noreferrer"
+      title={`查看 ${item?.name || formatRankingPortfolioCode(item?.code, item?.exchange)} 详情`}
+      className="group flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2 transition hover:border-amber-300/30 hover:bg-amber-500/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60"
+    >
+      {content}
+    </a>
   )
 }

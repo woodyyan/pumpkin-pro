@@ -1,7 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
+  buildRankingPortfolioDetailHref,
+  buildRankingPortfolioDetailSymbol,
   buildRankingPortfolioChartPoints,
   buildRankingPortfolioChartSeriesData,
   findRankingPortfolioPointByTime,
@@ -10,6 +13,8 @@ import {
   getRankingPortfolioPerformanceClass,
   normalizeRankingPortfolioSeries,
 } from '../../lib/ranking-portfolio.js'
+
+const panelSource = readFileSync(new URL('../RankingPortfolioPanel.js', import.meta.url), 'utf8')
 
 function formatPercentValue(value, digits = 2) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
@@ -138,6 +143,16 @@ describe('RankingPortfolioPanel helpers', () => {
     assert.equal(formatRankingPortfolioDate('invalid-date'), 'invalid-date')
   })
 
+  it('builds detail symbols and hrefs for constituent links', () => {
+    assert.equal(buildRankingPortfolioDetailSymbol('700', 'HKEX'), '00700.HK')
+    assert.equal(buildRankingPortfolioDetailSymbol('600519', 'SSE'), '600519.SH')
+    assert.equal(buildRankingPortfolioDetailSymbol('1', 'SZSE'), '000001.SZ')
+    assert.equal(buildRankingPortfolioDetailSymbol('300750', ''), '300750.SZ')
+    assert.equal(buildRankingPortfolioDetailHref('600519', 'SSE'), '/live-trading/600519.SH')
+    assert.equal(buildRankingPortfolioDetailHref('00700', 'HKEX'), '/live-trading/00700.HK')
+    assert.equal(buildRankingPortfolioDetailHref('', 'HKEX'), '')
+  })
+
   it('handles empty series safely', () => {
     const output = buildChartPoints([], 720, 240, 18)
     assert.equal(output.portfolio, '')
@@ -149,5 +164,14 @@ describe('RankingPortfolioPanel helpers', () => {
       baseline: [],
       latest: null,
     })
+  })
+})
+
+describe('RankingPortfolioPanel source contract', () => {
+  it('renders constituent rows as detail links and labels weight as 仓位', () => {
+    assert.match(panelSource, /buildRankingPortfolioDetailHref/)
+    assert.match(panelSource, /target="_blank"/)
+    assert.match(panelSource, /rel="noreferrer"/)
+    assert.match(panelSource, /仓位/)
   })
 })

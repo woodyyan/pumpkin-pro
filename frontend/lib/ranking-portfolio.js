@@ -58,6 +58,29 @@ export function formatRankingPortfolioCode(code, exchange) {
   return String(code || '')
 }
 
+export function buildRankingPortfolioDetailSymbol(code, exchange) {
+  const digits = String(code || '').replace(/\D/g, '')
+  if (!digits) return ''
+
+  const normalizedExchange = String(exchange || '').toUpperCase()
+  if (normalizedExchange === 'HKEX') {
+    return `${digits.padStart(5, '0').slice(-5)}.HK`
+  }
+
+  const normalizedCode = digits.padStart(6, '0').slice(-6)
+  if (normalizedExchange === 'SSE') return `${normalizedCode}.SH`
+  if (normalizedExchange === 'SZSE') return `${normalizedCode}.SZ`
+
+  return normalizedCode.startsWith('6') || normalizedCode.startsWith('9')
+    ? `${normalizedCode}.SH`
+    : `${normalizedCode}.SZ`
+}
+
+export function buildRankingPortfolioDetailHref(code, exchange) {
+  const symbol = buildRankingPortfolioDetailSymbol(code, exchange)
+  return symbol ? `/live-trading/${encodeURIComponent(symbol)}` : ''
+}
+
 export function buildRankingPortfolioChartPoints(series, width, height, padding) {
   if (!Array.isArray(series) || series.length === 0) return { portfolio: '', benchmark: '', baselineY: height / 2 }
   const values = []

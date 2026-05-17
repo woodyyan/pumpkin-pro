@@ -188,6 +188,16 @@ describe('RankingPortfolioPanel source contract', () => {
     assert.match(panelSource, /仓位/)
   })
 
+  it('renders four portfolio cards and B-combo ranking metadata', () => {
+    assert.match(panelSource, /A \/ B 双组合/)
+    assert.match(panelSource, /每日收盘后取卧龙AI精选排行榜A、B两种规则 4 只股票/)
+    assert.match(panelSource, /selectedExchange/)
+    assert.match(panelSource, /selectedVariant/)
+    assert.match(panelSource, /\$\{windowText\} 连续上榜优先/)
+    assert.match(panelSource, /榜单第\$\{item\?\.source_rank \|\| '--'\}名/)
+    assert.match(panelSource, /连续\$\{item\?\.consecutive_days \|\| '--'\}日/)
+  })
+
   it('keeps latest rebalance collapsed behind a disclosure button', () => {
     assert.match(panelSource, /最近一次调仓/)
     assert.match(panelSource, /<details/)

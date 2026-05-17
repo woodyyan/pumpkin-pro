@@ -65,6 +65,42 @@ func TestCalculateRankingPortfolioTradeRatio(t *testing.T) {
 	}
 }
 
+func TestBuildRankingPortfolioConstituentItems_SelectsTop10ByStreak(t *testing.T) {
+	definition := RankingPortfolioDefinition{
+		Exchange:         "ASHARE",
+		PortfolioVariant: rankingPortfolioVariantB,
+		SelectionRule:    rankingPortfolioSelectionRuleTop10ByStreak,
+		SelectionWindow:  10,
+		MaxHoldings:      4,
+		ExcludedBoards:   mustMarshal([]string{aShareBoardStar}),
+	}
+	rankingItems := []RankingItem{
+		{Rank: 1, Code: "688001", Exchange: "SSE", Board: aShareBoardStar, ConsecutiveDays: 15},
+		{Rank: 2, Code: "600001", Exchange: "SSE", Board: aShareBoardMain, ConsecutiveDays: 6},
+		{Rank: 3, Code: "000001", Exchange: "SZSE", Board: aShareBoardMain, ConsecutiveDays: 9},
+		{Rank: 4, Code: "300001", Exchange: "SZSE", Board: aShareBoardChiNext, ConsecutiveDays: 5},
+		{Rank: 5, Code: "600002", Exchange: "SSE", Board: aShareBoardMain, ConsecutiveDays: 9},
+		{Rank: 6, Code: "000002", Exchange: "SZSE", Board: aShareBoardMain, ConsecutiveDays: 4},
+		{Rank: 7, Code: "600003", Exchange: "SSE", Board: aShareBoardMain, ConsecutiveDays: 8},
+		{Rank: 8, Code: "000003", Exchange: "SZSE", Board: aShareBoardMain, ConsecutiveDays: 3},
+	}
+
+	items := buildRankingPortfolioConstituentItems(definition, rankingItems)
+	if len(items) != 4 {
+		t.Fatalf("expected 4 constituents, got %d", len(items))
+	}
+	gotCodes := []string{items[0].Code, items[1].Code, items[2].Code, items[3].Code}
+	wantCodes := []string{"000001", "600002", "600003", "600001"}
+	for i := range wantCodes {
+		if gotCodes[i] != wantCodes[i] {
+			t.Fatalf("unexpected selected order: got %v want %v", gotCodes, wantCodes)
+		}
+	}
+	if items[0].SourceRank != 3 || items[1].SourceRank != 5 {
+		t.Fatalf("expected source ranks from ranking list, got %+v", items)
+	}
+}
+
 func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
@@ -121,39 +157,66 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRankingPortfolio failed: %v", err)
 	}
-	if resp.Meta.SnapshotVersion != "2026-05-07" {
-		t.Fatalf("expected latest snapshot version 2026-05-07, got %s", resp.Meta.SnapshotVersion)
+	if len(resp.Items) != 4 {
+		t.Fatalf("expected 4 portfolio responses, got %d", len(resp.Items))
 	}
-	if len(resp.Series) != 2 {
-		t.Fatalf("expected 2 series points, got %d", len(resp.Series))
+
+	itemsByID := map[string]RankingPortfolioResponse{}
+	for _, item := range resp.Items {
+		itemsByID[item.Meta.DefinitionID] = item
 	}
-	if resp.Series[1].PortfolioReturnPct <= 0 {
-		t.Fatalf("expected positive portfolio return, got %+v", resp.Series[1])
+
+	aResp, ok := itemsByID[defaultRankingPortfolioDefinitionID]
+	if !ok {
+		t.Fatalf("missing default A-share portfolio response: %+v", resp.Items)
 	}
-	if resp.Series[1].ExcessReturnPct <= 0 {
-		t.Fatalf("expected positive excess return, got %+v", resp.Series[1])
+	if aResp.Meta.SnapshotVersion != "2026-05-07" {
+		t.Fatalf("expected latest snapshot version 2026-05-07, got %s", aResp.Meta.SnapshotVersion)
 	}
-	if len(resp.Constituents) != 4 {
-		t.Fatalf("expected 4 latest constituents, got %d", len(resp.Constituents))
+	if len(aResp.Series) != 2 {
+		t.Fatalf("expected 2 series points, got %d", len(aResp.Series))
 	}
-	if resp.Meta.BatchID == "" || resp.Meta.MethodNote == "" {
-		t.Fatalf("expected batch id and method note, got %+v", resp.Meta)
+	if aResp.Series[1].PortfolioReturnPct <= 0 {
+		t.Fatalf("expected positive portfolio return, got %+v", aResp.Series[1])
 	}
+	if aResp.Series[1].ExcessReturnPct <= 0 {
+		t.Fatalf("expected positive excess return, got %+v", aResp.Series[1])
+	}
+	if len(aResp.Constituents) != 4 {
+		t.Fatalf("expected 4 latest constituents, got %d", len(aResp.Constituents))
+	}
+	if aResp.Meta.BatchID == "" || aResp.Meta.MethodNote == "" {
+		t.Fatalf("expected batch id and method note, got %+v", aResp.Meta)
+	}
+	bResp, ok := itemsByID["wolong_ai_top10_ex_star_by_streak_v1"]
+	if !ok {
+		t.Fatalf("missing A-share B portfolio response: %+v", resp.Items)
+	}
+	if bResp.Meta.PortfolioVariant != rankingPortfolioVariantB || bResp.Meta.SelectionWindow != 10 {
+		t.Fatalf("unexpected B meta: %+v", bResp.Meta)
+	}
+	if len(bResp.Constituents) != 4 {
+		t.Fatalf("expected 4 B constituents, got %d", len(bResp.Constituents))
+	}
+	if bResp.Constituents[0].Code != "600003" || bResp.Constituents[0].SourceRank != 2 {
+		t.Fatalf("unexpected B leading constituent: %+v", bResp.Constituents)
+	}
+
 	wantEffectiveTime := time.Date(2026, 5, 8, 9, 30, 0, 0, rankingSnapshotLocation).UTC().Format(time.RFC3339)
-	if resp.Meta.HoldingsEffectiveTime != wantEffectiveTime {
-		t.Fatalf("holdings_effective_time = %s, want %s", resp.Meta.HoldingsEffectiveTime, wantEffectiveTime)
+	if aResp.Meta.HoldingsEffectiveTime != wantEffectiveTime {
+		t.Fatalf("holdings_effective_time = %s, want %s", aResp.Meta.HoldingsEffectiveTime, wantEffectiveTime)
 	}
-	if resp.LatestRebalance == nil {
+	if aResp.LatestRebalance == nil {
 		t.Fatal("expected latest rebalance payload")
 	}
-	if resp.LatestRebalance.EffectiveTime != wantEffectiveTime {
-		t.Fatalf("latest rebalance effective_time = %s, want %s", resp.LatestRebalance.EffectiveTime, wantEffectiveTime)
+	if aResp.LatestRebalance.EffectiveTime != wantEffectiveTime {
+		t.Fatalf("latest rebalance effective_time = %s, want %s", aResp.LatestRebalance.EffectiveTime, wantEffectiveTime)
 	}
-	if resp.LatestRebalance.ChangeCount != 4 || len(resp.LatestRebalance.Items) != 4 {
-		t.Fatalf("expected 4 rebalance items, got %+v", resp.LatestRebalance)
+	if aResp.LatestRebalance.ChangeCount != 4 || len(aResp.LatestRebalance.Items) != 4 {
+		t.Fatalf("expected 4 rebalance items, got %+v", aResp.LatestRebalance)
 	}
 	itemsByCode := map[string]RankingPortfolioRebalanceItem{}
-	for _, item := range resp.LatestRebalance.Items {
+	for _, item := range aResp.LatestRebalance.Items {
 		itemsByCode[item.Code] = item
 	}
 	if item := itemsByCode["600002"]; item.Action != "sell" || item.FromWeight != 0.25 || item.ToWeight != 0 || item.ReferencePrice != 44 || item.ReferenceCostPrice != 43.9912 {

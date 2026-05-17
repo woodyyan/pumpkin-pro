@@ -5,13 +5,17 @@ import "time"
 const (
 	defaultRankingPortfolioDefinitionID   = "wolong_ai_top4_ex_star_equal_v1"
 	defaultRankingPortfolioDefinitionCode = "wolong-ai-top4-ex-star-equal"
-	defaultRankingPortfolioName           = "卧龙AI精选模拟组合"
+	defaultRankingPortfolioName           = "模拟组合A"
 	defaultRankingPortfolioExchange       = "ASHARE"
 	defaultRankingPortfolioBenchmarkCode  = "SHCI"
 	defaultRankingPortfolioBenchmarkName  = "上证指数"
 	defaultRankingPortfolioMaxHoldings    = 4
 	defaultRankingPortfolioTradeCostRate  = 0.0002
 	defaultRankingPortfolioWarningText    = "当日有效成分股不足 4 只"
+	rankingPortfolioVariantA              = "A"
+	rankingPortfolioVariantB              = "B"
+	rankingPortfolioSelectionRuleTop4     = "top4"
+	rankingPortfolioSelectionRuleTop10ByStreak = "top10_by_consecutive_days"
 )
 
 // RankingPortfolioDefinition stores the portfolio rule definition separately
@@ -21,9 +25,12 @@ type RankingPortfolioDefinition struct {
 	Code            string    `gorm:"size:64;not null;uniqueIndex"`
 	Name            string    `gorm:"size:128;not null"`
 	Exchange        string    `gorm:"size:16;not null;default:'ASHARE'"`
+	PortfolioVariant string   `gorm:"size:8;not null;default:'A'"`
 	BenchmarkCode   string    `gorm:"size:16;not null;default:'SHCI'"`
 	BenchmarkName   string    `gorm:"size:64;not null;default:'上证指数'"`
 	MaxHoldings     int       `gorm:"not null;default:4"`
+	SelectionRule   string    `gorm:"size:64;not null;default:'top4'"`
+	SelectionWindow int       `gorm:"not null;default:0"`
 	ExcludedBoards  string    `gorm:"type:text;not null;default:'[]'"`
 	WeightingMethod string    `gorm:"size:32;not null;default:'equal'"`
 	RebalanceRule   string    `gorm:"size:64;not null;default:'t_close_generate_t1_open_rebalance'"`
@@ -72,6 +79,8 @@ type RankingPortfolioSnapshotConstituent struct {
 	Name            string    `gorm:"size:128;not null;default:''"`
 	Exchange        string    `gorm:"size:8;not null;default:'SZSE'"`
 	Board           string    `gorm:"size:16;not null;default:''"`
+	SourceRank      int       `gorm:"not null;default:0"`
+	ConsecutiveDays int       `gorm:"not null;default:0"`
 	Weight          float64   `gorm:"not null;default:0"`
 	RankingScore    float64   `gorm:"not null;default:0"`
 	Opportunity     float64   `gorm:"not null;default:0"`
@@ -165,15 +174,17 @@ type RankingPortfolioSeriesPoint struct {
 }
 
 type RankingPortfolioConstituentItem struct {
-	Rank         int     `json:"rank"`
-	Code         string  `json:"code"`
-	Name         string  `json:"name"`
-	Exchange     string  `json:"exchange"`
-	Board        string  `json:"board,omitempty"`
-	Weight       float64 `json:"weight"`
-	RankingScore float64 `json:"ranking_score,omitempty"`
-	Opportunity  float64 `json:"opportunity,omitempty"`
-	Risk         float64 `json:"risk,omitempty"`
+	Rank            int     `json:"rank"`
+	SourceRank      int     `json:"source_rank,omitempty"`
+	Code            string  `json:"code"`
+	Name            string  `json:"name"`
+	Exchange        string  `json:"exchange"`
+	Board           string  `json:"board,omitempty"`
+	ConsecutiveDays int     `json:"consecutive_days,omitempty"`
+	Weight          float64 `json:"weight"`
+	RankingScore    float64 `json:"ranking_score,omitempty"`
+	Opportunity     float64 `json:"opportunity,omitempty"`
+	Risk            float64 `json:"risk,omitempty"`
 }
 
 type RankingPortfolioRebalanceItem struct {
@@ -202,6 +213,10 @@ type RankingPortfolioMeta struct {
 	DefinitionID             string  `json:"definition_id"`
 	DefinitionCode           string  `json:"definition_code"`
 	Name                     string  `json:"name"`
+	Exchange                 string  `json:"exchange"`
+	PortfolioVariant         string  `json:"portfolio_variant"`
+	SelectionRule            string  `json:"selection_rule"`
+	SelectionWindow          int     `json:"selection_window,omitempty"`
 	BatchID                  string  `json:"batch_id"`
 	SnapshotVersion          string  `json:"snapshot_version"`
 	SnapshotDate             string  `json:"snapshot_date"`
@@ -227,4 +242,8 @@ type RankingPortfolioResponse struct {
 	Series          []RankingPortfolioSeriesPoint     `json:"series"`
 	Constituents    []RankingPortfolioConstituentItem `json:"constituents"`
 	LatestRebalance *RankingPortfolioLatestRebalance  `json:"latest_rebalance,omitempty"`
+}
+
+type RankingPortfolioCollectionResponse struct {
+	Items []RankingPortfolioResponse `json:"items"`
 }

@@ -255,18 +255,71 @@ function RankingPortfolioChart({ series = [], benchmarkLabel = '上证指数' })
 
 export default function RankingPortfolioPanel({ data = null, loading = false }) {
   const panelRef = useRef(null)
+  const [selectedExchange, setSelectedExchange] = useState('ASHARE')
+  const [selectedVariant, setSelectedVariant] = useState('A')
 
   useEffect(() => {
     if (!panelRef.current) return
   }, [])
 
-  const meta = data?.meta || null
-  const series = Array.isArray(data?.series) ? data.series : []
-  const constituents = Array.isArray(data?.constituents) ? data.constituents : []
-  const latestRebalance = data?.latest_rebalance && typeof data.latest_rebalance === 'object' ? data.latest_rebalance : null
-  const benchmarkLabel = meta?.benchmark_name || meta?.benchmark_code || '上证指数'
+  const portfolios = Array.isArray(data?.items) ? data.items : []
+  const exchangeTabs = [
+    { key: 'ASHARE', label: 'A股' },
+    { key: 'HKEX', label: '港股' },
+  ]
+  const variantTabs = [
+    { key: 'A', label: '模拟组合A' },
+    { key: 'B', label: '模拟组合B' },
+  ]
 
-  if (loading && !meta) {
+  const portfolioMap = useMemo(() => {
+    const entries = {}
+    for (const item of portfolios) {
+      const exchange = String(item?.meta?.exchange || '').toUpperCase() || 'ASHARE'
+      const variant = String(item?.meta?.portfolio_variant || '').toUpperCase() || 'A'
+      entries[`${exchange}:${variant}`] = item
+    }
+    return entries
+  }, [portfolios])
+
+  const availableExchanges = useMemo(
+    () => exchangeTabs.filter((tab) => portfolioMap[`${tab.key}:A`] || portfolioMap[`${tab.key}:B`]),
+    [portfolioMap]
+  )
+
+  const availableVariants = useMemo(
+    () => variantTabs.filter((tab) => portfolioMap[`${selectedExchange}:${tab.key}`]),
+    [portfolioMap, selectedExchange]
+  )
+
+  useEffect(() => {
+    if (!availableExchanges.length) return
+    if (!availableExchanges.some((tab) => tab.key === selectedExchange)) {
+      setSelectedExchange(availableExchanges[0].key)
+    }
+  }, [availableExchanges, selectedExchange])
+
+  useEffect(() => {
+    if (!availableVariants.length) return
+    if (!availableVariants.some((tab) => tab.key === selectedVariant)) {
+      setSelectedVariant(availableVariants[0].key)
+    }
+  }, [availableVariants, selectedVariant])
+
+  const selectedPortfolio = portfolioMap[`${selectedExchange}:${selectedVariant}`] || portfolios[0] || null
+  const meta = selectedPortfolio?.meta || null
+  const series = Array.isArray(selectedPortfolio?.series) ? selectedPortfolio.series : []
+  const constituents = Array.isArray(selectedPortfolio?.constituents) ? selectedPortfolio.constituents : []
+  const latestRebalance = selectedPortfolio?.latest_rebalance && typeof selectedPortfolio.latest_rebalance === 'object'
+    ? selectedPortfolio.latest_rebalance
+    : null
+  const benchmarkLabel = meta?.benchmark_name || meta?.benchmark_code || '上证指数'
+  const windowText = Number(meta?.selection_window || 0) > 0 ? `TOP${meta.selection_window}` : 'TOP4'
+  const selectionSummary = meta?.portfolio_variant === 'B'
+    ? `${windowText} 连续上榜优先`
+    : '榜单前 4'
+
+  if (loading && portfolios.length === 0) {
     return (
       <section className="rounded-2xl border border-border bg-card p-5">
         <div className="flex h-56 items-center justify-center text-sm text-white/35">
@@ -282,64 +335,118 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-base font-semibold text-white">卧龙AI精选模拟组合</h3>
-            <span className="rounded-full border border-amber-300/20 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200">收益质量跟踪</span>
+            <span className="rounded-full border border-amber-300/20 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200">A / B 双组合</span>
           </div>
-          <p className="mt-1 text-xs leading-5 text-white/45">{meta?.method_note || '模拟组合规则说明加载中。'}</p>
+          <p className="mt-1 text-xs leading-5 text-white/45">每日收盘后取卧龙AI精选排行榜A、B两种规则 4 只股票，下一交易日生效，收益按相邻有效交易日收盘价近似计算并扣除 0.02% 交易成本，不代表实际投资建议。</p>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 lg:min-w-[280px]">
-          <MetricCard
-            label="累计收益"
-            tooltip="模拟组合从起始日持有到当前的总收益率，反映这套选股规则本身的累计表现。"
-            value={formatRankingPortfolioPercent(meta?.latest_portfolio_return_pct)}
-            valueClass={getRankingPortfolioPerformanceClass(meta?.latest_portfolio_return_pct)}
-          />
-          <MetricCard
-            label="基准收益"
-            tooltip={`同一时间段内，基准 ${benchmarkLabel} 的累计收益率，用来对比市场整体表现。`}
-            value={formatRankingPortfolioPercent(meta?.latest_benchmark_return_pct)}
-            valueClass={getRankingPortfolioPerformanceClass(meta?.latest_benchmark_return_pct)}
-          />
-          <MetricCard
-            label="超额收益"
-            tooltip={`模拟组合累计收益减去 ${benchmarkLabel} 累计收益后的差值。正值表示跑赢基准，负值表示跑输基准。`}
-            value={formatRankingPortfolioPercent(meta?.latest_excess_return_pct)}
-            valueClass={getRankingPortfolioPerformanceClass(meta?.latest_excess_return_pct)}
-          />
+        <div className="flex flex-col gap-2 lg:items-end">
+          <div className="flex items-center gap-1 rounded-lg bg-black/20 p-0.5">
+            {exchangeTabs.map((tab) => {
+              const disabled = !portfolioMap[`${tab.key}:A`] && !portfolioMap[`${tab.key}:B`]
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => setSelectedExchange(tab.key)}
+                  className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+                    selectedExchange === tab.key
+                      ? 'bg-primary text-black'
+                      : 'text-white/55 hover:bg-white/[0.05] hover:text-white/80'
+                  } ${disabled ? 'cursor-not-allowed opacity-35 hover:bg-transparent hover:text-white/55' : ''}`}
+                >
+                  {tab.label}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="flex items-center gap-1 rounded-lg bg-black/20 p-0.5">
+            {variantTabs.map((tab) => {
+              const disabled = !portfolioMap[`${selectedExchange}:${tab.key}`]
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => setSelectedVariant(tab.key)}
+                  className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+                    selectedVariant === tab.key
+                      ? 'bg-white text-slate-950'
+                      : 'text-white/55 hover:bg-white/[0.05] hover:text-white/80'
+                  } ${disabled ? 'cursor-not-allowed opacity-35 hover:bg-transparent hover:text-white/55' : ''}`}
+                >
+                  {tab.label}
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.8fr)] xl:items-stretch">
-        <div className="xl:h-full">
-          <RankingPortfolioChart series={series} benchmarkLabel={benchmarkLabel} />
-        </div>
+      {!selectedPortfolio ? (
+        <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-white/35">暂无模拟组合数据</div>
+      ) : (
+        <>
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] text-white/45">
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1">{selectedExchange === 'HKEX' ? '港股' : 'A股'} {meta?.name || '模拟组合'}</span>
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1">{selectionSummary}</span>
+            {meta?.snapshot_date ? <span>数据日期：{meta.snapshot_date}</span> : null}
+          </div>
 
-        <div className="rounded-2xl border border-border/70 bg-black/10 p-4 xl:h-full">
-          <div className="flex items-center justify-between gap-3">
-            <div>
+          <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="grid grid-cols-3 gap-3 lg:min-w-[280px]">
+              <MetricCard
+                label="累计收益"
+                tooltip="模拟组合从起始日持有到当前的总收益率，反映这套选股规则本身的累计表现。"
+                value={formatRankingPortfolioPercent(meta?.latest_portfolio_return_pct)}
+                valueClass={getRankingPortfolioPerformanceClass(meta?.latest_portfolio_return_pct)}
+              />
+              <MetricCard
+                label="基准收益"
+                tooltip={`同一时间段内，基准 ${benchmarkLabel} 的累计收益率，用来对比市场整体表现。`}
+                value={formatRankingPortfolioPercent(meta?.latest_benchmark_return_pct)}
+                valueClass={getRankingPortfolioPerformanceClass(meta?.latest_benchmark_return_pct)}
+              />
+              <MetricCard
+                label="超额收益"
+                tooltip={`模拟组合累计收益减去 ${benchmarkLabel} 累计收益后的差值。正值表示跑赢基准，负值表示跑输基准。`}
+                value={formatRankingPortfolioPercent(meta?.latest_excess_return_pct)}
+                valueClass={getRankingPortfolioPerformanceClass(meta?.latest_excess_return_pct)}
+              />
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.8fr)] xl:items-stretch">
+            <div className="xl:h-full">
+              <RankingPortfolioChart series={series} benchmarkLabel={benchmarkLabel} />
+            </div>
+
+            <div className="rounded-2xl border border-border/70 bg-black/10 p-4 xl:h-full">
               <div className="text-sm font-medium text-white">当前成分股</div>
-            </div>
-          </div>
 
-          {meta?.has_shortfall ? (
-            <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-              {meta?.warning_text || '当日有效成分股不足 4 只'}
-            </div>
-          ) : null}
+              {meta?.has_shortfall ? (
+                <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                  {meta?.warning_text || '当日有效成分股不足 4 只'}
+                </div>
+              ) : null}
 
-          <div className="mt-3 space-y-2">
-            {constituents.length ? constituents.map((item) => (
-              <RankingPortfolioConstituentRow key={`${item.exchange}-${item.code}`} item={item} />
-            )) : (
-              <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-white/35">
-                暂无成分股数据
+              <div className="mt-3 space-y-2">
+                {constituents.length ? constituents.map((item) => (
+                  <RankingPortfolioConstituentRow key={`${item.exchange}-${item.code}`} item={item} showSourceRank={meta?.portfolio_variant === 'B'} />
+                )) : (
+                  <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-white/35">
+                    暂无成分股数据
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          <LatestRebalanceDisclosure rebalance={latestRebalance} />
-        </div>
-      </div>
+              <LatestRebalanceDisclosure rebalance={latestRebalance} />
+            </div>
+          </div>
+        </>
+      )}
     </section>
   )
 }
@@ -376,13 +483,18 @@ function MetricCard({ label, tooltip, value, valueClass }) {
   )
 }
 
-function RankingPortfolioConstituentRow({ item }) {
+function RankingPortfolioConstituentRow({ item, showSourceRank = false }) {
   const detailHref = buildRankingPortfolioDetailHref(item?.code, item?.exchange)
+  const codeLabel = formatRankingPortfolioCode(item?.code, item?.exchange)
+  const sourceMeta = showSourceRank
+    ? `榜单第${item?.source_rank || '--'}名 · 连续${item?.consecutive_days || '--'}日`
+    : ''
   const content = (
     <>
       <div className="min-w-0">
         <div className="truncate text-sm font-medium text-white transition group-hover:text-amber-100">{item?.name || '--'}</div>
-        <div className="mt-0.5 text-[11px] text-white/35">#{item?.rank} · {formatRankingPortfolioCode(item?.code, item?.exchange)}</div>
+        <div className="mt-0.5 text-[11px] text-white/35">#{item?.rank} · {codeLabel}</div>
+        {showSourceRank ? <div className="mt-0.5 text-[11px] text-white/35">{sourceMeta}</div> : null}
       </div>
       <div className="text-right">
         <div className="text-sm font-semibold text-white">{formatRankingPortfolioPercent((item?.weight || 0) * 100, 0)}</div>

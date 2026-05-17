@@ -19,9 +19,6 @@ const QuadrantChart = dynamic(() => import('../components/QuadrantChart'), { ssr
 const RankingPanel = dynamic(() => import('../components/RankingPanel'), { ssr: false })
 const RankingPortfolioPanel = dynamic(() => import('../components/RankingPortfolioPanel'), { ssr: false })
 
-const POLL_MS = 5000
-const MARKET_OVERVIEW_POLL_MS = 5000
-
 export default function LiveTradingOverviewPage() {
   const { isLoggedIn, openAuthModal, ready, user } = useAuth()
   const [watchlist, setWatchlist] = useState({ items: [], active_symbol: '', session_state: 'idle' })
@@ -43,6 +40,7 @@ export default function LiveTradingOverviewPage() {
   const [rankingExchange, setRankingExchange] = useState('ASHARE') // independent tab state for ranking
   const [rankingPortfolioData, setRankingPortfolioData] = useState(null)
   const [rankingPortfolioLoading, setRankingPortfolioLoading] = useState(false)
+  const [manualRefreshing, setManualRefreshing] = useState(false)
   const [quadrantSearchState, setQuadrantSearchState] = useState(() => createQuadrantSearchState())
 
   const privateAccessReady = ready && isLoggedIn
@@ -187,17 +185,17 @@ export default function LiveTradingOverviewPage() {
     if (hkRes.status === 'fulfilled') setMarketOverviewHK(hkRes.value)
   }
 
-  const loadPrivateData = async ({ bootstrap = false } = {}) => {
+  const loadPrivateData = async ({ bootstrap = false, refreshQuadrant = false } = {}) => {
     try {
-      if (bootstrap) {
+      if (bootstrap || refreshQuadrant) {
         const wl = await loadWatchlist()
-        loadSignalConfigs()
+        await loadSignalConfigs()
         // Load quadrant with watchlist symbols filtered by current exchange
         const symbols = (wl?.items || []).map((i) => i.symbol)
         const filteredSymbols = quadrantExchange === 'HKEX'
           ? symbols.filter((s) => s.toUpperCase().endsWith('.HK'))
           : symbols.filter((s) => !s.toUpperCase().endsWith('.HK'))
-        loadQuadrant(filteredSymbols, quadrantExchange)
+        await loadQuadrant(filteredSymbols, quadrantExchange)
       }
       await loadSnapshots()
       updateError('')
@@ -214,6 +212,20 @@ export default function LiveTradingOverviewPage() {
     }
   }
 
+  const handleManualRefresh = async () => {
+    if (!ready || manualRefreshing) return
+    setManualRefreshing(true)
+    try {
+      const tasks = [loadPublicData(), loadRanking(rankingExchange), loadRankingPortfolio()]
+      if (privateAccessReady) {
+        tasks.push(loadPrivateData({ refreshQuadrant: true }))
+      }
+      await Promise.all(tasks)
+    } finally {
+      setManualRefreshing(false)
+    }
+  }
+
   // Bootstrap
   useEffect(() => {
     if (!ready) return
@@ -225,20 +237,6 @@ export default function LiveTradingOverviewPage() {
     } else {
       resetPrivateState()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, privateAccessReady])
-
-  // Polling
-  useEffect(() => {
-    if (!ready) return
-    const timer = setInterval(() => {
-      loadPublicData()
-      loadRankingPortfolio()
-      if (privateAccessReady) {
-        loadPrivateData()
-      }
-    }, POLL_MS)
-    return () => clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, privateAccessReady])
 
@@ -345,6 +343,27 @@ export default function LiveTradingOverviewPage() {
         <meta name="description" content="卧龙AI量化交易台行情看板 — 实时 A 股/港股行情、四象限风险全景图、关注池管理。支持 AI 个股智能诊断与技术指标分析。" />
         <link rel="canonical" href="https://wolongtrader.top/live-trading" />
       </Head>
+
+      <section className="rounded-2xl border border-border bg-card px-5 py-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-white">行情看板概览</div>
+            <div className="mt-1 text-xs text-white/45">页面初始化后不再自动轮询，点击右侧按钮手动刷新四象限、精选榜单和模拟组合。</div>
+          </div>
+          <div className="flex items-center gap-3">
+            {lastUpdateAt ? <span className="text-xs text-white/35">上次刷新：{formatDateTime(lastUpdateAt)}</span> : null}
+            <button
+              type="button"
+              disabled={!ready || manualRefreshing}
+              onClick={handleManualRefresh}
+              className="inline-flex items-center justify-center rounded-xl border border-primary/35 bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {manualRefreshing ? '刷新中...' : '手动刷新'}
+            </button>
+          </div>
+        </div>
+      </section>
+
       {/* Market overview — compact index bar */}
       <section className="rounded-2xl border border-border bg-card px-5 py-3">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -676,12 +695,6 @@ export default function LiveTradingOverviewPage() {
                 )
               })}
             </section>
-          )}
-
-          {lastUpdateAt && (
-            <div className="text-right text-xs text-white/35">
-              最后更新：{formatDateTime(lastUpdateAt)}
-            </div>
           )}
         </>
       ) : (

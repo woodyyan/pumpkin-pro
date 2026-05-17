@@ -888,7 +888,7 @@ func resolveRankingExchanges(exchange string) []string {
 
 // GetRanking returns the market-specific ranking list.
 // HKEX keeps the legacy opportunity-zone logic; ASHARE prefers ranking_score when available.
-func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*RankingResponse, error) {
+func (s *Service) buildRankingResponse(ctx context.Context, exchange string, limit int) (*RankingResponse, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
@@ -993,6 +993,10 @@ func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*
 		},
 		Items: items,
 	}, nil
+}
+
+func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*RankingResponse, error) {
+	return s.buildRankingResponse(ctx, exchange, limit)
 }
 
 // exchangeAccum is an internal accumulator for per-exchange stats.

@@ -29,10 +29,10 @@ var (
 const (
 	defaultDefinitionID              = "wolong_ai_top4_ex_star_equal_v1"
 	defaultDefinitionCode            = "wolong-ai-top4-ex-star-equal"
-	defaultPortfolioName             = "卧龙AI精选模拟组合"
+	defaultPortfolioName             = "模拟组合A"
 	defaultBenchmarkCode             = "SHCI"
 	defaultBenchmarkName             = "上证指数"
-	defaultMethodNote                = "模拟组合规则：每日收盘后取去除科创板后的卧龙AI精选 TOP4，下一交易日生效，收益按相邻有效交易日收盘价近似计算并扣除 0.02% 交易成本，不代表实际投资建议。"
+	defaultMethodNote                = ""
 	defaultWarningText               = "当日有效成分股不足 4 只"
 	defaultMaxHoldings               = 4
 	defaultTradeCostRate             = 0.0002

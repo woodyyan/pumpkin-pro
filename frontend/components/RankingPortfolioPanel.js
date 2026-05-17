@@ -9,7 +9,6 @@ import {
   formatRankingPortfolioDateTime,
   formatRankingPortfolioPercent,
   formatRankingPortfolioReferencePrice,
-  formatRankingPortfolioWeight,
   formatRankingPortfolioWeightChange,
   getRankingPortfolioRebalanceActionLabel,
   getRankingPortfolioPerformanceClass,
@@ -257,11 +256,6 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
   const panelRef = useRef(null)
   const [selectedExchange, setSelectedExchange] = useState('ASHARE')
   const [selectedVariant, setSelectedVariant] = useState('A')
-
-  useEffect(() => {
-    if (!panelRef.current) return
-  }, [])
-
   const portfolios = Array.isArray(data?.items) ? data.items : []
   const exchangeTabs = [
     { key: 'ASHARE', label: 'A股' },
@@ -315,9 +309,10 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
     : null
   const benchmarkLabel = meta?.benchmark_name || meta?.benchmark_code || '上证指数'
   const windowText = Number(meta?.selection_window || 0) > 0 ? `TOP${meta.selection_window}` : 'TOP4'
+  const compactMarketHint = selectedExchange === 'ASHARE' ? '剔除科创板 · ' : ''
   const selectionSummary = meta?.portfolio_variant === 'B'
-    ? `${windowText} 连续上榜优先`
-    : '榜单前 4'
+    ? `${compactMarketHint}${windowText} 连续上榜优先`
+    : `${compactMarketHint}TOP4`
 
   if (loading && portfolios.length === 0) {
     return (
@@ -330,17 +325,17 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
   }
 
   return (
-    <section ref={panelRef} className="rounded-2xl border border-border bg-card p-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <section ref={panelRef} className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-base font-semibold text-white">卧龙AI精选模拟组合</h3>
             <span className="rounded-full border border-amber-300/20 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200">A / B 双组合</span>
           </div>
-          <p className="mt-1 text-xs leading-5 text-white/45">每日收盘后取卧龙AI精选排行榜A、B两种规则 4 只股票，下一交易日生效，收益按相邻有效交易日收盘价近似计算并扣除 0.02% 交易成本，不代表实际投资建议。</p>
+          <p className="mt-1 text-xs leading-5 text-white/45">跟踪卧龙AI精选 A、B 两套组合表现，快速看哪套规则更稳、哪套更能跑赢基准。</p>
         </div>
 
-        <div className="flex flex-col gap-2 lg:items-end">
+        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
           <div className="flex items-center gap-1 rounded-lg bg-black/20 p-0.5">
             {exchangeTabs.map((tab) => {
               const disabled = !portfolioMap[`${tab.key}:A`] && !portfolioMap[`${tab.key}:B`]
@@ -389,41 +384,43 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
         <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-white/35">暂无模拟组合数据</div>
       ) : (
         <>
-          <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] text-white/45">
-            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1">{selectedExchange === 'HKEX' ? '港股' : 'A股'} {meta?.name || '模拟组合'}</span>
-            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1">{selectionSummary}</span>
-            {meta?.snapshot_date ? <span>数据日期：{meta.snapshot_date}</span> : null}
-          </div>
+          <div className="mt-3 rounded-2xl border border-white/8 bg-black/15 px-3 py-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/45">
+                <span className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-1 text-white/70">{selectedExchange === 'HKEX' ? '港股' : 'A股'} {meta?.name || '模拟组合'}</span>
+                <span className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-1">{selectionSummary}</span>
+                {meta?.snapshot_date ? <span>数据日期：{meta.snapshot_date}</span> : null}
+              </div>
 
-          <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="grid grid-cols-3 gap-3 lg:min-w-[280px]">
-              <MetricCard
-                label="累计收益"
-                tooltip="模拟组合从起始日持有到当前的总收益率，反映这套选股规则本身的累计表现。"
-                value={formatRankingPortfolioPercent(meta?.latest_portfolio_return_pct)}
-                valueClass={getRankingPortfolioPerformanceClass(meta?.latest_portfolio_return_pct)}
-              />
-              <MetricCard
-                label="基准收益"
-                tooltip={`同一时间段内，基准 ${benchmarkLabel} 的累计收益率，用来对比市场整体表现。`}
-                value={formatRankingPortfolioPercent(meta?.latest_benchmark_return_pct)}
-                valueClass={getRankingPortfolioPerformanceClass(meta?.latest_benchmark_return_pct)}
-              />
-              <MetricCard
-                label="超额收益"
-                tooltip={`模拟组合累计收益减去 ${benchmarkLabel} 累计收益后的差值。正值表示跑赢基准，负值表示跑输基准。`}
-                value={formatRankingPortfolioPercent(meta?.latest_excess_return_pct)}
-                valueClass={getRankingPortfolioPerformanceClass(meta?.latest_excess_return_pct)}
-              />
+              <div className="grid grid-cols-3 gap-2 lg:min-w-[300px]">
+                <MetricCard
+                  label="累计收益"
+                  tooltip="模拟组合从起始日持有到当前的总收益率，反映这套选股规则本身的累计表现。"
+                  value={formatRankingPortfolioPercent(meta?.latest_portfolio_return_pct)}
+                  valueClass={getRankingPortfolioPerformanceClass(meta?.latest_portfolio_return_pct)}
+                />
+                <MetricCard
+                  label="基准收益"
+                  tooltip={`同一时间段内，基准 ${benchmarkLabel} 的累计收益率，用来对比市场整体表现。`}
+                  value={formatRankingPortfolioPercent(meta?.latest_benchmark_return_pct)}
+                  valueClass={getRankingPortfolioPerformanceClass(meta?.latest_benchmark_return_pct)}
+                />
+                <MetricCard
+                  label="超额收益"
+                  tooltip={`模拟组合累计收益减去 ${benchmarkLabel} 累计收益后的差值。正值表示跑赢基准，负值表示跑输基准。`}
+                  value={formatRankingPortfolioPercent(meta?.latest_excess_return_pct)}
+                  valueClass={getRankingPortfolioPerformanceClass(meta?.latest_excess_return_pct)}
+                />
+              </div>
             </div>
           </div>
 
-          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(280px,0.8fr)] xl:items-stretch">
+          <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.52fr)_minmax(270px,0.82fr)] xl:items-stretch">
             <div className="xl:h-full">
               <RankingPortfolioChart series={series} benchmarkLabel={benchmarkLabel} />
             </div>
 
-            <div className="rounded-2xl border border-border/70 bg-black/10 p-4 xl:h-full">
+            <div className="rounded-2xl border border-border/70 bg-black/10 p-3.5 xl:h-full">
               <div className="text-sm font-medium text-white">当前成分股</div>
 
               {meta?.has_shortfall ? (
@@ -474,11 +471,11 @@ function TooltipMetric({ label, value, colorClass, highlight = false }) {
 
 function MetricCard({ label, tooltip, value, valueClass }) {
   return (
-    <div className="rounded-2xl border border-border/70 bg-black/10 px-3 py-3">
+    <div className="rounded-xl border border-white/8 bg-white/[0.04] px-2.5 py-2.5">
       <div className="text-[11px] text-white/35">
         <LabelWithInfo label={label} tooltip={tooltip} labelClassName="text-[11px] text-white/35" tipPlacement="top-right" tipWidthClassName="w-52 sm:w-60" />
       </div>
-      <div className={`mt-2 text-lg font-semibold tabular-nums ${valueClass}`}>{value}</div>
+      <div className={`mt-1.5 text-base font-semibold tabular-nums ${valueClass}`}>{value}</div>
     </div>
   )
 }

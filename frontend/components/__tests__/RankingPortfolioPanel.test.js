@@ -188,14 +188,28 @@ describe('RankingPortfolioPanel source contract', () => {
     assert.match(panelSource, /仓位/)
   })
 
-  it('renders four portfolio cards and B-combo ranking metadata', () => {
+  it('renders compact exchange and variant toggles with B-combo metadata', () => {
     assert.match(panelSource, /A \/ B 双组合/)
-    assert.match(panelSource, /每日收盘后取卧龙AI精选排行榜A、B两种规则 4 只股票/)
+    assert.match(panelSource, /跟踪卧龙AI精选 A、B 两套组合表现，快速看哪套规则更稳、哪套更能跑赢基准。/)
     assert.match(panelSource, /selectedExchange/)
     assert.match(panelSource, /selectedVariant/)
+    assert.match(panelSource, /模拟组合A/)
+    assert.match(panelSource, /模拟组合B/)
+    assert.match(panelSource, /剔除科创板/)
     assert.match(panelSource, /\$\{windowText\} 连续上榜优先/)
     assert.match(panelSource, /榜单第\$\{item\?\.source_rank \|\| '--'\}名/)
     assert.match(panelSource, /连续\$\{item\?\.consecutive_days \|\| '--'\}日/)
+    assert.doesNotMatch(panelSource, /每日收盘后取卧龙AI精选排行榜A、B两种规则 4 只股票/)
+  })
+
+  it('imports every React hook it uses', () => {
+    assert.match(panelSource, /import \{[^}]*useEffect[^}]*\} from 'react'/)
+    assert.match(panelSource, /useEffect\(/)
+  })
+
+  it('imports rebalance formatter helpers used in disclosure rows', () => {
+    assert.match(panelSource, /import \{[^}]*formatRankingPortfolioReferencePrice[^}]*formatRankingPortfolioWeightChange[^}]*\} from '\.\.\/lib\/ranking-portfolio'/)
+    assert.match(panelSource, /formatRankingPortfolioWeightChange\(item\?\.from_weight, item\?\.to_weight, 0\)/)
   })
 
   it('keeps latest rebalance collapsed behind a disclosure button', () => {

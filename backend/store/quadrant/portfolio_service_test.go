@@ -185,8 +185,11 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	if len(aResp.Constituents) != 4 {
 		t.Fatalf("expected 4 latest constituents, got %d", len(aResp.Constituents))
 	}
-	if aResp.Meta.BatchID == "" || aResp.Meta.MethodNote == "" {
-		t.Fatalf("expected batch id and method note, got %+v", aResp.Meta)
+	if aResp.Meta.BatchID == "" {
+		t.Fatalf("expected batch id, got %+v", aResp.Meta)
+	}
+	if aResp.Meta.MethodNote != "" {
+		t.Fatalf("expected method note to be omitted from response, got %q", aResp.Meta.MethodNote)
 	}
 	bResp, ok := itemsByID["wolong_ai_top10_ex_star_by_streak_v1"]
 	if !ok {

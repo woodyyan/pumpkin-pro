@@ -16,5 +16,29 @@ describe('live-trading page syntax', () => {
       })
     })
   })
-})
 
+  it('keeps only market and watchlist on 10-second polling', () => {
+    assert.ok(!pageSource.includes('行情看板概览'))
+    assert.ok(!pageSource.includes('手动刷新'))
+    assert.ok(!pageSource.includes('manualRefreshing'))
+    assert.ok(!pageSource.includes('handleManualRefresh'))
+    assert.ok(pageSource.includes('const refreshRealtimeSections = useCallback(() => {'))
+    assert.ok(pageSource.includes('loadPublicData()'))
+    assert.ok(pageSource.includes('loadPrivateData()'))
+    assert.ok(pageSource.includes('window.setInterval(() => {'))
+    assert.ok(pageSource.includes('refreshRealtimeSections()'))
+    assert.ok(pageSource.includes('10000'))
+
+    const refreshStart = pageSource.indexOf('const refreshRealtimeSections = useCallback(() => {')
+    assert.notEqual(refreshStart, -1, 'refreshRealtimeSections definition not found')
+
+    const refreshEnd = pageSource.indexOf('}, [privateAccessReady])', refreshStart)
+    assert.notEqual(refreshEnd, -1, 'refreshRealtimeSections closing not found')
+
+    const refreshBody = pageSource.slice(refreshStart, refreshEnd)
+    assert.ok(refreshBody.includes('loadPublicData()'))
+    assert.ok(refreshBody.includes('loadPrivateData()'))
+    assert.ok(!refreshBody.includes('loadRanking('))
+    assert.ok(!refreshBody.includes('loadRankingPortfolio('))
+  })
+})

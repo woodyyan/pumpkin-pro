@@ -30,7 +30,6 @@ export default function LiveTradingOverviewPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
-  const [lastUpdateAt, setLastUpdateAt] = useState('')
   const [signalConfigMap, setSignalConfigMap] = useState({})
   const [quadrantData, setQuadrantData] = useState(null)
   const [quadrantLoading, setQuadrantLoading] = useState(false)
@@ -40,7 +39,6 @@ export default function LiveTradingOverviewPage() {
   const [rankingExchange, setRankingExchange] = useState('ASHARE') // independent tab state for ranking
   const [rankingPortfolioData, setRankingPortfolioData] = useState(null)
   const [rankingPortfolioLoading, setRankingPortfolioLoading] = useState(false)
-  const [manualRefreshing, setManualRefreshing] = useState(false)
   const [quadrantSearchState, setQuadrantSearchState] = useState(() => createQuadrantSearchState())
 
   const privateAccessReady = ready && isLoggedIn
@@ -52,7 +50,6 @@ export default function LiveTradingOverviewPage() {
     setQuadrantData(null)
     setError('')
     setErrorNeedsLogin(false)
-    setLastUpdateAt('')
   }, [])
 
   const updateError = (nextError, nextNeedsLogin = false) => {
@@ -105,7 +102,6 @@ export default function LiveTradingOverviewPage() {
     const data = await requestJson('/api/live/watchlist/snapshots')
     const items = Array.isArray(data?.items) ? data.items : []
     setSnapshots(items)
-    setLastUpdateAt(new Date().toISOString())
     return items
   }
 
@@ -212,19 +208,12 @@ export default function LiveTradingOverviewPage() {
     }
   }
 
-  const handleManualRefresh = async () => {
-    if (!ready || manualRefreshing) return
-    setManualRefreshing(true)
-    try {
-      const tasks = [loadPublicData(), loadRanking(rankingExchange), loadRankingPortfolio()]
-      if (privateAccessReady) {
-        tasks.push(loadPrivateData({ refreshQuadrant: true }))
-      }
-      await Promise.all(tasks)
-    } finally {
-      setManualRefreshing(false)
+  const refreshRealtimeSections = useCallback(() => {
+    loadPublicData()
+    if (privateAccessReady) {
+      loadPrivateData()
     }
-  }
+  }, [privateAccessReady])
 
   // Bootstrap
   useEffect(() => {
@@ -239,6 +228,16 @@ export default function LiveTradingOverviewPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, privateAccessReady])
+
+  useEffect(() => {
+    if (!ready) return undefined
+
+    const intervalId = window.setInterval(() => {
+      refreshRealtimeSections()
+    }, 10000)
+
+    return () => window.clearInterval(intervalId)
+  }, [ready, refreshRealtimeSections])
 
   useEffect(() => {
     if (!currentQuadrantSearch.selectedCode) return
@@ -343,26 +342,6 @@ export default function LiveTradingOverviewPage() {
         <meta name="description" content="卧龙AI量化交易台行情看板 — 实时 A 股/港股行情、四象限风险全景图、关注池管理。支持 AI 个股智能诊断与技术指标分析。" />
         <link rel="canonical" href="https://wolongtrader.top/live-trading" />
       </Head>
-
-      <section className="rounded-2xl border border-border bg-card px-5 py-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="text-sm font-semibold text-white">行情看板概览</div>
-            <div className="mt-1 text-xs text-white/45">页面初始化后不再自动轮询，点击右侧按钮手动刷新四象限、精选榜单和模拟组合。</div>
-          </div>
-          <div className="flex items-center gap-3">
-            {lastUpdateAt ? <span className="text-xs text-white/35">上次刷新：{formatDateTime(lastUpdateAt)}</span> : null}
-            <button
-              type="button"
-              disabled={!ready || manualRefreshing}
-              onClick={handleManualRefresh}
-              className="inline-flex items-center justify-center rounded-xl border border-primary/35 bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {manualRefreshing ? '刷新中...' : '手动刷新'}
-            </button>
-          </div>
-        </div>
-      </section>
 
       {/* Market overview — compact index bar */}
       <section className="rounded-2xl border border-border bg-card px-5 py-3">

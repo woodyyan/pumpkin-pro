@@ -63,6 +63,11 @@ describe('portfolio pnl calendar integration', () => {
     assert.doesNotMatch(pageSource, /const hasMultiMarketCurve = curveSeries\.length > 1/)
   })
 
+  it('uses a thinner equity curve stroke for the desktop chart cards', () => {
+    assert.match(pageSource, /strokeWidth="1\.35"/)
+    assert.match(pageSource, /r="1\.35"/)
+  })
+
   it('defaults display metric to amount and refreshes after dashboard load', () => {
     assert.match(pageSource, /useState\('amount'\)/)
     assert.match(pageSource, /setPnlCalendarRefreshVersion\(\(prev\) => prev \+ 1\)/)

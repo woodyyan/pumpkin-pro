@@ -1157,8 +1157,8 @@ function SimpleLineChart({ points, color = '#f59e0b' }) {
     <svg viewBox={`0 0 ${width} ${height}`} className="h-full min-h-[144px] w-full overflow-visible" preserveAspectRatio="none">
       <path d={areaPath} fill={color} opacity="0.12" />
       <line x1={paddingX} y1={height - paddingY} x2={width - paddingX} y2={height - paddingY} stroke="rgba(255,255,255,0.08)" strokeWidth="0.6" />
-      <polyline fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" points={polyline} />
-      <circle cx={last.x} cy={last.y} r="1.8" fill={color} />
+      <polyline fill="none" stroke={color} strokeWidth="1.35" strokeLinejoin="round" strokeLinecap="round" points={polyline} />
+      <circle cx={last.x} cy={last.y} r="1.35" fill={color} />
     </svg>
   )
 }

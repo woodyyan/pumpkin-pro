@@ -10,13 +10,12 @@ import changelogData from '../data/changelog.json'
 import NavSearchBox from '../components/NavSearchBox'
 
 const NAV_ITEMS = [
-  { href: '/', label: '首页' },
-  { href: '/strategies', label: '策略库' },
-  { href: '/backtest', label: '回测引擎' },
   { href: '/live-trading', label: '行情看板' },
   { href: '/stock-picker', label: '选股器' },
-  { href: '/factor-lab', label: '因子实验室' },
+  { href: '/backtest', label: '回测引擎' },
+  { href: '/strategies', label: '策略库' },
   { href: '/portfolio', label: '持仓管理' },
+  { href: '/factor-lab', label: '因子实验室' },
   { href: '/changelog', label: '更新日志', badgeKey: 'changelog' },
 ]
 

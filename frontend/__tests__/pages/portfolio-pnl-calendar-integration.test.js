@@ -57,6 +57,12 @@ describe('portfolio pnl calendar integration', () => {
     assert.match(detailSource, /custom-scrollbar/)
   })
 
+  it('keeps the wider desktop calendar layout whenever the calendar column is shown', () => {
+    assert.match(pageSource, /xl:grid-cols-\[0\.92fr_1\.08fr\]/)
+    assert.match(pageSource, /xl:grid-cols-1 xl:auto-rows-fr/)
+    assert.doesNotMatch(pageSource, /const hasMultiMarketCurve = curveSeries\.length > 1/)
+  })
+
   it('defaults display metric to amount and refreshes after dashboard load', () => {
     assert.match(pageSource, /useState\('amount'\)/)
     assert.match(pageSource, /setPnlCalendarRefreshVersion\(\(prev\) => prev \+ 1\)/)

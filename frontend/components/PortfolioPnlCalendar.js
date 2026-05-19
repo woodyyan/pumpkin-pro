@@ -106,7 +106,7 @@ export default function PortfolioPnlCalendar({
   }
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
+    <section className="flex h-full min-h-0 flex-col rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h3 className="flex items-center gap-2 text-sm font-semibold text-white/80">
@@ -196,7 +196,7 @@ export default function PortfolioPnlCalendar({
         </div>
       ) : null}
 
-      <div className={`relative ${loading ? 'pointer-events-none opacity-55' : ''}`}>
+      <div className={`relative flex-1 ${loading ? 'pointer-events-none opacity-55' : ''}`}>
         <div className="grid grid-cols-7 gap-1.5 text-center text-[10px] text-white/28 sm:gap-2">
           {WEEKDAY_LABELS.map((label) => (
             <div key={label} className="py-1 font-medium">{label}</div>

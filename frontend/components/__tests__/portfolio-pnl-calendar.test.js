@@ -65,4 +65,9 @@ describe('PortfolioPnlCalendar helpers', () => {
     assert.match(source, /whitespace-normal break-words text-center/)
     assert.match(source, /min-h-\[68px\]/)
   })
+
+  it('allows the desktop calendar card to stretch to match the curve height', () => {
+    assert.match(source, /flex h-full min-h-0 flex-col rounded-2xl/)
+    assert.match(source, /relative flex-1/)
+  })
 })

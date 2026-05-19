@@ -1154,7 +1154,7 @@ function SimpleLineChart({ points, color = '#f59e0b' }) {
   const last = coords[coords.length - 1]
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-40 overflow-visible" preserveAspectRatio="none">
+    <svg viewBox={`0 0 ${width} ${height}`} className="h-full min-h-[144px] w-full overflow-visible" preserveAspectRatio="none">
       <path d={areaPath} fill={color} opacity="0.12" />
       <line x1={paddingX} y1={height - paddingY} x2={width - paddingX} y2={height - paddingY} stroke="rgba(255,255,255,0.08)" strokeWidth="0.6" />
       <polyline fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" points={polyline} />
@@ -1176,7 +1176,7 @@ function EquityCurveCard({ series }) {
   const deltaClass = deltaValue >= 0 ? 'text-rose-400' : 'text-emerald-400'
 
   return (
-    <div className="rounded-xl bg-black/20 p-3 sm:p-4">
+    <div className="flex h-full min-h-0 flex-col rounded-xl bg-black/20 p-3 sm:p-4">
       <div className="flex items-start justify-between gap-3 mb-2">
         <div>
           <div className="text-xs font-semibold text-white/70">{series.scope_label || scopeLabel(series.scope)}</div>
@@ -1185,7 +1185,9 @@ function EquityCurveCard({ series }) {
         </div>
         <div className="text-[10px] text-white/25 shrink-0">{series.currency_code || (series.scope === 'HKEX' ? 'HKD' : 'CNY')}</div>
       </div>
-      <SimpleLineChart points={points} color={series.scope === 'HKEX' ? '#38bdf8' : '#f59e0b'} />
+      <div className="min-h-0 flex-1">
+        <SimpleLineChart points={points} color={series.scope === 'HKEX' ? '#38bdf8' : '#f59e0b'} />
+      </div>
       <div className="mt-2 flex items-center justify-between text-[10px] text-white/30">
         <span>{first?.date || '--'}</span>
         <span>{latest?.date || '--'}</span>
@@ -1196,11 +1198,12 @@ function EquityCurveCard({ series }) {
 
 function EquityCurveSection({ curve, curveRange, setCurveRange }) {
   const series = Array.isArray(curve?.series) ? curve.series.filter((item) => Array.isArray(item?.points) && item.points.length > 0) : []
+  const stackSeriesOnDesktop = series.length > 1
   if (series.length === 0) return null
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <section className="flex h-full min-h-0 flex-col rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
+      <div className="mb-4 flex shrink-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h3 className="text-sm font-semibold text-white/80 flex items-center gap-2">
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 17l6-6 4 4 7-8"/></svg>
@@ -1227,7 +1230,7 @@ function EquityCurveSection({ curve, curveRange, setCurveRange }) {
           {curve?.mixed_currency ? <div className="text-[10px] text-white/30 sm:text-right">分币种展示，不做汇率折算</div> : null}
         </div>
       </div>
-      <div className={`grid gap-3 ${series.length > 1 ? 'xl:grid-cols-2' : ''}`}>
+      <div className={`grid min-h-0 flex-1 gap-3 ${stackSeriesOnDesktop ? 'xl:grid-cols-1 xl:auto-rows-fr' : ''}`}>
         {series.map((item) => (
           <EquityCurveCard key={item.scope} series={item} />
         ))}
@@ -1370,7 +1373,7 @@ function PortfolioCoreDashboardSection({
       ) : null}
 
       {(hasCurve || hasCalendar) ? (
-        <div className="grid items-stretch gap-4 xl:grid-cols-[1.45fr_1fr]">
+        <div className={`grid items-stretch gap-4 ${hasCalendar ? 'xl:grid-cols-[0.92fr_1.08fr]' : 'xl:grid-cols-[1.45fr_1fr]'}`}>
           {hasCurve ? <EquityCurveSection curve={curve} curveRange={curveRange} setCurveRange={setCurveRange} /> : null}
           {hasCalendar ? (
             <PortfolioPnlCalendar

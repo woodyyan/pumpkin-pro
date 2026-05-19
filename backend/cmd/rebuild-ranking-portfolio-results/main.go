@@ -42,6 +42,17 @@ const (
 	rebuildSnapshotHourInShanghai    = 15
 	rebuildEffectiveHourInShanghai   = 9
 	rebuildEffectiveMinuteInShanghai = 30
+
+	definitionIDAShareB = "wolong_ai_top10_ex_star_by_streak_v1"
+	definitionIDHKA     = "wolong_ai_hk_top4_equal_v1"
+	definitionIDHKB     = "wolong_ai_hk_top10_by_streak_v1"
+
+	definitionCodeAShareB = "wolong-ai-top10-ex-star-by-streak"
+	definitionCodeHKA     = "wolong-ai-hk-top4-equal"
+	definitionCodeHKB     = "wolong-ai-hk-top10-by-streak"
+
+	selectionRuleTop4          = "top4"
+	selectionRuleTop10ByStreak = "top10_by_consecutive_days"
 )
 
 type cliOptions struct {
@@ -146,7 +157,7 @@ func main() {
 		log.Fatalf("加载组合定义失败: %v", err)
 	}
 
-	targetDates, err := loadTargetDates(ctx, db, opts)
+	targetDates, err := loadTargetDates(ctx, db, resolveDefinitionExchanges(definition.Exchange), opts)
 	if err != nil {
 		log.Fatalf("加载待重建日期失败: %v", err)
 	}
@@ -291,23 +302,47 @@ func loadDefinition(ctx context.Context, db *gorm.DB, definitionID string) (quad
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return quadrant.RankingPortfolioDefinition{}, err
 	}
-	if definitionID != defaultDefinitionID {
-		return quadrant.RankingPortfolioDefinition{}, fmt.Errorf("组合定义不存在: %s", definitionID)
-	}
 
-	now := time.Now().UTC()
+	if fallback, ok := fallbackDefinitionByID(definitionID, time.Now().UTC()); ok {
+		return fallback, nil
+	}
+	return quadrant.RankingPortfolioDefinition{}, fmt.Errorf("组合定义不存在: %s", definitionID)
+}
+
+func fallbackDefinitionByID(definitionID string, now time.Time) (quadrant.RankingPortfolioDefinition, bool) {
+	for _, definition := range fallbackDefinitions(now) {
+		if definition.ID == strings.TrimSpace(definitionID) {
+			return definition, true
+		}
+	}
+	return quadrant.RankingPortfolioDefinition{}, false
+}
+
+func fallbackDefinitions(now time.Time) []quadrant.RankingPortfolioDefinition {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	return []quadrant.RankingPortfolioDefinition{
+		buildFallbackDefinition(defaultDefinitionID, defaultDefinitionCode, defaultPortfolioName, "ASHARE", "A", defaultBenchmarkCode, defaultBenchmarkName, selectionRuleTop4, 0, []string{"STAR"}, now),
+		buildFallbackDefinition(definitionIDAShareB, definitionCodeAShareB, "模拟组合B", "ASHARE", "B", "SHCI", "上证指数", selectionRuleTop10ByStreak, 10, []string{"STAR"}, now),
+		buildFallbackDefinition(definitionIDHKA, definitionCodeHKA, "模拟组合A", "HKEX", "A", "HSI", "恒生指数", selectionRuleTop4, 0, nil, now),
+		buildFallbackDefinition(definitionIDHKB, definitionCodeHKB, "模拟组合B", "HKEX", "B", "HSI", "恒生指数", selectionRuleTop10ByStreak, 10, nil, now),
+	}
+}
+
+func buildFallbackDefinition(id string, code string, name string, exchange string, portfolioVariant string, benchmarkCode string, benchmarkName string, selectionRule string, selectionWindow int, excludedBoards []string, now time.Time) quadrant.RankingPortfolioDefinition {
 	return quadrant.RankingPortfolioDefinition{
-		ID:               defaultDefinitionID,
-		Code:             defaultDefinitionCode,
-		Name:             defaultPortfolioName,
-		Exchange:         "ASHARE",
-		PortfolioVariant: "A",
-		BenchmarkCode:    defaultBenchmarkCode,
-		BenchmarkName:    defaultBenchmarkName,
+		ID:               id,
+		Code:             code,
+		Name:             name,
+		Exchange:         exchange,
+		PortfolioVariant: portfolioVariant,
+		BenchmarkCode:    benchmarkCode,
+		BenchmarkName:    benchmarkName,
 		MaxHoldings:      defaultMaxHoldings,
-		SelectionRule:    "top4",
-		SelectionWindow:  0,
-		ExcludedBoards:   "[\"STAR\"]",
+		SelectionRule:    selectionRule,
+		SelectionWindow:  selectionWindow,
+		ExcludedBoards:   marshalStringSlice(excludedBoards),
 		WeightingMethod:  "equal",
 		RebalanceRule:    "t_close_generate_t1_open_rebalance",
 		TradeCostRate:    defaultTradeCostRate,
@@ -315,14 +350,28 @@ func loadDefinition(ctx context.Context, db *gorm.DB, definitionID string) (quad
 		IsActive:         true,
 		CreatedAt:        now,
 		UpdatedAt:        now,
-	}, nil
+	}
 }
 
-func loadTargetDates(ctx context.Context, db *gorm.DB, opts cliOptions) ([]string, error) {
+func marshalStringSlice(values []string) string {
+	if len(values) == 0 {
+		return "[]"
+	}
+	payload, err := json.Marshal(values)
+	if err != nil {
+		return "[]"
+	}
+	return string(payload)
+}
+
+func loadTargetDates(ctx context.Context, db *gorm.DB, exchanges []string, opts cliOptions) ([]string, error) {
 	query := db.WithContext(ctx).
 		Model(&quadrant.RankingSnapshot{}).
-		Distinct("snapshot_date").
-		Where("exchange IN ?", []string{"SSE", "SZSE"})
+		Distinct("snapshot_date")
+
+	if len(exchanges) > 0 {
+		query = query.Where("exchange IN ?", exchanges)
+	}
 
 	if opts.FromDate != "" {
 		query = query.Where("snapshot_date >= ?", opts.FromDate)
@@ -386,7 +435,8 @@ func buildPlans(ctx context.Context, db *gorm.DB, definition quadrant.RankingPor
 }
 
 func buildPlanForDate(ctx context.Context, db *gorm.DB, definition quadrant.RankingPortfolioDefinition, snapshotDate string, previousConstituents []quadrant.RankingPortfolioConstituentItem, stockResolver *stockPriceResolver, benchResolver *benchmarkResolver) (rebuildPlan, []quadrant.RankingPortfolioConstituentItem, error) {
-	sourceRows, err := loadSourceSnapshotRows(ctx, db, snapshotDate)
+	repo := quadrant.NewRepository(db)
+	sourceRows, err := loadSourceSnapshotRows(ctx, db, snapshotDate, resolveDefinitionExchanges(definition.Exchange))
 	if err != nil {
 		return rebuildPlan{}, nil, fmt.Errorf("加载 ranking snapshots 失败: %w", err)
 	}
@@ -394,7 +444,10 @@ func buildPlanForDate(ctx context.Context, db *gorm.DB, definition quadrant.Rank
 		return rebuildPlan{}, nil, fmt.Errorf("%s 没有可用的 ranking snapshots", snapshotDate)
 	}
 
-	constituents := selectPortfolioConstituentsFromSnapshots(sourceRows, definition.MaxHoldings)
+	constituents, err := selectPortfolioConstituentsFromSnapshots(ctx, repo, definition, sourceRows)
+	if err != nil {
+		return rebuildPlan{}, nil, fmt.Errorf("构建组合成分失败: %w", err)
+	}
 	hasShortfall := len(constituents) < definition.MaxHoldings
 	warningText := ""
 	if hasShortfall {
@@ -441,59 +494,155 @@ func buildPlanForDate(ctx context.Context, db *gorm.DB, definition quadrant.Rank
 	}, constituents, nil
 }
 
-func loadSourceSnapshotRows(ctx context.Context, db *gorm.DB, snapshotDate string) ([]sourceSnapshotRow, error) {
+func loadSourceSnapshotRows(ctx context.Context, db *gorm.DB, snapshotDate string, exchanges []string) ([]sourceSnapshotRow, error) {
 	var rows []sourceSnapshotRow
-	err := db.WithContext(ctx).
+	query := db.WithContext(ctx).
 		Model(&quadrant.RankingSnapshot{}).
 		Select("id, code, name, exchange, rank, opportunity, risk, close_price, price_trade_date, snapshot_date").
-		Where("snapshot_date = ? AND exchange IN ?", snapshotDate, []string{"SSE", "SZSE"}).
-		Order("rank ASC, id ASC").
-		Find(&rows).Error
+		Where("snapshot_date = ?", snapshotDate)
+	if len(exchanges) > 0 {
+		query = query.Where("exchange IN ?", exchanges)
+	}
+	err := query.Order("rank ASC, id ASC").Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
 	return rows, nil
 }
 
-func selectPortfolioConstituentsFromSnapshots(rows []sourceSnapshotRow, limit int) []quadrant.RankingPortfolioConstituentItem {
-	if limit <= 0 {
-		limit = defaultMaxHoldings
+func selectPortfolioConstituentsFromSnapshots(ctx context.Context, repo *quadrant.Repository, definition quadrant.RankingPortfolioDefinition, rows []sourceSnapshotRow) ([]quadrant.RankingPortfolioConstituentItem, error) {
+	maxHoldings := definition.MaxHoldings
+	if maxHoldings <= 0 {
+		maxHoldings = defaultMaxHoldings
 	}
-	filtered := make([]sourceSnapshotRow, 0, len(rows))
+
+	exchanges := resolveDefinitionExchanges(definition.Exchange)
+	exchangeSet := make(map[string]struct{}, len(exchanges))
+	for _, exchange := range exchanges {
+		exchangeSet[strings.ToUpper(strings.TrimSpace(exchange))] = struct{}{}
+	}
+
+	needsStreak := definition.SelectionRule == selectionRuleTop10ByStreak
+	rankingItems := make([]quadrant.RankingItem, 0, len(rows))
 	for _, row := range rows {
-		if row.Exchange != "SSE" && row.Exchange != "SZSE" {
+		normalizedExchange := strings.ToUpper(strings.TrimSpace(row.Exchange))
+		if _, ok := exchangeSet[normalizedExchange]; !ok {
 			continue
 		}
 		if strings.Contains(strings.ToUpper(strings.TrimSpace(row.Name)), "ST") {
 			continue
 		}
-		if normalizeBoardFromCode(row.Code) == "STAR" {
+
+		item := quadrant.RankingItem{
+			Rank:        row.Rank,
+			Code:        strings.TrimSpace(row.Code),
+			Name:        strings.TrimSpace(row.Name),
+			Exchange:    normalizedExchange,
+			Board:       normalizeBoardForExchange(normalizedExchange, row.Code),
+			Opportunity: row.Opportunity,
+			Risk:        row.Risk,
+		}
+		if needsStreak && repo != nil {
+			days, err := repo.GetConsecutiveDays(ctx, item.Code, exchanges)
+			if err != nil {
+				return nil, err
+			}
+			item.ConsecutiveDays = days
+		}
+		rankingItems = append(rankingItems, item)
+	}
+
+	excludedBoards := decodeExcludedBoards(definition.ExcludedBoards)
+	filtered := make([]quadrant.RankingItem, 0, len(rankingItems))
+	for _, item := range rankingItems {
+		if len(excludedBoards) > 0 && excludedBoards[strings.ToUpper(strings.TrimSpace(item.Board))] {
 			continue
 		}
-		filtered = append(filtered, row)
-		if len(filtered) == limit {
-			break
-		}
+		filtered = append(filtered, item)
+	}
+
+	if definition.SelectionWindow > 0 && len(filtered) > definition.SelectionWindow {
+		filtered = filtered[:definition.SelectionWindow]
+	}
+
+	selected := filtered
+	if needsStreak {
+		selected = append([]quadrant.RankingItem(nil), filtered...)
+		sort.SliceStable(selected, func(i, j int) bool {
+			if selected[i].ConsecutiveDays == selected[j].ConsecutiveDays {
+				if selected[i].Rank == selected[j].Rank {
+					return snapshotRowKey(selected[i].Exchange, selected[i].Code) < snapshotRowKey(selected[j].Exchange, selected[j].Code)
+				}
+				return selected[i].Rank < selected[j].Rank
+			}
+			return selected[i].ConsecutiveDays > selected[j].ConsecutiveDays
+		})
+	}
+
+	if len(selected) > maxHoldings {
+		selected = selected[:maxHoldings]
 	}
 
 	weight := 0.0
-	if len(filtered) > 0 {
-		weight = 1 / float64(len(filtered))
+	if len(selected) > 0 {
+		weight = 1 / float64(len(selected))
 	}
-	items := make([]quadrant.RankingPortfolioConstituentItem, 0, len(filtered))
-	for i, row := range filtered {
+	items := make([]quadrant.RankingPortfolioConstituentItem, 0, len(selected))
+	for i, item := range selected {
 		items = append(items, quadrant.RankingPortfolioConstituentItem{
-			Rank:        i + 1,
-			Code:        strings.TrimSpace(row.Code),
-			Name:        strings.TrimSpace(row.Name),
-			Exchange:    strings.TrimSpace(row.Exchange),
-			Board:       normalizeBoardFromCode(row.Code),
-			Weight:      weight,
-			Opportunity: row.Opportunity,
-			Risk:        row.Risk,
+			Rank:            i + 1,
+			SourceRank:      item.Rank,
+			Code:            item.Code,
+			Name:            item.Name,
+			Exchange:        item.Exchange,
+			Board:           item.Board,
+			ConsecutiveDays: item.ConsecutiveDays,
+			Weight:          weight,
+			Opportunity:     item.Opportunity,
+			Risk:            item.Risk,
 		})
 	}
-	return items
+	return items, nil
+}
+
+func resolveDefinitionExchanges(exchange string) []string {
+	switch strings.ToUpper(strings.TrimSpace(exchange)) {
+	case "HKEX":
+		return []string{"HKEX"}
+	case "ASHARE", "":
+		fallthrough
+	default:
+		return []string{"SSE", "SZSE"}
+	}
+}
+
+func decodeExcludedBoards(value string) map[string]bool {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	var boards []string
+	_ = json.Unmarshal([]byte(value), &boards)
+	result := make(map[string]bool, len(boards))
+	for _, board := range boards {
+		normalized := strings.ToUpper(strings.TrimSpace(board))
+		if normalized != "" {
+			result[normalized] = true
+		}
+	}
+	return result
+}
+
+func normalizeBoardForExchange(exchange string, code string) string {
+	switch strings.ToUpper(strings.TrimSpace(exchange)) {
+	case "SSE", "SZSE":
+		return normalizeBoardFromCode(code)
+	default:
+		return ""
+	}
+}
+
+func snapshotRowKey(exchange string, code string) string {
+	return strings.ToUpper(strings.TrimSpace(exchange)) + "\x00" + strings.TrimSpace(code)
 }
 
 func normalizeBoardFromCode(code string) string {
@@ -776,15 +925,17 @@ func loadLatestPortfolioConstituentsBeforeDate(ctx context.Context, db *gorm.DB,
 	items := make([]quadrant.RankingPortfolioConstituentItem, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, quadrant.RankingPortfolioConstituentItem{
-			Rank:         row.Rank,
-			Code:         row.Code,
-			Name:         row.Name,
-			Exchange:     row.Exchange,
-			Board:        row.Board,
-			Weight:       row.Weight,
-			RankingScore: row.RankingScore,
-			Opportunity:  row.Opportunity,
-			Risk:         row.Risk,
+			Rank:            row.Rank,
+			SourceRank:      row.SourceRank,
+			Code:            row.Code,
+			Name:            row.Name,
+			Exchange:        row.Exchange,
+			Board:           row.Board,
+			ConsecutiveDays: row.ConsecutiveDays,
+			Weight:          row.Weight,
+			RankingScore:    row.RankingScore,
+			Opportunity:     row.Opportunity,
+			Risk:            row.Risk,
 		})
 	}
 	return items, nil
@@ -900,8 +1051,8 @@ func upsertDefinitionTx(tx *gorm.DB, definition quadrant.RankingPortfolioDefinit
 	return tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"code", "name", "exchange", "benchmark_code", "benchmark_name",
-			"max_holdings", "excluded_boards", "weighting_method", "rebalance_rule",
+			"code", "name", "exchange", "portfolio_variant", "benchmark_code", "benchmark_name",
+			"max_holdings", "selection_rule", "selection_window", "excluded_boards", "weighting_method", "rebalance_rule",
 			"trade_cost_rate", "method_note", "is_active", "updated_at",
 		}),
 	}).Create(&definition).Error
@@ -928,6 +1079,8 @@ func replaceConstituentsTx(ctx context.Context, tx *gorm.DB, definitionID string
 			Name:            item.Name,
 			Exchange:        item.Exchange,
 			Board:           item.Board,
+			SourceRank:      item.SourceRank,
+			ConsecutiveDays: item.ConsecutiveDays,
 			Weight:          item.Weight,
 			RankingScore:    item.RankingScore,
 			Opportunity:     item.Opportunity,
@@ -1018,15 +1171,17 @@ func buildResultForDateTx(ctx context.Context, tx *gorm.DB, definition quadrant.
 	}
 	for _, row := range constituentRows {
 		constituentsByVersion[row.SnapshotVersion] = append(constituentsByVersion[row.SnapshotVersion], quadrant.RankingPortfolioConstituentItem{
-			Rank:         row.Rank,
-			Code:         row.Code,
-			Name:         row.Name,
-			Exchange:     row.Exchange,
-			Board:        row.Board,
-			Weight:       row.Weight,
-			RankingScore: row.RankingScore,
-			Opportunity:  row.Opportunity,
-			Risk:         row.Risk,
+			Rank:            row.Rank,
+			SourceRank:      row.SourceRank,
+			Code:            row.Code,
+			Name:            row.Name,
+			Exchange:        row.Exchange,
+			Board:           row.Board,
+			ConsecutiveDays: row.ConsecutiveDays,
+			Weight:          row.Weight,
+			RankingScore:    row.RankingScore,
+			Opportunity:     row.Opportunity,
+			Risk:            row.Risk,
 		})
 	}
 

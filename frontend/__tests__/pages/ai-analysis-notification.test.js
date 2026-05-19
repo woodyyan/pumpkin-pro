@@ -109,3 +109,30 @@ describe('settings page notification preferences', () => {
     assert.match(settingsPageSource, /添加到主屏幕后可在后台接收通知/)
   })
 })
+
+
+describe('settings page webhook delivery history', () => {
+  it('renders delivery history as collapsed details by default', () => {
+    assert.match(settingsPageSource, /<details className="group rounded-xl border border-border bg-black\/20 p-4">/)
+    assert.match(settingsPageSource, /默认收起，点开后查看最近的投递记录。/)
+    assert.match(settingsPageSource, /group-open:hidden/)
+    assert.match(settingsPageSource, /group-open:inline/)
+  })
+})
+
+
+describe('settings page webhook channel support', () => {
+  it('supports both wecom and feishu options in settings page', () => {
+    assert.match(settingsPageSource, /WEBHOOK_CHANNEL_OPTIONS/)
+    assert.match(settingsPageSource, /value: 'wecom'/)
+    assert.match(settingsPageSource, /value: 'feishu'/)
+    assert.match(settingsPageSource, /飞书 Webhook 配置教程/)
+    assert.match(settingsPageSource, /webhookConfig\.channel/)
+  })
+
+  it('switches payload preview by selected channel', () => {
+    assert.match(settingsPageSource, /msgtype: 'text'/)
+    assert.match(settingsPageSource, /msg_type: 'text'/)
+    assert.match(settingsPageSource, /JSON\.stringify\(webhookChannelMeta\.payloadPreview, null, 2\)/)
+  })
+})

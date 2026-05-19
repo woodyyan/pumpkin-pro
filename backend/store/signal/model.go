@@ -10,6 +10,7 @@ type WebhookEndpointRecord struct {
 	ID               string    `gorm:"primaryKey;size:36"`
 	UserID           string    `gorm:"size:36;not null;uniqueIndex"`
 	URL              string    `gorm:"size:1024;not null"`
+	Channel          string    `gorm:"size:16;not null;default:'wecom'"`
 	SecretCipherText string    `gorm:"type:text;not null;default:''"`
 	IsEnabled        bool      `gorm:"not null;default:true;index"`
 	TimeoutMS        int       `gorm:"not null;default:3000"`
@@ -81,6 +82,7 @@ func (WebhookDeliveryRecord) TableName() string {
 
 type WebhookEndpoint struct {
 	URL       string `json:"url"`
+	Channel   string `json:"channel"`
 	HasSecret bool   `json:"has_secret"`
 	IsEnabled bool   `json:"is_enabled"`
 	TimeoutMS int    `json:"timeout_ms"`
@@ -124,6 +126,7 @@ type WebhookDelivery struct {
 
 type WebhookConfigInput struct {
 	URL       string `json:"url"`
+	Channel   string `json:"channel"`
 	Secret    string `json:"secret"`
 	IsEnabled *bool  `json:"is_enabled"`
 	TimeoutMS int    `json:"timeout_ms"`
@@ -164,6 +167,7 @@ func toWebhookEndpoint(record *WebhookEndpointRecord, hasSecret bool) *WebhookEn
 	}
 	return &WebhookEndpoint{
 		URL:       record.URL,
+		Channel:   record.Channel,
 		HasSecret: hasSecret,
 		IsEnabled: record.IsEnabled,
 		TimeoutMS: record.TimeoutMS,

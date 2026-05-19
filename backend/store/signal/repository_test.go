@@ -28,6 +28,7 @@ func makeWebhookRecord(userID string) WebhookEndpointRecord {
 		ID:               "wh-" + userID,
 		UserID:           userID,
 		URL:              "https://hooks.example.com/pumpkin",
+		Channel:          WebhookChannelWeCom,
 		SecretCipherText: "encrypted-secret",
 		IsEnabled:        true,
 		TimeoutMS:        5000,
@@ -79,10 +80,14 @@ func TestSignalRepo_WebhookEndpointCRUD(t *testing.T) {
 	if got.URL != "https://hooks.example.com/pumpkin" {
 		t.Errorf("expected stored URL, got %s", got.URL)
 	}
+	if got.Channel != WebhookChannelWeCom {
+		t.Errorf("expected stored channel %s, got %s", WebhookChannelWeCom, got.Channel)
+	}
 
 	// Update endpoint
 	record2 := *saved
 	record2.URL = "https://hooks.example.com/pumpkin-v2"
+	record2.Channel = WebhookChannelFeishu
 	record2.TimeoutMS = 8000
 	record2.UpdatedAt = time.Now().UTC()
 	updated, err := repo.SaveWebhookEndpoint(ctx, record2)
@@ -91,6 +96,9 @@ func TestSignalRepo_WebhookEndpointCRUD(t *testing.T) {
 	}
 	if updated.URL != "https://hooks.example.com/pumpkin-v2" {
 		t.Errorf("expected updated URL, got %s", updated.URL)
+	}
+	if updated.Channel != WebhookChannelFeishu {
+		t.Errorf("expected updated channel %s, got %s", WebhookChannelFeishu, updated.Channel)
 	}
 }
 

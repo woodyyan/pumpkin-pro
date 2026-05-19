@@ -23,6 +23,37 @@ import {
 } from '../lib/notification.js'
 import Head from 'next/head'
 
+const WEBHOOK_CHANNEL_OPTIONS = [
+  {
+    value: 'wecom',
+    label: '企业微信',
+    docLabel: '企业微信 Webhook 配置教程',
+    docHref: 'https://open.work.weixin.qq.com/help2/pc/14931',
+    payloadPreview: {
+      msgtype: 'text',
+      text: {
+        content: '股票交易信号来啦！\n类型：正式信号\n股票：00700.HK\n方向：BUY\n时间：2026-03-30 18:00:00\n策略：均线金叉策略\n原因：策略触发原因说明',
+      },
+    },
+  },
+  {
+    value: 'feishu',
+    label: '飞书',
+    docLabel: '飞书 Webhook 配置教程',
+    docHref: 'https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot?lang=zh-CN',
+    payloadPreview: {
+      msg_type: 'text',
+      content: {
+        text: '股票交易信号来啦！\n类型：正式信号\n股票：00700.HK\n方向：BUY\n时间：2026-03-30 18:00:00\n策略：均线金叉策略\n原因：策略触发原因说明',
+      },
+    },
+  },
+]
+
+function getWebhookChannelMeta(channel) {
+  return WEBHOOK_CHANNEL_OPTIONS.find((item) => item.value === channel) || WEBHOOK_CHANNEL_OPTIONS[0]
+}
+
 function createInvestForm(profile = null) {
   return {
     total_capital: profile?.total_capital ? String(profile.total_capital) : '',
@@ -43,6 +74,7 @@ export default function SettingsPage() {
   const { openAuthModal, isLoggedIn, ready, user } = useAuth()
   const [webhookConfig, setWebhookConfig] = useState({
     url: '',
+    channel: 'wecom',
     has_secret: false,
     is_enabled: true,
     timeout_ms: 3000,
@@ -69,6 +101,7 @@ export default function SettingsPage() {
   const [notifPrefs, setNotifPrefs] = useState(() => loadNotificationPreferences())
   const [notifSupported, setNotifSupported] = useState(false)
   const authIdentityKey = String(user?.id || user?.email || '')
+  const webhookChannelMeta = getWebhookChannelMeta(webhookConfig.channel)
 
   const applyError = (err, fallbackText) => {
     setNotice('')
@@ -82,6 +115,7 @@ export default function SettingsPage() {
     if (!item) {
       setWebhookConfig({
         url: '',
+        channel: 'wecom',
         has_secret: false,
         is_enabled: true,
         timeout_ms: 3000,
@@ -92,6 +126,7 @@ export default function SettingsPage() {
 
     setWebhookConfig({
       url: item.url || '',
+      channel: item.channel || 'wecom',
       has_secret: Boolean(item.has_secret),
       is_enabled: item.is_enabled !== false,
       timeout_ms: Number(item.timeout_ms) > 0 ? Number(item.timeout_ms) : 3000,
@@ -147,6 +182,7 @@ export default function SettingsPage() {
     if (!isLoggedIn) {
       setWebhookConfig({
         url: '',
+        channel: 'wecom',
         has_secret: false,
         is_enabled: true,
         timeout_ms: 3000,
@@ -180,6 +216,7 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: webhookConfig.url,
+          channel: webhookConfig.channel,
           secret: secretInput,
           is_enabled: webhookConfig.is_enabled,
           timeout_ms: Number(webhookConfig.timeout_ms) || 3000,
@@ -190,6 +227,7 @@ export default function SettingsPage() {
       if (item) {
         setWebhookConfig({
           url: item.url || '',
+          channel: item.channel || 'wecom',
           has_secret: Boolean(item.has_secret),
           is_enabled: item.is_enabled !== false,
           timeout_ms: Number(item.timeout_ms) > 0 ? Number(item.timeout_ms) : 3000,
@@ -519,9 +557,11 @@ export default function SettingsPage() {
           <div>
             <h2 className="text-base font-semibold text-white">Webhook 推送配置</h2>
             <p className="mt-1 text-xs text-white/60">
-              用于接收所有股票的交易信号。仅支持 HTTPS URL；Secret 为可选，配置后会附带签名头。测试按钮仅在真实送达后才会提示成功。
+              用于接收所有股票的网站信号。当前支持企业微信和飞书机器人。Secret签名为可选。
               不知道如何获取 Webhook 地址？可参考
-              <a href="https://open.work.weixin.qq.com/help2/pc/14931" target="_blank" rel="noopener noreferrer" className="text-primary/80 underline underline-offset-2 hover:text-primary ml-0.5">企业微信 Webhook 配置教程</a>。
+              <a href="https://open.work.weixin.qq.com/help2/pc/14931" target="_blank" rel="noopener noreferrer" className="ml-0.5 text-primary/80 underline underline-offset-2 hover:text-primary">企业微信 Webhook 配置教程</a>
+              {' '}或
+              <a href="https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot?lang=zh-CN" target="_blank" rel="noopener noreferrer" className="ml-0.5 text-primary/80 underline underline-offset-2 hover:text-primary">飞书 Webhook 配置教程</a>。
             </p>
           </div>
           <div className="text-xs text-white/55">
@@ -549,6 +589,26 @@ export default function SettingsPage() {
         ) : null}
 
         <div className="mt-4 space-y-3 rounded-xl border border-border bg-black/20 p-4">
+          <div>
+            <div className="mb-2 text-xs text-white/55">推送渠道</div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {WEBHOOK_CHANNEL_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setWebhookConfig((prev) => ({ ...prev, channel: option.value }))}
+                  className={
+                    webhookConfig.channel === option.value
+                      ? 'rounded-lg border border-primary bg-primary/10 px-3 py-2 text-left transition shadow-[0_0_0_1px_rgba(230,126,34,0.2)]'
+                      : 'rounded-lg border border-border bg-black/20 px-3 py-2 text-left transition hover:border-white/20'
+                  }
+                >
+                  <div className="text-sm font-medium text-white">{option.label}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <input
             value={webhookConfig.url}
             onChange={(event) => setWebhookConfig((prev) => ({ ...prev, url: event.target.value.trim() }))}
@@ -559,12 +619,12 @@ export default function SettingsPage() {
           <input
             value={secretInput}
             onChange={(event) => setSecretInput(event.target.value)}
-            placeholder={webhookConfig.has_secret ? '留空表示不修改 Secret；输入可更新签名密钥' : '可选：输入 Secret 启用签名；留空则不签名发送'}
+            placeholder={webhookConfig.has_secret ? '留空表示不修改 Secret；输入可更新签名密钥' : '可选：输入机器人签名密钥；留空则不启用签名'}
             className="w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
           />
 
           <div className="text-xs text-white/55">
-            当前签名状态：{webhookConfig.has_secret ? <span className="text-emerald-300">已启用（HMAC）</span> : <span className="text-amber-300">未启用（可选）</span>}
+            当前签名状态：{webhookConfig.has_secret ? <span className="text-emerald-300">已启用</span> : <span className="text-amber-300">未启用（可选）</span>}
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
@@ -613,13 +673,14 @@ export default function SettingsPage() {
             <summary className="cursor-pointer text-xs font-medium text-white/85">查看触发条件与 Payload 模板</summary>
             <div className="mt-3 space-y-3 text-xs text-white/75">
               <div className="space-y-1">
+                <div>推送渠道：当前为 {webhookChannelMeta.label} 机器人。</div>
                 <div>评估周期：系统每小时自动评估一次已开启信号的股票策略。</div>
                 <div>失败重试：最多 4 次，退避间隔 1 分钟 / 5 分钟 / 15 分钟。</div>
               </div>
               <div>
-                <div className="mb-1 text-white/65">Payload 模板（text 消息格式）</div>
+                <div className="mb-1 text-white/65">Payload 模板（系统自动生成）</div>
                 <pre className="overflow-x-auto rounded-lg border border-border/80 bg-black/50 p-2 text-[11px] leading-5 text-emerald-200">
-                  {JSON.stringify({ msgtype: 'text', text: { content: '股票交易信号来啦！\n类型：正式信号\n股票：00700.HK\n方向：BUY\n时间：2026-03-30 18:00:00\n策略：均线金叉策略\n原因：策略触发原因说明' } }, null, 2)}
+                  {JSON.stringify(webhookChannelMeta.payloadPreview, null, 2)}
                 </pre>
               </div>
             </div>
@@ -646,12 +707,26 @@ export default function SettingsPage() {
             )}
           </div>
 
-          <div className="space-y-2 rounded-xl border border-border bg-black/20 p-4">
-            <div className="text-sm font-semibold text-white">最近 20 次投递</div>
-            {!deliveryItems.length ? (
+          {!deliveryItems.length ? (
+            <div className="space-y-2 rounded-xl border border-border bg-black/20 p-4">
+              <div className="text-sm font-semibold text-white">最近 20 次投递</div>
               <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-white/50">暂无投递记录</div>
-            ) : (
-              <div className="space-y-2">
+            </div>
+          ) : (
+            <details className="group rounded-xl border border-border bg-black/20 p-4">
+              <summary className="flex cursor-pointer list-none items-start justify-between gap-3 [&::-webkit-details-marker]:hidden">
+                <div>
+                  <div className="text-sm font-semibold text-white">最近 20 次投递</div>
+                  <div className="mt-1 text-xs text-white/45">默认收起，点开后查看最近的投递记录。</div>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-white/55">
+                  <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-white/65">{deliveryItems.length} 条</span>
+                  <span className="group-open:hidden">展开</span>
+                  <span className="hidden group-open:inline">收起</span>
+                </div>
+              </summary>
+
+              <div className="mt-3 space-y-2 border-t border-white/8 pt-3">
                 {deliveryItems.map((item) => (
                   <div key={`${item.event_id}-${item.updated_at}`} className="rounded-lg border border-border bg-black/30 px-3 py-2 text-xs text-white/75">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -663,8 +738,8 @@ export default function SettingsPage() {
                   </div>
                 ))}
               </div>
-            )}
-          </div>
+            </details>
+          )}
         </div>
       </section>
 

@@ -25,12 +25,12 @@ import (
 )
 
 const (
-	defaultWebhookTimeoutMS     = 3000
-	defaultCooldownSeconds      = 3600
-	defaultEvalIntervalSeconds  = 3600
-	defaultDispatchBatchSize    = 30
-	defaultDispatcherInterval   = 2 * time.Second
-	defaultMaxAttempts          = 4
+	defaultWebhookTimeoutMS    = 3000
+	defaultCooldownSeconds     = 3600
+	defaultEvalIntervalSeconds = 3600
+	defaultDispatchBatchSize   = 30
+	defaultDispatcherInterval  = 2 * time.Second
+	defaultMaxAttempts         = 4
 )
 
 type ServiceConfig struct {
@@ -126,6 +126,23 @@ func (s *Service) UpsertWebhookEndpoint(ctx context.Context, userID string, inpu
 		return nil, err
 	}
 
+	channel := ""
+	if existing != nil {
+		channel = existing.Channel
+	}
+	channelInput := strings.TrimSpace(input.Channel)
+	if channelInput != "" || existing == nil {
+		channel, err = normalizeWebhookChannel(channelInput)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		channel, err = normalizeWebhookChannel(channel)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	timeoutMS := input.TimeoutMS
 	if timeoutMS <= 0 {
 		if existing != nil && existing.TimeoutMS > 0 {
@@ -163,6 +180,7 @@ func (s *Service) UpsertWebhookEndpoint(ctx context.Context, userID string, inpu
 		ID:               uuid.NewString(),
 		UserID:           strings.TrimSpace(userID),
 		URL:              normalizedURL,
+		Channel:          channel,
 		SecretCipherText: secretCipherText,
 		IsEnabled:        isEnabled,
 		TimeoutMS:        timeoutMS,
@@ -689,7 +707,14 @@ func (s *Service) processDelivery(ctx context.Context, deliveryID string) {
 		}
 	}
 
-	payload, err := s.buildWebhookPayload(*event)
+	channel, err := normalizeWebhookChannel(endpoint.Channel)
+	if err != nil {
+		_ = s.repo.MarkDeliveryFailed(ctx, record.ID, 0, 0, "webhook channel invalid", attemptedAt)
+		return
+	}
+	adapter := getWebhookChannelAdapter(channel)
+	timestamp := strconv.FormatInt(attemptedAt.Unix(), 10)
+	payload, err := s.buildWebhookPayload(*event, channel, timestamp, secret)
 	if err != nil {
 		_ = s.repo.MarkDeliveryFailed(ctx, record.ID, 0, 0, "build payload failed", attemptedAt)
 		return
@@ -701,23 +726,19 @@ func (s *Service) processDelivery(ctx context.Context, deliveryID string) {
 		return
 	}
 
-	timestamp := strconv.FormatInt(attemptedAt.Unix(), 10)
-	signature := ""
-	if strings.TrimSpace(secret) != "" {
-		signature = s.signPayload(timestamp, bodyBytes, secret)
+	targetURL, err := adapter.PrepareURL(endpoint.URL, timestamp, secret)
+	if err != nil {
+		_ = s.scheduleRetryOrFail(ctx, record, attemptedAt, 0, 0, err.Error())
+		return
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.URL, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		_ = s.scheduleRetryOrFail(ctx, record, attemptedAt, 0, 0, err.Error())
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Pumpkin-Event-Id", event.EventID)
-	req.Header.Set("X-Pumpkin-Timestamp", timestamp)
-	if signature != "" {
-		req.Header.Set("X-Pumpkin-Signature", signature)
-	}
 
 	timeout := endpoint.TimeoutMS
 	if timeout <= 0 {
@@ -773,17 +794,17 @@ func (s *Service) nextBackoff(currentAttempt int) time.Duration {
 	return s.retryBackoffs[index]
 }
 
-func (s *Service) buildWebhookPayload(event SignalEventRecord) (map[string]any, error) {
+func (s *Service) buildWebhookPayload(event SignalEventRecord, channel string, timestamp string, secret string) (map[string]any, error) {
 	reason := map[string]any{}
 	if err := decodeJSONMap(event.ReasonJSON, &reason); err != nil {
 		return nil, err
 	}
-	return map[string]any{
-		"msgtype": "text",
-		"text": map[string]any{
-			"content": buildWebhookTextContent(event, reason),
-		},
-	}, nil
+	normalizedChannel, err := normalizeWebhookChannel(channel)
+	if err != nil {
+		return nil, err
+	}
+	adapter := getWebhookChannelAdapter(normalizedChannel)
+	return adapter.BuildPayload(buildWebhookTextContent(event, reason), timestamp, secret), nil
 }
 
 func buildWebhookTextContent(event SignalEventRecord, reason map[string]any) string {

@@ -46,6 +46,7 @@ func (r *Repository) SaveWebhookEndpoint(ctx context.Context, record WebhookEndp
 		}
 
 		existing.URL = record.URL
+		existing.Channel = record.Channel
 		existing.SecretCipherText = record.SecretCipherText
 		existing.IsEnabled = record.IsEnabled
 		existing.TimeoutMS = record.TimeoutMS
@@ -53,6 +54,7 @@ func (r *Repository) SaveWebhookEndpoint(ctx context.Context, record WebhookEndp
 
 		if err := tx.Model(&WebhookEndpointRecord{}).Where("id = ?", existing.ID).Updates(map[string]any{
 			"url":                existing.URL,
+			"channel":            existing.Channel,
 			"secret_cipher_text": existing.SecretCipherText,
 			"is_enabled":         existing.IsEnabled,
 			"timeout_ms":         existing.TimeoutMS,

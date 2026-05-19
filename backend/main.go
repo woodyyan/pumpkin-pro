@@ -1105,6 +1105,7 @@ func (a *appServer) handleWebhookConfig(w http.ResponseWriter, r *http.Request) 
 		}
 		input := signal.WebhookConfigInput{
 			URL:       asString(payload["url"]),
+			Channel:   asString(payload["channel"]),
 			Secret:    asString(payload["secret"]),
 			IsEnabled: asBoolPtr(payload["is_enabled"]),
 			TimeoutMS: asInt(payload["timeout_ms"]),

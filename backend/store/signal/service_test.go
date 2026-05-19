@@ -39,6 +39,104 @@ func TestNormalizeSide(t *testing.T) {
 	}
 }
 
+func TestNormalizeWebhookChannel(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{"default empty", "", WebhookChannelWeCom, false},
+		{"wecom", "wecom", WebhookChannelWeCom, false},
+		{"feishu", "Feishu", WebhookChannelFeishu, false},
+		{"invalid", "dingtalk", "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeWebhookChannel(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("normalizeWebhookChannel(%q): expected error", tc.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeWebhookChannel(%q): unexpected error %v", tc.input, err)
+			}
+			if got != tc.want {
+				t.Fatalf("normalizeWebhookChannel(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildWebhookOfficialSignature(t *testing.T) {
+	got := buildWebhookOfficialSignature("1710000000", "test-secret")
+	want := "FlbrRYRRSv3dloEFBtxpKatqeoavTbB9+QhWXqQY7I0="
+	if got != want {
+		t.Fatalf("buildWebhookOfficialSignature() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildWebhookPayloadByChannel(t *testing.T) {
+	svc := NewService(nil, ServiceConfig{})
+	event := SignalEventRecord{
+		Symbol:     "00700.HK",
+		Side:       "BUY",
+		StrategyID: "strat-macd",
+		EventTime:  time.Date(2026, 3, 30, 18, 0, 0, 0, cstLocation()),
+	}
+	timestamp := "1710000000"
+	secret := "test-secret"
+
+	wecomPayload, err := svc.buildWebhookPayload(event, WebhookChannelWeCom, timestamp, secret)
+	if err != nil {
+		t.Fatalf("buildWebhookPayload(wecom) failed: %v", err)
+	}
+	if wecomPayload["msgtype"] != "text" {
+		t.Fatalf("expected wecom msgtype=text, got %#v", wecomPayload["msgtype"])
+	}
+	wecomText, _ := wecomPayload["text"].(map[string]any)
+	if !strings.Contains(stringifyWebhookValue(wecomText["content"]), "股票交易信号来啦！") {
+		t.Fatal("expected wecom payload content text")
+	}
+	if _, ok := wecomPayload["sign"]; ok {
+		t.Fatal("wecom payload should not inline sign")
+	}
+
+	feishuPayload, err := svc.buildWebhookPayload(event, WebhookChannelFeishu, timestamp, secret)
+	if err != nil {
+		t.Fatalf("buildWebhookPayload(feishu) failed: %v", err)
+	}
+	if feishuPayload["msg_type"] != "text" {
+		t.Fatalf("expected feishu msg_type=text, got %#v", feishuPayload["msg_type"])
+	}
+	if feishuPayload["timestamp"] != timestamp {
+		t.Fatalf("expected feishu timestamp %s, got %#v", timestamp, feishuPayload["timestamp"])
+	}
+	if feishuPayload["sign"] != buildWebhookOfficialSignature(timestamp, secret) {
+		t.Fatalf("expected feishu sign")
+	}
+	feishuContent, _ := feishuPayload["content"].(map[string]any)
+	if !strings.Contains(stringifyWebhookValue(feishuContent["text"]), "股票交易信号来啦！") {
+		t.Fatal("expected feishu payload text")
+	}
+}
+
+func TestWeComWebhookAdapterPrepareURL(t *testing.T) {
+	adapter := wecomWebhookAdapter{}
+	got, err := adapter.PrepareURL("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc", "1710000000", "test-secret")
+	if err != nil {
+		t.Fatalf("PrepareURL failed: %v", err)
+	}
+	if !strings.Contains(got, "timestamp=1710000000") {
+		t.Fatalf("expected timestamp query in %q", got)
+	}
+	if !strings.Contains(got, "sign=") {
+		t.Fatalf("expected sign query in %q", got)
+	}
+}
+
 func TestValidateWebhookURL(t *testing.T) {
 	tests := []struct {
 		url    string
@@ -87,7 +185,7 @@ func TestIsPrivateHost(t *testing.T) {
 		{"192.168.1.1", true},
 		{"172.16.0.1", true},
 		{"169.254.0.1", true}, // link-local
-		{"0.0.0.0", true},      // unspecified
+		{"0.0.0.0", true},     // unspecified
 		{"8.8.8.8", false},
 		{"hooks.example.com", false},
 		{"api.tencentcloud.com", false},
@@ -238,12 +336,12 @@ func TestSignPayload_ChangesWithInput(t *testing.T) {
 
 func TestBuildWebhookTextContent(t *testing.T) {
 	event := SignalEventRecord{
-		Symbol:    "600036.SH",
-		Side:      "SELL",
-		StrategyID: "strat-macd",
+		Symbol:      "600036.SH",
+		Side:        "SELL",
+		StrategyID:  "strat-macd",
 		SignalScore: 0.92,
-		IsTest:     false,
-		EventTime:  time.Date(2026, 4, 10, 14, 30, 0, 0, cstLocation()),
+		IsTest:      false,
+		EventTime:   time.Date(2026, 4, 10, 14, 30, 0, 0, cstLocation()),
 	}
 
 	content := buildWebhookTextContent(event, map[string]any{"message": "MACD 死叉"})
@@ -263,9 +361,9 @@ func TestBuildWebhookTextContent(t *testing.T) {
 
 func TestBuildWebhookTextContent_TestEvent(t *testing.T) {
 	event := SignalEventRecord{
-		Symbol:   "00700.HK",
-		Side:     "BUY",
-		IsTest:   true,
+		Symbol:    "00700.HK",
+		Side:      "BUY",
+		IsTest:    true,
 		EventTime: time.Now(),
 	}
 	content := buildWebhookTextContent(event, map[string]any{"kind": "webhook_test"})

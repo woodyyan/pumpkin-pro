@@ -9,8 +9,10 @@ import {
   flattenFactorDefinitions,
   formatFactorValue,
   formatWeight,
+  getActiveFactorScoreKeys,
   getPageNumbers,
   getScoreTone,
+  isScoreColumnActive,
   validateFactorWeights,
 } from '../lib/factor-lab'
 
@@ -51,6 +53,8 @@ export default function FactorLabPage() {
   const factors = meta?.factors?.length ? meta.factors : FACTOR_DEFINITIONS
   const factorMap = useMemo(() => flattenFactorDefinitions(factors.map((factor) => ({ ...factor, scoreKey: factor.scoreKey || `${factor.key}_score` }))), [factors])
   const weightStatus = useMemo(() => validateFactorWeights(factorWeights), [factorWeights])
+  const activeScoreKeys = useMemo(() => getActiveFactorScoreKeys(factorWeights, factorMap), [factorWeights, factorMap])
+  const columns = useMemo(() => ALL_COLUMNS.map((col) => ({ ...col, inactive: !isScoreColumnActive(col.key, activeScoreKeys) })), [activeScoreKeys])
   const chips = useMemo(() => factorWeightChipText(factorWeights, factorMap), [factorWeights, factorMap])
   const total = data?.total || 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -167,7 +171,7 @@ export default function FactorLabPage() {
 
           <section className="space-y-4">
             <SelectedWeights chips={chips} status={weightStatus} onReset={handleReset} loading={loadingData} />
-            <ResultTable data={data} columns={ALL_COLUMNS} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} loading={loadingData} />
+            <ResultTable data={data} columns={columns} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} loading={loadingData} />
             <ResultCards data={data} factorWeights={factorWeights} factorMap={factorMap} loading={loadingData} />
             {total > 0 && <Pagination page={page} totalPages={totalPages} total={total} onPageChange={handlePageChange} />}
           </section>
@@ -275,9 +279,9 @@ function ResultTable({ data, columns, sortBy, sortOrder, onSort, loading }) {
     <section className="hidden overflow-hidden rounded-2xl border border-border bg-card lg:block">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead><tr className="border-b border-border bg-white/[0.02]">{columns.map((col) => <th key={col.key} style={{ minWidth: col.width }} className="whitespace-nowrap px-3 py-2.5 text-left text-xs font-medium text-white/50"><button type="button" disabled={!col.sortable} onClick={() => onSort(col.key)} className="inline-flex items-center gap-1 hover:text-white/80">{col.label}{sortBy === col.key && <span className="text-primary">{sortOrder === 'asc' ? '↑' : '↓'}</span>}</button></th>)}<th className="px-3 py-2.5 text-center text-xs font-medium text-white/50">操作</th></tr></thead>
+          <thead><tr className="border-b border-border bg-white/[0.02]">{columns.map((col) => <th key={col.key} style={{ minWidth: col.width }} className={`whitespace-nowrap px-3 py-2.5 text-left text-xs font-medium ${col.inactive ? 'text-white/20' : 'text-white/50'}`}><button type="button" disabled={!col.sortable} onClick={() => onSort(col.key)} className={`inline-flex items-center gap-1 ${col.inactive ? 'hover:text-white/35' : 'hover:text-white/80'}`}>{col.label}{col.inactive && <span className="rounded bg-white/[0.04] px-1 text-[10px] text-white/25">未参与</span>}{sortBy === col.key && <span className="text-primary">{sortOrder === 'asc' ? '↑' : '↓'}</span>}</button></th>)}<th className="px-3 py-2.5 text-center text-xs font-medium text-white/50">操作</th></tr></thead>
           <tbody>
-            {loading && items.length === 0 ? Array.from({ length: 8 }).map((_, idx) => <tr key={idx} className="border-b border-white/[0.04]"><td colSpan={columns.length + 1} className="px-3 py-3"><div className="h-4 w-full animate-pulse rounded bg-white/[0.06]" /></td></tr>) : items.length === 0 ? <tr><td colSpan={columns.length + 1} className="py-16 text-center text-white/40">无匹配结果</td></tr> : items.map((row) => <tr key={row.code} className="border-b border-white/[0.04] hover:bg-white/[0.03]">{columns.map((col) => <td key={col.key} className="whitespace-nowrap px-3 py-2 text-white/75">{renderCell(row, col)}</td>)}<td className="whitespace-nowrap px-3 py-2 text-center"><button type="button" onClick={() => window.open(`/live-trading/${row.symbol || codeToSymbol(row.code)}`, '_blank')} className="rounded-md border border-primary/30 px-2 py-0.5 text-xs text-primary hover:bg-primary/10">详情</button></td></tr>)}
+            {loading && items.length === 0 ? Array.from({ length: 8 }).map((_, idx) => <tr key={idx} className="border-b border-white/[0.04]"><td colSpan={columns.length + 1} className="px-3 py-3"><div className="h-4 w-full animate-pulse rounded bg-white/[0.06]" /></td></tr>) : items.length === 0 ? <tr><td colSpan={columns.length + 1} className="py-16 text-center text-white/40">无匹配结果</td></tr> : items.map((row) => <tr key={row.code} className="border-b border-white/[0.04] hover:bg-white/[0.03]">{columns.map((col) => <td key={col.key} className={`whitespace-nowrap px-3 py-2 ${col.inactive ? 'text-white/25' : 'text-white/75'}`}>{renderCell(row, col)}</td>)}<td className="whitespace-nowrap px-3 py-2 text-center"><button type="button" onClick={() => window.open(`/live-trading/${row.symbol || codeToSymbol(row.code)}`, '_blank')} className="rounded-md border border-primary/30 px-2 py-0.5 text-xs text-primary hover:bg-primary/10">详情</button></td></tr>)}
           </tbody>
         </table>
       </div>
@@ -301,13 +305,13 @@ function renderCell(row, col) {
   if (col.key === 'code') return <span className="font-mono text-primary/80">{String(row.code).padStart(6, '0')}</span>
   if (col.key === 'name') return <span className="text-white/90">{row.name || '--'}{row.is_new_stock && <span className="ml-1 rounded bg-primary/10 px-1 text-[10px] text-primary">新</span>}</span>
   if (col.key === 'industry') return row.industry || '--'
-  if (SCORE_KEYS.has(col.key)) return <ScoreBadge value={row[col.key]} />
+  if (SCORE_KEYS.has(col.key)) return <ScoreBadge value={row[col.key]} inactive={col.inactive} />
   return formatFactorValue(row[col.key], col.format || 'number')
 }
 
-function ScoreBadge({ value }) {
+function ScoreBadge({ value, inactive = false }) {
   const tone = getScoreTone(value)
-  const className = {
+  const className = inactive ? 'border-white/10 bg-white/[0.02] text-white/25' : {
     strong: 'border-red-500/30 bg-red-500/10 text-red-300',
     good: 'border-primary/30 bg-primary/10 text-primary',
     neutral: 'border-white/15 bg-white/5 text-white/70',

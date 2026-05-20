@@ -103,6 +103,21 @@ export function getScoreTone(value) {
   return 'weak'
 }
 
+export function getActiveFactorScoreKeys(factorWeights = {}, factorMap = flattenFactorDefinitions()) {
+  const normalized = normalizeFactorWeights(factorWeights)
+  const selectedKeys = Object.keys(normalized)
+  if (selectedKeys.length === 0) {
+    return new Set(FACTOR_DEFINITIONS.map((factor) => factor.scoreKey))
+  }
+  return new Set(selectedKeys.map((key) => factorMap[key]?.scoreKey || `${key}_score`))
+}
+
+export function isScoreColumnActive(columnKey, activeScoreKeys = new Set()) {
+  if (columnKey === 'composite_score') return true
+  if (!columnKey.endsWith('_score')) return true
+  return activeScoreKeys.has(columnKey)
+}
+
 export function getPageNumbers(current, total) {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
   const pages = [1]

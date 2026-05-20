@@ -7,7 +7,9 @@ import {
   factorWeightChipText,
   flattenFactorDefinitions,
   formatFactorValue,
+  getActiveFactorScoreKeys,
   getPageNumbers,
+  isScoreColumnActive,
   normalizeFactorWeights,
   sumFactorWeights,
   validateFactorWeights,
@@ -40,6 +42,26 @@ describe('factor weight helpers', () => {
     const map = flattenFactorDefinitions([{ key: 'value', scoreKey: 'value_score', label: '价值' }])
     assert.deepEqual(factorWeightChipText({}, map), ['默认 7 因子等权'])
     assert.deepEqual(factorWeightChipText({ value: '1' }, map), ['价值 1.00'])
+  })
+
+  it('marks only weighted factors as active when custom weights exist', () => {
+    const map = flattenFactorDefinitions([
+      { key: 'value', scoreKey: 'value_score', label: '价值' },
+      { key: 'growth', scoreKey: 'growth_score', label: '成长' },
+      { key: 'quality', scoreKey: 'quality_score', label: '质量' },
+    ])
+    const active = getActiveFactorScoreKeys({ value: '0.5', growth: '0.5', quality: '' }, map)
+    assert.equal(isScoreColumnActive('composite_score', active), true)
+    assert.equal(isScoreColumnActive('value_score', active), true)
+    assert.equal(isScoreColumnActive('growth_score', active), true)
+    assert.equal(isScoreColumnActive('quality_score', active), false)
+    assert.equal(isScoreColumnActive('close_price', active), true)
+  })
+
+  it('keeps every factor score column active in default equal-weight mode', () => {
+    const active = getActiveFactorScoreKeys({})
+    assert.equal(isScoreColumnActive('value_score', active), true)
+    assert.equal(isScoreColumnActive('low_volatility_score', active), true)
   })
 })
 

@@ -9,6 +9,8 @@
 quant/data/cache/
 .workbuddy/
 .env
+.ai/
+.cache/
 .workb/
 /docs/
 backend/.cache/

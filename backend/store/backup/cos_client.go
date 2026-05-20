@@ -6,14 +6,22 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"sort"
 	"strings"
 	"time"
+)
+
+const (
+	cosUploadTimeout     = 20 * time.Minute
+	cosUploadRetryDelay  = 2 * time.Second
+	cosUploadMaxAttempts = 2
 )
 
 type COSCloudStorageClient struct {
@@ -31,12 +39,34 @@ func NewCOSCloudStorageClient(bucket, region, secretID, secretKey string) *COSCl
 		baseURL:    baseURL,
 		secretID:   strings.TrimSpace(secretID),
 		secretKey:  strings.TrimSpace(secretKey),
-		httpClient: &http.Client{Timeout: 60 * time.Second},
+		httpClient: &http.Client{Timeout: cosUploadTimeout},
 		now:        time.Now,
 	}
 }
 
 func (c *COSCloudStorageClient) Upload(ctx context.Context, objectKey, localPath, contentType string) error {
+	var lastErr error
+	for attempt := 1; attempt <= cosUploadMaxAttempts; attempt++ {
+		err := c.uploadOnce(ctx, objectKey, localPath, contentType)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if attempt == cosUploadMaxAttempts || errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			break
+		}
+		log.Printf("[backup] COS upload attempt %d/%d failed for %s: %v; retrying in %s",
+			attempt, cosUploadMaxAttempts, objectKey, err, cosUploadRetryDelay)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(cosUploadRetryDelay):
+		}
+	}
+	return lastErr
+}
+
+func (c *COSCloudStorageClient) uploadOnce(ctx context.Context, objectKey, localPath, contentType string) error {
 	file, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("open local file: %w", err)

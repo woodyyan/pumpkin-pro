@@ -25,10 +25,12 @@ type FactorLabConfig struct {
 	ComputeHour         int
 	ComputeMinute       int
 	PythonBin           string
+	Phase0ScriptPath    string
 	Phase1ScriptPath    string
 	Phase2ScriptPath    string
 	ProgressInterval    int
 	TimeoutMinutes      int
+	StepTimeoutMinutes  int
 }
 
 // BackupConfig holds database backup settings.
@@ -121,13 +123,15 @@ func Load() Config {
 		},
 		FactorLab: FactorLabConfig{
 			DailyComputeEnabled: getEnvAsBool("FACTOR_LAB_DAILY_COMPUTE_ENABLED", true),
-			ComputeHour:         getEnvAsInt("FACTOR_LAB_COMPUTE_HOUR", 20),
-			ComputeMinute:       getEnvAsInt("FACTOR_LAB_COMPUTE_MINUTE", 30),
+			ComputeHour:         getEnvAsInt("FACTOR_LAB_COMPUTE_HOUR", 21),
+			ComputeMinute:       getEnvAsInt("FACTOR_LAB_COMPUTE_MINUTE", 0),
 			PythonBin:           getEnv("FACTOR_LAB_PYTHON_BIN", "python3"),
+			Phase0ScriptPath:    getEnv("FACTOR_LAB_PHASE0_SCRIPT", "quant/scripts/update_factor_lab_phase0_incremental.py"),
 			Phase1ScriptPath:    getEnv("FACTOR_LAB_PHASE1_SCRIPT", "quant/scripts/compute_factor_lab_phase1.py"),
 			Phase2ScriptPath:    getEnv("FACTOR_LAB_PHASE2_SCRIPT", "quant/scripts/compute_factor_lab_phase2.py"),
 			ProgressInterval:    getEnvAsInt("FACTOR_LAB_PROGRESS_INTERVAL", 500),
-			TimeoutMinutes:      getEnvAsInt("FACTOR_LAB_TIMEOUT_MINUTES", 60),
+			TimeoutMinutes:      getEnvAsInt("FACTOR_LAB_TIMEOUT_MINUTES", 180),
+			StepTimeoutMinutes:  getEnvAsInt("FACTOR_LAB_STEP_TIMEOUT_MINUTES", 30),
 		},
 	}
 }

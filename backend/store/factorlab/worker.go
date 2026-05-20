@@ -5,18 +5,22 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
-	defaultComputeHour       = 20
-	defaultComputeMinute     = 30
-	defaultComputeTimeout    = 60 * time.Minute
+	defaultComputeHour       = 21
+	defaultComputeMinute     = 0
+	defaultComputeTimeout    = 3 * time.Hour
+	defaultStepTimeout       = 30 * time.Minute
 	defaultProgressInterval  = 500
 	defaultPythonBin         = "python3"
+	defaultPhase0Script      = "quant/scripts/update_factor_lab_phase0_incremental.py"
 	defaultPhase1Script      = "quant/scripts/compute_factor_lab_phase1.py"
 	defaultPhase2Script      = "quant/scripts/compute_factor_lab_phase2.py"
 	factorLabWorkerLogPrefix = "[factorlab-worker]"
@@ -25,12 +29,15 @@ const (
 type WorkerConfig struct {
 	Enabled          bool
 	DBPath           string
+	BackupDir        string
 	PythonBin        string
+	Phase0ScriptPath string
 	Phase1ScriptPath string
 	Phase2ScriptPath string
 	Hour             int
 	Minute           int
 	Timeout          time.Duration
+	StepTimeout      time.Duration
 	ProgressInterval int
 }
 
@@ -38,6 +45,8 @@ type Worker struct {
 	cfg       WorkerConfig
 	lastRunAt time.Time
 	lastError string
+	mu        sync.Mutex
+	running   bool
 }
 
 func NewWorker(cfg WorkerConfig) *Worker {
@@ -47,6 +56,9 @@ func NewWorker(cfg WorkerConfig) *Worker {
 func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
 	if strings.TrimSpace(cfg.PythonBin) == "" {
 		cfg.PythonBin = defaultPythonBin
+	}
+	if strings.TrimSpace(cfg.Phase0ScriptPath) == "" {
+		cfg.Phase0ScriptPath = defaultPhase0Script
 	}
 	if strings.TrimSpace(cfg.Phase1ScriptPath) == "" {
 		cfg.Phase1ScriptPath = defaultPhase1Script
@@ -63,8 +75,14 @@ func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = defaultComputeTimeout
 	}
+	if cfg.StepTimeout <= 0 {
+		cfg.StepTimeout = defaultStepTimeout
+	}
 	if cfg.ProgressInterval <= 0 {
 		cfg.ProgressInterval = defaultProgressInterval
+	}
+	if strings.TrimSpace(cfg.BackupDir) == "" && strings.TrimSpace(cfg.DBPath) != "" {
+		cfg.BackupDir = filepath.Join(filepath.Dir(cfg.DBPath), "backups", "factorlab")
 	}
 	return cfg
 }
@@ -84,7 +102,9 @@ func (w *Worker) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-time.After(wait):
-				w.RunOnce(ctx)
+				if err := w.RunOnce(ctx); err != nil {
+					log.Printf("%s pipeline failed: %v", factorLabWorkerLogPrefix, err)
+				}
 			}
 		}
 	}()
@@ -95,22 +115,60 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	if !w.cfg.Enabled {
 		return nil
 	}
+	if !w.tryStartRun() {
+		return fmt.Errorf("factor lab pipeline is already running")
+	}
+	defer w.finishRun()
 	if strings.TrimSpace(w.cfg.DBPath) == "" {
 		w.lastError = "DB path is empty"
-		return fmt.Errorf("factor lab daily compute db path is empty")
+		return fmt.Errorf("factor lab pipeline db path is empty")
 	}
 	ctx, cancel := context.WithTimeout(ctx, w.cfg.Timeout)
 	defer cancel()
 
+	if err := w.quickCheckDatabase(ctx, "before"); err != nil {
+		w.lastError = err.Error()
+		return err
+	}
+	backupPath, err := w.backupDatabase(ctx)
+	if err != nil {
+		w.lastError = err.Error()
+		return err
+	}
+	log.Printf("%s safe backup created: %s", factorLabWorkerLogPrefix, backupPath)
+
+	if err := w.runScript(ctx, "phase0-incremental", w.cfg.Phase0ScriptPath, buildPhase0CommandArgs(w.cfg)); err != nil {
+		return err
+	}
 	if err := w.runScript(ctx, "phase1", w.cfg.Phase1ScriptPath, buildPhase1CommandArgs(w.cfg)); err != nil {
 		return err
 	}
 	if err := w.runScript(ctx, "phase2", w.cfg.Phase2ScriptPath, buildPhase2CommandArgs(w.cfg)); err != nil {
 		return err
 	}
+	if err := w.quickCheckDatabase(ctx, "after"); err != nil {
+		w.lastError = err.Error()
+		return err
+	}
 	w.lastRunAt = time.Now()
 	w.lastError = ""
 	return nil
+}
+
+func (w *Worker) tryStartRun() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.running {
+		return false
+	}
+	w.running = true
+	return true
+}
+
+func (w *Worker) finishRun() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.running = false
 }
 
 func (w *Worker) runScript(ctx context.Context, label, scriptPath string, args []string) error {
@@ -132,6 +190,55 @@ func (w *Worker) runScript(ctx context.Context, label, scriptPath string, args [
 	}
 	log.Printf("%s ✅ %s completed\n%s", factorLabWorkerLogPrefix, label, trimmedOutput)
 	return nil
+}
+
+func (w *Worker) quickCheckDatabase(ctx context.Context, stage string) error {
+	output, err := runSQLiteCommand(ctx, w.cfg.DBPath, "PRAGMA quick_check;")
+	if err != nil {
+		return fmt.Errorf("sqlite quick_check %s failed: %w (%s)", stage, err, strings.TrimSpace(output))
+	}
+	if strings.TrimSpace(output) != "ok" {
+		return fmt.Errorf("sqlite quick_check %s failed: %s", stage, strings.TrimSpace(output))
+	}
+	log.Printf("%s quick_check %s ok", factorLabWorkerLogPrefix, stage)
+	return nil
+}
+
+func (w *Worker) backupDatabase(ctx context.Context) (string, error) {
+	if strings.TrimSpace(w.cfg.BackupDir) == "" {
+		return "", fmt.Errorf("backup dir is empty")
+	}
+	if err := os.MkdirAll(w.cfg.BackupDir, 0o755); err != nil {
+		return "", fmt.Errorf("create backup dir: %w", err)
+	}
+	destPath := filepath.Join(w.cfg.BackupDir, fmt.Sprintf("factorlab_pipeline_%s.db", time.Now().Format("20060102_150405")))
+	_ = os.Remove(destPath)
+	output, err := runSQLiteCommand(ctx, w.cfg.DBPath, fmt.Sprintf(".backup %s", destPath))
+	if err != nil {
+		_ = os.Remove(destPath)
+		return "", fmt.Errorf("sqlite backup failed: %w (%s)", err, strings.TrimSpace(output))
+	}
+	return destPath, nil
+}
+
+func runSQLiteCommand(ctx context.Context, dbPath string, statement string) (string, error) {
+	cmd := exec.CommandContext(ctx, "sqlite3", dbPath, statement)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	err := cmd.Run()
+	return output.String(), err
+}
+
+func buildPhase0CommandArgs(cfg WorkerConfig) []string {
+	args := []string{
+		cfg.Phase0ScriptPath,
+		"--db", cfg.DBPath,
+		"--write",
+		"--progress-interval", fmt.Sprintf("%d", cfg.ProgressInterval),
+		"--step-timeout-seconds", fmt.Sprintf("%d", int(cfg.StepTimeout.Seconds())),
+	}
+	return args
 }
 
 func buildPhase1CommandArgs(cfg WorkerConfig) []string {

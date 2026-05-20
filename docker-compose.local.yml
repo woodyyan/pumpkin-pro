@@ -54,8 +54,16 @@ services:
       - COS_BACKUP_PREFIX=${COS_BACKUP_PREFIX:-pumpkin-pro-backups/}
       - COS_SECRET_ID=${COS_SECRET_ID:-}
       - COS_SECRET_KEY=${COS_SECRET_KEY:-}
+      - FACTOR_LAB_COMPUTE_HOUR=${FACTOR_LAB_COMPUTE_HOUR:-21}
+      - FACTOR_LAB_COMPUTE_MINUTE=${FACTOR_LAB_COMPUTE_MINUTE:-0}
+      - FACTOR_LAB_PHASE0_SCRIPT=${FACTOR_LAB_PHASE0_SCRIPT:-/app/quant/scripts/update_factor_lab_phase0_incremental.py}
+      - FACTOR_LAB_PHASE1_SCRIPT=${FACTOR_LAB_PHASE1_SCRIPT:-/app/quant/scripts/compute_factor_lab_phase1.py}
+      - FACTOR_LAB_PHASE2_SCRIPT=${FACTOR_LAB_PHASE2_SCRIPT:-/app/quant/scripts/compute_factor_lab_phase2.py}
+      - FACTOR_LAB_TIMEOUT_MINUTES=${FACTOR_LAB_TIMEOUT_MINUTES:-180}
+      - FACTOR_LAB_STEP_TIMEOUT_MINUTES=${FACTOR_LAB_STEP_TIMEOUT_MINUTES:-30}
     volumes:
       - ./data:/app/data
+      - ./quant:/app/quant:ro
     depends_on:
       - quant
 

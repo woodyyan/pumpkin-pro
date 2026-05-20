@@ -3534,12 +3534,15 @@ func main() {
 	factorLabWorker := factorlab.NewWorker(factorlab.WorkerConfig{
 		Enabled:          cfg.FactorLab.DailyComputeEnabled,
 		DBPath:           cfg.DB.Path,
+		BackupDir:        cfg.Backup.BackupDir,
 		PythonBin:        cfg.FactorLab.PythonBin,
+		Phase0ScriptPath: cfg.FactorLab.Phase0ScriptPath,
 		Phase1ScriptPath: cfg.FactorLab.Phase1ScriptPath,
 		Phase2ScriptPath: cfg.FactorLab.Phase2ScriptPath,
 		Hour:             cfg.FactorLab.ComputeHour,
 		Minute:           cfg.FactorLab.ComputeMinute,
 		Timeout:          time.Duration(cfg.FactorLab.TimeoutMinutes) * time.Minute,
+		StepTimeout:      time.Duration(cfg.FactorLab.StepTimeoutMinutes) * time.Minute,
 		ProgressInterval: cfg.FactorLab.ProgressInterval,
 	})
 	factorLabWorker.Start(context.Background())

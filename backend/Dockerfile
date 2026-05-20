@@ -6,6 +6,13 @@ ARG GOSUMDB=sum.golang.org
 ENV GOPROXY=${GOPROXY}
 ENV GOSUMDB=${GOSUMDB}
 
+RUN apk add --no-cache python3 py3-pip sqlite && \
+    python3 -m venv /opt/factorlab-venv && \
+    /opt/factorlab-venv/bin/pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple \
+      requests pandas numpy akshare
+
+ENV PATH="/opt/factorlab-venv/bin:${PATH}"
+
 WORKDIR /app
 
 COPY go.mod go.sum ./

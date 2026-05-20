@@ -7,9 +7,12 @@ import (
 )
 
 func TestNormalizeWorkerConfigDefaults(t *testing.T) {
-	cfg := normalizeWorkerConfig(WorkerConfig{Hour: -1, Minute: 99})
+	cfg := normalizeWorkerConfig(WorkerConfig{DBPath: "data/pumpkin.db", Hour: -1, Minute: 99})
 	if cfg.PythonBin != defaultPythonBin {
 		t.Fatalf("expected default python bin, got %q", cfg.PythonBin)
+	}
+	if cfg.Phase0ScriptPath != defaultPhase0Script {
+		t.Fatalf("expected default phase0 script, got %q", cfg.Phase0ScriptPath)
 	}
 	if cfg.Phase1ScriptPath != defaultPhase1Script {
 		t.Fatalf("expected default phase1 script, got %q", cfg.Phase1ScriptPath)
@@ -23,6 +26,12 @@ func TestNormalizeWorkerConfigDefaults(t *testing.T) {
 	if cfg.Timeout != defaultComputeTimeout {
 		t.Fatalf("unexpected timeout: %s", cfg.Timeout)
 	}
+	if cfg.StepTimeout != defaultStepTimeout {
+		t.Fatalf("unexpected step timeout: %s", cfg.StepTimeout)
+	}
+	if cfg.BackupDir != "data/backups/factorlab" {
+		t.Fatalf("unexpected backup dir: %s", cfg.BackupDir)
+	}
 	if cfg.ProgressInterval != defaultProgressInterval {
 		t.Fatalf("unexpected progress interval: %d", cfg.ProgressInterval)
 	}
@@ -31,10 +40,23 @@ func TestNormalizeWorkerConfigDefaults(t *testing.T) {
 func TestBuildPhaseCommandArgs(t *testing.T) {
 	cfg := normalizeWorkerConfig(WorkerConfig{
 		DBPath:           "data/pumpkin.db",
+		Phase0ScriptPath: "quant/scripts/update_factor_lab_phase0_incremental.py",
 		Phase1ScriptPath: "quant/scripts/compute_factor_lab_phase1.py",
 		Phase2ScriptPath: "quant/scripts/compute_factor_lab_phase2.py",
+		StepTimeout:      10 * time.Minute,
 		ProgressInterval: 123,
 	})
+	phase0 := buildPhase0CommandArgs(cfg)
+	wantPhase0 := []string{
+		"quant/scripts/update_factor_lab_phase0_incremental.py",
+		"--db", "data/pumpkin.db",
+		"--write",
+		"--progress-interval", "123",
+		"--step-timeout-seconds", "600",
+	}
+	if !reflect.DeepEqual(phase0, wantPhase0) {
+		t.Fatalf("unexpected phase0 args\n got: %#v\nwant: %#v", phase0, wantPhase0)
+	}
 	phase1 := buildPhase1CommandArgs(cfg)
 	wantPhase1 := []string{
 		"quant/scripts/compute_factor_lab_phase1.py",
@@ -75,5 +97,19 @@ func TestRunOnceDisabledSkips(t *testing.T) {
 	worker := NewWorker(WorkerConfig{Enabled: false})
 	if err := worker.RunOnce(nil); err != nil {
 		t.Fatalf("disabled worker should skip without error: %v", err)
+	}
+}
+
+func TestTryStartRunPreventsConcurrentRuns(t *testing.T) {
+	worker := NewWorker(WorkerConfig{Enabled: true})
+	if !worker.tryStartRun() {
+		t.Fatal("first run should start")
+	}
+	if worker.tryStartRun() {
+		t.Fatal("second run should be rejected")
+	}
+	worker.finishRun()
+	if !worker.tryStartRun() {
+		t.Fatal("run should start after finish")
 	}
 }

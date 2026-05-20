@@ -3,58 +3,52 @@ import assert from 'node:assert/strict'
 
 import {
   buildFactorScreenerPayload,
-  buildSelectedFilterChips,
   codeToSymbol,
-  flattenMetricDefinitions,
+  factorWeightChipText,
+  flattenFactorDefinitions,
   formatFactorValue,
-  getDynamicMetricColumns,
   getPageNumbers,
-  updateFactorFilter,
+  normalizeFactorWeights,
+  sumFactorWeights,
+  validateFactorWeights,
 } from '../factor-lab.js'
 
-const groups = [
-  { key: 'value', label: '价值', items: [{ key: 'pe', label: 'PE', unit: '倍', format: 'number' }] },
-  { key: 'dividend', label: '股息率', items: [{ key: 'dividend_yield', label: '股息率', unit: '%', format: 'percentFromRatio' }] },
-]
-
 describe('buildFactorScreenerPayload', () => {
-  it('drops empty filters and clamps pagination', () => {
+  it('normalizes positive factor weights and clamps pagination', () => {
     const payload = buildFactorScreenerPayload({
-      filters: { pe: { min: '0', max: '20' }, pb: { min: '', max: '' } },
-      sortBy: 'pe', sortOrder: 'desc', page: 0, pageSize: 999,
+      factorWeights: { value: '0.4', growth: '0.6', quality: '', momentum: '0' },
+      sortBy: 'growth_score', sortOrder: 'asc', page: 0, pageSize: 999,
     })
-    assert.deepEqual(payload.filters, { pe: { min: 0, max: 20 } })
-    assert.equal(payload.sort_by, 'pe')
-    assert.equal(payload.sort_order, 'desc')
+    assert.deepEqual(payload.factor_weights, { value: 0.4, growth: 0.6 })
+    assert.equal(payload.sort_by, 'growth_score')
+    assert.equal(payload.sort_order, 'asc')
     assert.equal(payload.page, 1)
     assert.equal(payload.page_size, 200)
   })
 })
 
-describe('updateFactorFilter', () => {
-  it('removes a filter when both bounds are empty', () => {
-    const next = updateFactorFilter({ pe: { min: '0', max: '20' } }, 'pe', 'min', '')
-    assert.deepEqual(next, { pe: { min: '', max: '20' } })
-    assert.deepEqual(updateFactorFilter(next, 'pe', 'max', ''), {})
+describe('factor weight helpers', () => {
+  it('validates default equal-weight mode and custom weights', () => {
+    assert.equal(validateFactorWeights({}).valid, true)
+    assert.equal(validateFactorWeights({ value: '0.5' }).valid, false)
+    assert.equal(validateFactorWeights({ value: '0.5', growth: '0.5' }).valid, true)
+    assert.deepEqual(normalizeFactorWeights({ value: '0.5', growth: '0.5', size: '-1' }), { value: 0.5, growth: 0.5 })
+    assert.equal(sumFactorWeights({ value: '0.25', quality: '0.75' }), 1)
+  })
+
+  it('builds factor chips from definitions', () => {
+    const map = flattenFactorDefinitions([{ key: 'value', scoreKey: 'value_score', label: '价值' }])
+    assert.deepEqual(factorWeightChipText({}, map), ['默认 7 因子等权'])
+    assert.deepEqual(factorWeightChipText({ value: '1' }, map), ['价值 1.00'])
   })
 })
 
 describe('formatFactorValue', () => {
-  it('formats percent ratio and big numbers', () => {
+  it('formats score, percent ratio and big numbers', () => {
+    assert.equal(formatFactorValue(88.888, 'score'), '88.9')
     assert.equal(formatFactorValue(0.035, 'percentFromRatio'), '3.50%')
     assert.equal(formatFactorValue(12300000000, 'bigNumber'), '123.00 亿')
     assert.equal(formatFactorValue(null, 'number'), '--')
-  })
-})
-
-describe('metric helpers', () => {
-  it('flattens definitions and builds chips/dynamic columns', () => {
-    const map = flattenMetricDefinitions(groups)
-    assert.equal(map.pe.groupLabel, '价值')
-    const chips = buildSelectedFilterChips({ pe: { max: '20' }, dividend_yield: { min: '3' } }, map)
-    assert.equal(chips[0].text, 'PE ≤ 20倍')
-    assert.equal(chips[1].text, '股息率 ≥ 3%')
-    assert.deepEqual(getDynamicMetricColumns({ pe: {}, dividend_yield: {} }, map), ['pe', 'dividend_yield'])
   })
 })
 

@@ -26,6 +26,7 @@ type FactorLabConfig struct {
 	ComputeMinute       int
 	PythonBin           string
 	Phase1ScriptPath    string
+	Phase2ScriptPath    string
 	ProgressInterval    int
 	TimeoutMinutes      int
 }
@@ -124,6 +125,7 @@ func Load() Config {
 			ComputeMinute:       getEnvAsInt("FACTOR_LAB_COMPUTE_MINUTE", 30),
 			PythonBin:           getEnv("FACTOR_LAB_PYTHON_BIN", "python3"),
 			Phase1ScriptPath:    getEnv("FACTOR_LAB_PHASE1_SCRIPT", "quant/scripts/compute_factor_lab_phase1.py"),
+			Phase2ScriptPath:    getEnv("FACTOR_LAB_PHASE2_SCRIPT", "quant/scripts/compute_factor_lab_phase2.py"),
 			ProgressInterval:    getEnvAsInt("FACTOR_LAB_PROGRESS_INTERVAL", 500),
 			TimeoutMinutes:      getEnvAsInt("FACTOR_LAB_TIMEOUT_MINUTES", 60),
 		},

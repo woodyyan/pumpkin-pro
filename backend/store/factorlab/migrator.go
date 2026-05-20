@@ -17,6 +17,9 @@ func (Migrator) AutoMigrate(db *gorm.DB) error {
 		&FactorFinancialMetric{},
 		&FactorDividendRecord{},
 		&FactorSnapshot{},
+		&FactorSecurityIndustry{},
+		&FactorRankScore{},
+		&FactorScore{},
 		&FactorTaskRun{},
 		&FactorTaskItem{},
 	)

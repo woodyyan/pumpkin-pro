@@ -138,6 +138,58 @@ type FactorSnapshot struct {
 
 func (FactorSnapshot) TableName() string { return "factor_snapshots" }
 
+type FactorSecurityIndustry struct {
+	Code            string    `gorm:"primaryKey;size:16" json:"code"`
+	RawIndustryName string    `gorm:"size:128;not null;default:''" json:"raw_industry_name"`
+	IndustryName    string    `gorm:"size:128;not null;default:'';index" json:"industry_name"`
+	IndustrySource  string    `gorm:"size:64;not null;default:''" json:"industry_source"`
+	UpdatedAt       time.Time `gorm:"not null" json:"updated_at"`
+}
+
+func (FactorSecurityIndustry) TableName() string { return "factor_security_industries" }
+
+type FactorRankScore struct {
+	SnapshotDate               string    `gorm:"primaryKey;size:10;index" json:"snapshot_date"`
+	Code                       string    `gorm:"primaryKey;size:16" json:"code"`
+	PERankScore                *float64  `gorm:"column:pe_rank_score" json:"pe_rank_score"`
+	PBRankScore                *float64  `gorm:"column:pb_rank_score" json:"pb_rank_score"`
+	PSRankScore                *float64  `gorm:"column:ps_rank_score" json:"ps_rank_score"`
+	DividendYieldRankScore     *float64  `json:"dividend_yield_rank_score"`
+	EarningGrowthRankScore     *float64  `json:"earning_growth_rank_score"`
+	RevenueGrowthRankScore     *float64  `json:"revenue_growth_rank_score"`
+	Performance1YRankScore     *float64  `gorm:"column:performance_1y_rank_score" json:"performance_1y_rank_score"`
+	ROERankScore               *float64  `gorm:"column:roe_rank_score" json:"roe_rank_score"`
+	OperatingCFMarginRankScore *float64  `gorm:"column:operating_cf_margin_rank_score" json:"operating_cf_margin_rank_score"`
+	AssetToEquityRankScore     *float64  `json:"asset_to_equity_rank_score"`
+	Momentum1MRankScore        *float64  `gorm:"column:momentum_1m_rank_score" json:"momentum_1m_rank_score"`
+	MarketCapRankScore         *float64  `json:"market_cap_rank_score"`
+	Volatility1MRankScore      *float64  `gorm:"column:volatility_1m_rank_score" json:"volatility_1m_rank_score"`
+	Beta1YRankScore            *float64  `gorm:"column:beta_1y_rank_score" json:"beta_1y_rank_score"`
+	CreatedAt                  time.Time `gorm:"not null" json:"created_at"`
+}
+
+func (FactorRankScore) TableName() string { return "factor_rank_scores" }
+
+type FactorScore struct {
+	SnapshotDate       string    `gorm:"primaryKey;size:10;index" json:"snapshot_date"`
+	Code               string    `gorm:"primaryKey;size:16" json:"code"`
+	Symbol             string    `gorm:"size:20;not null;default:'';index" json:"symbol"`
+	Name               string    `gorm:"size:128;not null;default:''" json:"name"`
+	Industry           string    `gorm:"size:128;not null;default:'';index" json:"industry"`
+	IsNewStock         bool      `gorm:"not null;default:false;index" json:"is_new_stock"`
+	ClosePrice         float64   `gorm:"not null;default:0" json:"close_price"`
+	ValueScore         *float64  `json:"value_score"`
+	DividendYieldScore *float64  `json:"dividend_yield_score"`
+	GrowthScore        *float64  `json:"growth_score"`
+	QualityScore       *float64  `json:"quality_score"`
+	MomentumScore      *float64  `json:"momentum_score"`
+	SizeScore          *float64  `json:"size_score"`
+	LowVolatilityScore *float64  `json:"low_volatility_score"`
+	CreatedAt          time.Time `gorm:"not null" json:"created_at"`
+}
+
+func (FactorScore) TableName() string { return "factor_scores" }
+
 type FactorTaskRun struct {
 	ID           string     `gorm:"primaryKey;size:36" json:"id"`
 	TaskType     string     `gorm:"size:32;not null;index" json:"task_type"`

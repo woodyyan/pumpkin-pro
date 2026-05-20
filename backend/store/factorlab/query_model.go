@@ -26,18 +26,28 @@ type FactorMetricGroup struct {
 	Items []FactorMetricDefinition `json:"items"`
 }
 
+type FactorDefinition struct {
+	Key           string  `json:"key"`
+	Label         string  `json:"label"`
+	Format        string  `json:"format"`
+	Description   string  `json:"description"`
+	Coverage      int64   `json:"coverage"`
+	DefaultWeight float64 `json:"default_weight"`
+}
+
 type FactorFilterRange struct {
 	Min *float64 `json:"min,omitempty"`
 	Max *float64 `json:"max,omitempty"`
 }
 
 type FactorScreenerRequest struct {
-	SnapshotDate string                       `json:"snapshot_date,omitempty"`
-	Filters      map[string]FactorFilterRange `json:"filters,omitempty"`
-	SortBy       string                       `json:"sort_by,omitempty"`
-	SortOrder    string                       `json:"sort_order,omitempty"`
-	Page         int                          `json:"page,omitempty"`
-	PageSize     int                          `json:"page_size,omitempty"`
+	SnapshotDate  string                       `json:"snapshot_date,omitempty"`
+	Filters       map[string]FactorFilterRange `json:"filters,omitempty"`
+	FactorWeights map[string]float64           `json:"factor_weights,omitempty"`
+	SortBy        string                       `json:"sort_by,omitempty"`
+	SortOrder     string                       `json:"sort_order,omitempty"`
+	Page          int                          `json:"page,omitempty"`
+	PageSize      int                          `json:"page_size,omitempty"`
 }
 
 type FactorScreenerResponse struct {
@@ -49,31 +59,21 @@ type FactorScreenerResponse struct {
 }
 
 type FactorScreenerItem struct {
-	SnapshotDate            string   `json:"snapshot_date"`
-	Code                    string   `json:"code"`
-	Symbol                  string   `json:"symbol"`
-	Name                    string   `json:"name"`
-	Board                   string   `json:"board"`
-	ListingAgeDays          *int     `json:"listing_age_days"`
-	IsNewStock              bool     `json:"is_new_stock"`
-	AvailableTradingDays    int      `json:"available_trading_days"`
-	ClosePrice              float64  `json:"close_price"`
-	MarketCap               *float64 `json:"market_cap"`
-	PE                      *float64 `json:"pe"`
-	PB                      *float64 `json:"pb"`
-	PS                      *float64 `json:"ps"`
-	DividendYield           *float64 `json:"dividend_yield"`
-	EarningGrowth           *float64 `json:"earning_growth"`
-	RevenueGrowth           *float64 `json:"revenue_growth"`
-	Performance1Y           *float64 `json:"performance_1y"`
-	PerformanceSinceListing *float64 `json:"performance_since_listing"`
-	Momentum1M              *float64 `json:"momentum_1m"`
-	ROE                     *float64 `json:"roe"`
-	OperatingCFMargin       *float64 `json:"operating_cf_margin"`
-	AssetToEquity           *float64 `json:"asset_to_equity"`
-	Volatility1M            *float64 `json:"volatility_1m"`
-	Beta1Y                  *float64 `json:"beta_1y"`
-	DataQualityFlags        []string `json:"data_quality_flags"`
+	SnapshotDate       string   `json:"snapshot_date"`
+	Code               string   `json:"code"`
+	Symbol             string   `json:"symbol"`
+	Name               string   `json:"name"`
+	Industry           string   `json:"industry"`
+	IsNewStock         bool     `json:"is_new_stock"`
+	ClosePrice         float64  `json:"close_price"`
+	CompositeScore     *float64 `json:"composite_score"`
+	ValueScore         *float64 `json:"value_score"`
+	DividendYieldScore *float64 `json:"dividend_yield_score"`
+	GrowthScore        *float64 `json:"growth_score"`
+	QualityScore       *float64 `json:"quality_score"`
+	MomentumScore      *float64 `json:"momentum_score"`
+	SizeScore          *float64 `json:"size_score"`
+	LowVolatilityScore *float64 `json:"low_volatility_score"`
 }
 
 type FactorLabUniverseMeta struct {
@@ -97,6 +97,7 @@ type FactorLabMetaResponse struct {
 	Universe     FactorLabUniverseMeta `json:"universe"`
 	Coverage     map[string]int64      `json:"coverage"`
 	Metrics      []FactorMetricGroup   `json:"metrics"`
+	Factors      []FactorDefinition    `json:"factors"`
 	LastRun      FactorTaskRunMeta     `json:"last_run"`
 }
 
@@ -106,15 +107,15 @@ type SnapshotStats struct {
 }
 
 type ScanInput struct {
-	SnapshotDate string
-	Filters      map[string]FactorFilterRange
-	SortBy       string
-	SortOrder    string
-	Page         int
-	PageSize     int
+	SnapshotDate  string
+	FactorWeights map[string]float64
+	SortBy        string
+	SortOrder     string
+	Page          int
+	PageSize      int
 }
 
 type ScanResult struct {
 	Total int64
-	Items []FactorSnapshot
+	Items []FactorScore
 }

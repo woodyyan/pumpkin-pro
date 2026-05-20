@@ -9,7 +9,6 @@ import (
 )
 
 func ptrFloat(v float64) *float64 { return &v }
-func ptrInt(v int) *int           { return &v }
 
 func setupFactorLabQueryService(t *testing.T) (*Service, *Repository) {
 	t.Helper()
@@ -21,18 +20,18 @@ func setupFactorLabQueryService(t *testing.T) (*Service, *Repository) {
 	return NewService(repo), repo
 }
 
-func seedFactorSnapshots(t *testing.T, repo *Repository) {
+func seedFactorScores(t *testing.T, repo *Repository) {
 	t.Helper()
 	now := time.Now().UTC()
-	records := []FactorSnapshot{
-		{SnapshotDate: "2026-05-08", Code: "000001", Symbol: "000001.SZ", Name: "平安银行", Board: BoardMain, ClosePrice: 10, MarketCap: ptrFloat(100e8), PE: ptrFloat(8), PB: ptrFloat(0.8), PS: ptrFloat(1.2), DividendYield: ptrFloat(0.035), EarningGrowth: ptrFloat(20), RevenueGrowth: ptrFloat(10), ROE: ptrFloat(12), OperatingCFMargin: ptrFloat(18), AssetToEquity: ptrFloat(8), Momentum1M: ptrFloat(5), Volatility1M: ptrFloat(15), Beta1Y: ptrFloat(0.9), ListingAgeDays: ptrInt(1000), AvailableTradingDays: 260, DataQualityFlags: `[]`, CreatedAt: now},
-		{SnapshotDate: "2026-05-08", Code: "000002", Symbol: "000002.SZ", Name: "万科A", Board: BoardMain, ClosePrice: 8, MarketCap: ptrFloat(80e8), PE: ptrFloat(20), PB: ptrFloat(1.5), PS: ptrFloat(2.5), DividendYield: ptrFloat(0.01), EarningGrowth: ptrFloat(-5), RevenueGrowth: ptrFloat(2), ROE: ptrFloat(5), AssetToEquity: ptrFloat(12), Momentum1M: ptrFloat(-3), Volatility1M: ptrFloat(25), Beta1Y: ptrFloat(1.2), ListingAgeDays: ptrInt(2000), AvailableTradingDays: 260, DataQualityFlags: `["no_operating_cf_margin"]`, CreatedAt: now},
-		{SnapshotDate: "2026-05-08", Code: "300001", Symbol: "300001.SZ", Name: "特锐德", Board: BoardChiNext, ClosePrice: 20, MarketCap: ptrFloat(30e8), PE: nil, PB: ptrFloat(3), IsNewStock: true, ListingAgeDays: ptrInt(100), AvailableTradingDays: 80, DataQualityFlags: `["no_pe"]`, CreatedAt: now},
+	records := []FactorScore{
+		{SnapshotDate: "2026-05-08", Code: "000001", Symbol: "000001.SZ", Name: "平安银行", Industry: "银行", ClosePrice: 10, ValueScore: ptrFloat(90), DividendYieldScore: ptrFloat(80), GrowthScore: ptrFloat(40), QualityScore: ptrFloat(70), MomentumScore: ptrFloat(30), SizeScore: ptrFloat(20), LowVolatilityScore: ptrFloat(85), CreatedAt: now},
+		{SnapshotDate: "2026-05-08", Code: "000002", Symbol: "000002.SZ", Name: "万科A", Industry: "房地产", ClosePrice: 8, ValueScore: ptrFloat(70), DividendYieldScore: ptrFloat(60), GrowthScore: ptrFloat(20), QualityScore: ptrFloat(40), MomentumScore: ptrFloat(50), SizeScore: ptrFloat(30), LowVolatilityScore: ptrFloat(65), CreatedAt: now},
+		{SnapshotDate: "2026-05-08", Code: "300001", Symbol: "300001.SZ", Name: "特锐德", Industry: "电力设备", IsNewStock: true, ClosePrice: 20, ValueScore: nil, DividendYieldScore: ptrFloat(10), GrowthScore: ptrFloat(95), QualityScore: ptrFloat(60), MomentumScore: ptrFloat(90), SizeScore: ptrFloat(100), LowVolatilityScore: nil, CreatedAt: now},
 	}
-	if err := repo.BulkUpsertSnapshots(context.Background(), records); err != nil {
-		t.Fatalf("seed snapshots: %v", err)
+	if err := repo.db.WithContext(context.Background()).Create(&records).Error; err != nil {
+		t.Fatalf("seed factor scores: %v", err)
 	}
-	if err := repo.CreateTaskRun(context.Background(), FactorTaskRun{ID: "run-1", TaskType: TaskTypeDailyCompute, SnapshotDate: "2026-05-08", Status: TaskStatusSuccess, StartedAt: now}); err != nil {
+	if err := repo.CreateTaskRun(context.Background(), FactorTaskRun{ID: "run-1", TaskType: "factor_score_compute", SnapshotDate: "2026-05-08", Status: TaskStatusSuccess, StartedAt: now}); err != nil {
 		t.Fatalf("seed task run: %v", err)
 	}
 }
@@ -46,14 +45,14 @@ func TestFactorLabMetaNoSnapshot(t *testing.T) {
 	if meta.HasSnapshot {
 		t.Fatal("expected no snapshot")
 	}
-	if len(meta.Metrics) == 0 {
-		t.Fatal("expected metric definitions")
+	if len(meta.Factors) != 7 {
+		t.Fatalf("expected factor definitions, got %d", len(meta.Factors))
 	}
 }
 
 func TestFactorLabMetaWithCoverage(t *testing.T) {
 	svc, repo := setupFactorLabQueryService(t)
-	seedFactorSnapshots(t, repo)
+	seedFactorScores(t, repo)
 	meta, err := svc.Meta(context.Background())
 	if err != nil {
 		t.Fatalf("meta: %v", err)
@@ -64,7 +63,7 @@ func TestFactorLabMetaWithCoverage(t *testing.T) {
 	if meta.Universe.Total != 3 || meta.Universe.NewStockCount != 1 {
 		t.Fatalf("unexpected universe: %+v", meta.Universe)
 	}
-	if meta.Coverage["pe"] != 2 || meta.Coverage["operating_cf_margin"] != 1 {
+	if meta.Coverage["value_score"] != 2 || meta.Coverage["low_volatility_score"] != 2 {
 		t.Fatalf("unexpected coverage: %+v", meta.Coverage)
 	}
 	if meta.LastRun.Status != TaskStatusSuccess {
@@ -72,59 +71,69 @@ func TestFactorLabMetaWithCoverage(t *testing.T) {
 	}
 }
 
-func TestFactorLabScreenerFiltersAndDividendScale(t *testing.T) {
+func TestFactorLabScreenerDefaultEqualWeightCompositeSort(t *testing.T) {
 	svc, repo := setupFactorLabQueryService(t)
-	seedFactorSnapshots(t, repo)
-	minDividend := 3.0
-	maxPE := 10.0
+	seedFactorScores(t, repo)
+	resp, err := svc.Screen(context.Background(), FactorScreenerRequest{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("screen: %v", err)
+	}
+	if resp.Total != 3 || len(resp.Items) != 3 {
+		t.Fatalf("unexpected response size: %+v", resp)
+	}
+	if resp.Items[0].Code != "300001" {
+		t.Fatalf("expected default equal-weight composite sort, got first=%s", resp.Items[0].Code)
+	}
+	if resp.Items[0].CompositeScore == nil {
+		t.Fatal("expected composite score")
+	}
+}
+
+func TestFactorLabScreenerCustomWeightsNormalizeMissingScores(t *testing.T) {
+	svc, repo := setupFactorLabQueryService(t)
+	seedFactorScores(t, repo)
 	resp, err := svc.Screen(context.Background(), FactorScreenerRequest{
-		Filters: map[string]FactorFilterRange{
-			"dividend_yield": {Min: &minDividend},
-			"pe":             {Max: &maxPE},
-		},
-		SortBy:    "pe",
-		SortOrder: "asc",
-		Page:      1,
-		PageSize:  10,
+		FactorWeights: map[string]float64{"value": 0.5, "low_volatility": 0.5},
+		SortBy:        "composite_score",
+		SortOrder:     "desc",
+		Page:          1,
+		PageSize:      10,
 	})
 	if err != nil {
 		t.Fatalf("screen: %v", err)
 	}
-	if resp.Total != 1 || len(resp.Items) != 1 || resp.Items[0].Code != "000001" {
-		t.Fatalf("unexpected response: %+v", resp)
+	if resp.Items[0].Code != "000001" {
+		t.Fatalf("expected 000001 first, got %+v", resp.Items)
+	}
+	var item300001 FactorScreenerItem
+	for _, item := range resp.Items {
+		if item.Code == "300001" {
+			item300001 = item
+		}
+	}
+	if item300001.CompositeScore != nil {
+		t.Fatalf("expected nil composite when selected factors are missing, got %v", *item300001.CompositeScore)
 	}
 }
 
-func TestFactorLabScreenerMissingValuesExcluded(t *testing.T) {
+func TestFactorLabScreenerRejectsInvalidWeights(t *testing.T) {
 	svc, repo := setupFactorLabQueryService(t)
-	seedFactorSnapshots(t, repo)
-	minPE := 0.0
-	resp, err := svc.Screen(context.Background(), FactorScreenerRequest{Filters: map[string]FactorFilterRange{"pe": {Min: &minPE}}, PageSize: 10})
-	if err != nil {
-		t.Fatalf("screen: %v", err)
+	seedFactorScores(t, repo)
+	if _, err := svc.Screen(context.Background(), FactorScreenerRequest{FactorWeights: map[string]float64{"unknown": 1}}); err == nil {
+		t.Fatal("expected invalid factor error")
 	}
-	if resp.Total != 2 {
-		t.Fatalf("expected records with non-null pe only, got %d", resp.Total)
+	if _, err := svc.Screen(context.Background(), FactorScreenerRequest{FactorWeights: map[string]float64{"value": 0.5}}); err == nil {
+		t.Fatal("expected invalid sum error")
+	}
+	if _, err := svc.Screen(context.Background(), FactorScreenerRequest{FactorWeights: map[string]float64{"value": -1, "growth": 2}}); err == nil {
+		t.Fatal("expected negative weight error")
 	}
 }
 
-func TestFactorLabScreenerRejectsInvalidFilterAndRange(t *testing.T) {
+func TestFactorLabScreenerPaginationAndFactorSort(t *testing.T) {
 	svc, repo := setupFactorLabQueryService(t)
-	seedFactorSnapshots(t, repo)
-	min := 10.0
-	max := 1.0
-	if _, err := svc.Screen(context.Background(), FactorScreenerRequest{Filters: map[string]FactorFilterRange{"unknown": {Min: &min}}}); err == nil {
-		t.Fatal("expected invalid filter error")
-	}
-	if _, err := svc.Screen(context.Background(), FactorScreenerRequest{Filters: map[string]FactorFilterRange{"pe": {Min: &min, Max: &max}}}); err == nil {
-		t.Fatal("expected invalid range error")
-	}
-}
-
-func TestFactorLabScreenerPaginationAndSort(t *testing.T) {
-	svc, repo := setupFactorLabQueryService(t)
-	seedFactorSnapshots(t, repo)
-	resp, err := svc.Screen(context.Background(), FactorScreenerRequest{SortBy: "market_cap", SortOrder: "desc", Page: 1, PageSize: 1})
+	seedFactorScores(t, repo)
+	resp, err := svc.Screen(context.Background(), FactorScreenerRequest{SortBy: "value_score", SortOrder: "desc", Page: 1, PageSize: 1})
 	if err != nil {
 		t.Fatalf("screen: %v", err)
 	}

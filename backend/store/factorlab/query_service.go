@@ -2,8 +2,9 @@ package factorlab
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 	"time"
 )
@@ -11,7 +12,28 @@ import (
 const (
 	defaultPageSize = 50
 	maxPageSize     = 200
+	weightTolerance = 0.001
 )
+
+var factorDefinitions = []FactorDefinition{
+	{Key: "value", Label: "价值", Format: "score", Description: "PE、PB、PS 排名分加权后的估值风格得分。"},
+	{Key: "dividend_yield", Label: "股息率", Format: "score", Description: "股息收益率排名分。"},
+	{Key: "growth", Label: "成长", Format: "score", Description: "盈利增长、收入增长与近一年涨幅排名分加权后的成长得分。"},
+	{Key: "quality", Label: "质量", Format: "score", Description: "ROE、经营现金流率与资产权益比排名分加权后的质量得分。"},
+	{Key: "momentum", Label: "动量", Format: "score", Description: "近一年涨幅与近一月动量排名分加权后的动量得分。"},
+	{Key: "size", Label: "规模", Format: "score", Description: "市值排名分，小市值得分更高。"},
+	{Key: "low_volatility", Label: "低波动", Format: "score", Description: "近一月波动率与近一年 Beta 排名分加权后的低波动得分。"},
+}
+
+var factorKeyToScoreField = map[string]string{
+	"value":          "value_score",
+	"dividend_yield": "dividend_yield_score",
+	"growth":         "growth_score",
+	"quality":        "quality_score",
+	"momentum":       "momentum_score",
+	"size":           "size_score",
+	"low_volatility": "low_volatility_score",
+}
 
 type Service struct {
 	repo *Repository
@@ -31,7 +53,7 @@ func (s *Service) Meta(ctx context.Context) (FactorLabMetaResponse, error) {
 		return FactorLabMetaResponse{}, err
 	}
 	if strings.TrimSpace(date) == "" {
-		return FactorLabMetaResponse{HasSnapshot: false, Metrics: buildMetricGroups(nil)}, nil
+		return FactorLabMetaResponse{HasSnapshot: false, Factors: buildFactorDefinitions(nil), Metrics: buildMetricGroups(nil)}, nil
 	}
 	stats, err := s.repo.SnapshotStats(ctx, date)
 	if err != nil {
@@ -50,7 +72,8 @@ func (s *Service) Meta(ctx context.Context) (FactorLabMetaResponse, error) {
 			NewStockCount: stats.NewStockCount,
 		},
 		Coverage: coverage,
-		Metrics:  buildMetricGroups(coverage),
+		Factors:  buildFactorDefinitions(coverage),
+		Metrics:  buildMetricGroups(nil),
 		LastRun:  taskRunToMeta(lastRun),
 	}, nil
 }
@@ -66,14 +89,23 @@ func (s *Service) Screen(ctx context.Context, req FactorScreenerRequest) (Factor
 	}
 	items := make([]FactorScreenerItem, 0, len(result.Items))
 	for _, record := range result.Items {
-		items = append(items, snapshotToItem(record))
+		items = append(items, scoreToItem(record, input.FactorWeights))
+	}
+	sortItems(items, input.SortBy, input.SortOrder)
+	start := (input.Page - 1) * input.PageSize
+	if start > len(items) {
+		start = len(items)
+	}
+	end := start + input.PageSize
+	if end > len(items) {
+		end = len(items)
 	}
 	return FactorScreenerResponse{
 		SnapshotDate: input.SnapshotDate,
-		Total:        result.Total,
+		Total:        int64(len(items)),
 		Page:         input.Page,
 		PageSize:     input.PageSize,
-		Items:        items,
+		Items:        items[start:end],
 	}, nil
 }
 
@@ -100,83 +132,168 @@ func (s *Service) normalizeScreenerRequest(ctx context.Context, req FactorScreen
 	if pageSize > maxPageSize {
 		pageSize = maxPageSize
 	}
-	filters := make(map[string]FactorFilterRange)
-	for key, bounds := range req.Filters {
+	weights, err := normalizeFactorWeights(req.FactorWeights)
+	if err != nil {
+		return ScanInput{}, err
+	}
+	sortBy := strings.TrimSpace(req.SortBy)
+	if sortBy == "" {
+		sortBy = "composite_score"
+	}
+	sortOrder := strings.TrimSpace(req.SortOrder)
+	if !strings.EqualFold(sortOrder, "asc") && !strings.EqualFold(sortOrder, "desc") {
+		sortOrder = "desc"
+	}
+	return ScanInput{SnapshotDate: date, FactorWeights: weights, SortBy: sortBy, SortOrder: sortOrder, Page: page, PageSize: pageSize}, nil
+}
+
+func normalizeFactorWeights(raw map[string]float64) (map[string]float64, error) {
+	if len(raw) == 0 {
+		return equalFactorWeights(), nil
+	}
+	weights := make(map[string]float64)
+	sum := 0.0
+	for key, weight := range raw {
 		key = strings.TrimSpace(key)
-		if _, ok := metricColumns[key]; !ok {
-			return ScanInput{}, fmt.Errorf("不支持的因子指标: %s", key)
+		if _, ok := factorKeyToScoreField[key]; !ok {
+			return nil, fmt.Errorf("不支持的因子: %s", key)
 		}
-		if bounds.Min == nil && bounds.Max == nil {
+		if math.IsNaN(weight) || math.IsInf(weight, 0) || weight < 0 {
+			return nil, fmt.Errorf("%s 的权重必须是非负数", key)
+		}
+		if weight == 0 {
 			continue
 		}
-		normalized := normalizeFilterRange(key, bounds)
-		if normalized.Min != nil && normalized.Max != nil && *normalized.Min > *normalized.Max {
-			return ScanInput{}, fmt.Errorf("%s 的最小值不能大于最大值", key)
+		weights[key] = weight
+		sum += weight
+	}
+	if len(weights) == 0 {
+		return nil, fmt.Errorf("请至少选择一个因子并填写权重")
+	}
+	if math.Abs(sum-1) > weightTolerance {
+		return nil, fmt.Errorf("因子权重合计必须等于 1")
+	}
+	return weights, nil
+}
+
+func equalFactorWeights() map[string]float64 {
+	weights := make(map[string]float64, len(factorDefinitions))
+	weight := 1.0 / float64(len(factorDefinitions))
+	for _, factor := range factorDefinitions {
+		weights[factor.Key] = weight
+	}
+	return weights
+}
+
+func scoreToItem(record FactorScore, weights map[string]float64) FactorScreenerItem {
+	item := FactorScreenerItem{
+		SnapshotDate:       record.SnapshotDate,
+		Code:               record.Code,
+		Symbol:             record.Symbol,
+		Name:               record.Name,
+		Industry:           record.Industry,
+		IsNewStock:         record.IsNewStock,
+		ClosePrice:         record.ClosePrice,
+		ValueScore:         record.ValueScore,
+		DividendYieldScore: record.DividendYieldScore,
+		GrowthScore:        record.GrowthScore,
+		QualityScore:       record.QualityScore,
+		MomentumScore:      record.MomentumScore,
+		SizeScore:          record.SizeScore,
+		LowVolatilityScore: record.LowVolatilityScore,
+	}
+	item.CompositeScore = compositeScore(item, weights)
+	return item
+}
+
+func compositeScore(item FactorScreenerItem, weights map[string]float64) *float64 {
+	numerator := 0.0
+	denominator := 0.0
+	for key, weight := range weights {
+		score := item.factorScore(key)
+		if score == nil {
+			continue
 		}
-		filters[key] = normalized
+		numerator += *score * weight
+		denominator += weight
 	}
-	return ScanInput{
-		SnapshotDate: date,
-		Filters:      filters,
-		SortBy:       strings.TrimSpace(req.SortBy),
-		SortOrder:    strings.TrimSpace(req.SortOrder),
-		Page:         page,
-		PageSize:     pageSize,
-	}, nil
+	if denominator == 0 {
+		return nil
+	}
+	value := numerator / denominator
+	return &value
 }
 
-func normalizeFilterRange(key string, bounds FactorFilterRange) FactorFilterRange {
-	if key != "dividend_yield" {
-		return bounds
-	}
-	var out FactorFilterRange
-	if bounds.Min != nil {
-		v := *bounds.Min / 100
-		out.Min = &v
-	}
-	if bounds.Max != nil {
-		v := *bounds.Max / 100
-		out.Max = &v
-	}
-	return out
-}
-
-func snapshotToItem(record FactorSnapshot) FactorScreenerItem {
-	return FactorScreenerItem{
-		SnapshotDate:            record.SnapshotDate,
-		Code:                    record.Code,
-		Symbol:                  record.Symbol,
-		Name:                    record.Name,
-		Board:                   record.Board,
-		ListingAgeDays:          record.ListingAgeDays,
-		IsNewStock:              record.IsNewStock,
-		AvailableTradingDays:    record.AvailableTradingDays,
-		ClosePrice:              record.ClosePrice,
-		MarketCap:               record.MarketCap,
-		PE:                      record.PE,
-		PB:                      record.PB,
-		PS:                      record.PS,
-		DividendYield:           record.DividendYield,
-		EarningGrowth:           record.EarningGrowth,
-		RevenueGrowth:           record.RevenueGrowth,
-		Performance1Y:           record.Performance1Y,
-		PerformanceSinceListing: record.PerformanceSinceListing,
-		Momentum1M:              record.Momentum1M,
-		ROE:                     record.ROE,
-		OperatingCFMargin:       record.OperatingCFMargin,
-		AssetToEquity:           record.AssetToEquity,
-		Volatility1M:            record.Volatility1M,
-		Beta1Y:                  record.Beta1Y,
-		DataQualityFlags:        parseFlags(record.DataQualityFlags),
+func (item FactorScreenerItem) factorScore(key string) *float64 {
+	switch key {
+	case "value", "value_score":
+		return item.ValueScore
+	case "dividend_yield", "dividend_yield_score":
+		return item.DividendYieldScore
+	case "growth", "growth_score":
+		return item.GrowthScore
+	case "quality", "quality_score":
+		return item.QualityScore
+	case "momentum", "momentum_score":
+		return item.MomentumScore
+	case "size", "size_score":
+		return item.SizeScore
+	case "low_volatility", "low_volatility_score":
+		return item.LowVolatilityScore
+	case "composite_score":
+		return item.CompositeScore
+	default:
+		return nil
 	}
 }
 
-func parseFlags(raw string) []string {
-	var flags []string
-	if err := json.Unmarshal([]byte(raw), &flags); err != nil {
-		return []string{}
+func sortItems(items []FactorScreenerItem, sortBy, sortOrder string) {
+	desc := !strings.EqualFold(sortOrder, "asc")
+	sort.SliceStable(items, func(i, j int) bool {
+		left, right := items[i], items[j]
+		if sortBy == "code" {
+			return compareString(left.Code, right.Code, desc)
+		}
+		if sortBy == "name" {
+			return compareString(left.Name, right.Name, desc)
+		}
+		if sortBy == "industry" {
+			return compareString(left.Industry, right.Industry, desc)
+		}
+		if sortBy == "close_price" {
+			return compareFloat(&left.ClosePrice, &right.ClosePrice, desc, left.Code, right.Code)
+		}
+		return compareFloat(left.factorScore(sortBy), right.factorScore(sortBy), desc, left.Code, right.Code)
+	})
+}
+
+func compareString(left, right string, desc bool) bool {
+	if left == right {
+		return false
 	}
-	return flags
+	if desc {
+		return left > right
+	}
+	return left < right
+}
+
+func compareFloat(left, right *float64, desc bool, leftCode, rightCode string) bool {
+	if left == nil && right == nil {
+		return leftCode < rightCode
+	}
+	if left == nil {
+		return false
+	}
+	if right == nil {
+		return true
+	}
+	if *left == *right {
+		return leftCode < rightCode
+	}
+	if desc {
+		return *left > *right
+	}
+	return *left < *right
 }
 
 func taskRunToMeta(run *FactorTaskRun) FactorTaskRunMeta {
@@ -206,43 +323,20 @@ func isSnapshotStale(snapshotDate string) bool {
 	return now.Sub(parsed.In(loc)) > 96*time.Hour
 }
 
-func buildMetricGroups(coverage map[string]int64) []FactorMetricGroup {
-	cover := func(key string) int64 {
-		if coverage == nil {
-			return 0
+func buildFactorDefinitions(coverage map[string]int64) []FactorDefinition {
+	defaultWeight := 1.0 / float64(len(factorDefinitions))
+	out := make([]FactorDefinition, 0, len(factorDefinitions))
+	for _, factor := range factorDefinitions {
+		copy := factor
+		copy.DefaultWeight = defaultWeight
+		if coverage != nil {
+			copy.Coverage = coverage[factorKeyToScoreField[factor.Key]]
 		}
-		return coverage[key]
+		out = append(out, copy)
 	}
-	return []FactorMetricGroup{
-		{Key: "value", Label: "价值", Items: []FactorMetricDefinition{
-			{Key: "pe", Label: "PE", Unit: "倍", Format: "number", Direction: DirectionLowerBetter, Description: "市盈率，越低通常代表估值越便宜；亏损股 PE 可能不可用。", Coverage: cover("pe")},
-			{Key: "pb", Label: "PB", Unit: "倍", Format: "number", Direction: DirectionLowerBetter, Description: "市净率，衡量股价相对净资产的估值水平。", Coverage: cover("pb")},
-			{Key: "ps", Label: "PS", Unit: "倍", Format: "number", Direction: DirectionLowerBetter, Description: "市销率，使用市值除以营业收入。", Coverage: cover("ps")},
-		}},
-		{Key: "dividend", Label: "股息率", Items: []FactorMetricDefinition{
-			{Key: "dividend_yield", Label: "股息率", Unit: "%", Format: "percentFromRatio", Direction: DirectionHigherBetter, Description: "现金分红相对市值或股价的收益率；输入 3 表示 3%。", Coverage: cover("dividend_yield")},
-		}},
-		{Key: "growth", Label: "成长", Items: []FactorMetricDefinition{
-			{Key: "earning_growth", Label: "盈利增长", Unit: "%", Format: "percent", Direction: DirectionHigherBetter, Description: "最新报告期净利润同比增长。", Coverage: cover("earning_growth")},
-			{Key: "revenue_growth", Label: "收入增长", Unit: "%", Format: "percent", Direction: DirectionHigherBetter, Description: "最新报告期营业收入同比增长。", Coverage: cover("revenue_growth")},
-			{Key: "performance_1y", Label: "近一年涨幅", Unit: "%", Format: "percent", Direction: DirectionHigherBetter, Description: "最近约 250 个交易日涨跌幅；上市不足一年可能缺失。", Coverage: cover("performance_1y")},
-			{Key: "performance_since_listing", Label: "上市以来涨幅", Unit: "%", Format: "percent", Direction: DirectionHigherBetter, Description: "基于本地可用日线的上市以来涨跌幅。", Coverage: cover("performance_since_listing")},
-		}},
-		{Key: "quality", Label: "质量", Items: []FactorMetricDefinition{
-			{Key: "roe", Label: "ROE", Unit: "%", Format: "percent", Direction: DirectionHigherBetter, Description: "净利润 / 股东权益。", Coverage: cover("roe")},
-			{Key: "operating_cf_margin", Label: "经营现金流率", Unit: "%", Format: "percent", Direction: DirectionHigherBetter, Description: "经营活动现金流净额 / 营业收入。", Coverage: cover("operating_cf_margin")},
-			{Key: "asset_to_equity", Label: "资产权益比", Unit: "倍", Format: "number", Direction: DirectionLowerBetter, Description: "总资产 / 股东权益，用于观察杠杆水平。", Coverage: cover("asset_to_equity")},
-		}},
-		{Key: "momentum", Label: "动量", Items: []FactorMetricDefinition{
-			{Key: "momentum_1m", Label: "近一月动量", Unit: "%", Format: "percent", Direction: DirectionHigherBetter, Description: "最近约 20 个交易日涨跌幅。", Coverage: cover("momentum_1m")},
-			{Key: "performance_1y", Label: "近一年涨幅", Unit: "%", Format: "percent", Direction: DirectionHigherBetter, Description: "最近约 250 个交易日涨跌幅。", Coverage: cover("performance_1y")},
-		}},
-		{Key: "size", Label: "规模", Items: []FactorMetricDefinition{
-			{Key: "market_cap", Label: "总市值", Unit: "元", Format: "bigNumber", Direction: DirectionNeutral, Description: "公司总市值，筛选时可用于大盘/小盘风格。", Coverage: cover("market_cap")},
-		}},
-		{Key: "low_volatility", Label: "低波动", Items: []FactorMetricDefinition{
-			{Key: "volatility_1m", Label: "近一月波动率", Unit: "%", Format: "percent", Direction: DirectionLowerBetter, Description: "最近约 20 个交易日日收益标准差年化。", Coverage: cover("volatility_1m")},
-			{Key: "beta_1y", Label: "近一年 Beta", Unit: "倍", Format: "number", Direction: DirectionLowerBetter, Description: "近一年相对中证全指的市场敏感度。", Coverage: cover("beta_1y")},
-		}},
-	}
+	return out
+}
+
+func buildMetricGroups(coverage map[string]int64) []FactorMetricGroup {
+	return []FactorMetricGroup{}
 }

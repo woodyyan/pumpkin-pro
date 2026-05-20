@@ -52,6 +52,9 @@ def test_ensure_schema_creates_phase0_tables(tmp_path):
         assert "factor_snapshots" in tables
         assert "factor_task_runs" in tables
         assert "factor_task_items" in tables
+        assert "factor_security_industries" in tables
+        assert "factor_rank_scores" in tables
+        assert "factor_scores" in tables
     finally:
         conn.close()
 
@@ -60,7 +63,7 @@ def test_build_security_payload_from_quote_records_applies_limit_and_metrics():
     args = module.parse_args(["--mode", "securities", "--limit", "1", "--snapshot-date", "2026-05-08"])
     payload = module.build_security_payload_from_quote_records(
         [
-            {"code": "1", "name": "平安银行", "price": 11.2, "volume": 100, "amount": 1000, "market_cap": 10_000, "pe": 6.5, "pb": 0.8, "turnover_rate": 0.5},
+            {"code": "1", "name": "平安银行", "price": 11.2, "volume": 100, "amount": 1000, "market_cap": 10_000, "pe": 6.5, "pb": 0.8, "turnover_rate": 0.5, "industry": "银行Ⅰ"},
             {"code": "600519", "name": "贵州茅台", "price": 1500},
         ],
         args,
@@ -73,6 +76,8 @@ def test_build_security_payload_from_quote_records_applies_limit_and_metrics():
     assert payload.rows[0][4] == "MAIN"
     assert payload.metrics[0][1] == "2026-05-08"
     assert payload.metrics[0][3] == 10_000
+    assert payload.industries[0][0] == "000001"
+    assert payload.industries[0][2] == "银行"
     assert payload.source == "test-source"
 
 

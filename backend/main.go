@@ -3536,6 +3536,7 @@ func main() {
 		DBPath:           cfg.DB.Path,
 		PythonBin:        cfg.FactorLab.PythonBin,
 		Phase1ScriptPath: cfg.FactorLab.Phase1ScriptPath,
+		Phase2ScriptPath: cfg.FactorLab.Phase2ScriptPath,
 		Hour:             cfg.FactorLab.ComputeHour,
 		Minute:           cfg.FactorLab.ComputeMinute,
 		Timeout:          time.Duration(cfg.FactorLab.TimeoutMinutes) * time.Minute,

@@ -12,7 +12,10 @@ func TestNormalizeWorkerConfigDefaults(t *testing.T) {
 		t.Fatalf("expected default python bin, got %q", cfg.PythonBin)
 	}
 	if cfg.Phase1ScriptPath != defaultPhase1Script {
-		t.Fatalf("expected default script, got %q", cfg.Phase1ScriptPath)
+		t.Fatalf("expected default phase1 script, got %q", cfg.Phase1ScriptPath)
+	}
+	if cfg.Phase2ScriptPath != defaultPhase2Script {
+		t.Fatalf("expected default phase2 script, got %q", cfg.Phase2ScriptPath)
 	}
 	if cfg.Hour != defaultComputeHour || cfg.Minute != defaultComputeMinute {
 		t.Fatalf("unexpected default schedule: %02d:%02d", cfg.Hour, cfg.Minute)
@@ -25,21 +28,32 @@ func TestNormalizeWorkerConfigDefaults(t *testing.T) {
 	}
 }
 
-func TestBuildPhase1CommandArgs(t *testing.T) {
+func TestBuildPhaseCommandArgs(t *testing.T) {
 	cfg := normalizeWorkerConfig(WorkerConfig{
 		DBPath:           "data/pumpkin.db",
 		Phase1ScriptPath: "quant/scripts/compute_factor_lab_phase1.py",
+		Phase2ScriptPath: "quant/scripts/compute_factor_lab_phase2.py",
 		ProgressInterval: 123,
 	})
-	got := buildPhase1CommandArgs(cfg)
-	want := []string{
+	phase1 := buildPhase1CommandArgs(cfg)
+	wantPhase1 := []string{
 		"quant/scripts/compute_factor_lab_phase1.py",
 		"--db", "data/pumpkin.db",
 		"--write",
 		"--progress-interval", "123",
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("unexpected args\n got: %#v\nwant: %#v", got, want)
+	if !reflect.DeepEqual(phase1, wantPhase1) {
+		t.Fatalf("unexpected phase1 args\n got: %#v\nwant: %#v", phase1, wantPhase1)
+	}
+	phase2 := buildPhase2CommandArgs(cfg)
+	wantPhase2 := []string{
+		"quant/scripts/compute_factor_lab_phase2.py",
+		"--db", "data/pumpkin.db",
+		"--write",
+		"--progress-interval", "123",
+	}
+	if !reflect.DeepEqual(phase2, wantPhase2) {
+		t.Fatalf("unexpected phase2 args\n got: %#v\nwant: %#v", phase2, wantPhase2)
 	}
 }
 

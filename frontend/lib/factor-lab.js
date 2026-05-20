@@ -1,77 +1,70 @@
-export const DEFAULT_FACTOR_SORT = { sortBy: 'code', sortOrder: 'asc' }
+export const FACTOR_DEFINITIONS = [
+  { key: 'value', scoreKey: 'value_score', label: '价值' },
+  { key: 'dividend_yield', scoreKey: 'dividend_yield_score', label: '股息率' },
+  { key: 'growth', scoreKey: 'growth_score', label: '成长' },
+  { key: 'quality', scoreKey: 'quality_score', label: '质量' },
+  { key: 'momentum', scoreKey: 'momentum_score', label: '动量' },
+  { key: 'size', scoreKey: 'size_score', label: '规模' },
+  { key: 'low_volatility', scoreKey: 'low_volatility_score', label: '低波动' },
+]
 
-export function normalizeRangeInput(value) {
+export const DEFAULT_FACTOR_SORT = { sortBy: 'composite_score', sortOrder: 'desc' }
+
+export function normalizeWeightInput(value) {
   if (value === null || value === undefined) return null
   const text = String(value).trim()
   if (!text) return null
   const num = Number(text)
-  if (!Number.isFinite(num)) return null
+  if (!Number.isFinite(num) || num < 0) return null
   return num
 }
 
-export function buildFactorScreenerPayload({ filters = {}, sortBy = 'code', sortOrder = 'asc', page = 1, pageSize = 50, snapshotDate = '' } = {}) {
-  const normalizedFilters = {}
-  for (const [key, range] of Object.entries(filters || {})) {
-    const min = normalizeRangeInput(range?.min)
-    const max = normalizeRangeInput(range?.max)
-    if (min === null && max === null) continue
-    normalizedFilters[key] = {}
-    if (min !== null) normalizedFilters[key].min = min
-    if (max !== null) normalizedFilters[key].max = max
+export function normalizeFactorWeights(factorWeights = {}) {
+  const normalized = {}
+  for (const [key, value] of Object.entries(factorWeights || {})) {
+    const num = normalizeWeightInput(value)
+    if (num === null || num <= 0) continue
+    normalized[key] = num
   }
+  return normalized
+}
+
+export function sumFactorWeights(factorWeights = {}) {
+  return Object.values(normalizeFactorWeights(factorWeights)).reduce((sum, value) => sum + value, 0)
+}
+
+export function validateFactorWeights(factorWeights = {}) {
+  const normalized = normalizeFactorWeights(factorWeights)
+  const selectedCount = Object.keys(factorWeights || {}).length
+  if (selectedCount === 0) return { valid: true, sum: 0, message: '未选择因子时默认按 7 个因子等权综合排序。' }
+  const sum = Object.values(normalized).reduce((total, value) => total + value, 0)
+  if (Object.keys(normalized).length !== selectedCount) return { valid: false, sum, message: '已选择的因子需要填写大于 0 的权重。' }
+  if (Math.abs(sum - 1) > 0.001) return { valid: false, sum, message: '因子权重合计必须等于 1。' }
+  return { valid: true, sum, message: '权重合计为 1，将按自定义综合得分排序。' }
+}
+
+export function buildFactorScreenerPayload({ factorWeights = {}, sortBy = 'composite_score', sortOrder = 'desc', page = 1, pageSize = 50, snapshotDate = '' } = {}) {
   return {
     snapshot_date: snapshotDate || '',
-    filters: normalizedFilters,
-    sort_by: sortBy || 'code',
-    sort_order: sortOrder === 'desc' ? 'desc' : 'asc',
+    factor_weights: normalizeFactorWeights(factorWeights),
+    sort_by: sortBy || 'composite_score',
+    sort_order: sortOrder === 'asc' ? 'asc' : 'desc',
     page: Math.max(1, Number(page) || 1),
     page_size: Math.min(200, Math.max(1, Number(pageSize) || 50)),
   }
 }
 
-export function updateFactorFilter(filters, key, bound, value) {
-  const next = { ...(filters || {}) }
-  const current = { ...(next[key] || {}) }
-  current[bound] = value
-  const min = normalizeRangeInput(current.min)
-  const max = normalizeRangeInput(current.max)
-  if (min === null && max === null) {
-    delete next[key]
-  } else {
-    next[key] = current
-  }
-  return next
+export function factorWeightChipText(factorWeights = {}, factorMap = {}) {
+  const selectedCount = Object.keys(factorWeights || {}).length
+  const entries = Object.entries(normalizeFactorWeights(factorWeights))
+  if (entries.length === 0) return selectedCount === 0 ? ['默认 7 因子等权'] : ['请填写因子权重']
+  return entries.map(([key, weight]) => `${factorMap[key]?.label || key} ${formatWeight(weight)}`)
 }
 
-export function removeFactorFilter(filters, key) {
-  const next = { ...(filters || {}) }
-  delete next[key]
-  return next
-}
-
-export function flattenMetricDefinitions(groups = []) {
-  const map = {}
-  for (const group of groups || []) {
-    for (const item of group.items || []) {
-      map[item.key] = { ...item, group: group.key, groupLabel: group.label }
-    }
-  }
-  return map
-}
-
-export function getDynamicMetricColumns(filters = {}, metricMap = {}) {
-  const keys = Object.keys(filters || {})
-  return keys.filter((key) => metricMap[key]).slice(0, 6)
-}
-
-export function buildSelectedFilterChips(filters = {}, metricMap = {}) {
-  return Object.entries(filters || {}).map(([key, range]) => {
-    const metric = metricMap[key] || { label: key, unit: '' }
-    const parts = []
-    if (normalizeRangeInput(range?.min) !== null) parts.push(`≥ ${range.min}${metric.unit || ''}`)
-    if (normalizeRangeInput(range?.max) !== null) parts.push(`≤ ${range.max}${metric.unit || ''}`)
-    return { key, label: metric.label, text: `${metric.label} ${parts.join(' ')}`.trim() }
-  })
+export function formatWeight(value) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '--'
+  return num.toFixed(2)
 }
 
 export function formatFactorValue(value, format = 'number') {
@@ -79,6 +72,8 @@ export function formatFactorValue(value, format = 'number') {
   const num = Number(value)
   if (!Number.isFinite(num)) return '--'
   switch (format) {
+    case 'score':
+      return num.toFixed(1)
     case 'price':
       return num.toFixed(2)
     case 'percent':
@@ -99,14 +94,13 @@ export function formatFactorValue(value, format = 'number') {
   }
 }
 
-export function getBoardLabel(board) {
-  switch (board) {
-    case 'MAIN': return '主板'
-    case 'CHINEXT': return '创业板'
-    case 'STAR': return '科创板'
-    case 'BJ': return '北交所'
-    default: return board || '--'
-  }
+export function getScoreTone(value) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return 'muted'
+  if (num >= 80) return 'strong'
+  if (num >= 60) return 'good'
+  if (num >= 40) return 'neutral'
+  return 'weak'
 }
 
 export function getPageNumbers(current, total) {
@@ -122,4 +116,13 @@ export function getPageNumbers(current, total) {
 export function codeToSymbol(code) {
   const c = String(code || '').padStart(6, '0')
   return c.startsWith('6') || c.startsWith('9') ? `${c}.SH` : `${c}.SZ`
+}
+
+export function flattenFactorDefinitions(factors = FACTOR_DEFINITIONS) {
+  const map = {}
+  for (const factor of factors || []) {
+    map[factor.key] = factor
+    if (factor.scoreKey) map[factor.scoreKey] = factor
+  }
+  return map
 }

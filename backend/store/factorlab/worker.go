@@ -18,6 +18,7 @@ const (
 	defaultProgressInterval  = 500
 	defaultPythonBin         = "python3"
 	defaultPhase1Script      = "quant/scripts/compute_factor_lab_phase1.py"
+	defaultPhase2Script      = "quant/scripts/compute_factor_lab_phase2.py"
 	factorLabWorkerLogPrefix = "[factorlab-worker]"
 )
 
@@ -26,6 +27,7 @@ type WorkerConfig struct {
 	DBPath           string
 	PythonBin        string
 	Phase1ScriptPath string
+	Phase2ScriptPath string
 	Hour             int
 	Minute           int
 	Timeout          time.Duration
@@ -48,6 +50,9 @@ func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
 	}
 	if strings.TrimSpace(cfg.Phase1ScriptPath) == "" {
 		cfg.Phase1ScriptPath = defaultPhase1Script
+	}
+	if strings.TrimSpace(cfg.Phase2ScriptPath) == "" {
+		cfg.Phase2ScriptPath = defaultPhase2Script
 	}
 	if cfg.Hour < 0 || cfg.Hour > 23 {
 		cfg.Hour = defaultComputeHour
@@ -97,32 +102,51 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, w.cfg.Timeout)
 	defer cancel()
 
-	args := buildPhase1CommandArgs(w.cfg)
-	log.Printf("%s running: %s %s", factorLabWorkerLogPrefix, w.cfg.PythonBin, strings.Join(args, " "))
-	cmd := exec.CommandContext(ctx, w.cfg.PythonBin, args...)
-	var output bytes.Buffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
-	cmd.Dir = inferCommandDir(w.cfg.Phase1ScriptPath)
-	err := cmd.Run()
-	trimmedOutput := strings.TrimSpace(output.String())
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			err = fmt.Errorf("phase1 compute timeout after %s", w.cfg.Timeout)
-		}
-		w.lastError = err.Error()
-		log.Printf("%s ❌ failed: %v\n%s", factorLabWorkerLogPrefix, err, trimmedOutput)
+	if err := w.runScript(ctx, "phase1", w.cfg.Phase1ScriptPath, buildPhase1CommandArgs(w.cfg)); err != nil {
+		return err
+	}
+	if err := w.runScript(ctx, "phase2", w.cfg.Phase2ScriptPath, buildPhase2CommandArgs(w.cfg)); err != nil {
 		return err
 	}
 	w.lastRunAt = time.Now()
 	w.lastError = ""
-	log.Printf("%s ✅ completed\n%s", factorLabWorkerLogPrefix, trimmedOutput)
+	return nil
+}
+
+func (w *Worker) runScript(ctx context.Context, label, scriptPath string, args []string) error {
+	log.Printf("%s running %s: %s %s", factorLabWorkerLogPrefix, label, w.cfg.PythonBin, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, w.cfg.PythonBin, args...)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	cmd.Dir = inferCommandDir(scriptPath)
+	err := cmd.Run()
+	trimmedOutput := strings.TrimSpace(output.String())
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			err = fmt.Errorf("%s compute timeout after %s", label, w.cfg.Timeout)
+		}
+		w.lastError = err.Error()
+		log.Printf("%s ❌ %s failed: %v\n%s", factorLabWorkerLogPrefix, label, err, trimmedOutput)
+		return err
+	}
+	log.Printf("%s ✅ %s completed\n%s", factorLabWorkerLogPrefix, label, trimmedOutput)
 	return nil
 }
 
 func buildPhase1CommandArgs(cfg WorkerConfig) []string {
 	args := []string{
 		cfg.Phase1ScriptPath,
+		"--db", cfg.DBPath,
+		"--write",
+		"--progress-interval", fmt.Sprintf("%d", cfg.ProgressInterval),
+	}
+	return args
+}
+
+func buildPhase2CommandArgs(cfg WorkerConfig) []string {
+	args := []string{
+		cfg.Phase2ScriptPath,
 		"--db", cfg.DBPath,
 		"--write",
 		"--progress-interval", fmt.Sprintf("%d", cfg.ProgressInterval),

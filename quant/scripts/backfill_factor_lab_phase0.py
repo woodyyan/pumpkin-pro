@@ -44,6 +44,7 @@ TENCENT_KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 
 CODE_ALIASES = ["股票代码", "代码", "证券代码"]
 NAME_ALIASES = ["股票简称", "名称", "股票名称"]
+INDUSTRY_ALIASES = ["所属行业", "行业", "行业板块", "板块", "申万行业", "东财行业"]
 REVENUE_ALIASES = ["营业总收入-营业总收入", "营业收入-营业收入", "营业总收入", "营业收入"]
 REVENUE_YOY_ALIASES = ["营业总收入-同比增长", "营业收入-同比增长", "营业收入同比增长", "营业总收入同比增长"]
 NET_PROFIT_ALIASES = ["净利润-净利润", "归母净利润-净利润", "净利润", "归母净利润"]
@@ -76,6 +77,16 @@ SCHEMA_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_factor_securities_board ON factor_securities(board)",
     "CREATE INDEX IF NOT EXISTS idx_factor_securities_is_st ON factor_securities(is_st)",
     "CREATE INDEX IF NOT EXISTS idx_factor_securities_is_active ON factor_securities(is_active)",
+    """
+    CREATE TABLE IF NOT EXISTS factor_security_industries (
+        code TEXT PRIMARY KEY,
+        raw_industry_name TEXT NOT NULL DEFAULT '',
+        industry_name TEXT NOT NULL DEFAULT '',
+        industry_source TEXT NOT NULL DEFAULT '',
+        updated_at DATETIME NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_factor_security_industries_name ON factor_security_industries(industry_name)",
     """
     CREATE TABLE IF NOT EXISTS factor_daily_bars (
         code TEXT NOT NULL,
@@ -212,6 +223,51 @@ SCHEMA_SQL = [
         PRIMARY KEY (run_id, item_type, item_key)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS factor_rank_scores (
+        snapshot_date TEXT NOT NULL,
+        code TEXT NOT NULL,
+        pe_rank_score REAL,
+        pb_rank_score REAL,
+        ps_rank_score REAL,
+        dividend_yield_rank_score REAL,
+        earning_growth_rank_score REAL,
+        revenue_growth_rank_score REAL,
+        performance_1y_rank_score REAL,
+        roe_rank_score REAL,
+        operating_cf_margin_rank_score REAL,
+        asset_to_equity_rank_score REAL,
+        momentum_1m_rank_score REAL,
+        market_cap_rank_score REAL,
+        volatility_1m_rank_score REAL,
+        beta_1y_rank_score REAL,
+        created_at DATETIME NOT NULL,
+        PRIMARY KEY (snapshot_date, code)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_factor_rank_scores_snapshot_date ON factor_rank_scores(snapshot_date)",
+    """
+    CREATE TABLE IF NOT EXISTS factor_scores (
+        snapshot_date TEXT NOT NULL,
+        code TEXT NOT NULL,
+        symbol TEXT NOT NULL DEFAULT '',
+        name TEXT NOT NULL DEFAULT '',
+        industry TEXT NOT NULL DEFAULT '',
+        is_new_stock INTEGER NOT NULL DEFAULT 0,
+        close_price REAL NOT NULL DEFAULT 0,
+        value_score REAL,
+        dividend_yield_score REAL,
+        growth_score REAL,
+        quality_score REAL,
+        momentum_score REAL,
+        size_score REAL,
+        low_volatility_score REAL,
+        created_at DATETIME NOT NULL,
+        PRIMARY KEY (snapshot_date, code)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_factor_scores_snapshot_date ON factor_scores(snapshot_date)",
+    "CREATE INDEX IF NOT EXISTS idx_factor_scores_industry ON factor_scores(industry)",
 ]
 
 
@@ -227,6 +283,7 @@ class TaskStats:
 class SecuritiesPayload:
     rows: list[tuple[Any, ...]]
     metrics: list[tuple[Any, ...]]
+    industries: list[tuple[Any, ...]]
     source: str
 
 
@@ -387,6 +444,33 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    except sqlite3.Error:
+        return set()
+    return {str(row[1]) for row in rows}
+
+
+def normalize_industry_name(raw: Any) -> str:
+    text = str(raw or "").strip()
+    if not text or text in {"--", "-", "None", "nan"}:
+        return ""
+    for marker in ["(东财行业)", "（东财行业）", "(申万)", "（申万）"]:
+        text = text.replace(marker, "")
+    if "-" in text:
+        text = text.split("-", 1)[0].strip()
+    return text.rstrip("ⅠⅡⅢIV123一二三").strip()
+
+
+def first_industry_value(record: dict[str, Any]) -> Any:
+    for key in ["industry", "industry_name", "raw_industry_name"]:
+        value = record.get(key)
+        if str(value or "").strip():
+            return value
+    return ""
+
+
 def insert_task_run(conn: sqlite3.Connection, run_id: str, mode: str, args: argparse.Namespace) -> None:
     conn.execute(
         """
@@ -518,6 +602,7 @@ def load_local_code_universe(conn: sqlite3.Connection, args: argparse.Namespace,
 def build_security_payload_from_quote_records(records: list[dict[str, Any]], args: argparse.Namespace, source: str) -> SecuritiesPayload:
     rows: list[tuple[Any, ...]] = []
     metrics: list[tuple[Any, ...]] = []
+    industries: list[tuple[Any, ...]] = []
     trade_date = args.snapshot_date or datetime.today().strftime("%Y-%m-%d")
     now = utc_now()
     target_code = normalize_code(args.code) if args.code else ""
@@ -532,6 +617,10 @@ def build_security_payload_from_quote_records(records: list[dict[str, Any]], arg
         board = str(record.get("board") or "").strip().upper() or classify_board(code)
         exchange = str(record.get("exchange") or "").strip().upper() or infer_exchange(code)
         rows.append((code, infer_symbol(code), name, exchange, board, "", int(is_st_name(name)), 1, source, now))
+        raw_industry = first_industry_value(record)
+        industry_name = normalize_industry_name(raw_industry)
+        if industry_name:
+            industries.append((code, str(raw_industry or "").strip(), industry_name, source, now))
         price = safe_float(record.get("price"))
         volume = safe_float(record.get("volume")) or 0.0
         amount = safe_float(record.get("amount")) or 0.0
@@ -552,7 +641,7 @@ def build_security_payload_from_quote_records(records: list[dict[str, Any]], arg
         seen.add(code)
         if args.limit and len(rows) >= args.limit:
             break
-    return SecuritiesPayload(rows=rows, metrics=metrics, source=source)
+    return SecuritiesPayload(rows=rows, metrics=metrics, industries=industries, source=source)
 
 
 def fetch_securities_akshare(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -563,6 +652,7 @@ def fetch_securities_akshare(args: argparse.Namespace) -> list[dict[str, Any]]:
         raise RuntimeError("stock_zh_a_spot_em 返回空数据")
     code_col = find_column(df.columns, CODE_ALIASES)
     name_col = find_column(df.columns, NAME_ALIASES)
+    industry_col = find_column(df.columns, INDUSTRY_ALIASES)
     if not code_col or not name_col:
         raise RuntimeError("A 股列表缺少代码或名称列")
     records: list[dict[str, Any]] = []
@@ -577,6 +667,7 @@ def fetch_securities_akshare(args: argparse.Namespace) -> list[dict[str, Any]]:
             "pe": row.get("市盈率-动态"),
             "pb": row.get("市净率"),
             "turnover_rate": row.get("换手率"),
+            "industry": row.get(industry_col) if industry_col else "",
         })
     return records
 
@@ -588,7 +679,7 @@ def fetch_securities_eastmoney_direct(args: argparse.Namespace) -> list[dict[str
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/131 Safari/537.36",
         "Referer": "https://quote.eastmoney.com/",
     }
-    fields = "f12,f14,f2,f5,f6,f8,f9,f20,f23"
+    fields = "f12,f14,f2,f5,f6,f8,f9,f20,f23,f100"
     records: list[dict[str, Any]] = []
     page = 1
     page_size = 200
@@ -623,6 +714,7 @@ def fetch_securities_eastmoney_direct(args: argparse.Namespace) -> list[dict[str
                 "pe": item.get("f9"),
                 "market_cap": item.get("f20"),
                 "pb": item.get("f23"),
+                "industry": item.get("f100"),
             })
         log_step(f"securities: 东方财富 direct 已拉取 {len(records)} 条")
         total = int(data.get("total") or 0)
@@ -713,19 +805,35 @@ def fetch_securities_local(conn: sqlite3.Connection, args: argparse.Namespace) -
         log_step(f"securities: 本地 quadrant_scores 不可用：{exc}")
     if not args.limit or len(records_by_code) < args.limit:
         try:
-            rows = conn.execute(
+            columns = table_columns(conn, "company_profiles")
+            industry_columns_available = {"raw_industry_name", "industry_name"}.issubset(columns)
+            if industry_columns_available:
+                query = """
+                    SELECT code, name, exchange, board_code, raw_industry_name, industry_name
+                    FROM company_profiles
+                    WHERE code <> '' AND exchange IN ('SSE','SZSE')
+                    ORDER BY code ASC
                 """
-                SELECT code, name, exchange, board_code
-                FROM company_profiles
-                WHERE code <> '' AND exchange IN ('SSE','SZSE')
-                ORDER BY code ASC
+            else:
+                query = """
+                    SELECT code, name, exchange, board_code, '', ''
+                    FROM company_profiles
+                    WHERE code <> '' AND exchange IN ('SSE','SZSE')
+                    ORDER BY code ASC
                 """
-            ).fetchall()
-            for code, name, exchange, board in rows:
+            rows = conn.execute(query).fetchall()
+            for code, name, exchange, board, raw_industry, industry_name in rows:
                 normalized = normalize_code(code)
                 if not normalized or normalized in records_by_code or (target_code and normalized != target_code):
                     continue
-                records_by_code[normalized] = {"code": normalized, "name": name, "exchange": exchange, "board": board or classify_board(normalized)}
+                records_by_code[normalized] = {
+                    "code": normalized,
+                    "name": name,
+                    "exchange": exchange,
+                    "board": board or classify_board(normalized),
+                    "raw_industry_name": raw_industry,
+                    "industry_name": industry_name,
+                }
                 if args.limit and len(records_by_code) >= args.limit:
                     break
         except sqlite3.Error as exc:
@@ -776,7 +884,7 @@ def backfill_securities(conn: sqlite3.Connection, args: argparse.Namespace, run_
     payload = fetch_securities_payload(conn, args)
     stats = TaskStats(total=len(payload.rows))
     if not args.write:
-        print(f"[dry-run] securities={len(payload.rows)} market_metrics={len(payload.metrics)} source={payload.source}", flush=True)
+        print(f"[dry-run] securities={len(payload.rows)} market_metrics={len(payload.metrics)} industries={len(payload.industries)} source={payload.source}", flush=True)
         stats.skipped = len(payload.rows)
         return stats
     conn.executemany(
@@ -795,12 +903,21 @@ def backfill_securities(conn: sqlite3.Connection, args: argparse.Namespace, run_
         """,
         payload.metrics,
     )
+    if payload.industries:
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO factor_security_industries
+            (code, raw_industry_name, industry_name, industry_source, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            payload.industries,
+        )
     for idx, (code, *_rest) in enumerate(payload.rows, start=1):
         upsert_task_item(conn, run_id, "security", code, "success")
         log_progress("securities: 写入进度", idx, len(payload.rows), args.progress_interval)
     conn.commit()
     stats.success = len(payload.rows)
-    log_step(f"securities: 写入完成，股票 {stats.success} 条，市场指标 {len(payload.metrics)} 条")
+    log_step(f"securities: 写入完成，股票 {stats.success} 条，市场指标 {len(payload.metrics)} 条，行业映射 {len(payload.industries)} 条")
     return stats
 
 

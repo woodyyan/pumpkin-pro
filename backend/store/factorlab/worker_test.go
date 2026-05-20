@@ -100,16 +100,16 @@ func TestRunOnceDisabledSkips(t *testing.T) {
 	}
 }
 
-func TestTryStartRunPreventsConcurrentRuns(t *testing.T) {
+func TestBeginRunPreventsConcurrentRuns(t *testing.T) {
 	worker := NewWorker(WorkerConfig{Enabled: true})
-	if !worker.tryStartRun() {
-		t.Fatal("first run should start")
+	if run, ok := worker.beginRun("manual"); !ok || run.TriggerType != "manual" {
+		t.Fatalf("first run should start, got run=%+v ok=%v", run, ok)
 	}
-	if worker.tryStartRun() {
+	if _, ok := worker.beginRun("manual"); ok {
 		t.Fatal("second run should be rejected")
 	}
 	worker.finishRun()
-	if !worker.tryStartRun() {
+	if _, ok := worker.beginRun("manual"); !ok {
 		t.Fatal("run should start after finish")
 	}
 }

@@ -15,6 +15,23 @@ var factorScoreColumns = map[string]string{
 	"low_volatility_score": "low_volatility_score",
 }
 
+var rawMetricColumns = map[string]string{
+	"pe":                  "pe",
+	"pb":                  "pb",
+	"ps":                  "ps",
+	"dividend_yield":      "dividend_yield",
+	"earning_growth":      "earning_growth",
+	"revenue_growth":      "revenue_growth",
+	"performance_1y":      "performance_1y",
+	"roe":                 "roe",
+	"operating_cf_margin": "operating_cf_margin",
+	"asset_to_equity":     "asset_to_equity",
+	"momentum_1m":         "momentum_1m",
+	"market_cap":          "market_cap",
+	"volatility_1m":       "volatility_1m",
+	"beta_1y":             "beta_1y",
+}
+
 func (r *Repository) LatestSnapshotDate(ctx context.Context) (string, error) {
 	var date string
 	err := r.db.WithContext(ctx).
@@ -52,11 +69,19 @@ func (r *Repository) SnapshotStats(ctx context.Context, snapshotDate string) (Sn
 }
 
 func (r *Repository) MetricCoverage(ctx context.Context, snapshotDate string) (map[string]int64, error) {
-	coverage := make(map[string]int64, len(factorScoreColumns))
-	for key, column := range factorScoreColumns {
+	return r.coverageForColumns(ctx, &FactorScore{}, snapshotDate, factorScoreColumns)
+}
+
+func (r *Repository) RawMetricCoverage(ctx context.Context, snapshotDate string) (map[string]int64, error) {
+	return r.coverageForColumns(ctx, &FactorSnapshot{}, snapshotDate, rawMetricColumns)
+}
+
+func (r *Repository) coverageForColumns(ctx context.Context, model any, snapshotDate string, columns map[string]string) (map[string]int64, error) {
+	coverage := make(map[string]int64, len(columns))
+	for key, column := range columns {
 		var count int64
 		if err := r.db.WithContext(ctx).
-			Model(&FactorScore{}).
+			Model(model).
 			Where("snapshot_date = ? AND "+column+" IS NOT NULL", snapshotDate).
 			Count(&count).Error; err != nil {
 			return nil, err
@@ -64,6 +89,25 @@ func (r *Repository) MetricCoverage(ctx context.Context, snapshotDate string) (m
 		coverage[key] = count
 	}
 	return coverage, nil
+}
+
+func (r *Repository) ListTaskRuns(ctx context.Context, limit int) ([]FactorTaskRun, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	var runs []FactorTaskRun
+	err := r.db.WithContext(ctx).
+		Where("task_type IN ?", []string{"backfill", TaskTypeDailyCompute, "factor_score_compute"}).
+		Order("started_at DESC").
+		Limit(limit).
+		Find(&runs).Error
+	return runs, err
+}
+
+func (r *Repository) DBQuickCheck(ctx context.Context) (string, error) {
+	var result string
+	err := r.db.WithContext(ctx).Raw("PRAGMA quick_check").Row().Scan(&result)
+	return result, err
 }
 
 func (r *Repository) ScanSnapshots(ctx context.Context, input ScanInput) (ScanResult, error) {

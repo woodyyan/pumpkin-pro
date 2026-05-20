@@ -139,6 +139,7 @@ type appServer struct {
 	backupService         *backup.Service
 	backupWorker          *backup.Worker
 	factorLabService      *factorlab.Service
+	factorLabWorker       *factorlab.Worker
 	backtestService       *backtest.Service
 	screenerService       *screener.Service
 	analyticsRepo         *analytics.Repository
@@ -3419,6 +3420,40 @@ func (a *appServer) handleAdminCompanyProfileRefreshStatus(w http.ResponseWriter
 	writeJSON(w, http.StatusOK, a.companyProfileService.RefreshStatus())
 }
 
+func (a *appServer) handleAdminFactorLabPipelineStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	if a.factorLabService == nil || a.factorLabWorker == nil {
+		writeError(w, http.StatusServiceUnavailable, "因子流水线服务未初始化")
+		return
+	}
+	status, err := a.factorLabService.AdminStatus(r.Context(), a.factorLabWorker.Snapshot(time.Now()))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (a *appServer) handleAdminFactorLabPipelineRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	if a.factorLabWorker == nil {
+		writeError(w, http.StatusServiceUnavailable, "因子流水线服务未初始化")
+		return
+	}
+	run, err := a.factorLabWorker.StartManual(r.Context())
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, run)
+}
+
 func (a *appServer) handleAdminQuadrantLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
@@ -3590,6 +3625,7 @@ func main() {
 		backupService:         backupService,
 		backupWorker:          backupWorker,
 		factorLabService:      factorLabService,
+		factorLabWorker:       factorLabWorker,
 		backtestService:       backtestService,
 		screenerService:       screenerService,
 		analyticsRepo:         analyticsRepo,
@@ -3666,6 +3702,8 @@ func main() {
 	mux.HandleFunc("/api/admin/ai-usage", server.withSuperAdminAuth(server.handleAdminAITokenUsage))
 
 	mux.HandleFunc("/api/admin/device-analytics", server.withSuperAdminAuth(server.handleAdminDeviceAnalytics))
+	mux.HandleFunc("/api/admin/factor-lab/pipeline/status", server.withSuperAdminAuth(server.handleAdminFactorLabPipelineStatus))
+	mux.HandleFunc("/api/admin/factor-lab/pipeline/run", server.withSuperAdminAuth(server.handleAdminFactorLabPipelineRun))
 
 	mux.HandleFunc("/api/analytics/pageview", server.withOptionalAuth(server.handlePageView))
 

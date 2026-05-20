@@ -78,6 +78,76 @@ func (s *Service) Meta(ctx context.Context) (FactorLabMetaResponse, error) {
 	}, nil
 }
 
+func (s *Service) AdminStatus(ctx context.Context, worker WorkerStatus) (FactorPipelineAdminStatus, error) {
+	date, err := s.repo.LatestSnapshotDate(ctx)
+	if err != nil {
+		return FactorPipelineAdminStatus{}, err
+	}
+	coverage, err := s.Coverage(ctx, date)
+	if err != nil {
+		return FactorPipelineAdminStatus{}, err
+	}
+	runs, err := s.repo.ListTaskRuns(ctx, 10)
+	if err != nil {
+		return FactorPipelineAdminStatus{}, err
+	}
+	metas := make([]FactorTaskRunMeta, 0, len(runs))
+	for idx := range runs {
+		metas = append(metas, taskRunToMeta(&runs[idx]))
+	}
+	dbHealth, err := s.repo.DBQuickCheck(ctx)
+	if err != nil {
+		dbHealth = "failed: " + err.Error()
+	}
+	return FactorPipelineAdminStatus{Worker: worker, DBHealth: dbHealth, LatestSnapshot: date, Coverage: coverage, RecentTaskRuns: metas}, nil
+}
+
+func (s *Service) Coverage(ctx context.Context, snapshotDate string) (FactorCoverageResponse, error) {
+	date := strings.TrimSpace(snapshotDate)
+	if date == "" {
+		latest, err := s.repo.LatestSnapshotDate(ctx)
+		if err != nil {
+			return FactorCoverageResponse{}, err
+		}
+		date = latest
+	}
+	if date == "" {
+		return FactorCoverageResponse{RawMetrics: map[string]int64{}, Factors: map[string]int64{}}, nil
+	}
+	stats, err := s.repo.SnapshotStats(ctx, date)
+	if err != nil {
+		return FactorCoverageResponse{}, err
+	}
+	factors, err := s.repo.MetricCoverage(ctx, date)
+	if err != nil {
+		return FactorCoverageResponse{}, err
+	}
+	raw, err := s.repo.RawMetricCoverage(ctx, date)
+	if err != nil {
+		return FactorCoverageResponse{}, err
+	}
+	warnings := buildCoverageWarnings(stats.Total, raw, factors)
+	return FactorCoverageResponse{SnapshotDate: date, Universe: stats.Total, RawMetrics: raw, Factors: factors, Warnings: warnings}, nil
+}
+
+func buildCoverageWarnings(total int64, raw, factors map[string]int64) []string {
+	if total <= 0 {
+		return []string{}
+	}
+	warnings := []string{}
+	for _, key := range []string{"dividend_yield", "performance_1y", "operating_cf_margin"} {
+		if float64(raw[key])/float64(total) < 0.8 {
+			warnings = append(warnings, fmt.Sprintf("%s 覆盖率低于 80%%", key))
+		}
+	}
+	for _, key := range []string{"value_score", "growth_score", "quality_score", "momentum_score", "size_score", "low_volatility_score"} {
+		if float64(factors[key])/float64(total) < 0.8 {
+			warnings = append(warnings, fmt.Sprintf("%s 覆盖率低于 80%%", key))
+		}
+	}
+	return warnings
+}
+
 func (s *Service) Screen(ctx context.Context, req FactorScreenerRequest) (FactorScreenerResponse, error) {
 	input, err := s.normalizeScreenerRequest(ctx, req)
 	if err != nil {

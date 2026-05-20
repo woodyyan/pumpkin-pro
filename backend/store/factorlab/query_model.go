@@ -119,3 +119,19 @@ type ScanResult struct {
 	Total int64
 	Items []FactorScore
 }
+
+type FactorCoverageResponse struct {
+	SnapshotDate string           `json:"snapshot_date"`
+	Universe     int64            `json:"universe"`
+	RawMetrics   map[string]int64 `json:"raw_metrics"`
+	Factors      map[string]int64 `json:"factors"`
+	Warnings     []string         `json:"warnings"`
+}
+
+type FactorPipelineAdminStatus struct {
+	Worker         WorkerStatus           `json:"worker"`
+	DBHealth       string                 `json:"db_health"`
+	LatestSnapshot string                 `json:"latest_snapshot_date"`
+	Coverage       FactorCoverageResponse `json:"coverage"`
+	RecentTaskRuns []FactorTaskRunMeta    `json:"recent_task_runs"`
+}

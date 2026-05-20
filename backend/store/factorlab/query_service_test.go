@@ -9,6 +9,7 @@ import (
 )
 
 func ptrFloat(v float64) *float64 { return &v }
+func ptrInt(v int) *int           { return &v }
 
 func setupFactorLabQueryService(t *testing.T) (*Service, *Repository) {
 	t.Helper()
@@ -30,6 +31,14 @@ func seedFactorScores(t *testing.T, repo *Repository) {
 	}
 	if err := repo.db.WithContext(context.Background()).Create(&records).Error; err != nil {
 		t.Fatalf("seed factor scores: %v", err)
+	}
+	snapshots := []FactorSnapshot{
+		{SnapshotDate: "2026-05-08", Code: "000001", Symbol: "000001.SZ", Name: "平安银行", Board: BoardMain, ClosePrice: 10, PE: ptrFloat(8), DividendYield: ptrFloat(0.03), Performance1Y: ptrFloat(12), OperatingCFMargin: ptrFloat(18), ListingAgeDays: ptrInt(1000), AvailableTradingDays: 260, DataQualityFlags: `[]`, CreatedAt: now},
+		{SnapshotDate: "2026-05-08", Code: "000002", Symbol: "000002.SZ", Name: "万科A", Board: BoardMain, ClosePrice: 8, PE: ptrFloat(20), Performance1Y: ptrFloat(2), ListingAgeDays: ptrInt(2000), AvailableTradingDays: 260, DataQualityFlags: `[]`, CreatedAt: now},
+		{SnapshotDate: "2026-05-08", Code: "300001", Symbol: "300001.SZ", Name: "特锐德", Board: BoardChiNext, ClosePrice: 20, ListingAgeDays: ptrInt(100), AvailableTradingDays: 80, DataQualityFlags: `[]`, CreatedAt: now},
+	}
+	if err := repo.BulkUpsertSnapshots(context.Background(), snapshots); err != nil {
+		t.Fatalf("seed snapshots: %v", err)
 	}
 	if err := repo.CreateTaskRun(context.Background(), FactorTaskRun{ID: "run-1", TaskType: "factor_score_compute", SnapshotDate: "2026-05-08", Status: TaskStatusSuccess, StartedAt: now}); err != nil {
 		t.Fatalf("seed task run: %v", err)
@@ -68,6 +77,27 @@ func TestFactorLabMetaWithCoverage(t *testing.T) {
 	}
 	if meta.LastRun.Status != TaskStatusSuccess {
 		t.Fatalf("expected last run status, got %+v", meta.LastRun)
+	}
+}
+
+func TestFactorLabAdminStatusIncludesCoverageAndRecentRuns(t *testing.T) {
+	svc, repo := setupFactorLabQueryService(t)
+	seedFactorScores(t, repo)
+	status, err := svc.AdminStatus(context.Background(), WorkerStatus{Enabled: true, Schedule: "21:00"})
+	if err != nil {
+		t.Fatalf("admin status: %v", err)
+	}
+	if status.DBHealth != "ok" {
+		t.Fatalf("expected db health ok, got %q", status.DBHealth)
+	}
+	if status.Coverage.Universe != 3 || status.Coverage.RawMetrics["pe"] != 2 || status.Coverage.Factors["value_score"] != 2 {
+		t.Fatalf("unexpected coverage: %+v", status.Coverage)
+	}
+	if len(status.RecentTaskRuns) != 1 || status.RecentTaskRuns[0].Status != TaskStatusSuccess {
+		t.Fatalf("unexpected recent runs: %+v", status.RecentTaskRuns)
+	}
+	if len(status.Coverage.Warnings) == 0 {
+		t.Fatal("expected low coverage warnings")
 	}
 }
 

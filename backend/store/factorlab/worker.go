@@ -41,12 +41,49 @@ type WorkerConfig struct {
 	ProgressInterval int
 }
 
+type PhaseStatus struct {
+	Name            string     `json:"name"`
+	Status          string     `json:"status"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	DurationSeconds float64    `json:"duration_seconds"`
+	ErrorMessage    string     `json:"error_message,omitempty"`
+}
+
+type PipelineRunStatus struct {
+	ID              string        `json:"id"`
+	TriggerType     string        `json:"trigger_type"`
+	Status          string        `json:"status"`
+	CurrentPhase    string        `json:"current_phase"`
+	StartedAt       time.Time     `json:"started_at"`
+	FinishedAt      *time.Time    `json:"finished_at,omitempty"`
+	DurationSeconds float64       `json:"duration_seconds"`
+	DBHealthBefore  string        `json:"db_health_before"`
+	DBHealthAfter   string        `json:"db_health_after"`
+	BackupPath      string        `json:"backup_path,omitempty"`
+	ErrorMessage    string        `json:"error_message,omitempty"`
+	Phases          []PhaseStatus `json:"phases"`
+}
+
+type WorkerStatus struct {
+	Enabled   bool                `json:"enabled"`
+	Running   bool                `json:"running"`
+	Schedule  string              `json:"schedule"`
+	NextRunAt time.Time           `json:"next_run_at"`
+	LastRunAt *time.Time          `json:"last_run_at,omitempty"`
+	LastError string              `json:"last_error,omitempty"`
+	Current   *PipelineRunStatus  `json:"current,omitempty"`
+	History   []PipelineRunStatus `json:"history"`
+}
+
 type Worker struct {
 	cfg       WorkerConfig
 	lastRunAt time.Time
 	lastError string
 	mu        sync.Mutex
 	running   bool
+	current   *PipelineRunStatus
+	history   []PipelineRunStatus
 }
 
 func NewWorker(cfg WorkerConfig) *Worker {
@@ -112,57 +149,101 @@ func (w *Worker) Start(ctx context.Context) {
 }
 
 func (w *Worker) RunOnce(ctx context.Context) error {
+	return w.runPipeline(ctx, "scheduled")
+}
+
+func (w *Worker) StartManual(ctx context.Context) (*PipelineRunStatus, error) {
+	if !w.cfg.Enabled {
+		return nil, fmt.Errorf("factor lab pipeline disabled")
+	}
+	run, ok := w.beginRun("manual")
+	if !ok {
+		return nil, fmt.Errorf("factor lab pipeline is already running")
+	}
+	go w.executePipeline(context.Background(), run)
+	return run, nil
+}
+
+func (w *Worker) runPipeline(ctx context.Context, triggerType string) error {
 	if !w.cfg.Enabled {
 		return nil
 	}
-	if !w.tryStartRun() {
+	run, ok := w.beginRun(triggerType)
+	if !ok {
 		return fmt.Errorf("factor lab pipeline is already running")
 	}
+	return w.executePipeline(ctx, run)
+}
+
+func (w *Worker) beginRun(triggerType string) (*PipelineRunStatus, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.running {
+		return nil, false
+	}
+	now := time.Now()
+	run := &PipelineRunStatus{
+		ID:           fmt.Sprintf("factorlab-%s", now.Format("20060102-150405.000")),
+		TriggerType:  triggerType,
+		Status:       "running",
+		StartedAt:    now,
+		CurrentPhase: "pending",
+		Phases: []PhaseStatus{
+			{Name: "phase0_incremental", Status: "pending"},
+			{Name: "phase1", Status: "pending"},
+			{Name: "phase2", Status: "pending"},
+		},
+	}
+	w.running = true
+	w.current = run
+	return clonePipelineRunStatus(run), true
+}
+
+func (w *Worker) executePipeline(ctx context.Context, runSnapshot *PipelineRunStatus) error {
 	defer w.finishRun()
 	if strings.TrimSpace(w.cfg.DBPath) == "" {
-		w.lastError = "DB path is empty"
-		return fmt.Errorf("factor lab pipeline db path is empty")
+		err := fmt.Errorf("factor lab pipeline db path is empty")
+		w.failRun(err)
+		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, w.cfg.Timeout)
 	defer cancel()
 
 	if err := w.quickCheckDatabase(ctx, "before"); err != nil {
-		w.lastError = err.Error()
+		w.failRun(err)
 		return err
 	}
+	w.updateRun(func(run *PipelineRunStatus) { run.DBHealthBefore = "ok" })
 	backupPath, err := w.backupDatabase(ctx)
 	if err != nil {
-		w.lastError = err.Error()
+		w.failRun(err)
 		return err
 	}
+	w.updateRun(func(run *PipelineRunStatus) { run.BackupPath = backupPath })
 	log.Printf("%s safe backup created: %s", factorLabWorkerLogPrefix, backupPath)
 
-	if err := w.runScript(ctx, "phase0-incremental", w.cfg.Phase0ScriptPath, buildPhase0CommandArgs(w.cfg)); err != nil {
-		return err
+	steps := []struct {
+		name       string
+		scriptPath string
+		args       []string
+	}{
+		{name: "phase0_incremental", scriptPath: w.cfg.Phase0ScriptPath, args: buildPhase0CommandArgs(w.cfg)},
+		{name: "phase1", scriptPath: w.cfg.Phase1ScriptPath, args: buildPhase1CommandArgs(w.cfg)},
+		{name: "phase2", scriptPath: w.cfg.Phase2ScriptPath, args: buildPhase2CommandArgs(w.cfg)},
 	}
-	if err := w.runScript(ctx, "phase1", w.cfg.Phase1ScriptPath, buildPhase1CommandArgs(w.cfg)); err != nil {
-		return err
-	}
-	if err := w.runScript(ctx, "phase2", w.cfg.Phase2ScriptPath, buildPhase2CommandArgs(w.cfg)); err != nil {
-		return err
+	for _, step := range steps {
+		if err := w.runScript(ctx, step.name, step.scriptPath, step.args); err != nil {
+			w.failRun(err)
+			return err
+		}
 	}
 	if err := w.quickCheckDatabase(ctx, "after"); err != nil {
-		w.lastError = err.Error()
+		w.failRun(err)
 		return err
 	}
-	w.lastRunAt = time.Now()
-	w.lastError = ""
+	w.updateRun(func(run *PipelineRunStatus) { run.DBHealthAfter = "ok" })
+	w.completeRun()
 	return nil
-}
-
-func (w *Worker) tryStartRun() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.running {
-		return false
-	}
-	w.running = true
-	return true
 }
 
 func (w *Worker) finishRun() {
@@ -172,6 +253,12 @@ func (w *Worker) finishRun() {
 }
 
 func (w *Worker) runScript(ctx context.Context, label, scriptPath string, args []string) error {
+	started := time.Now()
+	w.updatePhase(label, func(phase *PhaseStatus) {
+		phase.Status = "running"
+		phase.StartedAt = &started
+	})
+	w.updateRun(func(run *PipelineRunStatus) { run.CurrentPhase = label })
 	log.Printf("%s running %s: %s %s", factorLabWorkerLogPrefix, label, w.cfg.PythonBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, w.cfg.PythonBin, args...)
 	var output bytes.Buffer
@@ -179,17 +266,93 @@ func (w *Worker) runScript(ctx context.Context, label, scriptPath string, args [
 	cmd.Stderr = &output
 	cmd.Dir = inferCommandDir(scriptPath)
 	err := cmd.Run()
+	finished := time.Now()
 	trimmedOutput := strings.TrimSpace(output.String())
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			err = fmt.Errorf("%s compute timeout after %s", label, w.cfg.Timeout)
 		}
-		w.lastError = err.Error()
+		w.updatePhase(label, func(phase *PhaseStatus) {
+			phase.Status = "failed"
+			phase.FinishedAt = &finished
+			phase.DurationSeconds = finished.Sub(started).Seconds()
+			phase.ErrorMessage = err.Error()
+		})
 		log.Printf("%s ❌ %s failed: %v\n%s", factorLabWorkerLogPrefix, label, err, trimmedOutput)
 		return err
 	}
+	w.updatePhase(label, func(phase *PhaseStatus) {
+		phase.Status = "success"
+		phase.FinishedAt = &finished
+		phase.DurationSeconds = finished.Sub(started).Seconds()
+	})
 	log.Printf("%s ✅ %s completed\n%s", factorLabWorkerLogPrefix, label, trimmedOutput)
 	return nil
+}
+
+func (w *Worker) updateRun(mutator func(*PipelineRunStatus)) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.current == nil {
+		return
+	}
+	mutator(w.current)
+}
+
+func (w *Worker) updatePhase(name string, mutator func(*PhaseStatus)) {
+	w.updateRun(func(run *PipelineRunStatus) {
+		for idx := range run.Phases {
+			if run.Phases[idx].Name == name {
+				mutator(&run.Phases[idx])
+				return
+			}
+		}
+	})
+}
+
+func (w *Worker) failRun(err error) {
+	finished := time.Now()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.lastError = err.Error()
+	if w.current != nil {
+		w.current.Status = "failed"
+		w.current.ErrorMessage = err.Error()
+		w.current.FinishedAt = &finished
+		w.current.DurationSeconds = finished.Sub(w.current.StartedAt).Seconds()
+		w.appendHistoryLocked(*w.current)
+	}
+}
+
+func (w *Worker) completeRun() {
+	finished := time.Now()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.lastRunAt = finished
+	w.lastError = ""
+	if w.current != nil {
+		w.current.Status = "success"
+		w.current.CurrentPhase = ""
+		w.current.FinishedAt = &finished
+		w.current.DurationSeconds = finished.Sub(w.current.StartedAt).Seconds()
+		w.appendHistoryLocked(*w.current)
+	}
+}
+
+func (w *Worker) appendHistoryLocked(run PipelineRunStatus) {
+	w.history = append([]PipelineRunStatus{*clonePipelineRunStatus(&run)}, w.history...)
+	if len(w.history) > 10 {
+		w.history = w.history[:10]
+	}
+}
+
+func clonePipelineRunStatus(run *PipelineRunStatus) *PipelineRunStatus {
+	if run == nil {
+		return nil
+	}
+	copyRun := *run
+	copyRun.Phases = append([]PhaseStatus(nil), run.Phases...)
+	return &copyRun
 }
 
 func (w *Worker) quickCheckDatabase(ctx context.Context, stage string) error {
@@ -283,6 +446,32 @@ func nextDailyTriggerTime(now time.Time, hour, minute int) time.Time {
 	return today
 }
 
+func (w *Worker) Snapshot(now time.Time) WorkerStatus {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var lastRunAt *time.Time
+	if !w.lastRunAt.IsZero() {
+		value := w.lastRunAt
+		lastRunAt = &value
+	}
+	history := make([]PipelineRunStatus, 0, len(w.history))
+	for _, item := range w.history {
+		history = append(history, *clonePipelineRunStatus(&item))
+	}
+	return WorkerStatus{
+		Enabled:   w.cfg.Enabled,
+		Running:   w.running,
+		Schedule:  fmt.Sprintf("%02d:%02d", w.cfg.Hour, w.cfg.Minute),
+		NextRunAt: nextDailyTriggerTime(now, w.cfg.Hour, w.cfg.Minute),
+		LastRunAt: lastRunAt,
+		LastError: w.lastError,
+		Current:   clonePipelineRunStatus(w.current),
+		History:   history,
+	}
+}
+
 func (w *Worker) Status() (lastRunAt time.Time, lastError string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.lastRunAt, w.lastError
 }

@@ -900,7 +900,10 @@ function AdminDashboard({ session, onLogout }) {
               </section>
             )}
 
-            {/* Panel 8: Quadrant Overview + Compute History (enhanced) */}
+            {/* Panel 8: Factor Lab Pipeline */}
+            <FactorLabPipelinePanel onUnauthorized={onLogout} />
+
+            {/* Panel 9: Quadrant Overview + Compute History (enhanced) */}
             <QuadrantAdminPanel onUnauthorized={onLogout} />
 
             {/* Panel 9: User Feedback */}
@@ -1270,6 +1273,130 @@ function CompanyProfilesAdminPanel({ onUnauthorized }) {
       </div>
     </section>
   )
+}
+
+function FactorLabPipelinePanel({ onUnauthorized }) {
+  const [triggering, setTriggering] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const resource = useAdminResource({
+    key: 'admin:factor-lab-pipeline',
+    request: () => adminFetch('/api/admin/factor-lab/pipeline/status'),
+    staleMs: 5_000,
+    minIntervalMs: 3_000,
+    pollMs: (payload) => payload?.worker?.running ? 5_000 : null,
+    onUnauthorized,
+    errorMessage: '加载因子流水线状态失败',
+  })
+  const data = resource.data
+  const worker = data?.worker || {}
+  const coverage = data?.coverage || {}
+  const phases = worker.current?.phases || []
+  const history = worker.history || []
+  const recentTaskRuns = data?.recent_task_runs || []
+  const triggerPipeline = async () => {
+    if (!window.confirm('确认立即运行因子流水线？任务将在 backend 容器内串行执行 Phase0 增量、Phase1、Phase2，并会先做数据库健康检查和备份。')) return
+    setTriggering(true)
+    setActionError('')
+    try {
+      await adminFetch('/api/admin/factor-lab/pipeline/run', { method: 'POST' })
+      await resource.refresh({ force: true, preferCache: false })
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '触发因子流水线失败')
+      if (message) setActionError(message)
+    } finally {
+      setTriggering(false)
+    }
+  }
+  const statusClass = resolveFactorStatusClass(worker.running ? 'running' : worker.current?.status || (worker.last_error ? 'failed' : 'success'))
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-white/80">因子实验室计算</h2>
+          <p className="mt-1 text-xs text-white/40">每天 21:00 在 backend 容器内串行执行 Phase0 增量、Phase1 快照、Phase2 因子分。</p>
+        </div>
+        <button
+          type="button"
+          disabled={triggering || worker.running}
+          onClick={triggerPipeline}
+          className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {worker.running ? '运行中...' : triggering ? '触发中...' : '立即运行流水线'}
+        </button>
+      </div>
+      {(resource.error || actionError) && <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">{actionError || resource.error}</div>}
+      {worker.last_error && <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">最近错误：{worker.last_error}</div>}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <StatCard label="流水线状态" value={worker.running ? 'running' : (worker.current?.status || '--')} sub={worker.schedule ? `每日 ${worker.schedule}` : ''} />
+        <StatCard label="DB 健康" value={data?.db_health || '--'} />
+        <StatCard label="最新快照" value={data?.latest_snapshot_date || '--'} />
+        <StatCard label="股票池" value={formatNumber(coverage.universe)} sub={coverage.snapshot_date || '--'} />
+        <StatCard label="下一次运行" value={formatAdminDateTime(worker.next_run_at)} />
+        <StatCard label="当前阶段" value={worker.current?.current_phase || '--'} />
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        {['phase0_incremental', 'phase1', 'phase2'].map((name) => {
+          const phase = phases.find((item) => item.name === name) || { name, status: worker.running ? 'pending' : 'idle' }
+          return <PhaseCard key={name} phase={phase} />
+        })}
+      </div>
+      {coverage.warnings?.length > 0 && <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-100">{coverage.warnings.join('；')}</div>}
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <CoverageTable title="原始指标覆盖率" rows={coverage.raw_metrics} total={coverage.universe} />
+        <CoverageTable title="因子得分覆盖率" rows={coverage.factors} total={coverage.universe} />
+      </div>
+      <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-4">
+        <div className="mb-3 flex items-center justify-between text-xs"><span className="text-white/40">最近 10 次流水线运行</span><span className={`rounded-full border px-2 py-0.5 ${statusClass}`}>{worker.running ? 'running' : (worker.current?.status || 'idle')}</span></div>
+        {history.length === 0 ? <p className="text-xs text-white/25">暂无流水线运行历史。</p> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead><tr className="border-b border-white/8 text-white/35"><th className="pb-2 pr-3">触发</th><th className="pb-2 pr-3">状态</th><th className="pb-2 pr-3">开始</th><th className="pb-2 pr-3">耗时</th><th className="pb-2">错误</th></tr></thead>
+              <tbody className="text-white/65">
+                {history.slice(0, 10).map((run) => <tr key={run.id} className="border-b border-white/[0.04] last:border-0"><td className="py-2 pr-3">{run.trigger_type}</td><td className="py-2 pr-3">{run.status}</td><td className="py-2 pr-3 whitespace-nowrap">{formatAdminDateTime(run.started_at)}</td><td className="py-2 pr-3">{formatDurationSeconds(run.duration_seconds)}</td><td className="py-2 text-rose-200/70">{run.error_message || '--'}</td></tr>)}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-4">
+        <div className="mb-3 text-xs text-white/40">最近 10 条任务明细</div>
+        {recentTaskRuns.length === 0 ? <p className="text-xs text-white/25">暂无任务记录。</p> : <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{recentTaskRuns.slice(0, 10).map((run) => <div key={run.id || `${run.snapshot_date}-${run.started_at}`} className="rounded-lg border border-white/8 bg-white/[0.03] px-3 py-2 text-xs"><div className="flex justify-between gap-2"><span className="text-white/70">{run.status || '--'}</span><span className="text-white/35">{run.snapshot_date || '--'}</span></div><div className="mt-1 truncate text-white/35">{run.id || '--'}</div></div>)}</div>}
+      </div>
+    </section>
+  )
+}
+
+function PhaseCard({ phase }) {
+  return <div className="rounded-xl border border-white/8 bg-[#15171e] p-4"><div className="flex items-center justify-between gap-2"><div className="text-sm font-semibold text-white/75">{phaseLabel(phase.name)}</div><span className={`rounded-full border px-2 py-0.5 text-[11px] ${resolveFactorStatusClass(phase.status)}`}>{phase.status}</span></div><div className="mt-2 text-xs text-white/35">耗时：{formatDurationSeconds(phase.duration_seconds)}</div>{phase.error_message && <div className="mt-2 text-xs text-rose-200/80">{phase.error_message}</div>}</div>
+}
+
+function CoverageTable({ title, rows, total }) {
+  const entries = Object.entries(rows || {}).sort((a, b) => a[0].localeCompare(b[0]))
+  return <div className="rounded-xl border border-white/8 bg-[#15171e] p-4"><div className="mb-3 text-xs text-white/40">{title}</div>{entries.length === 0 ? <p className="text-xs text-white/25">暂无数据</p> : <div className="space-y-2">{entries.map(([key, count]) => { const pct = total > 0 ? Math.round((Number(count || 0) / total) * 100) : 0; return <div key={key} className="text-xs"><div className="mb-1 flex justify-between gap-3"><span className="truncate text-white/60">{factorAdminLabel(key)}</span><span className={pct < 80 ? 'text-amber-200' : 'text-white/45'}>{formatNumber(count)} / {pct}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-white/5"><div className={`h-full rounded-full ${pct < 80 ? 'bg-amber-400/60' : 'bg-primary/60'}`} style={{ width: `${Math.min(100, pct)}%` }} /></div></div> })}</div>}</div>
+}
+
+function factorAdminLabel(key) {
+  const labels = { dividend_yield: '股息率', performance_1y: '近一年涨幅', operating_cf_margin: '经营现金流率', value_score: '价值', dividend_yield_score: '股息率因子', growth_score: '成长', quality_score: '质量', momentum_score: '动量', size_score: '规模', low_volatility_score: '低波动' }
+  return labels[key] || key
+}
+
+function phaseLabel(name) {
+  return { phase0_incremental: 'Phase0 增量', phase1: 'Phase1 快照', phase2: 'Phase2 因子分' }[name] || name
+}
+
+function resolveFactorStatusClass(status) {
+  if (status === 'success') return 'border-emerald-400/25 bg-emerald-500/12 text-emerald-200'
+  if (status === 'failed') return 'border-rose-400/25 bg-rose-500/12 text-rose-200'
+  if (status === 'running') return 'border-blue-400/25 bg-blue-500/12 text-blue-200'
+  if (status === 'partial') return 'border-amber-400/25 bg-amber-500/12 text-amber-100'
+  return 'border-white/12 bg-white/6 text-white/55'
+}
+
+function formatDurationSeconds(value) {
+  const seconds = Number(value || 0)
+  if (!Number.isFinite(seconds) || seconds <= 0) return '--'
+  if (seconds < 60) return `${Math.round(seconds)}秒`
+  return `${Math.floor(seconds / 60)}分${Math.round(seconds % 60)}秒`
 }
 
 function QuadrantAdminPanel({ onUnauthorized }) {

@@ -2,6 +2,7 @@ package factorlab
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -111,5 +112,36 @@ func TestBeginRunPreventsConcurrentRuns(t *testing.T) {
 	worker.finishRun()
 	if _, ok := worker.beginRun("manual"); !ok {
 		t.Fatal("run should start after finish")
+	}
+}
+
+func TestAppendPhaseLogLineCapturesTailAndSummary(t *testing.T) {
+	worker := NewWorker(WorkerConfig{Enabled: true})
+	if _, ok := worker.beginRun("manual"); !ok {
+		t.Fatal("run should start")
+	}
+	worker.appendPhaseLogLine("phase0_incremental", "stdout", "[12:00:00] daily-bars: 写入进度: 100/4338")
+	worker.appendPhaseLogLine("phase0_incremental", "stdout", `summary={"total":5,"success":3,"failed":1,"skipped":1} status=partial`)
+	snapshot := worker.Snapshot(time.Now())
+	phase := snapshot.Current.Phases[0]
+	if phase.TotalCount != 5 || phase.SuccessCount != 3 || phase.FailedCount != 1 || phase.SkippedCount != 1 {
+		t.Fatalf("unexpected counts: %+v", phase)
+	}
+	if len(phase.LogTail) != 2 || !strings.Contains(phase.LogTail[1], "summary=") {
+		t.Fatalf("unexpected log tail: %+v", phase.LogTail)
+	}
+}
+
+func TestAppendPhaseLogLineLimitsTail(t *testing.T) {
+	worker := NewWorker(WorkerConfig{Enabled: true})
+	if _, ok := worker.beginRun("manual"); !ok {
+		t.Fatal("run should start")
+	}
+	for idx := 0; idx < defaultLogTailLimit+5; idx++ {
+		worker.appendPhaseLogLine("phase0_incremental", "stdout", strings.Repeat("x", 1)+string(rune('a'+idx%26)))
+	}
+	snapshot := worker.Snapshot(time.Now())
+	if len(snapshot.Current.Phases[0].LogTail) != defaultLogTailLimit {
+		t.Fatalf("expected tail limit %d, got %d", defaultLogTailLimit, len(snapshot.Current.Phases[0].LogTail))
 	}
 }

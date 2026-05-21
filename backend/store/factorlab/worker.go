@@ -1,9 +1,12 @@
 package factorlab
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -19,6 +22,7 @@ const (
 	defaultComputeTimeout    = 3 * time.Hour
 	defaultStepTimeout       = 30 * time.Minute
 	defaultProgressInterval  = 500
+	defaultLogTailLimit      = 120
 	defaultPythonBin         = "python3"
 	defaultPhase0Script      = "quant/scripts/update_factor_lab_phase0_incremental.py"
 	defaultPhase1Script      = "quant/scripts/compute_factor_lab_phase1.py"
@@ -42,12 +46,19 @@ type WorkerConfig struct {
 }
 
 type PhaseStatus struct {
-	Name            string     `json:"name"`
-	Status          string     `json:"status"`
-	StartedAt       *time.Time `json:"started_at,omitempty"`
-	FinishedAt      *time.Time `json:"finished_at,omitempty"`
-	DurationSeconds float64    `json:"duration_seconds"`
-	ErrorMessage    string     `json:"error_message,omitempty"`
+	Name            string         `json:"name"`
+	Status          string         `json:"status"`
+	StartedAt       *time.Time     `json:"started_at,omitempty"`
+	FinishedAt      *time.Time     `json:"finished_at,omitempty"`
+	DurationSeconds float64        `json:"duration_seconds"`
+	TotalCount      int            `json:"total_count"`
+	SuccessCount    int            `json:"success_count"`
+	FailedCount     int            `json:"failed_count"`
+	SkippedCount    int            `json:"skipped_count"`
+	LastMessage     string         `json:"last_message,omitempty"`
+	ErrorMessage    string         `json:"error_message,omitempty"`
+	Summary         map[string]any `json:"summary,omitempty"`
+	LogTail         []string       `json:"log_tail"`
 }
 
 type PipelineRunStatus struct {
@@ -257,17 +268,33 @@ func (w *Worker) runScript(ctx context.Context, label, scriptPath string, args [
 	w.updatePhase(label, func(phase *PhaseStatus) {
 		phase.Status = "running"
 		phase.StartedAt = &started
+		phase.LogTail = []string{}
+		phase.LastMessage = ""
+		phase.ErrorMessage = ""
+		phase.Summary = nil
 	})
 	w.updateRun(func(run *PipelineRunStatus) { run.CurrentPhase = label })
 	log.Printf("%s running %s: %s %s", factorLabWorkerLogPrefix, label, w.cfg.PythonBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, w.cfg.PythonBin, args...)
-	var output bytes.Buffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
 	cmd.Dir = inferCommandDir(scriptPath)
-	err := cmd.Run()
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go w.captureScriptOutput(label, "stdout", stdout, &wg)
+	go w.captureScriptOutput(label, "stderr", stderr, &wg)
+	err = cmd.Wait()
+	wg.Wait()
 	finished := time.Now()
-	trimmedOutput := strings.TrimSpace(output.String())
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			err = fmt.Errorf("%s compute timeout after %s", label, w.cfg.Timeout)
@@ -278,7 +305,7 @@ func (w *Worker) runScript(ctx context.Context, label, scriptPath string, args [
 			phase.DurationSeconds = finished.Sub(started).Seconds()
 			phase.ErrorMessage = err.Error()
 		})
-		log.Printf("%s ❌ %s failed: %v\n%s", factorLabWorkerLogPrefix, label, err, trimmedOutput)
+		log.Printf("%s ❌ %s failed: %v", factorLabWorkerLogPrefix, label, err)
 		return err
 	}
 	w.updatePhase(label, func(phase *PhaseStatus) {
@@ -286,8 +313,75 @@ func (w *Worker) runScript(ctx context.Context, label, scriptPath string, args [
 		phase.FinishedAt = &finished
 		phase.DurationSeconds = finished.Sub(started).Seconds()
 	})
-	log.Printf("%s ✅ %s completed\n%s", factorLabWorkerLogPrefix, label, trimmedOutput)
+	log.Printf("%s ✅ %s completed", factorLabWorkerLogPrefix, label)
 	return nil
+}
+
+func (w *Worker) captureScriptOutput(label, stream string, reader io.Reader, wg *sync.WaitGroup) {
+	defer wg.Done()
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimRight(scanner.Text(), "\r\n")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		w.appendPhaseLogLine(label, stream, line)
+	}
+	if err := scanner.Err(); err != nil {
+		w.appendPhaseLogLine(label, stream, "log scan error: "+err.Error())
+	}
+}
+
+func (w *Worker) appendPhaseLogLine(label, stream, line string) {
+	log.Printf("%s %s %s | %s", factorLabWorkerLogPrefix, label, stream, line)
+	w.updatePhase(label, func(phase *PhaseStatus) {
+		entry := fmt.Sprintf("%s %s", time.Now().Format("15:04:05"), line)
+		phase.LogTail = append(phase.LogTail, entry)
+		if len(phase.LogTail) > defaultLogTailLimit {
+			phase.LogTail = phase.LogTail[len(phase.LogTail)-defaultLogTailLimit:]
+		}
+		phase.LastMessage = line
+		applyPhaseLogSummary(phase, line)
+	})
+}
+
+func applyPhaseLogSummary(phase *PhaseStatus, line string) {
+	if idx := strings.Index(line, "summary="); idx >= 0 {
+		raw := line[idx+len("summary="):]
+		if end := strings.LastIndex(raw, " status="); end >= 0 {
+			raw = raw[:end]
+		}
+		var summary map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &summary); err == nil {
+			phase.Summary = summary
+			phase.TotalCount = intFromSummary(summary, "total")
+			phase.SuccessCount = intFromSummary(summary, "success")
+			phase.FailedCount = intFromSummary(summary, "failed")
+			phase.SkippedCount = intFromSummary(summary, "skipped")
+		}
+	}
+	if strings.Contains(line, "failed:") || strings.Contains(line, "失败") {
+		phase.ErrorMessage = line
+	}
+}
+
+func intFromSummary(summary map[string]any, key string) int {
+	value, ok := summary[key]
+	if !ok || value == nil {
+		return 0
+	}
+	switch typed := value.(type) {
+	case float64:
+		return int(typed)
+	case int:
+		return typed
+	case json.Number:
+		parsed, _ := typed.Int64()
+		return int(parsed)
+	default:
+		return 0
+	}
 }
 
 func (w *Worker) updateRun(mutator func(*PipelineRunStatus)) {
@@ -351,8 +445,23 @@ func clonePipelineRunStatus(run *PipelineRunStatus) *PipelineRunStatus {
 		return nil
 	}
 	copyRun := *run
-	copyRun.Phases = append([]PhaseStatus(nil), run.Phases...)
+	copyRun.Phases = make([]PhaseStatus, 0, len(run.Phases))
+	for _, phase := range run.Phases {
+		copyRun.Phases = append(copyRun.Phases, clonePhaseStatus(phase))
+	}
 	return &copyRun
+}
+
+func clonePhaseStatus(phase PhaseStatus) PhaseStatus {
+	copyPhase := phase
+	copyPhase.LogTail = append([]string(nil), phase.LogTail...)
+	if phase.Summary != nil {
+		copyPhase.Summary = make(map[string]any, len(phase.Summary))
+		for key, value := range phase.Summary {
+			copyPhase.Summary[key] = value
+		}
+	}
+	return copyPhase
 }
 
 func (w *Worker) quickCheckDatabase(ctx context.Context, stage string) error {

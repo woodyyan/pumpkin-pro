@@ -1367,7 +1367,28 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
 }
 
 function PhaseCard({ phase }) {
-  return <div className="rounded-xl border border-white/8 bg-[#15171e] p-4"><div className="flex items-center justify-between gap-2"><div className="text-sm font-semibold text-white/75">{phaseLabel(phase.name)}</div><span className={`rounded-full border px-2 py-0.5 text-[11px] ${resolveFactorStatusClass(phase.status)}`}>{phase.status}</span></div><div className="mt-2 text-xs text-white/35">耗时：{formatDurationSeconds(phase.duration_seconds)}</div>{phase.error_message && <div className="mt-2 text-xs text-rose-200/80">{phase.error_message}</div>}</div>
+  const logs = phase.log_tail || []
+  return (
+    <div className="rounded-xl border border-white/8 bg-[#15171e] p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold text-white/75">{phaseLabel(phase.name)}</div>
+        <span className={`rounded-full border px-2 py-0.5 text-[11px] ${resolveFactorStatusClass(phase.status)}`}>{phase.status}</span>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-white/40">
+        <span>耗时：{formatDurationSeconds(phase.duration_seconds)}</span>
+        <span>总数：{formatNumber(phase.total_count)}</span>
+        <span className="text-emerald-200/75">成功：{formatNumber(phase.success_count)}</span>
+        <span className="text-rose-200/75">失败：{formatNumber(phase.failed_count)}</span>
+        <span>跳过：{formatNumber(phase.skipped_count)}</span>
+      </div>
+      {phase.last_message && <div className="mt-2 truncate rounded-lg bg-white/[0.04] px-2 py-1.5 text-[11px] text-blue-200/80" title={phase.last_message}>最新：{phase.last_message}</div>}
+      {phase.error_message && <div className="mt-2 rounded-lg border border-rose-400/20 bg-rose-500/10 px-2 py-1.5 text-xs text-rose-200/80">{phase.error_message}</div>}
+      <div className="mt-3 rounded-lg border border-white/8 bg-black/20 p-2">
+        <div className="mb-1 text-[11px] text-white/30">实时日志（最近 {logs.length} 行）</div>
+        {logs.length === 0 ? <p className="text-[11px] text-white/20">暂无日志。</p> : <pre className="max-h-44 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-5 text-white/55">{logs.slice(-80).join('\n')}</pre>}
+      </div>
+    </div>
+  )
 }
 
 function CoverageTable({ title, rows, total }) {

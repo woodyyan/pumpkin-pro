@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -54,7 +56,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--financial-report-limit", type=int, default=DEFAULT_FINANCIAL_REPORT_LIMIT, help="财务增量扫描最近报告期数量")
     parser.add_argument("--dividend-report-limit", type=int, default=DEFAULT_DIVIDEND_REPORT_LIMIT, help="分红增量扫描最近报告期数量")
     parser.add_argument("--step-timeout-seconds", type=int, default=DEFAULT_STEP_TIMEOUT_SECONDS, help="每个子任务超时时间")
-    parser.add_argument("--progress-interval", type=int, default=500, help="每处理多少项输出一次进度")
+    parser.add_argument("--progress-interval", type=int, default=500, help="普通子任务每处理多少项输出一次进度")
+    parser.add_argument("--item-progress-interval", type=int, default=1, help="逐股票子任务每处理多少项输出一次进度")
+    parser.add_argument("--daily-bars-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="tencent", help="日线增量数据源，默认腾讯以减少逐股慢失败")
+    parser.add_argument("--financials-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="财务增量数据源")
+    parser.add_argument("--dividends-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="分红增量数据源")
     parser.add_argument("--sleep", type=float, default=0.05, help="单股票请求间隔秒数，避免外部源限流")
     parser.add_argument("--snapshot-date", default="", help="市场快照交易日 YYYY-MM-DD；默认今天")
     parser.add_argument("--python-bin", default=sys.executable, help="用于调用 backfill 脚本的 Python 解释器")
@@ -99,13 +105,115 @@ def latest_date(conn: sqlite3.Connection, table: str, column: str, where: str = 
     return str(row[0] or "") if row else ""
 
 
+def active_security_codes(conn: sqlite3.Connection) -> list[str]:
+    try:
+        rows = conn.execute(
+            """
+            SELECT code FROM factor_securities
+            WHERE is_active = 1 AND is_st = 0 AND board IN ('MAIN', 'CHINEXT')
+            ORDER BY code ASC
+            """
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    return [str(row[0]) for row in rows if row and row[0]]
+
+
+def codes_missing_daily_target(conn: sqlite3.Connection, target_date: str) -> list[str]:
+    if not target_date:
+        return active_security_codes(conn)
+    try:
+        rows = conn.execute(
+            """
+            SELECT s.code
+            FROM factor_securities s
+            LEFT JOIN (
+              SELECT code, MAX(trade_date) AS max_trade_date
+              FROM factor_daily_bars
+              GROUP BY code
+            ) b ON b.code = s.code
+            WHERE s.is_active = 1 AND s.is_st = 0 AND s.board IN ('MAIN', 'CHINEXT')
+              AND COALESCE(b.max_trade_date, '') < ?
+            ORDER BY s.code ASC
+            """,
+            (target_date,),
+        ).fetchall()
+    except sqlite3.Error:
+        return active_security_codes(conn)
+    return [str(row[0]) for row in rows]
+
+
+def latest_report_candidates(limit: int) -> list[str]:
+    today = datetime.today()
+    year = today.year
+    candidates = [f"{year}-09-30", f"{year}-06-30", f"{year}-03-31", f"{year - 1}-12-31", f"{year - 1}-09-30", f"{year - 1}-06-30"]
+    parsed_today = today.strftime("%Y-%m-%d")
+    return [item for item in candidates if item <= parsed_today][:max(limit, 1)]
+
+
+def codes_missing_financial_reports(conn: sqlite3.Connection, report_limit: int) -> list[str]:
+    periods = latest_report_candidates(report_limit)
+    if not periods:
+        return []
+    placeholders = ",".join("?" for _ in periods)
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT s.code
+            FROM factor_securities s
+            WHERE s.is_active = 1 AND s.is_st = 0 AND s.board IN ('MAIN', 'CHINEXT')
+              AND NOT EXISTS (
+                SELECT 1 FROM factor_financial_metrics f
+                WHERE f.code = s.code AND f.report_period IN ({placeholders})
+              )
+            ORDER BY s.code ASC
+            """,
+            periods,
+        ).fetchall()
+    except sqlite3.Error:
+        return active_security_codes(conn)
+    return [str(row[0]) for row in rows]
+
+
+def codes_with_stale_dividends(conn: sqlite3.Connection, stale_days: int = 30) -> list[str]:
+    cutoff = (datetime.utcnow() - timedelta(days=stale_days)).strftime("%Y-%m-%dT%H:%M:%S")
+    try:
+        rows = conn.execute(
+            """
+            SELECT s.code
+            FROM factor_securities s
+            LEFT JOIN (
+              SELECT code, MAX(updated_at) AS max_updated_at
+              FROM factor_dividend_records
+              GROUP BY code
+            ) d ON d.code = s.code
+            WHERE s.is_active = 1 AND s.is_st = 0 AND s.board IN ('MAIN', 'CHINEXT')
+              AND COALESCE(d.max_updated_at, '') < ?
+            ORDER BY s.code ASC
+            """,
+            (cutoff,),
+        ).fetchall()
+    except sqlite3.Error:
+        return active_security_codes(conn)
+    return [str(row[0]) for row in rows]
+
+
+def write_code_list(codes: list[str], mode: str) -> str:
+    fd, path = tempfile.mkstemp(prefix=f"factorlab_{mode}_", suffix=".txt")
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        for code in codes:
+            handle.write(f"{code}\n")
+    return path
+
+
 def build_mode_command(args: argparse.Namespace, mode: str, conn: sqlite3.Connection) -> list[str]:
+    progress_interval = args.item_progress_interval if mode in {"daily-bars", "financials", "dividends"} else args.progress_interval
     cmd = [
         args.python_bin,
         str(BACKFILL_SCRIPT),
         "--db", str(args.db_path),
         "--mode", mode,
-        "--progress-interval", str(args.progress_interval),
+        "--progress-interval", str(progress_interval),
         "--sleep", str(args.sleep),
     ]
     if args.write:
@@ -114,6 +222,13 @@ def build_mode_command(args: argparse.Namespace, mode: str, conn: sqlite3.Connec
         cmd.extend(["--snapshot-date", args.snapshot_date])
 
     if mode == "daily-bars":
+        target_date = latest_date(conn, "factor_market_metrics", "trade_date") or latest_date(conn, "factor_daily_bars", "trade_date")
+        codes = codes_missing_daily_target(conn, target_date)
+        cmd.extend(["--daily-bars-source", args.daily_bars_source])
+        path = write_code_list(codes, mode)
+        args.temp_files.append(path)
+        cmd.extend(["--code-list-file", path])
+        log_step(f"incremental: daily-bars target_date={target_date or 'unknown'} missing_codes={len(codes)} source={args.daily_bars_source}")
         start = buffered_start_date(latest_date(conn, "factor_daily_bars", "trade_date"), args.buffer_days)
         if start:
             cmd.extend(["--start-date", start])
@@ -126,9 +241,19 @@ def build_mode_command(args: argparse.Namespace, mode: str, conn: sqlite3.Connec
         else:
             cmd.extend(["--lookback-days", str(args.lookback_days)])
     elif mode == "financials":
-        cmd.extend(["--report-limit", str(args.financial_report_limit)])
+        codes = codes_missing_financial_reports(conn, args.financial_report_limit)
+        cmd.extend(["--financials-source", args.financials_source, "--report-limit", str(args.financial_report_limit)])
+        path = write_code_list(codes, mode)
+        args.temp_files.append(path)
+        cmd.extend(["--code-list-file", path])
+        log_step(f"incremental: financials missing_codes={len(codes)} source={args.financials_source}")
     elif mode == "dividends":
-        cmd.extend(["--report-limit", str(args.dividend_report_limit)])
+        codes = codes_with_stale_dividends(conn)
+        cmd.extend(["--dividends-source", args.dividends_source, "--report-limit", str(args.dividend_report_limit)])
+        path = write_code_list(codes, mode)
+        args.temp_files.append(path)
+        cmd.extend(["--code-list-file", path])
+        log_step(f"incremental: dividends stale_codes={len(codes)} source={args.dividends_source}")
     return cmd
 
 
@@ -137,21 +262,13 @@ def run_mode(args: argparse.Namespace, mode: str, conn: sqlite3.Connection) -> M
     cmd = build_mode_command(args, mode, conn)
     log_step(f"incremental: 开始 {mode}: {' '.join(cmd)}")
     try:
-        completed = subprocess.run(cmd, cwd=str(SCRIPT_DIR.parents[1]), text=True, capture_output=True, timeout=args.step_timeout_seconds, check=False)
-    except subprocess.TimeoutExpired as exc:
+        completed = subprocess.run(cmd, cwd=str(SCRIPT_DIR.parents[1]), text=True, timeout=args.step_timeout_seconds, check=False)
+    except subprocess.TimeoutExpired:
         duration = (datetime.now() - started).total_seconds()
         message = f"timeout after {args.step_timeout_seconds}s"
-        if exc.stdout:
-            print(exc.stdout, flush=True)
-        if exc.stderr:
-            print(exc.stderr, file=sys.stderr, flush=True)
         log_step(f"incremental: {mode} 超时 {message}")
         return ModeResult(mode=mode, status="failed", return_code=124, duration_seconds=duration, error=message)
 
-    if completed.stdout:
-        print(completed.stdout, end="", flush=True)
-    if completed.stderr:
-        print(completed.stderr, end="", file=sys.stderr, flush=True)
     duration = (datetime.now() - started).total_seconds()
     status = "success" if completed.returncode == 0 else "failed"
     log_step(f"incremental: {mode} 完成 status={status} duration={duration:.1f}s")
@@ -170,6 +287,9 @@ def main(argv: list[str]) -> int:
         raise ValueError("--step-timeout-seconds 必须大于 0")
     if args.progress_interval <= 0:
         raise ValueError("--progress-interval 必须大于 0")
+    if args.item_progress_interval <= 0:
+        raise ValueError("--item-progress-interval 必须大于 0")
+    args.temp_files = []
 
     modes = split_csv(args.modes)
     unsupported = [mode for mode in modes if mode not in DEFAULT_MODES]
@@ -201,6 +321,11 @@ def main(argv: list[str]) -> int:
         print(f"summary={json.dumps(summary, ensure_ascii=False)} status={status}", flush=True)
         return 0 if status in {"success", "partial"} else 1
     finally:
+        for path in getattr(args, "temp_files", []):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
         conn.close()
 
 

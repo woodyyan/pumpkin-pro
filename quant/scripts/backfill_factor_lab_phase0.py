@@ -542,9 +542,25 @@ def tencent_symbol(code: str, is_index: bool = False) -> str:
     return tencent_quote_code(code)
 
 
-def get_target_codes(conn: sqlite3.Connection, code: str, limit: int) -> list[str]:
+def load_code_list_file(path: str) -> list[str]:
+    if not path:
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw in Path(path).read_text(encoding="utf-8").splitlines():
+        code = normalize_code(raw)
+        if code and code not in seen:
+            seen.add(code)
+            result.append(code)
+    return result
+
+
+def get_target_codes(conn: sqlite3.Connection, code: str, limit: int, code_list_file: str = "") -> list[str]:
     if code:
         return [normalize_code(code)]
+    if code_list_file:
+        file_codes = load_code_list_file(code_list_file)
+        return file_codes[:limit] if limit > 0 else file_codes
     rows = conn.execute(
         """
         SELECT code FROM factor_securities
@@ -1048,6 +1064,7 @@ def fetch_daily_bars_with_fallback(code: str, start_date: str, end_date: str, ar
                 rows = fetch_daily_bars_tencent(code, start_date, end_date, args, is_index=is_index)
             else:
                 raise ValueError(f"未知 source: {item}")
+            log_step(f"{mode_label}: {code} 数据源 {item} 成功，行数 {len(rows)}")
             return rows, item
         except Exception as exc:  # noqa: BLE001
             failures.append(f"{item}: {exc}")
@@ -1061,11 +1078,12 @@ def backfill_daily_bars(conn: sqlite3.Connection, args: argparse.Namespace, run_
     end_date = args.end_date or datetime.today().strftime("%Y%m%d")
     start_date = start_date.replace("-", "")
     end_date = end_date.replace("-", "")
-    codes = get_target_codes(conn, args.code, args.limit)
+    codes = get_target_codes(conn, args.code, args.limit, args.code_list_file)
     stats = TaskStats(total=len(codes))
     log_step(f"daily-bars: 待处理股票 {len(codes)} 只，日期 {start_date}~{end_date}")
     for idx, code in enumerate(codes, start=1):
         log_progress("daily-bars: 处理进度", idx, len(codes), args.progress_interval)
+        log_step(f"daily-bars: {code} 开始处理 {idx}/{len(codes)}")
         item_key = f"daily_bar:{code}:{start_date}:{end_date}:{args.adjust}"
         if args.resume and was_successful(conn, "daily_bar", item_key):
             stats.skipped += 1
@@ -1304,7 +1322,7 @@ def fetch_financials_tencent(conn: sqlite3.Connection, args: argparse.Namespace)
     log_step("financials: 尝试数据源 腾讯/个股基础面兜底")
     sys.path.insert(0, str(PROJECT_ROOT / "quant"))
     from data.fundamentals import get_symbol_fundamentals  # type: ignore
-    codes = get_target_codes(conn, args.code, args.limit)
+    codes = get_target_codes(conn, args.code, args.limit, args.code_list_file)
     rows: list[tuple[Any, ...]] = []
     now = utc_now()
     for idx, code in enumerate(codes, start=1):
@@ -1336,7 +1354,7 @@ def fetch_financials_tencent(conn: sqlite3.Connection, args: argparse.Namespace)
 
 def fetch_financial_rows_with_fallback(conn: sqlite3.Connection, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
     report_dates = build_report_date_candidates(args.report_limit)
-    target_codes = set(get_target_codes(conn, args.code, args.limit))
+    target_codes = set(get_target_codes(conn, args.code, args.limit, args.code_list_file))
     failures: list[str] = []
     for item in source_order(args.financials_source, EXTERNAL_SOURCE_ORDER):
         try:
@@ -1487,7 +1505,7 @@ def fetch_dividend_rows_with_fallback(code: str, args: argparse.Namespace) -> tu
 
 def backfill_dividends(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) -> TaskStats:
     log_step(f"dividends: 开始补全，source={args.dividends_source}, limit={args.limit or 'all'}, code={args.code or 'all'}, dry_run={not args.write}")
-    codes = get_target_codes(conn, args.code, args.limit)
+    codes = get_target_codes(conn, args.code, args.limit, args.code_list_file)
     stats = TaskStats(total=len(codes))
     log_step(f"dividends: 待处理股票 {len(codes)} 只")
     for idx, code in enumerate(codes, start=1):
@@ -1564,6 +1582,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--force", action="store_true", help="保留参数，后续用于强制覆盖策略；当前 upsert 已幂等覆盖")
     parser.add_argument("--limit", type=int, default=0, help="最多处理多少只股票，0 表示不限制")
     parser.add_argument("--code", default="", help="只处理单只股票代码")
+    parser.add_argument("--code-list-file", default="", help="按行读取待处理股票代码；优先级低于 --code，高于本地全量股票池")
     parser.add_argument("--start-date", default="", help="日线开始日期 YYYYMMDD 或 YYYY-MM-DD")
     parser.add_argument("--end-date", default="", help="日线结束日期 YYYYMMDD 或 YYYY-MM-DD")
     parser.add_argument("--snapshot-date", default="", help="市场快照交易日 YYYY-MM-DD；默认今天")

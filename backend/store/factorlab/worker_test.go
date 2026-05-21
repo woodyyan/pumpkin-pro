@@ -21,6 +21,12 @@ func TestNormalizeWorkerConfigDefaults(t *testing.T) {
 	if cfg.Phase2ScriptPath != defaultPhase2Script {
 		t.Fatalf("expected default phase2 script, got %q", cfg.Phase2ScriptPath)
 	}
+	if cfg.DailyBarsSource != "tencent" || cfg.FinancialsSource != "auto" || cfg.DividendsSource != "auto" {
+		t.Fatalf("unexpected sources: daily=%s financials=%s dividends=%s", cfg.DailyBarsSource, cfg.FinancialsSource, cfg.DividendsSource)
+	}
+	if cfg.ItemProgressInterval != 1 {
+		t.Fatalf("unexpected item progress interval: %d", cfg.ItemProgressInterval)
+	}
 	if cfg.Hour != defaultComputeHour || cfg.Minute != defaultComputeMinute {
 		t.Fatalf("unexpected default schedule: %02d:%02d", cfg.Hour, cfg.Minute)
 	}
@@ -40,12 +46,13 @@ func TestNormalizeWorkerConfigDefaults(t *testing.T) {
 
 func TestBuildPhaseCommandArgs(t *testing.T) {
 	cfg := normalizeWorkerConfig(WorkerConfig{
-		DBPath:           "data/pumpkin.db",
-		Phase0ScriptPath: "quant/scripts/update_factor_lab_phase0_incremental.py",
-		Phase1ScriptPath: "quant/scripts/compute_factor_lab_phase1.py",
-		Phase2ScriptPath: "quant/scripts/compute_factor_lab_phase2.py",
-		StepTimeout:      10 * time.Minute,
-		ProgressInterval: 123,
+		DBPath:               "data/pumpkin.db",
+		Phase0ScriptPath:     "quant/scripts/update_factor_lab_phase0_incremental.py",
+		Phase1ScriptPath:     "quant/scripts/compute_factor_lab_phase1.py",
+		Phase2ScriptPath:     "quant/scripts/compute_factor_lab_phase2.py",
+		StepTimeout:          10 * time.Minute,
+		ProgressInterval:     123,
+		ItemProgressInterval: 2,
 	})
 	phase0 := buildPhase0CommandArgs(cfg)
 	wantPhase0 := []string{
@@ -53,6 +60,10 @@ func TestBuildPhaseCommandArgs(t *testing.T) {
 		"--db", "data/pumpkin.db",
 		"--write",
 		"--progress-interval", "123",
+		"--item-progress-interval", "2",
+		"--daily-bars-source", "tencent",
+		"--financials-source", "auto",
+		"--dividends-source", "auto",
 		"--step-timeout-seconds", "600",
 	}
 	if !reflect.DeepEqual(phase0, wantPhase0) {

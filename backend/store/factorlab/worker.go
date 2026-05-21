@@ -31,18 +31,22 @@ const (
 )
 
 type WorkerConfig struct {
-	Enabled          bool
-	DBPath           string
-	BackupDir        string
-	PythonBin        string
-	Phase0ScriptPath string
-	Phase1ScriptPath string
-	Phase2ScriptPath string
-	Hour             int
-	Minute           int
-	Timeout          time.Duration
-	StepTimeout      time.Duration
-	ProgressInterval int
+	Enabled              bool
+	DBPath               string
+	BackupDir            string
+	PythonBin            string
+	Phase0ScriptPath     string
+	Phase1ScriptPath     string
+	Phase2ScriptPath     string
+	DailyBarsSource      string
+	FinancialsSource     string
+	DividendsSource      string
+	Hour                 int
+	Minute               int
+	Timeout              time.Duration
+	StepTimeout          time.Duration
+	ProgressInterval     int
+	ItemProgressInterval int
 }
 
 type PhaseStatus struct {
@@ -114,6 +118,15 @@ func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
 	if strings.TrimSpace(cfg.Phase2ScriptPath) == "" {
 		cfg.Phase2ScriptPath = defaultPhase2Script
 	}
+	if strings.TrimSpace(cfg.DailyBarsSource) == "" {
+		cfg.DailyBarsSource = "tencent"
+	}
+	if strings.TrimSpace(cfg.FinancialsSource) == "" {
+		cfg.FinancialsSource = "auto"
+	}
+	if strings.TrimSpace(cfg.DividendsSource) == "" {
+		cfg.DividendsSource = "auto"
+	}
 	if cfg.Hour < 0 || cfg.Hour > 23 {
 		cfg.Hour = defaultComputeHour
 	}
@@ -128,6 +141,9 @@ func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
 	}
 	if cfg.ProgressInterval <= 0 {
 		cfg.ProgressInterval = defaultProgressInterval
+	}
+	if cfg.ItemProgressInterval <= 0 {
+		cfg.ItemProgressInterval = 1
 	}
 	if strings.TrimSpace(cfg.BackupDir) == "" && strings.TrimSpace(cfg.DBPath) != "" {
 		cfg.BackupDir = filepath.Join(filepath.Dir(cfg.DBPath), "backups", "factorlab")
@@ -508,6 +524,10 @@ func buildPhase0CommandArgs(cfg WorkerConfig) []string {
 		"--db", cfg.DBPath,
 		"--write",
 		"--progress-interval", fmt.Sprintf("%d", cfg.ProgressInterval),
+		"--item-progress-interval", fmt.Sprintf("%d", cfg.ItemProgressInterval),
+		"--daily-bars-source", cfg.DailyBarsSource,
+		"--financials-source", cfg.FinancialsSource,
+		"--dividends-source", cfg.DividendsSource,
 		"--step-timeout-seconds", fmt.Sprintf("%d", int(cfg.StepTimeout.Seconds())),
 	}
 	return args

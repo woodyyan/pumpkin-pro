@@ -3567,18 +3567,22 @@ func main() {
 	backupWorker.Start(context.Background())
 
 	factorLabWorker := factorlab.NewWorker(factorlab.WorkerConfig{
-		Enabled:          cfg.FactorLab.DailyComputeEnabled,
-		DBPath:           cfg.DB.Path,
-		BackupDir:        cfg.Backup.BackupDir,
-		PythonBin:        cfg.FactorLab.PythonBin,
-		Phase0ScriptPath: cfg.FactorLab.Phase0ScriptPath,
-		Phase1ScriptPath: cfg.FactorLab.Phase1ScriptPath,
-		Phase2ScriptPath: cfg.FactorLab.Phase2ScriptPath,
-		Hour:             cfg.FactorLab.ComputeHour,
-		Minute:           cfg.FactorLab.ComputeMinute,
-		Timeout:          time.Duration(cfg.FactorLab.TimeoutMinutes) * time.Minute,
-		StepTimeout:      time.Duration(cfg.FactorLab.StepTimeoutMinutes) * time.Minute,
-		ProgressInterval: cfg.FactorLab.ProgressInterval,
+		Enabled:              cfg.FactorLab.DailyComputeEnabled,
+		DBPath:               cfg.DB.Path,
+		BackupDir:            cfg.Backup.BackupDir,
+		PythonBin:            cfg.FactorLab.PythonBin,
+		Phase0ScriptPath:     cfg.FactorLab.Phase0ScriptPath,
+		Phase1ScriptPath:     cfg.FactorLab.Phase1ScriptPath,
+		Phase2ScriptPath:     cfg.FactorLab.Phase2ScriptPath,
+		DailyBarsSource:      cfg.FactorLab.DailyBarsSource,
+		FinancialsSource:     cfg.FactorLab.FinancialsSource,
+		DividendsSource:      cfg.FactorLab.DividendsSource,
+		Hour:                 cfg.FactorLab.ComputeHour,
+		Minute:               cfg.FactorLab.ComputeMinute,
+		Timeout:              time.Duration(cfg.FactorLab.TimeoutMinutes) * time.Minute,
+		StepTimeout:          time.Duration(cfg.FactorLab.StepTimeoutMinutes) * time.Minute,
+		ProgressInterval:     cfg.FactorLab.ProgressInterval,
+		ItemProgressInterval: cfg.FactorLab.ItemProgressInterval,
 	})
 	factorLabWorker.Start(context.Background())
 

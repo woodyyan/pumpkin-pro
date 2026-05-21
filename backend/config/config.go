@@ -21,16 +21,20 @@ type Config struct {
 }
 
 type FactorLabConfig struct {
-	DailyComputeEnabled bool
-	ComputeHour         int
-	ComputeMinute       int
-	PythonBin           string
-	Phase0ScriptPath    string
-	Phase1ScriptPath    string
-	Phase2ScriptPath    string
-	ProgressInterval    int
-	TimeoutMinutes      int
-	StepTimeoutMinutes  int
+	DailyComputeEnabled  bool
+	ComputeHour          int
+	ComputeMinute        int
+	PythonBin            string
+	Phase0ScriptPath     string
+	Phase1ScriptPath     string
+	Phase2ScriptPath     string
+	DailyBarsSource      string
+	FinancialsSource     string
+	DividendsSource      string
+	ProgressInterval     int
+	ItemProgressInterval int
+	TimeoutMinutes       int
+	StepTimeoutMinutes   int
 }
 
 // BackupConfig holds database backup settings.
@@ -122,16 +126,20 @@ func Load() Config {
 			COSSecretKey:    getEnv("COS_SECRET_KEY", ""),
 		},
 		FactorLab: FactorLabConfig{
-			DailyComputeEnabled: getEnvAsBool("FACTOR_LAB_DAILY_COMPUTE_ENABLED", true),
-			ComputeHour:         getEnvAsInt("FACTOR_LAB_COMPUTE_HOUR", 21),
-			ComputeMinute:       getEnvAsInt("FACTOR_LAB_COMPUTE_MINUTE", 0),
-			PythonBin:           getEnv("FACTOR_LAB_PYTHON_BIN", "python3"),
-			Phase0ScriptPath:    getEnv("FACTOR_LAB_PHASE0_SCRIPT", "quant/scripts/update_factor_lab_phase0_incremental.py"),
-			Phase1ScriptPath:    getEnv("FACTOR_LAB_PHASE1_SCRIPT", "quant/scripts/compute_factor_lab_phase1.py"),
-			Phase2ScriptPath:    getEnv("FACTOR_LAB_PHASE2_SCRIPT", "quant/scripts/compute_factor_lab_phase2.py"),
-			ProgressInterval:    getEnvAsInt("FACTOR_LAB_PROGRESS_INTERVAL", 500),
-			TimeoutMinutes:      getEnvAsInt("FACTOR_LAB_TIMEOUT_MINUTES", 180),
-			StepTimeoutMinutes:  getEnvAsInt("FACTOR_LAB_STEP_TIMEOUT_MINUTES", 30),
+			DailyComputeEnabled:  getEnvAsBool("FACTOR_LAB_DAILY_COMPUTE_ENABLED", true),
+			ComputeHour:          getEnvAsInt("FACTOR_LAB_COMPUTE_HOUR", 21),
+			ComputeMinute:        getEnvAsInt("FACTOR_LAB_COMPUTE_MINUTE", 0),
+			PythonBin:            getEnv("FACTOR_LAB_PYTHON_BIN", "python3"),
+			Phase0ScriptPath:     getEnv("FACTOR_LAB_PHASE0_SCRIPT", "quant/scripts/update_factor_lab_phase0_incremental.py"),
+			Phase1ScriptPath:     getEnv("FACTOR_LAB_PHASE1_SCRIPT", "quant/scripts/compute_factor_lab_phase1.py"),
+			Phase2ScriptPath:     getEnv("FACTOR_LAB_PHASE2_SCRIPT", "quant/scripts/compute_factor_lab_phase2.py"),
+			DailyBarsSource:      getEnv("FACTOR_LAB_DAILY_BARS_SOURCE", "tencent"),
+			FinancialsSource:     getEnv("FACTOR_LAB_FINANCIALS_SOURCE", "auto"),
+			DividendsSource:      getEnv("FACTOR_LAB_DIVIDENDS_SOURCE", "auto"),
+			ProgressInterval:     getEnvAsInt("FACTOR_LAB_PROGRESS_INTERVAL", 500),
+			ItemProgressInterval: getEnvAsInt("FACTOR_LAB_ITEM_PROGRESS_INTERVAL", 1),
+			TimeoutMinutes:       getEnvAsInt("FACTOR_LAB_TIMEOUT_MINUTES", 180),
+			StepTimeoutMinutes:   getEnvAsInt("FACTOR_LAB_STEP_TIMEOUT_MINUTES", 30),
 		},
 	}
 }

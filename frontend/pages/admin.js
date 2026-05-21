@@ -1278,6 +1278,9 @@ function CompanyProfilesAdminPanel({ onUnauthorized }) {
 function FactorLabPipelinePanel({ onUnauthorized }) {
   const [triggering, setTriggering] = useState(false)
   const [actionError, setActionError] = useState('')
+  const [manualPhase, setManualPhase] = useState('all')
+  const [phase0Mode, setPhase0Mode] = useState('all')
+  const [manualScope, setManualScope] = useState('incremental')
   const resource = useAdminResource({
     key: 'admin:factor-lab-pipeline',
     request: () => adminFetch('/api/admin/factor-lab/pipeline/status'),
@@ -1293,12 +1296,21 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
   const phases = worker.current?.phases || []
   const history = worker.history || []
   const recentTaskRuns = data?.recent_task_runs || []
-  const triggerPipeline = async () => {
-    if (!window.confirm('确认立即运行因子流水线？任务将在 backend 容器内串行执行 Phase0 增量、Phase1、Phase2，并会先做数据库健康检查和备份。')) return
+  const triggerPipeline = async (override = null) => {
+    const payload = override || normalizeFactorRunSelection(manualPhase, phase0Mode, manualScope)
+    if (payload.error) {
+      setActionError(payload.error)
+      return
+    }
+    if (!window.confirm(`确认运行因子流水线？\n阶段：${payload.phase}\nPhase0 模式：${payload.phase0_mode}\n范围：${payload.scope}\n任务将在 backend 容器内执行，并会先做数据库健康检查和备份。`)) return
     setTriggering(true)
     setActionError('')
     try {
-      await adminFetch('/api/admin/factor-lab/pipeline/run', { method: 'POST' })
+      await adminFetch('/api/admin/factor-lab/pipeline/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
       await resource.refresh({ force: true, preferCache: false })
     } catch (err) {
       const message = handleAdminActionError(err, onUnauthorized, '触发因子流水线失败')
@@ -1318,10 +1330,10 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
         <button
           type="button"
           disabled={triggering || worker.running}
-          onClick={triggerPipeline}
+          onClick={() => triggerPipeline({ phase: 'all', phase0_mode: 'all', scope: 'incremental' })}
           className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {worker.running ? '运行中...' : triggering ? '触发中...' : '立即运行流水线'}
+          {worker.running ? '运行中...' : triggering ? '触发中...' : '运行完整流水线'}
         </button>
       </div>
       {(resource.error || actionError) && <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">{actionError || resource.error}</div>}
@@ -1333,6 +1345,20 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
         <StatCard label="股票池" value={formatNumber(coverage.universe)} sub={coverage.snapshot_date || '--'} />
         <StatCard label="下一次运行" value={formatAdminDateTime(worker.next_run_at)} />
         <StatCard label="当前阶段" value={worker.current?.current_phase || '--'} />
+      </div>
+      <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-4">
+        <div className="mb-3 text-xs text-white/40">手动运行</div>
+        <div className="grid gap-3 md:grid-cols-4">
+          <label className="text-xs text-white/45">阶段<select value={manualPhase} onChange={(e) => setManualPhase(e.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-[#0f1117] px-2 py-2 text-white/75"><option value="all">完整流水线</option><option value="phase0">只跑 Phase0</option><option value="phase1">只跑 Phase1</option><option value="phase2">只跑 Phase2</option><option value="phase1_phase2">Phase1 + Phase2</option></select></label>
+          <label className="text-xs text-white/45">Phase0 mode<select value={phase0Mode} onChange={(e) => setPhase0Mode(e.target.value)} disabled={!['all', 'phase0'].includes(manualPhase)} className="mt-1 w-full rounded-lg border border-white/10 bg-[#0f1117] px-2 py-2 text-white/75 disabled:opacity-40"><option value="all">all</option><option value="securities">securities</option><option value="daily-bars">daily-bars</option><option value="index-bars">index-bars</option><option value="financials">financials</option><option value="dividends">dividends</option></select></label>
+          <label className="text-xs text-white/45">范围<select value={manualScope} onChange={(e) => setManualScope(e.target.value)} disabled={!['all', 'phase0'].includes(manualPhase)} className="mt-1 w-full rounded-lg border border-white/10 bg-[#0f1117] px-2 py-2 text-white/75 disabled:opacity-40"><option value="incremental">incremental</option><option value="repair_missing_dividend_yield">修复股息率</option><option value="repair_missing_operating_cash_flow">修复经营现金流</option></select></label>
+          <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline()} className="self-end rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50">{triggering ? '触发中...' : '按选择运行'}</button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+          <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline({ phase: 'phase0', phase0_mode: 'dividends', scope: 'repair_missing_dividend_yield' })} className="rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-1.5 text-amber-100 disabled:opacity-40">只修复股息率</button>
+          <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline({ phase: 'phase0', phase0_mode: 'financials', scope: 'repair_missing_operating_cash_flow' })} className="rounded-lg border border-blue-400/25 bg-blue-500/10 px-3 py-1.5 text-blue-100 disabled:opacity-40">只修复经营现金流</button>
+          <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline({ phase: 'phase1_phase2', phase0_mode: 'all', scope: 'incremental' })} className="rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-3 py-1.5 text-emerald-100 disabled:opacity-40">只重算 Phase1+2</button>
+        </div>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         {['phase0_incremental', 'phase1', 'phase2'].map((name) => {
@@ -1350,9 +1376,9 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
         {history.length === 0 ? <p className="text-xs text-white/25">暂无流水线运行历史。</p> : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead><tr className="border-b border-white/8 text-white/35"><th className="pb-2 pr-3">触发</th><th className="pb-2 pr-3">状态</th><th className="pb-2 pr-3">开始</th><th className="pb-2 pr-3">耗时</th><th className="pb-2">错误</th></tr></thead>
+              <thead><tr className="border-b border-white/8 text-white/35"><th className="pb-2 pr-3">触发</th><th className="pb-2 pr-3">请求</th><th className="pb-2 pr-3">状态</th><th className="pb-2 pr-3">开始</th><th className="pb-2 pr-3">耗时</th><th className="pb-2">错误</th></tr></thead>
               <tbody className="text-white/65">
-                {history.slice(0, 10).map((run) => <tr key={run.id} className="border-b border-white/[0.04] last:border-0"><td className="py-2 pr-3">{run.trigger_type}</td><td className="py-2 pr-3">{run.status}</td><td className="py-2 pr-3 whitespace-nowrap">{formatAdminDateTime(run.started_at)}</td><td className="py-2 pr-3">{formatDurationSeconds(run.duration_seconds)}</td><td className="py-2 text-rose-200/70">{run.error_message || '--'}</td></tr>)}
+                {history.slice(0, 10).map((run) => <tr key={run.id} className="border-b border-white/[0.04] last:border-0"><td className="py-2 pr-3">{run.trigger_type}</td><td className="py-2 pr-3 text-white/40">{run.request?.phase || '--'} / {run.request?.phase0_mode || '--'} / {run.request?.scope || '--'}</td><td className="py-2 pr-3">{run.status}</td><td className="py-2 pr-3 whitespace-nowrap">{formatAdminDateTime(run.started_at)}</td><td className="py-2 pr-3">{formatDurationSeconds(run.duration_seconds)}</td><td className="py-2 text-rose-200/70">{run.error_message || '--'}</td></tr>)}
               </tbody>
             </table>
           </div>
@@ -1364,6 +1390,22 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
       </div>
     </section>
   )
+}
+
+function normalizeFactorRunSelection(phase, phase0Mode, scope) {
+  const payload = { phase, phase0_mode: phase0Mode, scope }
+  if (!['all', 'phase0'].includes(phase)) {
+    payload.phase0_mode = 'all'
+    payload.scope = 'incremental'
+    return payload
+  }
+  if (scope === 'repair_missing_dividend_yield' && phase0Mode !== 'dividends') {
+    return { ...payload, error: '修复股息率时，Phase0 mode 必须选择 dividends。' }
+  }
+  if (scope === 'repair_missing_operating_cash_flow' && phase0Mode !== 'financials') {
+    return { ...payload, error: '修复经营现金流时，Phase0 mode 必须选择 financials。' }
+  }
+  return payload
 }
 
 function PhaseCard({ phase }) {

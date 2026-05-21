@@ -1386,6 +1386,8 @@ def fetch_financial_rows_with_fallback(conn: sqlite3.Connection, args: argparse.
                 rows = fetch_financials_tencent(conn, args)
             else:
                 raise ValueError(f"未知 source: {item}")
+            if args.require_operating_cash_flow and not any(row[9] is not None for row in rows):
+                raise RuntimeError(f"{item} 未返回经营现金流字段")
             log_step(f"financials: 数据源 {item} 成功，记录 {len(rows)} 条")
             return rows, item
         except Exception as exc:  # noqa: BLE001
@@ -1574,6 +1576,7 @@ def backfill_dividends(conn: sqlite3.Connection, args: argparse.Namespace, run_i
     codes = get_target_codes(conn, args.code, args.limit, args.code_list_file)
     stats = TaskStats(total=len(codes))
     log_step(f"dividends: 待处理股票 {len(codes)} 只")
+    no_data_count = 0
     for idx, code in enumerate(codes, start=1):
         log_progress("dividends: 处理进度", idx, len(codes), args.progress_interval)
         item_key = f"dividend:{code}"
@@ -1596,11 +1599,21 @@ def backfill_dividends(conn: sqlite3.Connection, args: argparse.Namespace, run_i
             print(f"dividends {code}: {len(rows)} rows source={used_source}", flush=True)
             stats.success += 1
         except Exception as exc:  # noqa: BLE001
-            stats.failed += 1
-            if args.write:
-                upsert_task_item(conn, run_id, "dividend", item_key, "failed", str(exc))
-                conn.commit()
-            print(f"dividends {code}: failed: {exc}", file=sys.stderr, flush=True)
+            message = str(exc)
+            no_data = "分红数据为空" in message or "未返回可用股息率" in message or "direct 分红数据为空" in message
+            if no_data:
+                stats.skipped += 1
+                no_data_count += 1
+                if args.write:
+                    upsert_task_item(conn, run_id, "dividend", item_key, "skipped", message)
+                    conn.commit()
+                print(f"dividends {code}: no_data: {exc}", flush=True)
+            else:
+                stats.failed += 1
+                if args.write:
+                    upsert_task_item(conn, run_id, "dividend", item_key, "failed", message)
+                    conn.commit()
+                print(f"dividends {code}: failed: {exc}", file=sys.stderr, flush=True)
         if args.sleep > 0:
             time.sleep(args.sleep)
     return stats
@@ -1661,6 +1674,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--index-bars-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="指数日线数据源；auto=AKShare→东方财富→腾讯")
     parser.add_argument("--financials-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="财务数据源；auto=AKShare→东方财富→腾讯基础面兜底")
     parser.add_argument("--dividends-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="分红数据源；auto=AKShare→东方财富→腾讯基础面兜底")
+    parser.add_argument("--require-operating-cash-flow", action="store_true", help="财务回填要求至少一个经营现金流字段，否则继续尝试下一数据源")
     parser.add_argument("--progress-interval", type=int, default=50, help="每处理多少项输出一次进度")
     parser.add_argument("--verbose", action="store_true", help="输出外部源失败的完整 traceback")
     parser.add_argument("--sleep", type=float, default=0.05, help="单股票请求间隔秒数，避免外部源限流")

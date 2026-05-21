@@ -49,6 +49,12 @@ type WorkerConfig struct {
 	ItemProgressInterval int
 }
 
+type PipelineRunRequest struct {
+	Phase      string `json:"phase"`
+	Phase0Mode string `json:"phase0_mode"`
+	Scope      string `json:"scope"`
+}
+
 type PhaseStatus struct {
 	Name            string         `json:"name"`
 	Status          string         `json:"status"`
@@ -66,18 +72,19 @@ type PhaseStatus struct {
 }
 
 type PipelineRunStatus struct {
-	ID              string        `json:"id"`
-	TriggerType     string        `json:"trigger_type"`
-	Status          string        `json:"status"`
-	CurrentPhase    string        `json:"current_phase"`
-	StartedAt       time.Time     `json:"started_at"`
-	FinishedAt      *time.Time    `json:"finished_at,omitempty"`
-	DurationSeconds float64       `json:"duration_seconds"`
-	DBHealthBefore  string        `json:"db_health_before"`
-	DBHealthAfter   string        `json:"db_health_after"`
-	BackupPath      string        `json:"backup_path,omitempty"`
-	ErrorMessage    string        `json:"error_message,omitempty"`
-	Phases          []PhaseStatus `json:"phases"`
+	ID              string             `json:"id"`
+	TriggerType     string             `json:"trigger_type"`
+	Request         PipelineRunRequest `json:"request"`
+	Status          string             `json:"status"`
+	CurrentPhase    string             `json:"current_phase"`
+	StartedAt       time.Time          `json:"started_at"`
+	FinishedAt      *time.Time         `json:"finished_at,omitempty"`
+	DurationSeconds float64            `json:"duration_seconds"`
+	DBHealthBefore  string             `json:"db_health_before"`
+	DBHealthAfter   string             `json:"db_health_after"`
+	BackupPath      string             `json:"backup_path,omitempty"`
+	ErrorMessage    string             `json:"error_message,omitempty"`
+	Phases          []PhaseStatus      `json:"phases"`
 }
 
 type WorkerStatus struct {
@@ -176,14 +183,18 @@ func (w *Worker) Start(ctx context.Context) {
 }
 
 func (w *Worker) RunOnce(ctx context.Context) error {
-	return w.runPipeline(ctx, "scheduled")
+	return w.runPipeline(ctx, "scheduled", PipelineRunRequest{Phase: "all", Phase0Mode: "all", Scope: "incremental"})
 }
 
-func (w *Worker) StartManual(ctx context.Context) (*PipelineRunStatus, error) {
+func (w *Worker) StartManual(ctx context.Context, request PipelineRunRequest) (*PipelineRunStatus, error) {
 	if !w.cfg.Enabled {
 		return nil, fmt.Errorf("factor lab pipeline disabled")
 	}
-	run, ok := w.beginRun("manual")
+	request = normalizePipelineRunRequest(request)
+	if err := validatePipelineRunRequest(request); err != nil {
+		return nil, err
+	}
+	run, ok := w.beginRun("manual", request)
 	if !ok {
 		return nil, fmt.Errorf("factor lab pipeline is already running")
 	}
@@ -191,18 +202,66 @@ func (w *Worker) StartManual(ctx context.Context) (*PipelineRunStatus, error) {
 	return run, nil
 }
 
-func (w *Worker) runPipeline(ctx context.Context, triggerType string) error {
+func (w *Worker) runPipeline(ctx context.Context, triggerType string, request PipelineRunRequest) error {
 	if !w.cfg.Enabled {
 		return nil
 	}
-	run, ok := w.beginRun(triggerType)
+	request = normalizePipelineRunRequest(request)
+	if err := validatePipelineRunRequest(request); err != nil {
+		return err
+	}
+	run, ok := w.beginRun(triggerType, request)
 	if !ok {
 		return fmt.Errorf("factor lab pipeline is already running")
 	}
 	return w.executePipeline(ctx, run)
 }
 
-func (w *Worker) beginRun(triggerType string) (*PipelineRunStatus, bool) {
+func normalizePipelineRunRequest(request PipelineRunRequest) PipelineRunRequest {
+	request.Phase = strings.TrimSpace(request.Phase)
+	request.Phase0Mode = strings.TrimSpace(request.Phase0Mode)
+	request.Scope = strings.TrimSpace(request.Scope)
+	if request.Phase == "" {
+		request.Phase = "all"
+	}
+	if request.Phase0Mode == "" {
+		request.Phase0Mode = "all"
+	}
+	if request.Scope == "" {
+		request.Scope = "incremental"
+	}
+	return request
+}
+
+func validatePipelineRunRequest(request PipelineRunRequest) error {
+	if !containsString([]string{"all", "phase0", "phase1", "phase2", "phase1_phase2"}, request.Phase) {
+		return fmt.Errorf("unsupported factor lab phase: %s", request.Phase)
+	}
+	if !containsString([]string{"all", "securities", "daily-bars", "index-bars", "financials", "dividends"}, request.Phase0Mode) {
+		return fmt.Errorf("unsupported phase0 mode: %s", request.Phase0Mode)
+	}
+	if !containsString([]string{"incremental", "repair_missing_dividend_yield", "repair_missing_operating_cash_flow"}, request.Scope) {
+		return fmt.Errorf("unsupported factor lab scope: %s", request.Scope)
+	}
+	if request.Scope == "repair_missing_dividend_yield" && (request.Phase0Mode != "dividends" || !containsString([]string{"all", "phase0"}, request.Phase)) {
+		return fmt.Errorf("repair_missing_dividend_yield requires phase=all|phase0 and phase0_mode=dividends")
+	}
+	if request.Scope == "repair_missing_operating_cash_flow" && (request.Phase0Mode != "financials" || !containsString([]string{"all", "phase0"}, request.Phase)) {
+		return fmt.Errorf("repair_missing_operating_cash_flow requires phase=all|phase0 and phase0_mode=financials")
+	}
+	return nil
+}
+
+func containsString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *Worker) beginRun(triggerType string, request PipelineRunRequest) (*PipelineRunStatus, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.running {
@@ -212,18 +271,29 @@ func (w *Worker) beginRun(triggerType string) (*PipelineRunStatus, bool) {
 	run := &PipelineRunStatus{
 		ID:           fmt.Sprintf("factorlab-%s", now.Format("20060102-150405.000")),
 		TriggerType:  triggerType,
+		Request:      request,
 		Status:       "running",
 		StartedAt:    now,
 		CurrentPhase: "pending",
-		Phases: []PhaseStatus{
-			{Name: "phase0_incremental", Status: "pending"},
-			{Name: "phase1", Status: "pending"},
-			{Name: "phase2", Status: "pending"},
-		},
+		Phases:       initialPhaseStatuses(request),
 	}
 	w.running = true
 	w.current = run
 	return clonePipelineRunStatus(run), true
+}
+
+func initialPhaseStatuses(request PipelineRunRequest) []PhaseStatus {
+	phases := []PhaseStatus{}
+	if request.Phase == "all" || request.Phase == "phase0" {
+		phases = append(phases, PhaseStatus{Name: "phase0_incremental", Status: "pending"})
+	}
+	if request.Phase == "all" || request.Phase == "phase1" || request.Phase == "phase1_phase2" {
+		phases = append(phases, PhaseStatus{Name: "phase1", Status: "pending"})
+	}
+	if request.Phase == "all" || request.Phase == "phase2" || request.Phase == "phase1_phase2" {
+		phases = append(phases, PhaseStatus{Name: "phase2", Status: "pending"})
+	}
+	return phases
 }
 
 func (w *Worker) executePipeline(ctx context.Context, runSnapshot *PipelineRunStatus) error {
@@ -249,15 +319,7 @@ func (w *Worker) executePipeline(ctx context.Context, runSnapshot *PipelineRunSt
 	w.updateRun(func(run *PipelineRunStatus) { run.BackupPath = backupPath })
 	log.Printf("%s safe backup created: %s", factorLabWorkerLogPrefix, backupPath)
 
-	steps := []struct {
-		name       string
-		scriptPath string
-		args       []string
-	}{
-		{name: "phase0_incremental", scriptPath: w.cfg.Phase0ScriptPath, args: buildPhase0CommandArgs(w.cfg)},
-		{name: "phase1", scriptPath: w.cfg.Phase1ScriptPath, args: buildPhase1CommandArgs(w.cfg)},
-		{name: "phase2", scriptPath: w.cfg.Phase2ScriptPath, args: buildPhase2CommandArgs(w.cfg)},
-	}
+	steps := w.buildPipelineSteps(w.currentRequest())
 	for _, step := range steps {
 		if err := w.runScript(ctx, step.name, step.scriptPath, step.args); err != nil {
 			w.failRun(err)
@@ -271,6 +333,35 @@ func (w *Worker) executePipeline(ctx context.Context, runSnapshot *PipelineRunSt
 	w.updateRun(func(run *PipelineRunStatus) { run.DBHealthAfter = "ok" })
 	w.completeRun()
 	return nil
+}
+
+type pipelineStep struct {
+	name       string
+	scriptPath string
+	args       []string
+}
+
+func (w *Worker) currentRequest() PipelineRunRequest {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.current == nil {
+		return PipelineRunRequest{Phase: "all", Phase0Mode: "all", Scope: "incremental"}
+	}
+	return w.current.Request
+}
+
+func (w *Worker) buildPipelineSteps(request PipelineRunRequest) []pipelineStep {
+	steps := []pipelineStep{}
+	if request.Phase == "all" || request.Phase == "phase0" {
+		steps = append(steps, pipelineStep{name: "phase0_incremental", scriptPath: w.cfg.Phase0ScriptPath, args: buildPhase0CommandArgs(w.cfg, request)})
+	}
+	if request.Phase == "all" || request.Phase == "phase1" || request.Phase == "phase1_phase2" {
+		steps = append(steps, pipelineStep{name: "phase1", scriptPath: w.cfg.Phase1ScriptPath, args: buildPhase1CommandArgs(w.cfg)})
+	}
+	if request.Phase == "all" || request.Phase == "phase2" || request.Phase == "phase1_phase2" {
+		steps = append(steps, pipelineStep{name: "phase2", scriptPath: w.cfg.Phase2ScriptPath, args: buildPhase2CommandArgs(w.cfg)})
+	}
+	return steps
 }
 
 func (w *Worker) finishRun() {
@@ -518,11 +609,13 @@ func runSQLiteCommand(ctx context.Context, dbPath string, statement string) (str
 	return output.String(), err
 }
 
-func buildPhase0CommandArgs(cfg WorkerConfig) []string {
+func buildPhase0CommandArgs(cfg WorkerConfig, request PipelineRunRequest) []string {
 	args := []string{
 		cfg.Phase0ScriptPath,
 		"--db", cfg.DBPath,
 		"--write",
+		"--modes", request.Phase0Mode,
+		"--scope", request.Scope,
 		"--progress-interval", fmt.Sprintf("%d", cfg.ProgressInterval),
 		"--item-progress-interval", fmt.Sprintf("%d", cfg.ItemProgressInterval),
 		"--daily-bars-source", cfg.DailyBarsSource,

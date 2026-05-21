@@ -86,3 +86,40 @@ def test_build_financial_and_dividend_commands_use_small_report_limits(tmp_path)
         assert dividend_cmd[dividend_cmd.index("--report-limit") + 1] == "3"
     finally:
         conn.close()
+
+
+def test_repair_missing_dividend_yield_selects_old_dividend_records(tmp_path):
+    db_path = tmp_path / "factor.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("CREATE TABLE factor_securities (code TEXT, is_active INTEGER, is_st INTEGER, board TEXT)")
+        conn.execute("CREATE TABLE factor_dividend_records (code TEXT, dividend_yield REAL, cash_dividend_per_share REAL, raw_plan TEXT)")
+        conn.execute("INSERT INTO factor_securities VALUES ('000001',1,0,'MAIN'),('000002',1,0,'MAIN')")
+        conn.execute("INSERT INTO factor_dividend_records VALUES ('000001',NULL,NULL,''),('000002',0.02,NULL,'10派2元')")
+        args = module.parse_args(["--db", str(db_path), "--scope", "repair_missing_dividend_yield"])
+        args.db_path = db_path
+        args.temp_files = []
+        cmd = module.build_mode_command(args, "dividends", conn)
+        code_list = cmd[cmd.index("--code-list-file") + 1]
+        assert Path(code_list).read_text().strip() == "000001"
+    finally:
+        conn.close()
+
+
+def test_repair_missing_operating_cash_flow_requires_cashflow(tmp_path):
+    db_path = tmp_path / "factor.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("CREATE TABLE factor_securities (code TEXT, is_active INTEGER, is_st INTEGER, board TEXT)")
+        conn.execute("CREATE TABLE factor_financial_metrics (code TEXT, revenue REAL, operating_cash_flow REAL)")
+        conn.execute("INSERT INTO factor_securities VALUES ('000001',1,0,'MAIN'),('000002',1,0,'MAIN')")
+        conn.execute("INSERT INTO factor_financial_metrics VALUES ('000001',100,NULL),('000002',100,50)")
+        args = module.parse_args(["--db", str(db_path), "--scope", "repair_missing_operating_cash_flow"])
+        args.db_path = db_path
+        args.temp_files = []
+        cmd = module.build_mode_command(args, "financials", conn)
+        assert "--require-operating-cash-flow" in cmd
+        code_list = cmd[cmd.index("--code-list-file") + 1]
+        assert Path(code_list).read_text().strip() == "000001"
+    finally:
+        conn.close()

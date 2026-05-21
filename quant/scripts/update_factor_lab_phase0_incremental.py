@@ -50,6 +50,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--db", default="", help="pumpkin.db 路径；默认自动查找 data/pumpkin.db")
     parser.add_argument("--write", action="store_true", help="实际写入数据库；默认 dry-run")
     parser.add_argument("--modes", default=",".join(DEFAULT_MODES), help="逗号分隔的模式列表")
+    parser.add_argument("--scope", choices=["incremental", "repair_missing_dividend_yield", "repair_missing_operating_cash_flow"], default="incremental", help="增量或字段修复范围")
     parser.add_argument("--critical-modes", default=",".join(sorted(DEFAULT_CRITICAL_MODES)), help="失败后必须返回 failed 的关键模式")
     parser.add_argument("--lookback-days", type=int, default=DEFAULT_LOOKBACK_DAYS, help="无本地日期时的兜底回看自然日")
     parser.add_argument("--buffer-days", type=int, default=DEFAULT_BUFFER_DAYS, help="从本地最新日期向前回退的增量缓冲天数")
@@ -151,6 +152,24 @@ def latest_report_candidates(limit: int) -> list[str]:
     return [item for item in candidates if item <= parsed_today][:max(limit, 1)]
 
 
+def codes_missing_operating_cash_flow(conn: sqlite3.Connection) -> list[str]:
+    try:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT s.code
+            FROM factor_securities s
+            JOIN factor_financial_metrics f ON f.code = s.code
+            WHERE s.is_active = 1 AND s.is_st = 0 AND s.board IN ('MAIN', 'CHINEXT')
+              AND f.revenue IS NOT NULL
+              AND f.operating_cash_flow IS NULL
+            ORDER BY s.code ASC
+            """
+        ).fetchall()
+    except sqlite3.Error:
+        return active_security_codes(conn)
+    return [str(row[0]) for row in rows]
+
+
 def codes_missing_financial_reports(conn: sqlite3.Connection, report_limit: int) -> list[str]:
     periods = latest_report_candidates(report_limit)
     if not periods:
@@ -169,6 +188,24 @@ def codes_missing_financial_reports(conn: sqlite3.Connection, report_limit: int)
             ORDER BY s.code ASC
             """,
             periods,
+        ).fetchall()
+    except sqlite3.Error:
+        return active_security_codes(conn)
+    return [str(row[0]) for row in rows]
+
+
+def codes_missing_dividend_yield(conn: sqlite3.Connection) -> list[str]:
+    try:
+        rows = conn.execute(
+            """
+            SELECT d.code
+            FROM factor_dividend_records d
+            JOIN factor_securities s ON s.code = d.code
+            WHERE s.is_active = 1 AND s.is_st = 0 AND s.board IN ('MAIN', 'CHINEXT')
+            GROUP BY d.code
+            HAVING SUM(CASE WHEN d.dividend_yield IS NOT NULL OR d.cash_dividend_per_share IS NOT NULL OR d.raw_plan <> '' THEN 1 ELSE 0 END) = 0
+            ORDER BY d.code ASC
+            """
         ).fetchall()
     except sqlite3.Error:
         return active_security_codes(conn)
@@ -241,19 +278,28 @@ def build_mode_command(args: argparse.Namespace, mode: str, conn: sqlite3.Connec
         else:
             cmd.extend(["--lookback-days", str(args.lookback_days)])
     elif mode == "financials":
-        codes = codes_missing_financial_reports(conn, args.financial_report_limit)
+        if args.scope == "repair_missing_operating_cash_flow":
+            codes = codes_missing_operating_cash_flow(conn)
+            cmd.append("--require-operating-cash-flow")
+            log_step(f"incremental: financials repair_missing_operating_cash_flow codes={len(codes)} source={args.financials_source}")
+        else:
+            codes = codes_missing_financial_reports(conn, args.financial_report_limit)
+            log_step(f"incremental: financials missing_codes={len(codes)} source={args.financials_source}")
         cmd.extend(["--financials-source", args.financials_source, "--report-limit", str(args.financial_report_limit)])
         path = write_code_list(codes, mode)
         args.temp_files.append(path)
         cmd.extend(["--code-list-file", path])
-        log_step(f"incremental: financials missing_codes={len(codes)} source={args.financials_source}")
     elif mode == "dividends":
-        codes = codes_with_stale_dividends(conn)
+        if args.scope == "repair_missing_dividend_yield":
+            codes = codes_missing_dividend_yield(conn)
+            log_step(f"incremental: dividends repair_missing_dividend_yield codes={len(codes)} source={args.dividends_source}")
+        else:
+            codes = codes_with_stale_dividends(conn)
+            log_step(f"incremental: dividends stale_codes={len(codes)} source={args.dividends_source}")
         cmd.extend(["--dividends-source", args.dividends_source, "--report-limit", str(args.dividend_report_limit)])
         path = write_code_list(codes, mode)
         args.temp_files.append(path)
         cmd.extend(["--code-list-file", path])
-        log_step(f"incremental: dividends stale_codes={len(codes)} source={args.dividends_source}")
     return cmd
 
 
@@ -292,6 +338,8 @@ def main(argv: list[str]) -> int:
     args.temp_files = []
 
     modes = split_csv(args.modes)
+    if modes == ["all"] or not modes:
+        modes = list(DEFAULT_MODES)
     unsupported = [mode for mode in modes if mode not in DEFAULT_MODES]
     if unsupported:
         raise ValueError("不支持的增量模式: " + ",".join(unsupported))

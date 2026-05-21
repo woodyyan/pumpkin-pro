@@ -3446,7 +3446,9 @@ func (a *appServer) handleAdminFactorLabPipelineRun(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusServiceUnavailable, "因子流水线服务未初始化")
 		return
 	}
-	run, err := a.factorLabWorker.StartManual(r.Context())
+	var req factorlab.PipelineRunRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	run, err := a.factorLabWorker.StartManual(r.Context(), req)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return

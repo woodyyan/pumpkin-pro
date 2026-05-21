@@ -54,11 +54,13 @@ func TestBuildPhaseCommandArgs(t *testing.T) {
 		ProgressInterval:     123,
 		ItemProgressInterval: 2,
 	})
-	phase0 := buildPhase0CommandArgs(cfg)
+	phase0 := buildPhase0CommandArgs(cfg, PipelineRunRequest{Phase: "phase0", Phase0Mode: "dividends", Scope: "repair_missing_dividend_yield"})
 	wantPhase0 := []string{
 		"quant/scripts/update_factor_lab_phase0_incremental.py",
 		"--db", "data/pumpkin.db",
 		"--write",
+		"--modes", "dividends",
+		"--scope", "repair_missing_dividend_yield",
 		"--progress-interval", "123",
 		"--item-progress-interval", "2",
 		"--daily-bars-source", "tencent",
@@ -91,6 +93,15 @@ func TestBuildPhaseCommandArgs(t *testing.T) {
 	}
 }
 
+func TestValidatePipelineRunRequestRejectsInvalidRepairScope(t *testing.T) {
+	if err := validatePipelineRunRequest(PipelineRunRequest{Phase: "phase1", Phase0Mode: "dividends", Scope: "repair_missing_dividend_yield"}); err == nil {
+		t.Fatal("expected invalid repair request")
+	}
+	if err := validatePipelineRunRequest(PipelineRunRequest{Phase: "phase0", Phase0Mode: "dividends", Scope: "repair_missing_dividend_yield"}); err != nil {
+		t.Fatalf("expected valid dividend repair request: %v", err)
+	}
+}
+
 func TestNextDailyTriggerTime(t *testing.T) {
 	loc := time.FixedZone("CST", 8*3600)
 	before := time.Date(2026, 5, 9, 19, 0, 0, 0, loc)
@@ -114,21 +125,22 @@ func TestRunOnceDisabledSkips(t *testing.T) {
 
 func TestBeginRunPreventsConcurrentRuns(t *testing.T) {
 	worker := NewWorker(WorkerConfig{Enabled: true})
-	if run, ok := worker.beginRun("manual"); !ok || run.TriggerType != "manual" {
+	request := PipelineRunRequest{Phase: "phase0", Phase0Mode: "dividends", Scope: "repair_missing_dividend_yield"}
+	if run, ok := worker.beginRun("manual", request); !ok || run.TriggerType != "manual" || run.Request.Scope != "repair_missing_dividend_yield" {
 		t.Fatalf("first run should start, got run=%+v ok=%v", run, ok)
 	}
-	if _, ok := worker.beginRun("manual"); ok {
+	if _, ok := worker.beginRun("manual", request); ok {
 		t.Fatal("second run should be rejected")
 	}
 	worker.finishRun()
-	if _, ok := worker.beginRun("manual"); !ok {
+	if _, ok := worker.beginRun("manual", request); !ok {
 		t.Fatal("run should start after finish")
 	}
 }
 
 func TestAppendPhaseLogLineCapturesTailAndSummary(t *testing.T) {
 	worker := NewWorker(WorkerConfig{Enabled: true})
-	if _, ok := worker.beginRun("manual"); !ok {
+	if _, ok := worker.beginRun("manual", PipelineRunRequest{Phase: "all", Phase0Mode: "all", Scope: "incremental"}); !ok {
 		t.Fatal("run should start")
 	}
 	worker.appendPhaseLogLine("phase0_incremental", "stdout", "[12:00:00] daily-bars: 写入进度: 100/4338")
@@ -145,7 +157,7 @@ func TestAppendPhaseLogLineCapturesTailAndSummary(t *testing.T) {
 
 func TestAppendPhaseLogLineLimitsTail(t *testing.T) {
 	worker := NewWorker(WorkerConfig{Enabled: true})
-	if _, ok := worker.beginRun("manual"); !ok {
+	if _, ok := worker.beginRun("manual", PipelineRunRequest{Phase: "all", Phase0Mode: "all", Scope: "incremental"}); !ok {
 		t.Fatal("run should start")
 	}
 	for idx := 0; idx < defaultLogTailLimit+5; idx++ {

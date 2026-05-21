@@ -80,11 +80,23 @@ def test_compute_snapshot_for_security_full_metrics():
     row = result.row
     assert row[9] == 360_000_000.0
     assert row[12] == 3.0  # PS
-    assert row[13] == 0.02  # dividend_yield
+    assert round(row[13], 6) == round(0.5 / 36.0, 6)  # dividend_yield from cash_dividend_per_share
     assert row[19] == 12.0  # ROE %
     assert row[20] == 20.0  # operating_cf_margin %
     assert row[21] == 2.0   # asset_to_equity
     assert row[23] is not None
+
+
+def test_compute_dividend_yield_prefers_direct_source_value():
+    dividend = module.DividendRecord(
+        report_period="2025-12-31",
+        ex_dividend_date="2026-05-01",
+        cash_dividend_per_share=0.5,
+        total_cash_dividend=7_200_000.0,
+        dividend_yield=0.035,
+        dividend_yield_source="akshare:现金分红-股息率",
+    )
+    assert module.compute_dividend_yield(dividend, 360_000_000.0, 36.0) == 0.035
 
 
 def test_compute_snapshot_excludes_suspended_or_missing_date():

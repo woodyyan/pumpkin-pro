@@ -55,6 +55,10 @@ def test_ensure_schema_creates_phase0_tables(tmp_path):
         assert "factor_security_industries" in tables
         assert "factor_rank_scores" in tables
         assert "factor_scores" in tables
+        dividend_columns = module.table_columns(conn, "factor_dividend_records")
+        assert "dividend_yield" in dividend_columns
+        assert "dividend_yield_source" in dividend_columns
+        assert "raw_plan" in dividend_columns
     finally:
         conn.close()
 
@@ -118,6 +122,49 @@ def test_parse_tencent_quote_line_extracts_market_metrics():
     assert parsed["amount"] == 200000.0
     assert parsed["market_cap"] == 220000000000.0
     assert parsed["pb"] == 0.8
+
+
+def test_parse_dividend_helpers_extract_yield_and_cash_per_share():
+    assert module.normalize_dividend_yield_value("2.5%") == 0.025
+    assert module.normalize_dividend_yield_value("0.018") == 0.018
+    assert module.parse_cash_dividend_per_share("10派2.36元(含税)") == 0.236
+    assert module.parse_cash_dividend_per_share("10转4.00派1.20元") == 0.12
+
+
+def test_parse_dividend_frame_maps_akshare_fields():
+    pd = __import__("pandas")
+    df = pd.DataFrame([
+        {
+            "报告期": "2025-12-31",
+            "除权除息日": "2026-06-01",
+            "现金分红-现金分红比例": "2.36",
+            "现金分红-现金分红比例描述": "10派2.36元(含税)",
+            "现金分红-股息率": "0.020397579948",
+        }
+    ])
+    rows = module.parse_dividend_frame("000001", df, "akshare:test")
+    assert rows[0][3] == 0.236
+    assert rows[0][5] == 0.020397579948
+    assert rows[0][6] == "akshare:test:现金分红-股息率"
+    assert rows[0][7] == "10派2.36元(含税)"
+
+
+def test_parse_dividend_frame_maps_eastmoney_fields():
+    pd = __import__("pandas")
+    df = pd.DataFrame([
+        {
+            "REPORT_DATE": "2025-12-31 00:00:00",
+            "EX_DIVIDEND_DATE": "2026-06-01 00:00:00",
+            "PRETAX_BONUS_RMB": "17.5",
+            "IMPL_PLAN_PROFILE": "10派17.50元(含税)",
+            "DIVIDENT_RATIO": "0.032552083333",
+        }
+    ])
+    rows = module.parse_dividend_frame("601318", df, "eastmoney:test")
+    assert rows[0][3] == 1.75
+    assert rows[0][5] == 0.032552083333
+    assert rows[0][6] == "eastmoney:test:DIVIDENT_RATIO"
+    assert rows[0][7] == "10派17.50元(含税)"
 
 
 def test_task_run_lifecycle(tmp_path):

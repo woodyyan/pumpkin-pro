@@ -101,6 +101,9 @@ type FactorDividendRecord struct {
 	ExDividendDate       string    `gorm:"primaryKey;size:10" json:"ex_dividend_date"`
 	CashDividendPerShare *float64  `json:"cash_dividend_per_share"`
 	TotalCashDividend    *float64  `json:"total_cash_dividend"`
+	DividendYield        *float64  `json:"dividend_yield"`
+	DividendYieldSource  string    `gorm:"size:128;not null;default:''" json:"dividend_yield_source"`
+	RawPlan              string    `gorm:"type:text;not null;default:''" json:"raw_plan"`
 	Source               string    `gorm:"size:64;not null;default:''" json:"source"`
 	UpdatedAt            time.Time `gorm:"not null" json:"updated_at"`
 }

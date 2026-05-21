@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sqlite3
 import sys
 import time
@@ -55,8 +56,11 @@ OPERATING_CF_ALIASES = ["经营活动产生的现金流量净额", "经营现金
 REPORT_DATE_ALIASES = ["最新公告日期", "公告日期", "业绩披露日期"]
 DIVIDEND_PER_SHARE_ALIASES = ["每股现金红利", "派息", "现金分红-每股现金红利", "现金分红-派息比例"]
 TOTAL_DIVIDEND_ALIASES = ["现金分红总额", "分红总额", "现金分红-现金分红总额"]
-EX_DIVIDEND_DATE_ALIASES = ["除权除息日", "除息日", "股权登记日"]
-REPORT_PERIOD_ALIASES = ["报告期", "分红年度"]
+DIVIDEND_YIELD_ALIASES = ["现金分红-股息率", "股息率", "DIVIDENT_RATIO", "DIVIDEND_RATE"]
+DIVIDEND_PLAN_ALIASES = ["现金分红-现金分红比例描述", "IMPL_PLAN_PROFILE", "分红方案", "方案说明"]
+DIVIDEND_RATIO_ALIASES = ["现金分红-现金分红比例", "PRETAX_BONUS_RMB"]
+EX_DIVIDEND_DATE_ALIASES = ["除权除息日", "除息日", "股权登记日", "EX_DIVIDEND_DATE"]
+REPORT_PERIOD_ALIASES = ["报告期", "分红年度", "REPORT_DATE"]
 
 SCHEMA_SQL = [
     """
@@ -156,6 +160,9 @@ SCHEMA_SQL = [
         ex_dividend_date TEXT NOT NULL DEFAULT 'unknown',
         cash_dividend_per_share REAL,
         total_cash_dividend REAL,
+        dividend_yield REAL,
+        dividend_yield_source TEXT NOT NULL DEFAULT '',
+        raw_plan TEXT NOT NULL DEFAULT '',
         source TEXT NOT NULL DEFAULT '',
         updated_at DATETIME NOT NULL,
         PRIMARY KEY (code, report_period, ex_dividend_date)
@@ -441,7 +448,20 @@ def connect_db(path: Path) -> sqlite3.Connection:
 def ensure_schema(conn: sqlite3.Connection) -> None:
     for statement in SCHEMA_SQL:
         conn.execute(statement)
+    ensure_factor_dividend_columns(conn)
     conn.commit()
+
+
+def ensure_factor_dividend_columns(conn: sqlite3.Connection) -> None:
+    columns = table_columns(conn, "factor_dividend_records")
+    migrations = {
+        "dividend_yield": "ALTER TABLE factor_dividend_records ADD COLUMN dividend_yield REAL",
+        "dividend_yield_source": "ALTER TABLE factor_dividend_records ADD COLUMN dividend_yield_source TEXT NOT NULL DEFAULT ''",
+        "raw_plan": "ALTER TABLE factor_dividend_records ADD COLUMN raw_plan TEXT NOT NULL DEFAULT ''",
+    }
+    for column, statement in migrations.items():
+        if column not in columns:
+            conn.execute(statement)
 
 
 def table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
@@ -1399,6 +1419,35 @@ def backfill_financials(conn: sqlite3.Connection, args: argparse.Namespace, run_
     return stats
 
 
+def normalize_dividend_yield_value(value: Any) -> Optional[float]:
+    text = str(value or "")
+    parsed = safe_float(text.replace("%", ""))
+    if parsed is None:
+        return None
+    if "%" in text or parsed > 1:
+        return parsed / 100.0
+    return parsed
+
+
+def parse_cash_dividend_per_share(value: Any) -> Optional[float]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    patterns = [
+        r"(?:每)?10股[^\d-]*派\s*([-+]?\d+(?:\.\d+)?)",
+        r"10\s*派\s*([-+]?\d+(?:\.\d+)?)",
+        r"派\s*([-+]?\d+(?:\.\d+)?)\s*元",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            try:
+                return float(match.group(1)) / 10.0
+            except ValueError:
+                return None
+    return None
+
+
 def parse_dividend_frame(code: str, df: Any, source: str) -> list[tuple[Any, ...]]:
     if df is None or df.empty:
         return []
@@ -1406,6 +1455,9 @@ def parse_dividend_frame(code: str, df: Any, source: str) -> list[tuple[Any, ...
     ex_col = find_column(df.columns, EX_DIVIDEND_DATE_ALIASES)
     per_share_col = find_column(df.columns, DIVIDEND_PER_SHARE_ALIASES)
     total_col = find_column(df.columns, TOTAL_DIVIDEND_ALIASES)
+    yield_col = find_column(df.columns, DIVIDEND_YIELD_ALIASES)
+    plan_col = find_column(df.columns, DIVIDEND_PLAN_ALIASES)
+    cash_ratio_col = find_column(df.columns, DIVIDEND_RATIO_ALIASES)
     rows: list[tuple[Any, ...]] = []
     now = utc_now()
     for _, row in df.iterrows():
@@ -1415,12 +1467,25 @@ def parse_dividend_frame(code: str, df: Any, source: str) -> list[tuple[Any, ...
             report_period = "unknown"
         if not ex_date:
             ex_date = "unknown"
+        raw_plan = str(row.get(plan_col) or "").strip() if plan_col else ""
+        cash_per_share = safe_float(row.get(per_share_col)) if per_share_col else None
+        if cash_per_share is None and cash_ratio_col:
+            ratio_value = safe_float(row.get(cash_ratio_col))
+            if ratio_value is not None:
+                cash_per_share = ratio_value / 10.0
+        if cash_per_share is None and raw_plan:
+            cash_per_share = parse_cash_dividend_per_share(raw_plan)
+        dividend_yield = normalize_dividend_yield_value(row.get(yield_col)) if yield_col else None
+        dividend_yield_source = f"{source}:{yield_col}" if dividend_yield is not None and yield_col else ""
         rows.append((
             code,
             report_period,
             ex_date,
-            safe_float(row.get(per_share_col)) if per_share_col else None,
+            cash_per_share,
             safe_float(row.get(total_col)) if total_col else None,
+            dividend_yield,
+            dividend_yield_source,
+            raw_plan,
             source,
             now,
         ))
@@ -1477,10 +1542,11 @@ def fetch_dividend_rows_tencent(code: str) -> list[tuple[Any, ...]]:
     payload = get_symbol_fundamentals(infer_symbol(code))
     meta = payload.get("meta") or {}
     items = payload.get("items") or {}
-    if safe_float(items.get("dividend_yield")) is None:
+    dividend_yield = normalize_dividend_yield_value(items.get("dividend_yield"))
+    if dividend_yield is None:
         raise RuntimeError("腾讯基础面未返回可用股息率")
     report_period = normalize_date(meta.get("dividend_report_date") or meta.get("fy_report_date")) or "unknown"
-    return [(code, report_period, "unknown", None, None, "tencent+fundamentals:dividend_yield_only", utc_now())]
+    return [(code, report_period, "unknown", None, None, dividend_yield, "tencent:items.dividend_yield", "", "tencent+fundamentals:dividend_yield_only", utc_now())]
 
 
 def fetch_dividend_rows_with_fallback(code: str, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
@@ -1520,8 +1586,8 @@ def backfill_dividends(conn: sqlite3.Connection, args: argparse.Namespace, run_i
                 conn.executemany(
                     """
                     INSERT OR REPLACE INTO factor_dividend_records
-                    (code, report_period, ex_dividend_date, cash_dividend_per_share, total_cash_dividend, source, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (code, report_period, ex_dividend_date, cash_dividend_per_share, total_cash_dividend, dividend_yield, dividend_yield_source, raw_plan, source, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     rows,
                 )

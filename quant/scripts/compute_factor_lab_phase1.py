@@ -87,6 +87,8 @@ class DividendRecord:
     ex_dividend_date: str
     cash_dividend_per_share: Optional[float]
     total_cash_dividend: Optional[float]
+    dividend_yield: Optional[float] = None
+    dividend_yield_source: str = ""
 
 
 @dataclass
@@ -297,7 +299,7 @@ def load_latest_financial(conn: sqlite3.Connection, code: str, snapshot_date: st
 def load_latest_dividend(conn: sqlite3.Connection, code: str, snapshot_date: str) -> Optional[DividendRecord]:
     row = conn.execute(
         """
-        SELECT report_period, ex_dividend_date, cash_dividend_per_share, total_cash_dividend
+        SELECT report_period, ex_dividend_date, cash_dividend_per_share, total_cash_dividend, dividend_yield, dividend_yield_source
         FROM factor_dividend_records
         WHERE code = ? AND (ex_dividend_date <= ? OR ex_dividend_date = 'unknown')
         ORDER BY CASE WHEN ex_dividend_date = 'unknown' THEN report_period ELSE ex_dividend_date END DESC
@@ -312,6 +314,8 @@ def load_latest_dividend(conn: sqlite3.Connection, code: str, snapshot_date: str
         ex_dividend_date=row[1],
         cash_dividend_per_share=safe_float(row[2]),
         total_cash_dividend=safe_float(row[3]),
+        dividend_yield=safe_float(row[4]),
+        dividend_yield_source=row[5] or "",
     )
 
 
@@ -362,10 +366,12 @@ def compute_listing_age_days(listing_date: str, snapshot_date: str) -> Optional[
 def compute_dividend_yield(dividend: Optional[DividendRecord], market_cap: Optional[float], close_price: float) -> Optional[float]:
     if not dividend:
         return None
-    if dividend.total_cash_dividend is not None and market_cap and market_cap > 0:
-        return dividend.total_cash_dividend / market_cap
+    if dividend.dividend_yield is not None and dividend.dividend_yield >= 0:
+        return dividend.dividend_yield
     if dividend.cash_dividend_per_share is not None and close_price > 0:
         return dividend.cash_dividend_per_share / close_price
+    if dividend.total_cash_dividend is not None and market_cap and market_cap > 0:
+        return dividend.total_cash_dividend / market_cap
     return None
 
 

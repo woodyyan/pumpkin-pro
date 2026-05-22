@@ -14,8 +14,11 @@ export function normalizeWeightInput(value) {
   if (value === null || value === undefined) return null
   const text = String(value).trim()
   if (!text) return null
-  const num = Number(text)
-  if (!Number.isFinite(num) || num < 0) return null
+  const normalizedText = text.replace(/[％%]\s*$/, '').trim()
+  if (!normalizedText) return null
+  if (!/^(?:\d+|\d+\.\d{0,2}|\.\d{1,2})$/.test(normalizedText)) return null
+  const num = Number(normalizedText)
+  if (!Number.isFinite(num) || num < 0 || num > 100) return null
   return num
 }
 
@@ -36,11 +39,11 @@ export function sumFactorWeights(factorWeights = {}) {
 export function validateFactorWeights(factorWeights = {}) {
   const normalized = normalizeFactorWeights(factorWeights)
   const selectedCount = Object.keys(factorWeights || {}).length
-  if (selectedCount === 0) return { valid: true, sum: 0, message: '未选择因子时默认按 7 个因子等权综合排序。' }
+  if (selectedCount === 0) return { valid: true, sum: 100, message: '未选择因子时将恢复默认 7 因子等权结果。' }
   const sum = Object.values(normalized).reduce((total, value) => total + value, 0)
-  if (Object.keys(normalized).length !== selectedCount) return { valid: false, sum, message: '已选择的因子需要填写大于 0 的权重。' }
-  if (Math.abs(sum - 1) > 0.001) return { valid: false, sum, message: '因子权重合计必须等于 1。' }
-  return { valid: true, sum, message: '权重合计为 1，将按自定义综合得分排序。' }
+  if (Object.keys(normalized).length !== selectedCount) return { valid: false, sum, message: '已选择的因子需要填写 0 到 100 之间的大于 0 的权重，最多保留 2 位小数。' }
+  if (Math.abs(sum - 100) > 0.001) return { valid: false, sum, message: '因子权重合计必须等于 100%。' }
+  return { valid: true, sum, message: '权重合计为 100%，可启动计算。' }
 }
 
 export function buildFactorScreenerPayload({ factorWeights = {}, sortBy = 'composite_score', sortOrder = 'desc', page = 1, pageSize = 50, snapshotDate = '' } = {}) {
@@ -64,7 +67,16 @@ export function factorWeightChipText(factorWeights = {}, factorMap = {}) {
 export function formatWeight(value) {
   const num = Number(value)
   if (!Number.isFinite(num)) return '--'
-  return num.toFixed(2)
+  return `${num.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')}%`
+}
+
+export function areFactorWeightsEqual(left = {}, right = {}) {
+  const normalizeForCompare = (weights) => ({
+    selectedCount: Object.keys(weights || {}).length,
+    entries: Object.entries(normalizeFactorWeights(weights))
+      .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey)),
+  })
+  return JSON.stringify(normalizeForCompare(left)) === JSON.stringify(normalizeForCompare(right))
 }
 
 export function formatFactorValue(value, format = 'number') {

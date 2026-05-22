@@ -13,6 +13,7 @@ const (
 	defaultPageSize = 50
 	maxPageSize     = 200
 	weightTolerance = 0.001
+	weightPrecision = 100
 )
 
 var factorDefinitions = []FactorDefinition{
@@ -220,8 +221,11 @@ func normalizeFactorWeights(raw map[string]float64) (map[string]float64, error) 
 		if _, ok := factorKeyToScoreField[key]; !ok {
 			return nil, fmt.Errorf("不支持的因子: %s", key)
 		}
-		if math.IsNaN(weight) || math.IsInf(weight, 0) || weight < 0 {
-			return nil, fmt.Errorf("%s 的权重必须是非负数", key)
+		if math.IsNaN(weight) || math.IsInf(weight, 0) || weight < 0 || weight > 100 {
+			return nil, fmt.Errorf("%s 的权重必须是 0 到 100 之间的非负百分比", key)
+		}
+		if !hasAtMostTwoDecimals(weight) {
+			return nil, fmt.Errorf("%s 的权重最多保留 2 位小数", key)
 		}
 		if weight == 0 {
 			continue
@@ -232,15 +236,20 @@ func normalizeFactorWeights(raw map[string]float64) (map[string]float64, error) 
 	if len(weights) == 0 {
 		return nil, fmt.Errorf("请至少选择一个因子并填写权重")
 	}
-	if math.Abs(sum-1) > weightTolerance {
-		return nil, fmt.Errorf("因子权重合计必须等于 1")
+	if math.Abs(sum-100) > weightTolerance {
+		return nil, fmt.Errorf("因子权重合计必须等于 100%%")
 	}
 	return weights, nil
 }
 
+func hasAtMostTwoDecimals(weight float64) bool {
+	scaled := weight * weightPrecision
+	return math.Abs(scaled-math.Round(scaled)) <= weightTolerance
+}
+
 func equalFactorWeights() map[string]float64 {
 	weights := make(map[string]float64, len(factorDefinitions))
-	weight := 1.0 / float64(len(factorDefinitions))
+	weight := 100.0 / float64(len(factorDefinitions))
 	for _, factor := range factorDefinitions {
 		weights[factor.Key] = weight
 	}
@@ -386,7 +395,7 @@ func isSnapshotStale(snapshotDate string) bool {
 }
 
 func buildFactorDefinitions(coverage map[string]int64) []FactorDefinition {
-	defaultWeight := 1.0 / float64(len(factorDefinitions))
+	defaultWeight := 100.0 / float64(len(factorDefinitions))
 	out := make([]FactorDefinition, 0, len(factorDefinitions))
 	for _, factor := range factorDefinitions {
 		copy := factor

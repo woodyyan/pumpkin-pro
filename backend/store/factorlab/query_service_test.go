@@ -120,7 +120,7 @@ func TestFactorLabScreenerCustomWeightsNormalizeMissingScores(t *testing.T) {
 	svc, repo := setupFactorLabQueryService(t)
 	seedFactorScores(t, repo)
 	resp, err := svc.Screen(context.Background(), FactorScreenerRequest{
-		FactorWeights: map[string]float64{"value": 0.5, "low_volatility": 0.5},
+		FactorWeights: map[string]float64{"value": 50, "low_volatility": 50},
 		SortBy:        "composite_score",
 		SortOrder:     "desc",
 		Page:          1,
@@ -146,14 +146,20 @@ func TestFactorLabScreenerCustomWeightsNormalizeMissingScores(t *testing.T) {
 func TestFactorLabScreenerRejectsInvalidWeights(t *testing.T) {
 	svc, repo := setupFactorLabQueryService(t)
 	seedFactorScores(t, repo)
-	if _, err := svc.Screen(context.Background(), FactorScreenerRequest{FactorWeights: map[string]float64{"unknown": 1}}); err == nil {
+	if _, err := svc.Screen(context.Background(), FactorScreenerRequest{FactorWeights: map[string]float64{"unknown": 100}}); err == nil {
 		t.Fatal("expected invalid factor error")
 	}
-	if _, err := svc.Screen(context.Background(), FactorScreenerRequest{FactorWeights: map[string]float64{"value": 0.5}}); err == nil {
+	if _, err := svc.Screen(context.Background(), FactorScreenerRequest{FactorWeights: map[string]float64{"value": 50}}); err == nil {
 		t.Fatal("expected invalid sum error")
 	}
-	if _, err := svc.Screen(context.Background(), FactorScreenerRequest{FactorWeights: map[string]float64{"value": -1, "growth": 2}}); err == nil {
+	if _, err := svc.Screen(context.Background(), FactorScreenerRequest{FactorWeights: map[string]float64{"value": -1, "growth": 101}}); err == nil {
 		t.Fatal("expected negative weight error")
+	}
+	if _, err := svc.Screen(context.Background(), FactorScreenerRequest{FactorWeights: map[string]float64{"value": 12.345, "growth": 87.655}}); err == nil {
+		t.Fatal("expected precision error")
+	}
+	if _, err := svc.Screen(context.Background(), FactorScreenerRequest{FactorWeights: map[string]float64{"value": 12.5, "growth": 87.5}}); err != nil {
+		t.Fatalf("expected decimal percentage accepted, got %v", err)
 	}
 }
 

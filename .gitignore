@@ -9,7 +9,14 @@
 quant/data/cache/
 .workbuddy/
 .env
-.ai/
+# AI knowledge base
+# Note: we track specs/context docs for long-term project memory.
+!.ai/
+.ai/*
+!.ai/context/
+!.ai/context/**
+!.ai/specs/
+!.ai/specs/**
 .cache/
 .workb/
 /docs/

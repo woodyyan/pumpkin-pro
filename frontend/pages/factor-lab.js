@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Head from 'next/head'
 import { requestJson } from '../lib/api'
 import {
+  areFactorWeightsEqual,
   FACTOR_DEFINITIONS,
   buildFactorScreenerPayload,
   codeToSymbol,
@@ -40,7 +41,8 @@ const SCORE_KEYS = new Set(SCORE_COLUMNS.map((col) => col.key))
 export default function FactorLabPage() {
   const [meta, setMeta] = useState(null)
   const [data, setData] = useState(null)
-  const [factorWeights, setFactorWeights] = useState({})
+  const [draftWeights, setDraftWeights] = useState({})
+  const [appliedWeights, setAppliedWeights] = useState({})
   const [sortBy, setSortBy] = useState('composite_score')
   const [sortOrder, setSortOrder] = useState('desc')
   const [page, setPage] = useState(1)
@@ -52,10 +54,11 @@ export default function FactorLabPage() {
 
   const factors = meta?.factors?.length ? meta.factors : FACTOR_DEFINITIONS
   const factorMap = useMemo(() => flattenFactorDefinitions(factors.map((factor) => ({ ...factor, scoreKey: factor.scoreKey || `${factor.key}_score` }))), [factors])
-  const weightStatus = useMemo(() => validateFactorWeights(factorWeights), [factorWeights])
-  const activeScoreKeys = useMemo(() => getActiveFactorScoreKeys(factorWeights, factorMap), [factorWeights, factorMap])
+  const draftStatus = useMemo(() => validateFactorWeights(draftWeights), [draftWeights])
+  const hasPendingChanges = useMemo(() => !areFactorWeightsEqual(draftWeights, appliedWeights), [draftWeights, appliedWeights])
+  const activeScoreKeys = useMemo(() => getActiveFactorScoreKeys(appliedWeights, factorMap), [appliedWeights, factorMap])
   const columns = useMemo(() => ALL_COLUMNS.map((col) => ({ ...col, inactive: !isScoreColumnActive(col.key, activeScoreKeys) })), [activeScoreKeys])
-  const chips = useMemo(() => factorWeightChipText(factorWeights, factorMap), [factorWeights, factorMap])
+  const chips = useMemo(() => factorWeightChipText(appliedWeights, factorMap), [appliedWeights, factorMap])
   const total = data?.total || 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
@@ -73,11 +76,10 @@ export default function FactorLabPage() {
   }, [])
 
   const fetchScreener = useCallback(async () => {
-    if (!weightStatus.valid) return
     setLoadingData(true)
     setError('')
     try {
-      const payload = buildFactorScreenerPayload({ factorWeights, sortBy, sortOrder, page, pageSize })
+      const payload = buildFactorScreenerPayload({ factorWeights: appliedWeights, sortBy, sortOrder, page, pageSize })
       const result = await requestJson('/api/factor-lab/screener', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -89,21 +91,18 @@ export default function FactorLabPage() {
     } finally {
       setLoadingData(false)
     }
-  }, [factorWeights, page, pageSize, sortBy, sortOrder, weightStatus.valid])
+  }, [appliedWeights, page, pageSize, sortBy, sortOrder])
 
   useEffect(() => { fetchMeta() }, [fetchMeta])
 
   useEffect(() => {
-    if (!meta?.has_snapshot || !weightStatus.valid) return undefined
-    const timer = setTimeout(() => { fetchScreener() }, 500)
-    return () => clearTimeout(timer)
-  }, [fetchScreener, meta?.has_snapshot, weightStatus.valid])
+    if (!meta?.has_snapshot) return undefined
+    fetchScreener()
+    return undefined
+  }, [fetchScreener, meta?.has_snapshot])
 
   const handleToggleFactor = (key, checked) => {
-    setPage(1)
-    setSortBy('composite_score')
-    setSortOrder('desc')
-    setFactorWeights((current) => {
+    setDraftWeights((current) => {
       const next = { ...current }
       if (checked) next[key] = next[key] || ''
       else delete next[key]
@@ -112,17 +111,21 @@ export default function FactorLabPage() {
   }
 
   const handleWeightChange = (key, value) => {
-    setPage(1)
-    setSortBy('composite_score')
-    setSortOrder('desc')
-    setFactorWeights((current) => ({ ...current, [key]: value }))
+    const normalizedValue = String(value).replace(/[％%]/g, '').trim()
+    setDraftWeights((current) => ({ ...current, [key]: normalizedValue }))
   }
 
   const handleReset = () => {
-    setFactorWeights({})
+    setDraftWeights({})
+  }
+
+  const handleApply = () => {
+    if (!draftStatus.valid || !hasPendingChanges) return false
+    setAppliedWeights(draftWeights)
     setPage(1)
     setSortBy('composite_score')
     setSortOrder('desc')
+    return true
   }
 
   const handleSort = (key) => {
@@ -150,7 +153,7 @@ export default function FactorLabPage() {
           <p className="mt-1 text-sm text-white/50">基于排名分的 7 因子排序，支持自定义因子权重生成综合得分。</p>
         </div>
         <button type="button" onClick={() => setMobileFiltersOpen(true)} className="rounded-xl border border-primary/30 bg-primary/10 px-4 py-2 text-sm text-primary lg:hidden">
-          因子权重 {Object.keys(factorWeights).length > 0 ? `(${Object.keys(factorWeights).length})` : ''}
+          因子权重 {Object.keys(draftWeights).length > 0 ? `(${Object.keys(draftWeights).length})` : ''}
         </button>
       </header>
 
@@ -166,13 +169,23 @@ export default function FactorLabPage() {
       ) : (
         <main className="grid gap-5 lg:grid-cols-[300px_1fr]">
           <aside className="hidden lg:block">
-            <FactorWeightPanel factors={factors} weights={factorWeights} status={weightStatus} onToggle={handleToggleFactor} onChange={handleWeightChange} onReset={handleReset} />
+            <FactorWeightPanel
+              factors={factors}
+              weights={draftWeights}
+              status={draftStatus}
+              hasPendingChanges={hasPendingChanges}
+              onToggle={handleToggleFactor}
+              onChange={handleWeightChange}
+              onReset={handleReset}
+              onApply={handleApply}
+              loading={loadingData}
+            />
           </aside>
 
           <section className="space-y-4">
-            <SelectedWeights chips={chips} status={weightStatus} onReset={handleReset} loading={loadingData} />
+            <SelectedWeights chips={chips} draftStatus={draftStatus} hasPendingChanges={hasPendingChanges} loading={loadingData} />
             <ResultTable data={data} columns={columns} sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} loading={loadingData} />
-            <ResultCards data={data} factorWeights={factorWeights} factorMap={factorMap} loading={loadingData} />
+            <ResultCards data={data} factorWeights={appliedWeights} factorMap={factorMap} loading={loadingData} />
             {total > 0 && <Pagination page={page} totalPages={totalPages} total={total} onPageChange={handlePageChange} />}
           </section>
         </main>
@@ -185,7 +198,21 @@ export default function FactorLabPage() {
               <h2 className="text-base font-medium">因子与权重</h2>
               <button type="button" onClick={() => setMobileFiltersOpen(false)} className="rounded-full bg-white/10 px-3 py-1 text-sm text-white/60">关闭</button>
             </div>
-            <FactorWeightPanel factors={factors} weights={factorWeights} status={weightStatus} onToggle={handleToggleFactor} onChange={handleWeightChange} onReset={handleReset} />
+            <FactorWeightPanel
+              factors={factors}
+              weights={draftWeights}
+              status={draftStatus}
+              hasPendingChanges={hasPendingChanges}
+              onToggle={handleToggleFactor}
+              onChange={handleWeightChange}
+              onReset={handleReset}
+              onApply={() => {
+                const applied = handleApply()
+                if (applied) setMobileFiltersOpen(false)
+                return applied
+              }}
+              loading={loadingData}
+            />
           </div>
         </div>
       )}
@@ -219,14 +246,11 @@ function StatCard({ label, value, suffix }) {
   return <div className="rounded-2xl border border-border bg-card px-4 py-3"><div className="text-xs text-white/40">{label}</div><div className="mt-2 text-xl font-semibold text-white">{value}<span className="ml-1 text-xs font-normal text-white/40">{suffix}</span></div></div>
 }
 
-function FactorWeightPanel({ factors, weights, status, onToggle, onChange, onReset }) {
+function FactorWeightPanel({ factors, weights, status, hasPendingChanges, onToggle, onChange, onReset, onApply, loading }) {
   const selectedCount = Object.keys(weights || {}).length
   return (
     <section className="rounded-2xl border border-border bg-card p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="text-sm font-medium text-white/80">因子与权重</div>
-        <button type="button" onClick={onReset} className="text-xs text-white/40 hover:text-white/70">重置</button>
-      </div>
+      <div className="mb-3 text-sm font-medium text-white/80">因子与权重</div>
       <div className="space-y-2">
         {(factors || []).map((factor) => {
           const checked = Object.prototype.hasOwnProperty.call(weights, factor.key)
@@ -236,6 +260,17 @@ function FactorWeightPanel({ factors, weights, status, onToggle, onChange, onRes
       <div className={`mt-4 rounded-xl border px-3 py-2 text-xs ${status.valid ? 'border-primary/20 bg-primary/5 text-primary/80' : 'border-red-500/30 bg-red-500/10 text-red-300'}`}>
         <div className="flex items-center justify-between"><span>已选 {selectedCount || '默认'} 个因子</span><span>权重合计 {formatWeight(status.sum)}</span></div>
         <div className="mt-1 text-white/45">{status.message}</div>
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <button type="button" onClick={onReset} className="text-xs text-white/40 hover:text-white/70">仅重置左侧草稿</button>
+        <button
+          type="button"
+          onClick={onApply}
+          disabled={!status.valid || !hasPendingChanges || loading}
+          className="rounded-xl border border-primary/30 bg-primary/10 px-4 py-2 text-sm text-primary disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-white/25"
+        >
+          启动计算
+        </button>
       </div>
     </section>
   )
@@ -247,27 +282,31 @@ function FactorWeightRow({ factor, checked, value, onToggle, onChange }) {
       <div className="flex items-center gap-3">
         <input type="checkbox" checked={checked} onChange={(e) => onToggle(factor.key, e.target.checked)} className="h-4 w-4 accent-primary" />
         <label className="flex-1 text-sm text-white/75">{factor.label}</label>
-        <input
-          value={value}
-          disabled={!checked}
-          onChange={(e) => onChange(factor.key, e.target.value)}
-          inputMode="decimal"
-          placeholder="0.00"
-          className="w-20 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-right text-xs text-white outline-none disabled:cursor-not-allowed disabled:opacity-30 focus:border-primary/50"
-        />
+        <div className="relative w-24">
+          <input
+            value={value}
+            disabled={!checked}
+            onChange={(e) => onChange(factor.key, e.target.value)}
+            inputMode="decimal"
+            placeholder="30"
+            className="w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 pr-5 text-right text-xs text-white outline-none disabled:cursor-not-allowed disabled:opacity-30 focus:border-primary/50"
+          />
+          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-white/35">%</span>
+        </div>
       </div>
     </div>
   )
 }
 
-function SelectedWeights({ chips, status, onReset, loading }) {
+function SelectedWeights({ chips, draftStatus, hasPendingChanges, loading }) {
+  const stateText = hasPendingChanges ? (draftStatus.valid ? '草稿待启动计算' : '草稿待修正') : '已应用'
   return (
     <section className="rounded-2xl border border-border bg-card px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
           {chips.map((chip) => <span key={chip} className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs text-primary">{chip}</span>)}
         </div>
-        <div className="flex items-center gap-3 text-xs text-white/35">{loading && <span className="animate-pulse">排序中...</span>}<span className={status.valid ? 'text-primary/70' : 'text-red-300'}>{status.valid ? '自动应用' : '待修正'}</span><button type="button" onClick={onReset} className="hover:text-white/70">重置</button></div>
+        <div className="flex items-center gap-3 text-xs text-white/35">{loading && <span className="animate-pulse">排序中...</span>}<span className={hasPendingChanges && !draftStatus.valid ? 'text-red-300' : 'text-primary/70'}>{stateText}</span></div>
       </div>
     </section>
   )

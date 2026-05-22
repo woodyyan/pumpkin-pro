@@ -17,6 +17,12 @@ describe('live-trading page syntax', () => {
     })
   })
 
+  it('uses unified trade-date helper for quadrant data labels', () => {
+    assert.ok(pageSource.includes("formatCloseDateLabel(quadrantData.meta.source_trade_date, quadrantData.meta.computed_at)"))
+    assert.ok(pageSource.includes('parseTradeDateLabelDate(quadrantData.meta.source_trade_date)'))
+    assert.ok(!pageSource.includes('数据日期：{formatDateTime(quadrantData.meta.computed_at)}'))
+  })
+
   it('keeps only market and watchlist on 10-second polling', () => {
     assert.ok(!pageSource.includes('行情看板概览'))
     assert.ok(!pageSource.includes('手动刷新'))

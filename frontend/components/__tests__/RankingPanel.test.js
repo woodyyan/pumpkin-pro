@@ -45,18 +45,33 @@ function hasReturnPct(value) {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-function formatMetaDateTime(value) {
-  if (!value) return '--'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', { hour12: false })
+function formatCompactDate(dateStr) {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr || ''
+  const [year, month, day] = dateStr.split('-')
+  return `${year}/${Number(month)}/${Number(day)}`
+}
+
+function extractDateString(value) {
+  if (!value) return null
+  if (typeof value === 'string') {
+    const match = value.match(/^(\d{4}-\d{2}-\d{2})/)
+    return match ? match[1] : null
+  }
+  return null
+}
+
+function formatCloseDateLabel(sourceTradeDate, fallbackComputedAt) {
+  const dateStr = extractDateString(sourceTradeDate) || extractDateString(fallbackComputedAt)
+  if (!dateStr) return ''
+  return `按 ${formatCompactDate(dateStr)} 收盘后数据生成`
 }
 
 function buildRankingMetaSummary(meta, currentExchange = 'ASHARE') {
   const exchange = meta?.exchange || currentExchange
   const parts = [exchange === 'HKEX' ? '港股榜单来自机会区' : 'A股榜单按主板 / 创业板 / 科创板均衡筛选，兼顾精选评分与板块分散']
-  if (meta?.computed_at) {
-    parts.push(`数据日期：${formatMetaDateTime(meta.computed_at)}`)
+  const closeDateLabel = formatCloseDateLabel(meta?.source_trade_date, meta?.computed_at)
+  if (closeDateLabel) {
+    parts.push(closeDateLabel)
   }
   if (meta?.returned_count != null) {
     parts.push(`当前展示 TOP${meta.returned_count} 只`)
@@ -123,6 +138,7 @@ const SAMPLE_HKEX_ITEMS = [
 
 const SAMPLE_META = {
   computed_at: '2026-04-15T02:30:00Z',
+  source_trade_date: '2026-04-14',
   total_in_zone: 156,
   returned_count: 20,
   exchange: 'ASHARE',
@@ -226,7 +242,7 @@ describe('ranking meta summary', () => {
   it('builds A-share header copy with data date and TOP count', () => {
     const summary = buildRankingMetaSummary(SAMPLE_META)
     assert.ok(summary.includes('A股榜单按主板 / 创业板 / 科创板均衡筛选，兼顾精选评分与板块分散'))
-    assert.ok(summary.includes('数据日期：'))
+    assert.ok(summary.includes('按 2026/4/14 收盘后数据生成'))
     assert.ok(summary.includes('当前展示 TOP20 只'))
     assert.ok(!summary.includes('机会区共'))
   })
@@ -325,7 +341,7 @@ describe('Ranking data structure validation', () => {
   })
 
   it('meta has all required fields', () => {
-    assert.ok(SAMPLE_META.computed_at.length > 0, 'missing computed_at')
+    assert.ok(SAMPLE_META.source_trade_date.length > 0, 'missing source_trade_date')
     assert.ok(SAMPLE_META.total_in_zone > 0, 'total_in_zone should be positive')
     assert.ok(SAMPLE_META.returned_count > 0, 'returned_count should be positive')
     assert.ok(['ASHARE', 'HKEX'].includes(SAMPLE_META.exchange), 'invalid meta exchange')

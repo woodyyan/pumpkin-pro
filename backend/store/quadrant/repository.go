@@ -43,7 +43,7 @@ func (r *Repository) BulkUpsert(ctx context.Context, records []QuadrantScoreReco
 					"volatility", "drawdown", "crowding", "avg_amount5d",
 					"board", "ranking_score", "global_rank_score", "board_rank_score",
 					"tradability_score", "risk_adjusted_momentum_60d",
-					"computed_at",
+					"source_trade_date", "computed_at",
 				}),
 			}).Create(&batch).Error; err != nil {
 				return err

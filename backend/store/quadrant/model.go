@@ -26,6 +26,7 @@ type QuadrantScoreRecord struct {
 	BoardRankScore          float64   `gorm:"column:board_rank_score;not null;default:0"`
 	TradabilityScore        float64   `gorm:"column:tradability_score;not null;default:0"`
 	RiskAdjustedMomentum60d float64   `gorm:"column:risk_adjusted_momentum_60d;not null;default:0"`
+	SourceTradeDate         string    `gorm:"size:10;not null;default:''"`
 	ComputedAt              time.Time `gorm:"not null"`
 }
 
@@ -70,8 +71,9 @@ type QuadrantSummary struct {
 
 // QuadrantMeta holds metadata about the computation.
 type QuadrantMeta struct {
-	ComputedAt string `json:"computed_at"`
-	TotalCount int    `json:"total_count"`
+	ComputedAt      string `json:"computed_at"`
+	SourceTradeDate string `json:"source_trade_date,omitempty"`
+	TotalCount      int    `json:"total_count"`
 }
 
 // QuadrantResponse is the API response for GET /api/quadrant.
@@ -198,10 +200,11 @@ func (RankingSnapshot) TableName() string { return "quadrant_ranking_snapshots" 
 
 // RankingMeta holds ranking metadata.
 type RankingMeta struct {
-	ComputedAt    string `json:"computed_at"`
-	TotalInZone   int    `json:"total_in_zone"`
-	ReturnedCount int    `json:"returned_count"`
-	Exchange      string `json:"exchange"`
+	ComputedAt      string `json:"computed_at"`
+	SourceTradeDate string `json:"source_trade_date,omitempty"`
+	TotalInZone     int    `json:"total_in_zone"`
+	ReturnedCount   int    `json:"returned_count"`
+	Exchange        string `json:"exchange"`
 }
 
 // RankingResponse is the API response for GET /api/quadrant/ranking.

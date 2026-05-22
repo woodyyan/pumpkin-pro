@@ -242,6 +242,7 @@ func (s *Service) saveRankingPortfolio(ctx context.Context, records []QuadrantSc
 	if len(records) == 0 {
 		return nil
 	}
+	sourceTradeDate := collectLatestSourceTradeDate(records)
 	snapshotDate := rankingSnapshotDate(computedAt)
 	if snapshotDate == "" {
 		return nil
@@ -313,6 +314,7 @@ func (s *Service) saveRankingPortfolio(ctx context.Context, records []QuadrantSc
 				RankingTime:           computedAt,
 				HoldingsEffectiveTime: effectiveTime,
 				NavAsOfTime:           computedAt,
+				SourceTradeDate:       sourceTradeDate,
 				BenchmarkCode:         definition.BenchmarkCode,
 				BenchmarkName:         definition.BenchmarkName,
 				ConstituentsCount:     len(currentConstituents),
@@ -386,7 +388,7 @@ func (s *Service) saveRankingPortfolio(ctx context.Context, records []QuadrantSc
 			if err := tx.Clauses(clause.OnConflict{
 				Columns: []clause.Column{{Name: "definition_id"}, {Name: "snapshot_version"}},
 				DoUpdates: clause.AssignmentColumns([]string{
-					"batch_id", "snapshot_date", "ranking_time", "holdings_effective_time", "nav_as_of_time",
+					"batch_id", "snapshot_date", "ranking_time", "holdings_effective_time", "nav_as_of_time", "source_trade_date",
 					"benchmark_code", "benchmark_name", "latest_nav", "latest_benchmark_nav",
 					"latest_portfolio_return", "latest_benchmark_return", "latest_excess_return_pct",
 					"current_constituent_count", "has_shortfall", "warning_text", "method_note",
@@ -1022,6 +1024,7 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 		RankingTime:             latestSnapshot.RankingTime,
 		HoldingsEffectiveTime:   latestSnapshot.HoldingsEffectiveTime,
 		NavAsOfTime:             latestSnapshot.NavAsOfTime,
+		SourceTradeDate:         latestSnapshot.SourceTradeDate,
 		BenchmarkCode:           latestSnapshot.BenchmarkCode,
 		BenchmarkName:           latestSnapshot.BenchmarkName,
 		LatestNav:               latestPoint.Nav,
@@ -1136,7 +1139,7 @@ func buildEmptyRankingPortfolioResponse(definition RankingPortfolioDefinition) R
 	}
 }
 
-func (s *Service) buildCurrentRankingPortfolioSelection(ctx context.Context, definition RankingPortfolioDefinition) ([]RankingPortfolioConstituentItem, time.Time, error) {
+func (s *Service) buildCurrentRankingPortfolioSelection(ctx context.Context, definition RankingPortfolioDefinition) ([]RankingPortfolioConstituentItem, time.Time, string, error) {
 	limit := definition.SelectionWindow
 	if limit < definition.MaxHoldings {
 		limit = definition.MaxHoldings
@@ -1146,10 +1149,10 @@ func (s *Service) buildCurrentRankingPortfolioSelection(ctx context.Context, def
 	}
 	ranking, err := s.buildRankingResponse(ctx, definition.Exchange, limit)
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, time.Time{}, "", err
 	}
 	if len(ranking.Items) == 0 {
-		return nil, time.Time{}, nil
+		return nil, time.Time{}, "", nil
 	}
 	latestComputedAt := time.Time{}
 	if strings.TrimSpace(ranking.Meta.ComputedAt) != "" {
@@ -1157,11 +1160,11 @@ func (s *Service) buildCurrentRankingPortfolioSelection(ctx context.Context, def
 			latestComputedAt = parsed.UTC()
 		}
 	}
-	return buildRankingPortfolioConstituentItems(definition, ranking.Items), latestComputedAt, nil
+	return buildRankingPortfolioConstituentItems(definition, ranking.Items), latestComputedAt, normalizeSourceTradeDate(ranking.Meta.SourceTradeDate), nil
 }
 
 func (s *Service) applyCurrentRankingPortfolioSelection(ctx context.Context, definition RankingPortfolioDefinition, item *RankingPortfolioResponse, resultRankingTime time.Time) error {
-	currentConstituents, currentComputedAt, err := s.buildCurrentRankingPortfolioSelection(ctx, definition)
+	currentConstituents, currentComputedAt, currentSourceTradeDate, err := s.buildCurrentRankingPortfolioSelection(ctx, definition)
 	if err != nil {
 		return err
 	}
@@ -1181,7 +1184,10 @@ func (s *Service) applyCurrentRankingPortfolioSelection(ctx context.Context, def
 	if !currentComputedAt.IsZero() {
 		effectiveTime := buildRankingPortfolioCurrentEffectiveTime(currentComputedAt)
 		item.Meta.CurrentConstituentEffectiveTime = effectiveTime.UTC().Format(time.RFC3339)
-		item.Meta.CurrentConstituentSourceDate = buildRankingPortfolioCurrentSourceDate(effectiveTime)
+		item.Meta.CurrentConstituentSourceDate = currentSourceTradeDate
+		if item.Meta.CurrentConstituentSourceDate == "" {
+			item.Meta.CurrentConstituentSourceDate = buildRankingPortfolioCurrentSourceDate(effectiveTime)
+		}
 		if currentComputedAt.After(resultRankingTime) {
 			item.LatestRebalance = nil
 		}
@@ -1222,6 +1228,7 @@ func buildRankingPortfolioResponse(definition RankingPortfolioDefinition, result
 			BatchID:                  result.BatchID,
 			SnapshotVersion:          result.SnapshotVersion,
 			SnapshotDate:             result.SnapshotDate,
+			SourceTradeDate:          result.SourceTradeDate,
 			BenchmarkCode:            result.BenchmarkCode,
 			BenchmarkName:            result.BenchmarkName,
 			RankingTime:              result.RankingTime.UTC().Format(time.RFC3339),

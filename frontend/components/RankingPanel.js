@@ -1,5 +1,7 @@
 import { useCallback } from 'react'
 
+import { formatCloseDateLabel } from '../lib/trade-date-label'
+
 /**
  * RankingPanel — 卧龙AI精选排行榜
  * A 股按精选评分展示，港股继续按机会区机会评分展示。
@@ -297,18 +299,12 @@ function formatAmount(val) {
   return `${val.toFixed(0)}万`
 }
 
-function formatMetaDateTime(value) {
-  if (!value) return '--'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', { hour12: false })
-}
-
 function buildRankingMetaSummary(meta, currentExchange = 'ASHARE') {
   const exchange = meta?.exchange || currentExchange
   const parts = [exchange === 'HKEX' ? '港股榜单来自机会区' : 'A股榜单按主板 / 创业板 / 科创板均衡筛选，兼顾精选评分与板块分散']
-  if (meta?.computed_at) {
-    parts.push(`数据日期：${formatMetaDateTime(meta.computed_at)}`)
+  const closeDateLabel = formatCloseDateLabel(meta?.source_trade_date, meta?.computed_at)
+  if (closeDateLabel) {
+    parts.push(closeDateLabel)
   }
   if (meta?.returned_count != null) {
     parts.push(`当前展示 TOP${meta.returned_count} 只`)

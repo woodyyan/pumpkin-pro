@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { LabelWithInfo } from './InfoTip'
+import { formatCloseDateLabel } from '../lib/trade-date-label'
 import {
   buildRankingPortfolioDetailHref,
   buildRankingPortfolioChartSeriesData,
@@ -32,11 +33,11 @@ function formatChartTick(time) {
 }
 
 function buildCurrentConstituentHint(meta) {
-  const sourceDate = formatRankingPortfolioDate(meta?.current_constituent_source_date || meta?.snapshot_date)
+  const closeDateLabel = formatCloseDateLabel(meta?.current_constituent_source_date || meta?.source_trade_date, meta?.ranking_time)
   const effectiveDate = formatChartTick(meta?.current_constituent_effective_time || meta?.holdings_effective_time)
 
-  if (!sourceDate || sourceDate === '--' || !effectiveDate || effectiveDate === '--') return ''
-  return `按 ${formatChartTick(sourceDate)} 收盘后榜单生成，${effectiveDate} 开盘生效`
+  if (!closeDateLabel || !effectiveDate || effectiveDate === '--') return ''
+  return `${closeDateLabel}，${effectiveDate} 开盘生效`
 }
 
 function buildTooltipPosition(point, container) {

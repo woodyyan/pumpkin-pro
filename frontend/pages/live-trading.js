@@ -14,6 +14,7 @@ import {
   searchQuadrantStocks,
   updateQuadrantSearchEntry,
 } from '../lib/quadrant-search'
+import { formatCloseDateLabel, parseTradeDateLabelDate } from '../lib/trade-date-label'
 
 const QuadrantChart = dynamic(() => import('../components/QuadrantChart'), { ssr: false })
 const RankingPanel = dynamic(() => import('../components/RankingPanel'), { ssr: false })
@@ -369,11 +370,12 @@ export default function LiveTradingOverviewPage() {
             <h3 className="text-base font-semibold text-white">风险机会全景图</h3>
             {quadrantData?.meta?.computed_at && (
               <div className="mt-1 flex items-center gap-2 text-xs text-white/50">
-                <span>数据日期：{formatDateTime(quadrantData.meta.computed_at)}</span>
+                <span>{formatCloseDateLabel(quadrantData.meta.source_trade_date, quadrantData.meta.computed_at)}</span>
                 {quadrantData.meta.total_count > 0 && <span>· {quadrantData.meta.total_count.toLocaleString()} 只</span>}
                 {(() => {
-                  if (!quadrantData.meta.computed_at) return null
-                  const daysDiff = Math.floor((Date.now() - new Date(quadrantData.meta.computed_at).getTime()) / (1000 * 60 * 60 * 24))
+                  const staleDate = parseTradeDateLabelDate(quadrantData.meta.source_trade_date) || parseTradeDateLabelDate(quadrantData.meta.computed_at)
+                  if (!staleDate) return null
+                  const daysDiff = Math.floor((Date.now() - new Date(staleDate).getTime()) / (1000 * 60 * 60 * 24))
                   if (daysDiff > 3) {
                     return <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-200">数据已过期（{daysDiff} 天前）</span>
                   }

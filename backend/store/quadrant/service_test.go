@@ -216,8 +216,8 @@ func TestQuadrantService_BulkSave(t *testing.T) {
 
 	input := BulkSaveInput{
 		Items: []BulkSaveItem{
-			{Code: "S1", Name: "Stock 1", Opportunity: 0.8, Risk: 0.2, Quadrant: "机会"},
-			{Code: "S2", Name: "Stock 2", Opportunity: 0.4, Risk: 0.7, Quadrant: "防御"},
+			{Code: "S1", Name: "Stock 1", Opportunity: 0.8, Risk: 0.2, Quadrant: "机会", PriceTradeDate: "2026-04-09"},
+			{Code: "S2", Name: "Stock 2", Opportunity: 0.4, Risk: 0.7, Quadrant: "防御", PriceTradeDate: "2026-04-09"},
 			{Code: "", Name: "Empty Code", Opportunity: 0.5, Risk: 0.5, Quadrant: "机会"},
 		},
 		ComputedAt: "2026-04-10T08:00:00Z",
@@ -229,6 +229,47 @@ func TestQuadrantService_BulkSave(t *testing.T) {
 	}
 	if savedCount != 2 { // Empty-code item should be skipped
 		t.Errorf("expected 2 saved (empty code skipped), got %d", savedCount)
+	}
+
+	records, err := repo.FindBySymbols(context.Background(), []string{"S1", "S2"})
+	if err != nil {
+		t.Fatalf("FindBySymbols failed: %v", err)
+	}
+	for _, record := range records {
+		if record.SourceTradeDate != "2026-04-09" {
+			t.Fatalf("source_trade_date = %s, want 2026-04-09", record.SourceTradeDate)
+		}
+	}
+}
+
+func TestQuadrantService_BulkSave_UsesTradeDateResolverWhenAvailable(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	s := NewService(repo)
+	s.SetTradeDateResolver(func(ctx context.Context, exchange string, computedAt time.Time) string {
+		if exchange != "HKEX" {
+			t.Fatalf("exchange = %s, want HKEX", exchange)
+		}
+		return "2026-05-20"
+	})
+
+	_, err := s.BulkSave(context.Background(), BulkSaveInput{
+		Items:      []BulkSaveItem{{Code: "00700", Name: "腾讯控股", Exchange: "HKEX", Opportunity: 0.8, Risk: 0.2, Quadrant: "机会"}},
+		ComputedAt: "2026-05-21T18:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("BulkSave failed: %v", err)
+	}
+
+	records, err := repo.FindBySymbols(context.Background(), []string{"00700"})
+	if err != nil {
+		t.Fatalf("FindBySymbols failed: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	if records[0].SourceTradeDate != "2026-05-20" {
+		t.Fatalf("source_trade_date = %s, want 2026-05-20", records[0].SourceTradeDate)
 	}
 }
 
@@ -282,6 +323,31 @@ func TestQuadrantService_BulkSave_EmptyItems(t *testing.T) {
 	_, err := s.BulkSave(context.Background(), input)
 	if err == nil {
 		t.Error("expected error when all items have empty codes")
+	}
+}
+
+func TestQuadrantService_GetAllWithWatchlist_ExposesSourceTradeDate(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	s := NewService(repo)
+
+	records := []QuadrantScoreRecord{
+		makeQuadrantScoreRecord("W1"),
+		makeQuadrantScoreRecord("W2"),
+	}
+	records[0].SourceTradeDate = "2026-05-21"
+	records[1].SourceTradeDate = "2026-05-21"
+	if err := repo.BulkUpsert(ctx, records); err != nil {
+		t.Fatalf("BulkUpsert failed: %v", err)
+	}
+
+	resp, err := s.GetAllWithWatchlist(ctx, nil, nil)
+	if err != nil {
+		t.Fatalf("GetAllWithWatchlist failed: %v", err)
+	}
+	if resp.Meta.SourceTradeDate != "2026-05-21" {
+		t.Fatalf("source_trade_date = %s, want 2026-05-21", resp.Meta.SourceTradeDate)
 	}
 }
 

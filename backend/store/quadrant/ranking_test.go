@@ -21,38 +21,40 @@ func seedOpportunityRecords(t *testing.T, repo *Repository, records []QuadrantSc
 
 func makeRankingRecord(code, exchange string, opportunity, risk float64) QuadrantScoreRecord {
 	return QuadrantScoreRecord{
-		Code:        code,
-		Name:        "股票" + code,
-		Exchange:    exchange,
-		Opportunity: opportunity,
-		Risk:        risk,
-		Quadrant:    "机会",
-		Trend:       opportunity * 0.95,
-		Flow:        opportunity * 0.88,
-		Revision:    opportunity * 0.80,
-		Liquidity:   opportunity * 0.9, // 流动性分数
-		Volatility:  risk * 1.2,
-		Drawdown:    risk * 0.6,
-		Crowding:    risk * 0.9,
-		AvgAmount5d: 10000.0, // 1 亿元，满足硬过滤门槛
-		ComputedAt:  time.Date(2026, 4, 15, 2, 30, 0, 0, time.UTC),
+		Code:            code,
+		Name:            "股票" + code,
+		Exchange:        exchange,
+		Opportunity:     opportunity,
+		Risk:            risk,
+		Quadrant:        "机会",
+		Trend:           opportunity * 0.95,
+		Flow:            opportunity * 0.88,
+		Revision:        opportunity * 0.80,
+		Liquidity:       opportunity * 0.9, // 流动性分数
+		Volatility:      risk * 1.2,
+		Drawdown:        risk * 0.6,
+		Crowding:        risk * 0.9,
+		AvgAmount5d:     10000.0, // 1 亿元，满足硬过滤门槛
+		ComputedAt:      time.Date(2026, 4, 15, 2, 30, 0, 0, time.UTC),
+		SourceTradeDate: "2026-04-14",
 	}
 }
 
 func makeNonOpportunityRecord(code, exchange string, quadrant string) QuadrantScoreRecord {
 	return QuadrantScoreRecord{
-		Code:        code,
-		Name:        "股票" + code,
-		Exchange:    exchange,
-		Opportunity: 30,
-		Risk:        70,
-		Quadrant:    quadrant,
-		Trend:       25,
-		Flow:        20,
-		Revision:    18,
-		Liquidity:   40,
-		AvgAmount5d: 5000.0,
-		ComputedAt:  time.Date(2026, 4, 15, 2, 30, 0, 0, time.UTC),
+		Code:            code,
+		Name:            "股票" + code,
+		Exchange:        exchange,
+		Opportunity:     30,
+		Risk:            70,
+		Quadrant:        quadrant,
+		Trend:           25,
+		Flow:            20,
+		Revision:        18,
+		Liquidity:       40,
+		AvgAmount5d:     5000.0,
+		ComputedAt:      time.Date(2026, 4, 15, 2, 30, 0, 0, time.UTC),
+		SourceTradeDate: "2026-04-14",
 	}
 }
 
@@ -75,6 +77,7 @@ func makeAShareRankingRecord(code, board, quadrant string, rankingScore, opportu
 		BoardRankScore:   rankingScore - 1,
 		TradabilityScore: 80,
 		ComputedAt:       time.Date(2026, 4, 15, 2, 30, 0, 0, time.UTC),
+		SourceTradeDate:  "2026-04-14",
 	}
 	if strings.HasPrefix(code, "0") || strings.HasPrefix(code, "3") {
 		record.Exchange = "SZSE"
@@ -167,6 +170,29 @@ func TestRankingResponse_Fields(t *testing.T) {
 }
 
 // ── T-R2: Service GetRanking — Core Logic ──
+
+func TestGetRanking_ExposesSourceTradeDate(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	records := []QuadrantScoreRecord{
+		makeRankingRecord("600519", "SSE", 96, 20),
+		makeRankingRecord("000001", "SZSE", 94, 25),
+	}
+	if err := repo.BulkUpsert(ctx, records); err != nil {
+		t.Fatalf("BulkUpsert failed: %v", err)
+	}
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking failed: %v", err)
+	}
+	if resp.Meta.SourceTradeDate != "2026-04-14" {
+		t.Fatalf("source_trade_date = %s, want 2026-04-14", resp.Meta.SourceTradeDate)
+	}
+}
 
 func TestGetRanking_AShareTopN(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)

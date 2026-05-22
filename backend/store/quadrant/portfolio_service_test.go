@@ -173,6 +173,9 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	if aResp.Meta.SnapshotVersion != "2026-05-07" {
 		t.Fatalf("expected latest snapshot version 2026-05-07, got %s", aResp.Meta.SnapshotVersion)
 	}
+	if aResp.Meta.SourceTradeDate != "2026-04-14" {
+		t.Fatalf("source_trade_date = %s, want 2026-04-14", aResp.Meta.SourceTradeDate)
+	}
 	if len(aResp.Series) != 2 {
 		t.Fatalf("expected 2 series points, got %d", len(aResp.Series))
 	}
@@ -333,6 +336,9 @@ func TestGetRankingPortfolio_UsesLatestRankingForCurrentConstituents(t *testing.
 		makeAShareRankingRecord("002384", "MAIN", "机会", 94, 87, 18, 12000),
 	}
 	storedComputedAt := time.Date(2026, 5, 20, 15, 0, 0, 0, rankingSnapshotLocation)
+	for i := range storedRecords {
+		storedRecords[i].SourceTradeDate = "2026-05-19"
+	}
 	if err := svc.saveRankingPortfolio(ctx, storedRecords, storedComputedAt, nil); err != nil {
 		t.Fatalf("save stored portfolio failed: %v", err)
 	}
@@ -347,6 +353,7 @@ func TestGetRankingPortfolio_UsesLatestRankingForCurrentConstituents(t *testing.
 	}
 	for i := range latestRecords {
 		latestRecords[i].ComputedAt = latestComputedAt
+		latestRecords[i].SourceTradeDate = "2026-05-21"
 	}
 	seedOpportunityRecords(t, repo, latestRecords)
 
@@ -368,6 +375,9 @@ func TestGetRankingPortfolio_UsesLatestRankingForCurrentConstituents(t *testing.
 
 	if aResp.Meta.SnapshotVersion != "2026-05-20" {
 		t.Fatalf("snapshot_version = %s, want 2026-05-20", aResp.Meta.SnapshotVersion)
+	}
+	if aResp.Meta.SourceTradeDate != "2026-05-19" {
+		t.Fatalf("source_trade_date = %s, want 2026-05-19", aResp.Meta.SourceTradeDate)
 	}
 	if len(aResp.Constituents) != 4 {
 		t.Fatalf("expected 4 current constituents, got %d", len(aResp.Constituents))

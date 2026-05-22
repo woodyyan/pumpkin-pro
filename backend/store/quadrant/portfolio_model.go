@@ -55,6 +55,7 @@ type RankingPortfolioSnapshot struct {
 	RankingTime           time.Time `gorm:"not null"`
 	HoldingsEffectiveTime time.Time `gorm:"not null"`
 	NavAsOfTime           time.Time `gorm:"not null"`
+	SourceTradeDate       string    `gorm:"size:10;not null;default:''"`
 	BenchmarkCode         string    `gorm:"size:16;not null;default:'SHCI'"`
 	BenchmarkName         string    `gorm:"size:64;not null;default:'上证指数'"`
 	ConstituentsCount     int       `gorm:"not null;default:0"`
@@ -139,6 +140,7 @@ type RankingPortfolioResult struct {
 	RankingTime             time.Time `gorm:"not null"`
 	HoldingsEffectiveTime   time.Time `gorm:"not null"`
 	NavAsOfTime             time.Time `gorm:"not null"`
+	SourceTradeDate         string    `gorm:"size:10;not null;default:''"`
 	BenchmarkCode           string    `gorm:"size:16;not null;default:'SHCI'"`
 	BenchmarkName           string    `gorm:"size:64;not null;default:'上证指数'"`
 	LatestNav               float64   `gorm:"not null;default:1"`
@@ -220,6 +222,7 @@ type RankingPortfolioMeta struct {
 	BatchID                         string  `json:"batch_id"`
 	SnapshotVersion                 string  `json:"snapshot_version"`
 	SnapshotDate                    string  `json:"snapshot_date"`
+	SourceTradeDate                 string  `json:"source_trade_date,omitempty"`
 	BenchmarkCode                   string  `json:"benchmark_code"`
 	BenchmarkName                   string  `json:"benchmark_name"`
 	RankingTime                     string  `json:"ranking_time"`

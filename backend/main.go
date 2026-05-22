@@ -110,6 +110,67 @@ func newQuadrantBenchmarkPriceResolver(marketClient *live.MarketClient) quadrant
 	}
 }
 
+func newQuadrantTradeDateResolver(liveRepo *live.Repository, marketClient *live.MarketClient) quadrant.TradeDateResolver {
+	return func(ctx context.Context, exchange string, computedAt time.Time) string {
+		tradeDate := strings.TrimSpace(computedAt.In(time.FixedZone("CST", 8*60*60)).Format("2006-01-02"))
+		if tradeDate == "" {
+			return ""
+		}
+
+		normalizedExchange := strings.ToUpper(strings.TrimSpace(exchange))
+		if normalizedExchange == "HKEX" {
+			if marketClient != nil {
+				bars, err := marketClient.FetchBenchmarkDailyBars(ctx, "HSI", 10)
+				if err == nil && len(bars) > 0 {
+					candidateDates := quadrantSnapshotTradeDates(tradeDate, "HKEX")
+					for _, candidateDate := range candidateDates {
+						for i := len(bars) - 1; i >= 0; i-- {
+							if strings.TrimSpace(bars[i].Date) == candidateDate && bars[i].Close > 0 {
+								return candidateDate
+							}
+						}
+					}
+				}
+			}
+			return ""
+		}
+
+		if liveRepo != nil {
+			symbols := []string{"000001.SH", "399001.SZ"}
+			candidateDates := quadrantSnapshotTradeDates(tradeDate, "SSE")
+			for _, candidateDate := range candidateDates {
+				for _, symbol := range symbols {
+					record, err := liveRepo.GetClosingSnapshot(ctx, symbol, candidateDate)
+					if err != nil || record == nil || strings.TrimSpace(record.SnapshotJSON) == "" {
+						continue
+					}
+					var snapshot live.SymbolSnapshot
+					if err := json.Unmarshal([]byte(record.SnapshotJSON), &snapshot); err != nil {
+						continue
+					}
+					if snapshot.LastPrice > 0 {
+						return candidateDate
+					}
+				}
+			}
+		}
+		if marketClient != nil {
+			bars, err := marketClient.FetchBenchmarkDailyBars(ctx, "SHCI", 10)
+			if err == nil && len(bars) > 0 {
+				candidateDates := quadrantSnapshotTradeDates(tradeDate, "SSE")
+				for _, candidateDate := range candidateDates {
+					for i := len(bars) - 1; i >= 0; i-- {
+						if strings.TrimSpace(bars[i].Date) == candidateDate && bars[i].Close > 0 {
+							return candidateDate
+						}
+					}
+				}
+			}
+		}
+		return ""
+	}
+}
+
 func quadrantSnapshotTradeDates(tradeDate string, exchange string) []string {
 	tradeDate = strings.TrimSpace(tradeDate)
 	if tradeDate == "" {
@@ -3543,6 +3604,7 @@ func main() {
 	quadrantService := quadrant.NewService(quadrantRepo)
 	quadrantService.SetPriceResolver(newQuadrantPriceResolver(liveRepo))
 	quadrantService.SetBenchmarkPriceResolver(newQuadrantBenchmarkPriceResolver(liveMarketClient))
+	quadrantService.SetTradeDateResolver(newQuadrantTradeDateResolver(liveRepo, liveMarketClient))
 	quadrantWorker := quadrant.NewWorker(quadrantService, quadrant.WorkerConfig{
 		QuantServiceURL: cfg.QuantServiceURL,
 		BackendBaseURL:  cfg.BackendCallbackURL,

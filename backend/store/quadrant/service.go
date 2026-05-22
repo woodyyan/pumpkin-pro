@@ -20,11 +20,15 @@ type PriceResolver func(ctx context.Context, code string, exchange string, trade
 // Returns close price and the actual trade date used.
 type BenchmarkPriceResolver func(ctx context.Context, benchmark string, tradeDate string) (float64, string)
 
+// TradeDateResolver resolves the effective source trade date for a market batch.
+type TradeDateResolver func(ctx context.Context, exchange string, computedAt time.Time) string
+
 // Service provides business logic for quadrant scores.
 type Service struct {
 	repo                   *Repository
 	priceResolver          PriceResolver          // optional, for snapshot close_price
 	benchmarkPriceResolver BenchmarkPriceResolver // optional, for ranking portfolio benchmark close
+	tradeDateResolver      TradeDateResolver      // optional, for source_trade_date
 	worker                 *Worker                // optional, injected for manual trigger
 }
 
@@ -40,6 +44,11 @@ func (s *Service) SetPriceResolver(r PriceResolver) {
 // SetBenchmarkPriceResolver injects the benchmark price resolution callback.
 func (s *Service) SetBenchmarkPriceResolver(r BenchmarkPriceResolver) {
 	s.benchmarkPriceResolver = r
+}
+
+// SetTradeDateResolver injects the source-trade-date resolution callback.
+func (s *Service) SetTradeDateResolver(r TradeDateResolver) {
+	s.tradeDateResolver = r
 }
 
 var rankingSnapshotLocation = time.FixedZone("CST", 8*60*60)
@@ -105,6 +114,82 @@ func recentSnapshotRepairFromDate(snapshotDate string) string {
 	return parsed.AddDate(0, 0, -recentSnapshotRepairLookbackDays).Format("2006-01-02")
 }
 
+func normalizeSourceTradeDate(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if _, err := time.ParseInLocation("2006-01-02", value, rankingSnapshotLocation); err != nil {
+		return ""
+	}
+	return value
+}
+
+func inferSourceTradeDateFromHints(priceHints map[string]snapshotPriceHint) string {
+	latest := ""
+	for _, hint := range priceHints {
+		tradeDate := validPriceTradeDate(hint.TradeDate)
+		if tradeDate == "" {
+			continue
+		}
+		if latest == "" || tradeDate > latest {
+			latest = tradeDate
+		}
+	}
+	return latest
+}
+
+func inferSourceTradeDateFromItems(items []BulkSaveItem) string {
+	latest := ""
+	for _, item := range items {
+		tradeDate := validPriceTradeDate(item.PriceTradeDate)
+		if tradeDate == "" {
+			continue
+		}
+		if latest == "" || tradeDate > latest {
+			latest = tradeDate
+		}
+	}
+	return latest
+}
+
+func normalizeTradeDateResolverExchange(exchange string) string {
+	switch strings.ToUpper(strings.TrimSpace(exchange)) {
+	case "HKEX":
+		return "HKEX"
+	case "SSE", "SZSE", "ASHARE", "":
+		return "ASHARE"
+	default:
+		return "ASHARE"
+	}
+}
+
+func (s *Service) resolveSourceTradeDate(ctx context.Context, exchange string, computedAt time.Time, priceHints map[string]snapshotPriceHint) string {
+	if s.tradeDateResolver != nil {
+		if resolved := normalizeSourceTradeDate(s.tradeDateResolver(ctx, normalizeTradeDateResolverExchange(exchange), computedAt)); resolved != "" {
+			return resolved
+		}
+	}
+	if inferred := normalizeSourceTradeDate(inferSourceTradeDateFromHints(priceHints)); inferred != "" {
+		return inferred
+	}
+	return ""
+}
+
+func collectLatestSourceTradeDate(records []QuadrantScoreRecord) string {
+	latest := ""
+	for _, record := range records {
+		tradeDate := normalizeSourceTradeDate(record.SourceTradeDate)
+		if tradeDate == "" {
+			continue
+		}
+		if latest == "" || tradeDate > latest {
+			latest = tradeDate
+		}
+	}
+	return latest
+}
+
 // BulkSave writes all quadrant scores from the Quant callback.
 // It guarantees a compute log is written regardless of success or failure.
 func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error) {
@@ -139,6 +224,7 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 
 	records := make([]QuadrantScoreRecord, 0, len(input.Items))
 	priceHints := make(map[string]snapshotPriceHint, len(input.Items))
+
 	for _, item := range input.Items {
 		code := strings.TrimSpace(item.Code)
 		if code == "" {
@@ -166,6 +252,16 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 			TradabilityScore: item.TradabilityScore, RiskAdjustedMomentum60d: item.RiskAdjustedMomentum60d,
 			ComputedAt: computedAt,
 		})
+	}
+
+	sourceTradeDate := s.resolveSourceTradeDate(ctx, exchange, computedAt, priceHints)
+	if sourceTradeDate == "" {
+		sourceTradeDate = normalizeSourceTradeDate(inferSourceTradeDateFromItems(input.Items))
+	}
+	if sourceTradeDate != "" {
+		for i := range records {
+			records[i].SourceTradeDate = sourceTradeDate
+		}
 	}
 
 	totalCount := len(records)
@@ -683,6 +779,7 @@ func (s *Service) GetAllWithWatchlist(ctx context.Context, exchanges []string, w
 	allStocks := make([]QuadrantScoreCompact, 0, len(allRecords))
 	summary := QuadrantSummary{}
 	var latestComputedAt time.Time
+	sourceTradeDate := collectLatestSourceTradeDate(allRecords)
 
 	for _, r := range allRecords {
 		allStocks = append(allStocks, r.ToCompact())
@@ -723,8 +820,9 @@ func (s *Service) GetAllWithWatchlist(ctx context.Context, exchanges []string, w
 
 	return &QuadrantResponse{
 		Meta: QuadrantMeta{
-			ComputedAt: computedAtStr,
-			TotalCount: len(allRecords),
+			ComputedAt:      computedAtStr,
+			SourceTradeDate: sourceTradeDate,
+			TotalCount:      len(allRecords),
 		},
 		AllStocks:        allStocks,
 		WatchlistDetails: watchlistDetails,
@@ -937,6 +1035,7 @@ func (s *Service) buildRankingResponse(ctx context.Context, exchange string, lim
 
 	items := make([]RankingItem, 0, len(records))
 	var latestComputedAt time.Time
+	sourceTradeDate := collectLatestSourceTradeDate(records)
 
 	for i, r := range records {
 		item := RankingItem{
@@ -986,10 +1085,11 @@ func (s *Service) buildRankingResponse(ctx context.Context, exchange string, lim
 
 	return &RankingResponse{
 		Meta: RankingMeta{
-			ComputedAt:    computedAtStr,
-			TotalInZone:   int(totalInZone),
-			ReturnedCount: len(items),
-			Exchange:      displayExchange,
+			ComputedAt:      computedAtStr,
+			SourceTradeDate: sourceTradeDate,
+			TotalInZone:     int(totalInZone),
+			ReturnedCount:   len(items),
+			Exchange:        displayExchange,
 		},
 		Items: items,
 	}, nil

@@ -3,42 +3,42 @@ package quadrant
 import "time"
 
 const (
-	defaultRankingPortfolioDefinitionID   = "wolong_ai_top4_ex_star_equal_v1"
-	defaultRankingPortfolioDefinitionCode = "wolong-ai-top4-ex-star-equal"
-	defaultRankingPortfolioName           = "模拟组合A"
-	defaultRankingPortfolioExchange       = "ASHARE"
-	defaultRankingPortfolioBenchmarkCode  = "SHCI"
-	defaultRankingPortfolioBenchmarkName  = "上证指数"
-	defaultRankingPortfolioMaxHoldings    = 4
-	defaultRankingPortfolioTradeCostRate  = 0.0002
-	defaultRankingPortfolioWarningText    = "当日有效成分股不足 4 只"
-	rankingPortfolioVariantA              = "A"
-	rankingPortfolioVariantB              = "B"
-	rankingPortfolioSelectionRuleTop4     = "top4"
+	defaultRankingPortfolioDefinitionID        = "wolong_ai_top4_ex_star_equal_v1"
+	defaultRankingPortfolioDefinitionCode      = "wolong-ai-top4-ex-star-equal"
+	defaultRankingPortfolioName                = "模拟组合A"
+	defaultRankingPortfolioExchange            = "ASHARE"
+	defaultRankingPortfolioBenchmarkCode       = "SHCI"
+	defaultRankingPortfolioBenchmarkName       = "上证指数"
+	defaultRankingPortfolioMaxHoldings         = 4
+	defaultRankingPortfolioTradeCostRate       = 0.0002
+	defaultRankingPortfolioWarningText         = "当日有效成分股不足 4 只"
+	rankingPortfolioVariantA                   = "A"
+	rankingPortfolioVariantB                   = "B"
+	rankingPortfolioSelectionRuleTop4          = "top4"
 	rankingPortfolioSelectionRuleTop10ByStreak = "top10_by_consecutive_days"
 )
 
 // RankingPortfolioDefinition stores the portfolio rule definition separately
 // from the computed result batches.
 type RankingPortfolioDefinition struct {
-	ID              string    `gorm:"primaryKey;size:64"`
-	Code            string    `gorm:"size:64;not null;uniqueIndex"`
-	Name            string    `gorm:"size:128;not null"`
-	Exchange        string    `gorm:"size:16;not null;default:'ASHARE'"`
-	PortfolioVariant string   `gorm:"size:8;not null;default:'A'"`
-	BenchmarkCode   string    `gorm:"size:16;not null;default:'SHCI'"`
-	BenchmarkName   string    `gorm:"size:64;not null;default:'上证指数'"`
-	MaxHoldings     int       `gorm:"not null;default:4"`
-	SelectionRule   string    `gorm:"size:64;not null;default:'top4'"`
-	SelectionWindow int       `gorm:"not null;default:0"`
-	ExcludedBoards  string    `gorm:"type:text;not null;default:'[]'"`
-	WeightingMethod string    `gorm:"size:32;not null;default:'equal'"`
-	RebalanceRule   string    `gorm:"size:64;not null;default:'t_close_generate_t1_open_rebalance'"`
-	TradeCostRate   float64   `gorm:"not null;default:0.0002"`
-	MethodNote      string    `gorm:"type:text;not null;default:''"`
-	IsActive        bool      `gorm:"not null;default:true"`
-	CreatedAt       time.Time `gorm:"not null"`
-	UpdatedAt       time.Time `gorm:"not null"`
+	ID               string    `gorm:"primaryKey;size:64"`
+	Code             string    `gorm:"size:64;not null;uniqueIndex"`
+	Name             string    `gorm:"size:128;not null"`
+	Exchange         string    `gorm:"size:16;not null;default:'ASHARE'"`
+	PortfolioVariant string    `gorm:"size:8;not null;default:'A'"`
+	BenchmarkCode    string    `gorm:"size:16;not null;default:'SHCI'"`
+	BenchmarkName    string    `gorm:"size:64;not null;default:'上证指数'"`
+	MaxHoldings      int       `gorm:"not null;default:4"`
+	SelectionRule    string    `gorm:"size:64;not null;default:'top4'"`
+	SelectionWindow  int       `gorm:"not null;default:0"`
+	ExcludedBoards   string    `gorm:"type:text;not null;default:'[]'"`
+	WeightingMethod  string    `gorm:"size:32;not null;default:'equal'"`
+	RebalanceRule    string    `gorm:"size:64;not null;default:'t_close_generate_t1_open_rebalance'"`
+	TradeCostRate    float64   `gorm:"not null;default:0.0002"`
+	MethodNote       string    `gorm:"type:text;not null;default:''"`
+	IsActive         bool      `gorm:"not null;default:true"`
+	CreatedAt        time.Time `gorm:"not null"`
+	UpdatedAt        time.Time `gorm:"not null"`
 }
 
 func (RankingPortfolioDefinition) TableName() string {
@@ -210,31 +210,33 @@ type RankingPortfolioLatestRebalance struct {
 }
 
 type RankingPortfolioMeta struct {
-	DefinitionID             string  `json:"definition_id"`
-	DefinitionCode           string  `json:"definition_code"`
-	Name                     string  `json:"name"`
-	Exchange                 string  `json:"exchange"`
-	PortfolioVariant         string  `json:"portfolio_variant"`
-	SelectionRule            string  `json:"selection_rule"`
-	SelectionWindow          int     `json:"selection_window,omitempty"`
-	BatchID                  string  `json:"batch_id"`
-	SnapshotVersion          string  `json:"snapshot_version"`
-	SnapshotDate             string  `json:"snapshot_date"`
-	BenchmarkCode            string  `json:"benchmark_code"`
-	BenchmarkName            string  `json:"benchmark_name"`
-	RankingTime              string  `json:"ranking_time"`
-	HoldingsEffectiveTime    string  `json:"holdings_effective_time"`
-	NavAsOfTime              string  `json:"nav_as_of_time"`
-	UpdatedAt                string  `json:"updated_at"`
-	LatestNav                float64 `json:"latest_nav"`
-	LatestBenchmarkNav       float64 `json:"latest_benchmark_nav"`
-	LatestPortfolioReturnPct float64 `json:"latest_portfolio_return_pct"`
-	LatestBenchmarkReturnPct float64 `json:"latest_benchmark_return_pct"`
-	LatestExcessReturnPct    float64 `json:"latest_excess_return_pct"`
-	CurrentConstituentCount  int     `json:"current_constituent_count"`
-	HasShortfall             bool    `json:"has_shortfall"`
-	WarningText              string  `json:"warning_text,omitempty"`
-	MethodNote               string  `json:"method_note"`
+	DefinitionID                    string  `json:"definition_id"`
+	DefinitionCode                  string  `json:"definition_code"`
+	Name                            string  `json:"name"`
+	Exchange                        string  `json:"exchange"`
+	PortfolioVariant                string  `json:"portfolio_variant"`
+	SelectionRule                   string  `json:"selection_rule"`
+	SelectionWindow                 int     `json:"selection_window,omitempty"`
+	BatchID                         string  `json:"batch_id"`
+	SnapshotVersion                 string  `json:"snapshot_version"`
+	SnapshotDate                    string  `json:"snapshot_date"`
+	BenchmarkCode                   string  `json:"benchmark_code"`
+	BenchmarkName                   string  `json:"benchmark_name"`
+	RankingTime                     string  `json:"ranking_time"`
+	HoldingsEffectiveTime           string  `json:"holdings_effective_time"`
+	NavAsOfTime                     string  `json:"nav_as_of_time"`
+	UpdatedAt                       string  `json:"updated_at"`
+	LatestNav                       float64 `json:"latest_nav"`
+	LatestBenchmarkNav              float64 `json:"latest_benchmark_nav"`
+	LatestPortfolioReturnPct        float64 `json:"latest_portfolio_return_pct"`
+	LatestBenchmarkReturnPct        float64 `json:"latest_benchmark_return_pct"`
+	LatestExcessReturnPct           float64 `json:"latest_excess_return_pct"`
+	CurrentConstituentCount         int     `json:"current_constituent_count"`
+	CurrentConstituentSourceDate    string  `json:"current_constituent_source_date,omitempty"`
+	CurrentConstituentEffectiveTime string  `json:"current_constituent_effective_time,omitempty"`
+	HasShortfall                    bool    `json:"has_shortfall"`
+	WarningText                     string  `json:"warning_text,omitempty"`
+	MethodNote                      string  `json:"method_note"`
 }
 
 type RankingPortfolioResponse struct {

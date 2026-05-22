@@ -312,3 +312,84 @@ func TestSaveRankingPortfolio_RebuildsSameSnapshotVersion(t *testing.T) {
 		t.Fatalf("expected rebuilt result to expose 4 constituents, got %+v", result)
 	}
 }
+
+func TestGetRankingPortfolio_UsesLatestRankingForCurrentConstituents(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	svc.SetBenchmarkPriceResolver(func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
+		return 3000, tradeDate
+	})
+	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
+		return 10
+	})
+
+	storedRecords := []QuadrantScoreRecord{
+		makeAShareRankingRecord("000988", "MAIN", "机会", 97, 90, 15, 12000),
+		makeAShareRankingRecord("601991", "MAIN", "机会", 96, 89, 16, 12000),
+		makeAShareRankingRecord("001309", "MAIN", "机会", 95, 88, 17, 12000),
+		makeAShareRankingRecord("002384", "MAIN", "机会", 94, 87, 18, 12000),
+	}
+	storedComputedAt := time.Date(2026, 5, 20, 15, 0, 0, 0, rankingSnapshotLocation)
+	if err := svc.saveRankingPortfolio(ctx, storedRecords, storedComputedAt, nil); err != nil {
+		t.Fatalf("save stored portfolio failed: %v", err)
+	}
+
+	latestComputedAt := time.Date(2026, 5, 22, 2, 0, 0, 0, rankingSnapshotLocation).UTC()
+	latestRecords := []QuadrantScoreRecord{
+		makeAShareRankingRecord("688802", "STAR", "机会", 99, 98, 10, 15000),
+		makeAShareRankingRecord("000988", "MAIN", "机会", 98, 97, 20, 15000),
+		makeAShareRankingRecord("600522", "MAIN", "机会", 97, 96, 21, 15000),
+		makeAShareRankingRecord("600584", "MAIN", "机会", 96, 95, 22, 15000),
+		makeAShareRankingRecord("600487", "MAIN", "机会", 95, 94, 23, 15000),
+	}
+	for i := range latestRecords {
+		latestRecords[i].ComputedAt = latestComputedAt
+	}
+	seedOpportunityRecords(t, repo, latestRecords)
+
+	resp, err := svc.GetRankingPortfolio(ctx)
+	if err != nil {
+		t.Fatalf("GetRankingPortfolio failed: %v", err)
+	}
+
+	var aResp *RankingPortfolioResponse
+	for i := range resp.Items {
+		if resp.Items[i].Meta.DefinitionID == defaultRankingPortfolioDefinitionID {
+			aResp = &resp.Items[i]
+			break
+		}
+	}
+	if aResp == nil {
+		t.Fatalf("missing A-share portfolio response: %+v", resp.Items)
+	}
+
+	if aResp.Meta.SnapshotVersion != "2026-05-20" {
+		t.Fatalf("snapshot_version = %s, want 2026-05-20", aResp.Meta.SnapshotVersion)
+	}
+	if len(aResp.Constituents) != 4 {
+		t.Fatalf("expected 4 current constituents, got %d", len(aResp.Constituents))
+	}
+	gotCodes := []string{aResp.Constituents[0].Code, aResp.Constituents[1].Code, aResp.Constituents[2].Code, aResp.Constituents[3].Code}
+	wantCodes := []string{"000988", "600522", "600584", "600487"}
+	for i := range wantCodes {
+		if gotCodes[i] != wantCodes[i] {
+			t.Fatalf("current constituents = %v, want %v", gotCodes, wantCodes)
+		}
+	}
+	if aResp.Meta.CurrentConstituentCount != 4 {
+		t.Fatalf("current_constituent_count = %d, want 4", aResp.Meta.CurrentConstituentCount)
+	}
+	if aResp.Meta.CurrentConstituentSourceDate != "2026-05-21" {
+		t.Fatalf("current_constituent_source_date = %s, want 2026-05-21", aResp.Meta.CurrentConstituentSourceDate)
+	}
+	wantEffectiveTime := time.Date(2026, 5, 22, 9, 30, 0, 0, rankingSnapshotLocation).UTC().Format(time.RFC3339)
+	if aResp.Meta.CurrentConstituentEffectiveTime != wantEffectiveTime {
+		t.Fatalf("current_constituent_effective_time = %s, want %s", aResp.Meta.CurrentConstituentEffectiveTime, wantEffectiveTime)
+	}
+	if aResp.LatestRebalance != nil {
+		t.Fatalf("expected latest rebalance to be hidden when current ranking is newer, got %+v", aResp.LatestRebalance)
+	}
+}

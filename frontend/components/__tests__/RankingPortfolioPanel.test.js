@@ -199,7 +199,9 @@ describe('RankingPortfolioPanel source contract', () => {
     assert.match(panelSource, /\$\{windowText\} 连续上榜优先/)
     assert.match(panelSource, /榜单第\$\{item\?\.source_rank \|\| '--'\}名/)
     assert.match(panelSource, /连续\$\{item\?\.consecutive_days \|\| '--'\}日/)
+    assert.match(panelSource, /按 \$\{formatChartTick\(sourceDate\)\} 收盘后榜单生成，\$\{effectiveDate\} 开盘生效/)
     assert.doesNotMatch(panelSource, /每日收盘后取卧龙AI精选排行榜A、B两种规则 4 只股票/)
+    assert.doesNotMatch(panelSource, /数据日期：/)
   })
 
   it('imports every React hook it uses', () => {

@@ -31,6 +31,14 @@ function formatChartTick(time) {
   return `${Number(month)}/${Number(day)}`
 }
 
+function buildCurrentConstituentHint(meta) {
+  const sourceDate = formatRankingPortfolioDate(meta?.current_constituent_source_date || meta?.snapshot_date)
+  const effectiveDate = formatChartTick(meta?.current_constituent_effective_time || meta?.holdings_effective_time)
+
+  if (!sourceDate || sourceDate === '--' || !effectiveDate || effectiveDate === '--') return ''
+  return `按 ${formatChartTick(sourceDate)} 收盘后榜单生成，${effectiveDate} 开盘生效`
+}
+
 function buildTooltipPosition(point, container) {
   const tooltipWidth = 196
   const tooltipHeight = 106
@@ -310,6 +318,7 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
   const benchmarkLabel = meta?.benchmark_name || meta?.benchmark_code || '上证指数'
   const windowText = Number(meta?.selection_window || 0) > 0 ? `TOP${meta.selection_window}` : 'TOP4'
   const compactMarketHint = selectedExchange === 'ASHARE' ? '剔除科创板 · ' : ''
+  const currentConstituentHint = buildCurrentConstituentHint(meta)
   const selectionSummary = meta?.portfolio_variant === 'B'
     ? `${compactMarketHint}${windowText} 连续上榜优先`
     : `${compactMarketHint}TOP4`
@@ -389,7 +398,6 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
               <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/45">
                 <span className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-1 text-white/70">{selectedExchange === 'HKEX' ? '港股' : 'A股'} {meta?.name || '模拟组合'}</span>
                 <span className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-1">{selectionSummary}</span>
-                {meta?.snapshot_date ? <span>数据日期：{meta.snapshot_date}</span> : null}
               </div>
 
               <div className="grid grid-cols-3 gap-2 lg:min-w-[300px]">
@@ -422,6 +430,7 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
 
             <div className="rounded-2xl border border-border/70 bg-black/10 p-3.5 xl:h-full">
               <div className="text-sm font-medium text-white">当前成分股</div>
+              {currentConstituentHint ? <div className="mt-1 text-[11px] leading-5 text-white/42">{currentConstituentHint}</div> : null}
 
               {meta?.has_shortfall ? (
                 <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">

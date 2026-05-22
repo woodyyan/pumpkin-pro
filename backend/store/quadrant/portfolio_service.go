@@ -22,17 +22,17 @@ const (
 )
 
 type rankingPortfolioDefinitionSpec struct {
-	ID              string
-	Code            string
-	Name            string
-	Exchange        string
+	ID               string
+	Code             string
+	Name             string
+	Exchange         string
 	PortfolioVariant string
-	BenchmarkCode   string
-	BenchmarkName   string
-	SelectionRule   string
-	SelectionWindow int
-	ExcludedBoards  []string
-	MethodNote      string
+	BenchmarkCode    string
+	BenchmarkName    string
+	SelectionRule    string
+	SelectionWindow  int
+	ExcludedBoards   []string
+	MethodNote       string
 }
 
 func defaultRankingPortfolioDefinitionSpecs() []rankingPortfolioDefinitionSpec {
@@ -183,6 +183,53 @@ func buildRankingPortfolioEffectiveTime(computedAt time.Time) time.Time {
 		0,
 		rankingSnapshotLocation,
 	).UTC()
+}
+
+func buildRankingPortfolioCurrentEffectiveTime(computedAt time.Time) time.Time {
+	if computedAt.IsZero() {
+		return time.Time{}
+	}
+	local := computedAt.In(rankingSnapshotLocation)
+	effectiveToday := time.Date(
+		local.Year(),
+		local.Month(),
+		local.Day(),
+		rankingPortfolioEffectiveHour,
+		rankingPortfolioEffectiveMinute,
+		0,
+		0,
+		rankingSnapshotLocation,
+	)
+	if local.Weekday() != time.Saturday && local.Weekday() != time.Sunday && !local.After(effectiveToday) {
+		return effectiveToday.UTC()
+	}
+
+	nextDay := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, rankingSnapshotLocation).AddDate(0, 0, 1)
+	for nextDay.Weekday() == time.Saturday || nextDay.Weekday() == time.Sunday {
+		nextDay = nextDay.AddDate(0, 0, 1)
+	}
+	return time.Date(
+		nextDay.Year(),
+		nextDay.Month(),
+		nextDay.Day(),
+		rankingPortfolioEffectiveHour,
+		rankingPortfolioEffectiveMinute,
+		0,
+		0,
+		rankingSnapshotLocation,
+	).UTC()
+}
+
+func buildRankingPortfolioCurrentSourceDate(effectiveTime time.Time) string {
+	if effectiveTime.IsZero() {
+		return ""
+	}
+	local := effectiveTime.In(rankingSnapshotLocation)
+	tradeDay := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, rankingSnapshotLocation).AddDate(0, 0, -1)
+	for tradeDay.Weekday() == time.Saturday || tradeDay.Weekday() == time.Sunday {
+		tradeDay = tradeDay.AddDate(0, 0, -1)
+	}
+	return tradeDay.Format("2006-01-02")
 }
 
 func (s *Service) saveRankingPortfolioBestEffort(ctx context.Context, records []QuadrantScoreRecord, computedAt time.Time, priceHints map[string]snapshotPriceHint) {
@@ -1089,6 +1136,60 @@ func buildEmptyRankingPortfolioResponse(definition RankingPortfolioDefinition) R
 	}
 }
 
+func (s *Service) buildCurrentRankingPortfolioSelection(ctx context.Context, definition RankingPortfolioDefinition) ([]RankingPortfolioConstituentItem, time.Time, error) {
+	limit := definition.SelectionWindow
+	if limit < definition.MaxHoldings {
+		limit = definition.MaxHoldings
+	}
+	if limit < 20 {
+		limit = 20
+	}
+	ranking, err := s.buildRankingResponse(ctx, definition.Exchange, limit)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	if len(ranking.Items) == 0 {
+		return nil, time.Time{}, nil
+	}
+	latestComputedAt := time.Time{}
+	if strings.TrimSpace(ranking.Meta.ComputedAt) != "" {
+		if parsed, parseErr := time.Parse(time.RFC3339, ranking.Meta.ComputedAt); parseErr == nil {
+			latestComputedAt = parsed.UTC()
+		}
+	}
+	return buildRankingPortfolioConstituentItems(definition, ranking.Items), latestComputedAt, nil
+}
+
+func (s *Service) applyCurrentRankingPortfolioSelection(ctx context.Context, definition RankingPortfolioDefinition, item *RankingPortfolioResponse, resultRankingTime time.Time) error {
+	currentConstituents, currentComputedAt, err := s.buildCurrentRankingPortfolioSelection(ctx, definition)
+	if err != nil {
+		return err
+	}
+	if len(currentConstituents) == 0 {
+		return nil
+	}
+
+	item.Constituents = currentConstituents
+	item.Meta.CurrentConstituentCount = len(currentConstituents)
+	item.Meta.HasShortfall = len(currentConstituents) < definition.MaxHoldings
+	if item.Meta.HasShortfall {
+		item.Meta.WarningText = defaultRankingPortfolioWarningText
+	} else {
+		item.Meta.WarningText = ""
+	}
+
+	if !currentComputedAt.IsZero() {
+		effectiveTime := buildRankingPortfolioCurrentEffectiveTime(currentComputedAt)
+		item.Meta.CurrentConstituentEffectiveTime = effectiveTime.UTC().Format(time.RFC3339)
+		item.Meta.CurrentConstituentSourceDate = buildRankingPortfolioCurrentSourceDate(effectiveTime)
+		if currentComputedAt.After(resultRankingTime) {
+			item.LatestRebalance = nil
+		}
+	}
+
+	return nil
+}
+
 func buildRankingPortfolioResponse(definition RankingPortfolioDefinition, result RankingPortfolioResult) (*RankingPortfolioResponse, error) {
 	series := []RankingPortfolioSeriesPoint{}
 	if strings.TrimSpace(result.SeriesJSON) != "" {
@@ -1155,7 +1256,11 @@ func (s *Service) GetRankingPortfolio(ctx context.Context) (*RankingPortfolioCol
 			First(&result).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				items = append(items, buildEmptyRankingPortfolioResponse(definition))
+				item := buildEmptyRankingPortfolioResponse(definition)
+				if err := s.applyCurrentRankingPortfolioSelection(ctx, definition, &item, time.Time{}); err != nil {
+					return nil, err
+				}
+				items = append(items, item)
 				continue
 			}
 			return nil, err
@@ -1163,6 +1268,9 @@ func (s *Service) GetRankingPortfolio(ctx context.Context) (*RankingPortfolioCol
 
 		item, err := buildRankingPortfolioResponse(definition, result)
 		if err != nil {
+			return nil, err
+		}
+		if err := s.applyCurrentRankingPortfolioSelection(ctx, definition, item, result.RankingTime); err != nil {
 			return nil, err
 		}
 		items = append(items, *item)

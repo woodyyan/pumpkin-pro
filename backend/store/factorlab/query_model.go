@@ -133,5 +133,4 @@ type FactorPipelineAdminStatus struct {
 	DBHealth       string                 `json:"db_health"`
 	LatestSnapshot string                 `json:"latest_snapshot_date"`
 	Coverage       FactorCoverageResponse `json:"coverage"`
-	RecentTaskRuns []FactorTaskRunMeta    `json:"recent_task_runs"`
 }

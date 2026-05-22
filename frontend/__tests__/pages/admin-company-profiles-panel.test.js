@@ -23,4 +23,9 @@ describe('admin company profiles panel integration', () => {
     assert.match(pageSource, /失败项 \/ 待补全/)
     assert.match(pageSource, /quality_flags/)
   })
+
+  it('does not render the removed recent factor task details block', () => {
+    assert.doesNotMatch(pageSource, /最近 10 条任务明细/)
+    assert.doesNotMatch(pageSource, /recent_task_runs/)
+  })
 })

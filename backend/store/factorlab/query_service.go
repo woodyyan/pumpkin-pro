@@ -87,19 +87,11 @@ func (s *Service) AdminStatus(ctx context.Context, worker WorkerStatus) (FactorP
 	if err != nil {
 		return FactorPipelineAdminStatus{}, err
 	}
-	runs, err := s.repo.ListTaskRuns(ctx, 10)
-	if err != nil {
-		return FactorPipelineAdminStatus{}, err
-	}
-	metas := make([]FactorTaskRunMeta, 0, len(runs))
-	for idx := range runs {
-		metas = append(metas, taskRunToMeta(&runs[idx]))
-	}
 	dbHealth, err := s.repo.DBQuickCheck(ctx)
 	if err != nil {
 		dbHealth = "failed: " + err.Error()
 	}
-	return FactorPipelineAdminStatus{Worker: worker, DBHealth: dbHealth, LatestSnapshot: date, Coverage: coverage, RecentTaskRuns: metas}, nil
+	return FactorPipelineAdminStatus{Worker: worker, DBHealth: dbHealth, LatestSnapshot: date, Coverage: coverage}, nil
 }
 
 func (s *Service) Coverage(ctx context.Context, snapshotDate string) (FactorCoverageResponse, error) {

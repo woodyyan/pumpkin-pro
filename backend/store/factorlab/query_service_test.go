@@ -93,9 +93,6 @@ func TestFactorLabAdminStatusIncludesCoverageAndRecentRuns(t *testing.T) {
 	if status.Coverage.Universe != 3 || status.Coverage.RawMetrics["pe"] != 2 || status.Coverage.Factors["value_score"] != 2 {
 		t.Fatalf("unexpected coverage: %+v", status.Coverage)
 	}
-	if len(status.RecentTaskRuns) != 1 || status.RecentTaskRuns[0].Status != TaskStatusSuccess {
-		t.Fatalf("unexpected recent runs: %+v", status.RecentTaskRuns)
-	}
 	if len(status.Coverage.Warnings) == 0 {
 		t.Fatal("expected low coverage warnings")
 	}

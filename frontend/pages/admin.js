@@ -1295,7 +1295,6 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
   const coverage = data?.coverage || {}
   const phases = worker.current?.phases || []
   const history = worker.history || []
-  const recentTaskRuns = data?.recent_task_runs || []
   const triggerPipeline = async (override = null) => {
     const payload = override || normalizeFactorRunSelection(manualPhase, phase0Mode, manualScope)
     if (payload.error) {
@@ -1383,10 +1382,6 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
             </table>
           </div>
         )}
-      </div>
-      <div className="mt-4 rounded-xl border border-white/8 bg-[#15171e] p-4">
-        <div className="mb-3 text-xs text-white/40">最近 10 条任务明细</div>
-        {recentTaskRuns.length === 0 ? <p className="text-xs text-white/25">暂无任务记录。</p> : <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{recentTaskRuns.slice(0, 10).map((run) => <div key={run.id || `${run.snapshot_date}-${run.started_at}`} className="rounded-lg border border-white/8 bg-white/[0.03] px-3 py-2 text-xs"><div className="flex justify-between gap-2"><span className="text-white/70">{run.status || '--'}</span><span className="text-white/35">{run.snapshot_date || '--'}</span></div><div className="mt-1 truncate text-white/35">{run.id || '--'}</div></div>)}</div>}
       </div>
     </section>
   )

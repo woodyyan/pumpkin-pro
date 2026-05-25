@@ -28,6 +28,7 @@ func TestTencentCloudProviderSendUsesTemplatePayload(t *testing.T) {
 		Language      string
 		Token         string
 		Host          string
+		RawBody       string
 		Body          tencentPayload
 	}
 	var captured requestCapture
@@ -55,7 +56,12 @@ func TestTencentCloudProviderSendUsesTemplatePayload(t *testing.T) {
 			captured.Token = r.Header.Get("X-TC-Token")
 			captured.Host = r.Host
 			defer r.Body.Close()
-			if err := json.NewDecoder(r.Body).Decode(&captured.Body); err != nil {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read request body: %v", err)
+			}
+			captured.RawBody = string(body)
+			if err := json.Unmarshal(body, &captured.Body); err != nil {
 				t.Fatalf("decode request body: %v", err)
 			}
 			return &http.Response{
@@ -117,6 +123,9 @@ func TestTencentCloudProviderSendUsesTemplatePayload(t *testing.T) {
 	}
 	if captured.Host != "ses.tencentcloudapi.com" {
 		t.Fatalf("Host = %s", captured.Host)
+	}
+	if strings.Contains(captured.RawBody, "TagName") {
+		t.Fatalf("request body must not include TagName: %s", captured.RawBody)
 	}
 }
 

@@ -32,4 +32,5 @@ A 股和港股交易日不完全一致，常见差异场景：
 ## 登录与账号安全
 - 公网邮件深链统一使用 `APP_PUBLIC_BASE_URL` 生成，当前生产域名为 `https://wolongtrader.top`。
 - `MAIL_PROVIDER` 当前支持 `mock` 与腾讯云邮件推送实现，生产建议使用 `tencent`。
+- 使用 Docker Compose 启动时，根目录 `.env` 不能只依赖变量插值；`backend` 服务必须通过 `env_file: .env` 或显式 `environment` 映射，未声明的变量否则不会进入容器。
 - 找回密码默认参数：token 30 分钟过期、同邮箱 60 秒冷却、同 IP 每小时 10 次、同邮箱每小时 3 次。

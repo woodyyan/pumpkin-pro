@@ -21,6 +21,8 @@ services:
 
   # 2. 核心交易网关与 API 服务 (Go)
   backend:
+    env_file:
+      - .env
     build:
       context: ./backend
       dockerfile: Dockerfile

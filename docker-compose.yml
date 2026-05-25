@@ -19,6 +19,8 @@ services:
 
   # 2. 核心交易网关与 API 服务 (Go)
   backend:
+    env_file:
+      - .env
     image: ${IMAGE_REGISTRY:-ccr.ccs.tencentyun.com}/${IMAGE_NAMESPACE:-pumpkin-pro}/pumpkin-pro-backend:${IMAGE_TAG:-latest}
     ports:
       - "8080:8080"

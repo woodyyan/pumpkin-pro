@@ -106,6 +106,8 @@ pumpkin-pro/
 cp .env.example .env
 ```
 
+`backend` 服务现在会通过 `env_file: .env` 直接把根目录 `.env` 注入容器。Compose 文件中的 `environment` 项仍保留用于覆盖容器内专用值，例如 `QUANT_SERVICE_URL=http://quant:8000` 与 `BACKEND_CALLBACK_URL=http://backend:8080`。
+
 如果你使用本地构建模式，请在项目根目录执行：
 
 ```bash

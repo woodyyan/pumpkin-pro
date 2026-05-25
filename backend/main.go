@@ -431,6 +431,12 @@ func (a *appServer) handleAuthForgotPassword(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := a.authService.ForgotPassword(r.Context(), input, auth.ClientIP(r), r.UserAgent()); err != nil {
+		retryAfter := 0
+		var rateErr *auth.RateLimitError
+		if errors.As(err, &rateErr) {
+			retryAfter = rateErr.RetryAfter()
+		}
+		log.Printf("[auth:forgot_password] ip=%s retry_after=%d err=%v", auth.ClientIP(r), retryAfter, err)
 		a.writeAuthError(w, err)
 		return
 	}

@@ -425,6 +425,24 @@ func TestServiceForgotPasswordRateLimited(t *testing.T) {
 	}
 }
 
+func TestServiceForgotPasswordMailFailureDoesNotConsumeCooldown(t *testing.T) {
+	mailer := &stubMailer{fail: errors.New("provider down")}
+	svc, ctx := setupAuthService(t)
+	svc.SetMailer(mailer)
+	_, err := svc.Register(ctx, RegisterInput{Email: "retry-after-failure@test.com", Password: "password12345"}, "", "")
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+	if err := svc.ForgotPassword(ctx, ForgotPasswordInput{Email: "retry-after-failure@test.com"}, "127.0.0.1", "ua"); err == nil {
+		t.Fatalf("expected ForgotPassword to fail when mail provider fails")
+	}
+
+	svc.SetMailer(&stubMailer{})
+	if err := svc.ForgotPassword(ctx, ForgotPasswordInput{Email: "retry-after-failure@test.com"}, "127.0.0.1", "ua"); err != nil {
+		t.Fatalf("ForgotPassword should allow immediate retry after delivery failure: %v", err)
+	}
+}
+
 func TestServiceForgotPasswordUnknownEmailIsSilent(t *testing.T) {
 	svc, ctx := setupAuthService(t)
 	svc.SetMailer(&stubMailer{})

@@ -179,6 +179,10 @@ func (r *Repository) CreatePasswordResetAttempt(ctx context.Context, record Pass
 	return r.db.WithContext(ctx).Create(&record).Error
 }
 
+func (r *Repository) DeletePasswordResetAttemptByID(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Delete(&PasswordResetAttemptRecord{}, "id = ?", id).Error
+}
+
 func (r *Repository) CountPasswordResetAttemptsByEmailSince(ctx context.Context, email string, since time.Time) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&PasswordResetAttemptRecord{}).

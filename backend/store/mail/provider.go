@@ -72,7 +72,6 @@ type tencentPayload struct {
 	Subject          string          `json:"Subject"`
 	ReplyToAddresses string          `json:"ReplyToAddresses,omitempty"`
 	Template         tencentTemplate `json:"Template"`
-	TagName          string          `json:"TagName,omitempty"`
 }
 
 type tencentTemplate struct {
@@ -117,7 +116,6 @@ func (p *TencentCloudProvider) Send(ctx context.Context, message auth.MailMessag
 			TemplateID:   p.cfg.TencentTemplateID,
 			TemplateData: string(templateData),
 		},
-		TagName: strings.TrimSpace(message.Tag),
 	}
 
 	body, err := json.Marshal(payload)

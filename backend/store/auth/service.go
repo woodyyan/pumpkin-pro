@@ -285,8 +285,9 @@ func (s *Service) ForgotPassword(ctx context.Context, input ForgotPasswordInput,
 	if err := s.repo.CreatePasswordResetToken(ctx, record); err != nil {
 		return err
 	}
+	attemptID := uuid.NewString()
 	if err := s.repo.CreatePasswordResetAttempt(ctx, PasswordResetAttemptRecord{
-		ID:        uuid.NewString(),
+		ID:        attemptID,
 		Email:     email,
 		UserID:    user.ID,
 		IP:        strings.TrimSpace(ip),
@@ -298,6 +299,7 @@ func (s *Service) ForgotPassword(ctx context.Context, input ForgotPasswordInput,
 
 	if s.mailer == nil {
 		_ = s.repo.DeletePasswordResetTokenByID(ctx, record.ID)
+		_ = s.repo.DeletePasswordResetAttemptByID(ctx, attemptID)
 		return fmt.Errorf("password reset mailer is not configured")
 	}
 
@@ -321,6 +323,7 @@ func (s *Service) ForgotPassword(ctx context.Context, input ForgotPasswordInput,
 		RequestID:    record.ID,
 	}); err != nil {
 		_ = s.repo.DeletePasswordResetTokenByID(ctx, record.ID)
+		_ = s.repo.DeletePasswordResetAttemptByID(ctx, attemptID)
 		s.writeAudit(ctx, "forgot_password", user.ID, email, ip, userAgent, false, err.Error())
 		return err
 	}

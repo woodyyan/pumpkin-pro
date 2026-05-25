@@ -27,6 +27,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
 	"github.com/woodyyan/pumpkin-pro/backend/store/fundcache"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
+	"github.com/woodyyan/pumpkin-pro/backend/store/mail"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 	"github.com/woodyyan/pumpkin-pro/backend/store/screener"
@@ -419,6 +420,53 @@ func (a *appServer) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (a *appServer) handleAuthForgotPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	var input auth.ForgotPasswordInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "找回密码请求格式错误")
+		return
+	}
+	if err := a.authService.ForgotPassword(r.Context(), input, auth.ClientIP(r), r.UserAgent()); err != nil {
+		a.writeAuthError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "如该邮箱已注册，我们将发送重置邮件"})
+}
+
+func (a *appServer) handleAuthInspectResetPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	status, err := a.authService.InspectPasswordResetToken(r.Context(), r.URL.Query().Get("token"))
+	if err != nil {
+		a.writeAuthError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (a *appServer) handleAuthResetPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	var input auth.ResetPasswordInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "重置密码请求格式错误")
+		return
+	}
+	if err := a.authService.ResetPassword(r.Context(), input, auth.ClientIP(r), r.UserAgent()); err != nil {
+		a.writeAuthError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "密码重置成功，请重新登录"})
+}
+
 func (a *appServer) handleAuthRefresh(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
@@ -511,6 +559,19 @@ func (a *appServer) writeAuthError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"code": "INVALID_CREDENTIAL", "detail": "邮箱或密码错误"})
 	case errors.Is(err, auth.ErrEmailAlreadyExists):
 		writeJSON(w, http.StatusConflict, map[string]any{"code": "EMAIL_EXISTS", "detail": "邮箱已被注册"})
+	case errors.Is(err, auth.ErrRateLimited):
+		retryAfter := 1
+		var rateErr *auth.RateLimitError
+		if errors.As(err, &rateErr) {
+			retryAfter = rateErr.RetryAfter()
+		}
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"code": "RATE_LIMITED", "detail": "请求过于频繁，请稍后再试", "retry_after_seconds": retryAfter})
+	case errors.Is(err, auth.ErrResetTokenNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]any{"code": "TOKEN_NOT_FOUND", "detail": "重置链接无效或已失效"})
+	case errors.Is(err, auth.ErrResetTokenExpired):
+		writeJSON(w, http.StatusGone, map[string]any{"code": "TOKEN_EXPIRED", "detail": "该重置链接已过期，请重新申请"})
+	case errors.Is(err, auth.ErrResetTokenConsumed):
+		writeJSON(w, http.StatusGone, map[string]any{"code": "TOKEN_CONSUMED", "detail": "该重置链接已经使用过，请重新申请"})
 	case errors.Is(err, auth.ErrUnauthorized):
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"code": "AUTH_REQUIRED", "detail": "登录已失效，请重新登录"})
 	case errors.Is(err, auth.ErrForbidden):
@@ -3567,7 +3628,20 @@ func main() {
 		JWTSecret:  strings.TrimSpace(cfg.Auth.JWTSecret),
 		AccessTTL:  time.Duration(cfg.Auth.AccessTokenTTLMinutes) * time.Minute,
 		RefreshTTL: time.Duration(cfg.Auth.RefreshTokenTTLHours) * time.Hour,
+		PasswordReset: auth.PasswordResetConfig{
+			PublicBaseURL:     strings.TrimSpace(cfg.AppPublicBaseURL),
+			TTL:               time.Duration(cfg.PasswordReset.TTLMinutes) * time.Minute,
+			RateLimitWindow:   time.Duration(cfg.PasswordReset.RateLimitWindowMinutes) * time.Minute,
+			RateLimitPerIP:    cfg.PasswordReset.RateLimitPerIP,
+			RateLimitPerEmail: cfg.PasswordReset.RateLimitPerEmail,
+			EmailCooldown:     time.Duration(cfg.PasswordReset.EmailCooldownSeconds) * time.Second,
+		},
 	})
+	mailerProvider, err := mail.New(cfg.Mail)
+	if err != nil {
+		log.Fatalf("Failed to initialize mail provider: %v", err)
+	}
+	authService.SetMailer(mailerProvider)
 
 	strategyRepo := strategy.NewRepository(storeInstance.DB)
 	strategyService := strategy.NewService(strategyRepo)
@@ -3710,6 +3784,9 @@ func main() {
 
 	mux.HandleFunc("/api/auth/register", server.handleAuthRegister)
 	mux.HandleFunc("/api/auth/login", server.handleAuthLogin)
+	mux.HandleFunc("/api/auth/forgot-password", server.handleAuthForgotPassword)
+	mux.HandleFunc("/api/auth/reset-password", server.handleAuthResetPassword)
+	mux.HandleFunc("/api/auth/reset-password/inspect", server.handleAuthInspectResetPassword)
 	mux.HandleFunc("/api/auth/refresh", server.handleAuthRefresh)
 	mux.HandleFunc("/api/auth/logout", server.withRequiredAuth(server.handleAuthLogout))
 	mux.HandleFunc("/api/user/me", server.withRequiredAuth(server.handleUserMe))

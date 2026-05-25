@@ -13,7 +13,7 @@ function isAuthRequiredError(error) {
   if (!error) return false
   if (Number(error.status) === 401) return true
   const code = String(error.code || '').toUpperCase()
-  if (code === 'AUTH_REQUIRED' || code === 'UNAUTHORIZED') return true
+  if (code === 'AUTH_REQUIRED' || code === 'UNAUTHORIZED' || code === 'SESSION_REVOKED') return true
   const message = String(error.message || '')
   return message.includes('需要登录') || message.includes('登录后使用')
 }
@@ -42,6 +42,10 @@ describe('isAuthRequiredError', () => {
 
   it('returns true for UNAUTHORIZED code', () => {
     assert.equal(isAuthRequiredError({ code: 'UNAUTHORIZED' }), true)
+  })
+
+  it('returns true for SESSION_REVOKED code', () => {
+    assert.equal(isAuthRequiredError({ code: 'SESSION_REVOKED' }), true)
   })
 
   it('detects Chinese auth-required message patterns', () => {

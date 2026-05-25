@@ -16,6 +16,8 @@ func (Migrator) AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&UserRecord{},
 		&UserProfileRecord{},
+		&PasswordResetTokenRecord{},
+		&PasswordResetAttemptRecord{},
 		&UserSessionRecord{},
 		&AuthAuditRecord{},
 	)

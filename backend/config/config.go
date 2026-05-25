@@ -9,15 +9,41 @@ import (
 
 type Config struct {
 	Port               string
+	AppPublicBaseURL   string
 	QuantServiceURL    string
 	BackendCallbackURL string
 	DB                 DBConfig
 	StrategySeedPath   string
 	Auth               AuthConfig
+	Mail               MailConfig
+	PasswordReset      PasswordResetConfig
 	AdminSeed          AdminSeedConfig
 	AI                 AIConfig
 	Backup             BackupConfig
 	FactorLab          FactorLabConfig
+}
+
+type PasswordResetConfig struct {
+	TTLMinutes             int
+	RateLimitPerIP         int
+	RateLimitPerEmail      int
+	RateLimitWindowMinutes int
+	EmailCooldownSeconds   int
+}
+
+type MailConfig struct {
+	Provider             string
+	FromEmail            string
+	FromName             string
+	TencentSecretID      string
+	TencentSecretKey     string
+	TencentRegion        string
+	TencentEndpoint      string
+	TencentAPIVersion    string
+	TencentAPIAction     string
+	MockLogBodies        bool
+	MockFailDelivery     bool
+	MockCaptureRecipient string
 }
 
 type FactorLabConfig struct {
@@ -84,9 +110,31 @@ type AuthConfig struct {
 func Load() Config {
 	return Config{
 		Port:               getEnv("PORT", "8080"),
+		AppPublicBaseURL:   trimTrailingSlash(getEnv("APP_PUBLIC_BASE_URL", "https://wolongtrader.top")),
 		QuantServiceURL:    trimTrailingSlash(getEnv("QUANT_SERVICE_URL", "http://localhost:8000")),
 		BackendCallbackURL: trimTrailingSlash(getEnv("BACKEND_CALLBACK_URL", fmt.Sprintf("http://localhost:%s", getEnv("PORT", "8080")))),
 		StrategySeedPath:   getEnv("STRATEGY_SEED_PATH", "seed/strategies.json"),
+		Mail: MailConfig{
+			Provider:             strings.ToLower(getEnv("MAIL_PROVIDER", "mock")),
+			FromEmail:            getEnv("MAIL_FROM_EMAIL", "no-reply@wolongtrader.top"),
+			FromName:             getEnv("MAIL_FROM_NAME", "卧龙 Trader"),
+			TencentSecretID:      getEnv("MAIL_TENCENT_SECRET_ID", ""),
+			TencentSecretKey:     getEnv("MAIL_TENCENT_SECRET_KEY", ""),
+			TencentRegion:        getEnv("MAIL_TENCENT_REGION", "ap-guangzhou"),
+			TencentEndpoint:      trimTrailingSlash(getEnv("MAIL_TENCENT_ENDPOINT", "https://ses.tencentcloudapi.com")),
+			TencentAPIVersion:    getEnv("MAIL_TENCENT_API_VERSION", "2020-10-02"),
+			TencentAPIAction:     getEnv("MAIL_TENCENT_API_ACTION", "SendEmail"),
+			MockLogBodies:        getEnvAsBool("MAIL_MOCK_LOG_BODIES", true),
+			MockFailDelivery:     getEnvAsBool("MAIL_MOCK_FAIL_DELIVERY", false),
+			MockCaptureRecipient: getEnv("MAIL_MOCK_CAPTURE_RECIPIENT", "dev-null@local.invalid"),
+		},
+		PasswordReset: PasswordResetConfig{
+			TTLMinutes:             getEnvAsInt("PASSWORD_RESET_TTL_MINUTES", 30),
+			RateLimitPerIP:         getEnvAsInt("PASSWORD_RESET_RATE_LIMIT_PER_IP", 10),
+			RateLimitPerEmail:      getEnvAsInt("PASSWORD_RESET_RATE_LIMIT_PER_EMAIL", 3),
+			RateLimitWindowMinutes: getEnvAsInt("PASSWORD_RESET_RATE_LIMIT_WINDOW_MINUTES", 60),
+			EmailCooldownSeconds:   getEnvAsInt("PASSWORD_RESET_EMAIL_COOLDOWN_SECONDS", 60),
+		},
 		AdminSeed: AdminSeedConfig{
 			Email:    getEnv("ADMIN_SEED_EMAIL", ""),
 			Password: getEnv("ADMIN_SEED_PASSWORD", ""),

@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 import { requestJson, isNetworkError } from './api'
 import {
+  AUTH_SESSION_CLEARED_EVENT,
+  broadcastAuthSessionCleared,
   clearAuthSession,
   getRefreshToken,
   isAuthRequiredError,
@@ -33,9 +35,31 @@ export function AuthProvider({ children }) {
     return next
   }, [])
 
-  const clearSession = useCallback(() => {
+  const clearSession = useCallback((reason = '') => {
     setSession(null)
     clearAuthSession()
+    broadcastAuthSessionCleared(reason)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const clearLocalSession = () => {
+      setSession(null)
+      clearAuthSession()
+    }
+    const onStorage = (event) => {
+      if (event.key !== 'pumpkin_pro_auth_logout_signal' || !event.newValue) return
+      clearLocalSession()
+    }
+    const onSessionCleared = () => {
+      clearLocalSession()
+    }
+    window.addEventListener('storage', onStorage)
+    window.addEventListener(AUTH_SESSION_CLEARED_EVENT, onSessionCleared)
+    return () => {
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener(AUTH_SESSION_CLEARED_EVENT, onSessionCleared)
+    }
   }, [])
 
   const fetchMe = useCallback(async () => {
@@ -52,14 +76,9 @@ export function AuthProvider({ children }) {
         return next
       })
     } catch (error) {
-      // Only clear session on explicit auth errors (401 / AUTH_REQUIRED).
-      // Network errors (502/timeout/unreachable during deployment) must NOT
-      // clear the session — the cached session is still valid.
       if (isAuthRequiredError(error) && !isNetworkError(error)) {
-        clearSession()
+        clearSession('auth_required')
       }
-      // For network errors, silently keep the cached session so the UI
-      // stays logged-in and will retry on next navigation / API call.
     }
   }, [clearSession])
 
@@ -95,7 +114,6 @@ export function AuthProvider({ children }) {
   }, [syncSession])
 
   const register = useCallback(async ({ email, password }) => {
-    // Attach UTM params captured on first visit
     let utm = {}
     try { utm = JSON.parse(localStorage.getItem('wolong_utm') || '{}') } catch {}
     const result = await requestJson(
@@ -125,7 +143,7 @@ export function AuthProvider({ children }) {
     } catch {
       // 无论后端是否成功，都清理本地登录态
     }
-    clearSession()
+    clearSession('logout')
   }, [clearSession])
 
   const value = useMemo(() => ({
@@ -250,7 +268,6 @@ function AuthDialog({
           </button>
         </div>
 
-
         <div className={`mb-5 ${theme.hintCard}`}>
           {reason || '登录后可使用策略创建、行情关注池等用户功能。'}
         </div>
@@ -290,6 +307,21 @@ function AuthDialog({
               placeholder="密码"
               className={theme.input}
             />
+            {mode === 'login' ? (
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose()
+                    if (typeof window !== 'undefined') window.location.href = '/forgot-password'
+                  }}
+                  className="transition hover:text-white"
+                >
+                  忘记密码？
+                </button>
+                <span>我们会通过邮箱帮你重置密码</span>
+              </div>
+            ) : null}
             {mode === 'register' ? (
               <input
                 value={confirmPassword}

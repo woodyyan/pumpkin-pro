@@ -3,16 +3,17 @@ package auth
 import "time"
 
 type UserRecord struct {
-	ID           string    `gorm:"primaryKey;size:36"`
-	Email        string    `gorm:"size:128;not null;uniqueIndex"`
-	PasswordHash string    `gorm:"size:255;not null"`
-	Status       string    `gorm:"size:20;not null;default:'active'"`
-	UTMSource    string    `gorm:"size:64;not null;default:''"`
-	UTMMedium    string    `gorm:"size:64;not null;default:''"`
-	UTMCampaign  string    `gorm:"size:64;not null;default:''"`
-	Referrer     string    `gorm:"size:512;not null;default:''"`
-	CreatedAt    time.Time `gorm:"not null"`
-	UpdatedAt    time.Time `gorm:"not null"`
+	ID                string    `gorm:"primaryKey;size:36"`
+	Email             string    `gorm:"size:128;not null;uniqueIndex"`
+	PasswordHash      string    `gorm:"size:255;not null"`
+	CredentialVersion int       `gorm:"not null;default:1"`
+	Status            string    `gorm:"size:20;not null;default:'active'"`
+	UTMSource         string    `gorm:"size:64;not null;default:''"`
+	UTMMedium         string    `gorm:"size:64;not null;default:''"`
+	UTMCampaign       string    `gorm:"size:64;not null;default:''"`
+	Referrer          string    `gorm:"size:512;not null;default:''"`
+	CreatedAt         time.Time `gorm:"not null"`
+	UpdatedAt         time.Time `gorm:"not null"`
 }
 
 func (UserRecord) TableName() string {
@@ -29,6 +30,32 @@ type UserProfileRecord struct {
 
 func (UserProfileRecord) TableName() string {
 	return "user_profiles"
+}
+
+type PasswordResetTokenRecord struct {
+	ID         string     `gorm:"primaryKey;size:36"`
+	UserID     string     `gorm:"size:36;not null;index"`
+	TokenHash  string     `gorm:"size:64;not null;uniqueIndex"`
+	ExpiresAt  time.Time  `gorm:"not null;index"`
+	ConsumedAt *time.Time `gorm:"index"`
+	IP         string     `gorm:"size:64;not null;default:''"`
+	CreatedAt  time.Time  `gorm:"not null;index"`
+}
+
+func (PasswordResetTokenRecord) TableName() string {
+	return "password_reset_tokens"
+}
+
+type PasswordResetAttemptRecord struct {
+	ID        string    `gorm:"primaryKey;size:36"`
+	Email     string    `gorm:"size:128;not null;index"`
+	UserID    string    `gorm:"size:36;not null;default:'';index"`
+	IP        string    `gorm:"size:64;not null;default:'';index"`
+	CreatedAt time.Time `gorm:"not null;index"`
+}
+
+func (PasswordResetAttemptRecord) TableName() string {
+	return "password_reset_attempts"
 }
 
 type UserSessionRecord struct {
@@ -111,4 +138,13 @@ type UpdateProfileInput struct {
 type ChangePasswordInput struct {
 	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password"`
+}
+
+type ForgotPasswordInput struct {
+	Email string `json:"email"`
+}
+
+type ResetPasswordInput struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"new_password"`
 }

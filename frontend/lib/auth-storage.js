@@ -1,4 +1,6 @@
 const AUTH_SESSION_STORAGE_KEY = 'pumpkin_pro_auth_session'
+const AUTH_LOGOUT_SIGNAL_STORAGE_KEY = 'pumpkin_pro_auth_logout_signal'
+export const AUTH_SESSION_CLEARED_EVENT = 'pumpkin-pro-auth-session-cleared'
 
 function isBrowser() {
   return typeof window !== 'undefined' && !!window.localStorage
@@ -45,8 +47,21 @@ export function isAuthRequiredError(error) {
   if (Number(error.status) === 401) return true
 
   const code = String(error.code || '').toUpperCase()
-  if (code === 'AUTH_REQUIRED' || code === 'UNAUTHORIZED') return true
+  if (code === 'AUTH_REQUIRED' || code === 'UNAUTHORIZED' || code === 'SESSION_REVOKED') return true
 
   const message = String(error.message || '')
   return message.includes('需要登录') || message.includes('登录后使用')
+}
+
+export function broadcastAuthSessionCleared(reason = '') {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(AUTH_LOGOUT_SIGNAL_STORAGE_KEY, JSON.stringify({
+      reason,
+      at: Date.now(),
+    }))
+  } catch {}
+  try {
+    window.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT, { detail: { reason } }))
+  } catch {}
 }

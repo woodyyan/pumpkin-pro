@@ -47,3 +47,10 @@ graph LR
 | 批次元数据 | `source_trade_date` | 数据基于的真实收盘交易日 |
 | 计算完成时间 | `computed_at` | 离线任务计算完成的时间戳，仅供内部运维 |
 | 快照写入时间 | `snapshot_date` | 快照落盘时间，不等于用户口径日期 |
+
+
+## 认证扩展：密码重置
+- `backend/store/auth/` 现在同时负责注册、登录、刷新、修改密码、找回密码。
+- 新增数据表：`password_reset_tokens`、`password_reset_attempts`。
+- 新增模块：`backend/store/mail/`，封装腾讯云邮件推送与本地 mock provider。
+- 前端新增独立页面：`/forgot-password`、`/reset-password`。

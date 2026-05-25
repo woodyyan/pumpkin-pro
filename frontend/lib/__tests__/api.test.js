@@ -520,3 +520,22 @@ describe('_fetchOnce + tryRefreshToken', () => {
     assert.equal(authHeader, null, 'no Authorization header when logged out')
   })
 })
+
+
+describe('requestJson auth reset routes', () => {
+  it('preserves custom query when inspecting reset-password token', async () => {
+    let capturedUrl = ''
+    const resultBody = { valid: true }
+    const response = { ok: true, status: 200, text: async () => JSON.stringify(resultBody), headers: new Map([['content-type', 'application/json']]) }
+    const request = async (url) => {
+      capturedUrl = url
+      return response
+    }
+    const data = await (async function call() {
+      const res = await request('/api/auth/reset-password/inspect?token=abc123')
+      return JSON.parse(await res.text())
+    })()
+    assert.equal(capturedUrl, '/api/auth/reset-password/inspect?token=abc123')
+    assert.equal(data.valid, true)
+  })
+})

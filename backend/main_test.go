@@ -938,3 +938,49 @@ func TestHandleLiveSymbolsAboutMissingInvalidAndMethod(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func TestWriteAuthErrorRateLimitedIncludesRetryAfter(t *testing.T) {
+	a := &appServer{}
+	w := httptest.NewRecorder()
+	a.writeAuthError(w, &auth.RateLimitError{RetryAfterSeconds: 42})
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d; want %d", w.Code, http.StatusTooManyRequests)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body failed: %v", err)
+	}
+	if body["code"] != "RATE_LIMITED" {
+		t.Fatalf("code = %v; want RATE_LIMITED", body["code"])
+	}
+	if body["retry_after_seconds"] != float64(42) {
+		t.Fatalf("retry_after_seconds = %v; want 42", body["retry_after_seconds"])
+	}
+}
+
+func TestWriteAuthErrorResetTokenCodes(t *testing.T) {
+	a := &appServer{}
+	cases := []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{auth.ErrResetTokenNotFound, http.StatusNotFound, "TOKEN_NOT_FOUND"},
+		{auth.ErrResetTokenExpired, http.StatusGone, "TOKEN_EXPIRED"},
+		{auth.ErrResetTokenConsumed, http.StatusGone, "TOKEN_CONSUMED"},
+	}
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		a.writeAuthError(w, tc.err)
+		if w.Code != tc.status {
+			t.Fatalf("status = %d; want %d for %v", w.Code, tc.status, tc.err)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body failed: %v", err)
+		}
+		if body["code"] != tc.code {
+			t.Fatalf("code = %v; want %s", body["code"], tc.code)
+		}
+	}
+}

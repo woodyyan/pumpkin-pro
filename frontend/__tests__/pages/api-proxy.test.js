@@ -25,6 +25,8 @@ describe('api proxy forwarded headers', () => {
     assert.ok(FORWARDED_REQUEST_HEADERS.includes('user-agent'))
     assert.ok(FORWARDED_REQUEST_HEADERS.includes('authorization'))
     assert.ok(FORWARDED_REQUEST_HEADERS.includes('cookie'))
+    assert.ok(FORWARDED_REQUEST_HEADERS.includes('x-forwarded-host'))
+    assert.ok(FORWARDED_REQUEST_HEADERS.includes('x-forwarded-proto'))
   })
 
   it('splits combined set-cookie headers without breaking expires attribute', () => {

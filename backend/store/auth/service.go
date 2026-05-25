@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -17,25 +18,32 @@ import (
 )
 
 type ServiceConfig struct {
-	JWTSecret  string
-	AccessTTL  time.Duration
-	RefreshTTL time.Duration
+	JWTSecret     string
+	AccessTTL     time.Duration
+	RefreshTTL    time.Duration
+	PasswordReset PasswordResetConfig
 }
 
 type AccessClaims struct {
-	UserID    string `json:"uid"`
-	Email     string `json:"email"`
-	IssuedAt  int64  `json:"iat"`
-	ExpiresAt int64  `json:"exp"`
+	UserID            string `json:"uid"`
+	Email             string `json:"email"`
+	CredentialVersion int    `json:"cv"`
+	IssuedAt          int64  `json:"iat"`
+	ExpiresAt         int64  `json:"exp"`
 }
 
 type Service struct {
-	repo *Repository
-	cfg  ServiceConfig
+	repo   *Repository
+	cfg    ServiceConfig
+	mailer Mailer
 }
 
 func NewService(repo *Repository, cfg ServiceConfig) *Service {
 	return &Service{repo: repo, cfg: cfg}
+}
+
+func (s *Service) SetMailer(mailer Mailer) {
+	s.mailer = mailer
 }
 
 func (s *Service) Register(ctx context.Context, input RegisterInput, ip string, userAgent string) (*AuthSessionResult, error) {
@@ -53,16 +61,17 @@ func (s *Service) Register(ctx context.Context, input RegisterInput, ip string, 
 
 	now := time.Now().UTC()
 	user := UserRecord{
-		ID:           uuid.NewString(),
-		Email:        email,
-		PasswordHash: string(hash),
-		Status:       "active",
-		UTMSource:    strings.TrimSpace(input.UTMSource),
-		UTMMedium:    strings.TrimSpace(input.UTMMedium),
-		UTMCampaign:  strings.TrimSpace(input.UTMCampaign),
-		Referrer:     strings.TrimSpace(input.Referrer),
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:                uuid.NewString(),
+		Email:             email,
+		PasswordHash:      string(hash),
+		CredentialVersion: 1,
+		Status:            "active",
+		UTMSource:         strings.TrimSpace(input.UTMSource),
+		UTMMedium:         strings.TrimSpace(input.UTMMedium),
+		UTMCampaign:       strings.TrimSpace(input.UTMCampaign),
+		Referrer:          strings.TrimSpace(input.Referrer),
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	profile := UserProfileRecord{
 		UserID:    user.ID,
@@ -220,7 +229,160 @@ func (s *Service) ChangePassword(ctx context.Context, userID string, input Chang
 	if err != nil {
 		return err
 	}
-	return s.repo.UpdatePasswordHash(ctx, userID, string(hash))
+	return s.repo.UpdatePasswordHashAndBumpCredentialVersion(ctx, userID, string(hash))
+}
+
+func (s *Service) ForgotPassword(ctx context.Context, input ForgotPasswordInput, ip string, userAgent string) error {
+	email := normalizeEmail(input.Email)
+	if email == "" || !strings.Contains(email, "@") {
+		s.writeAudit(ctx, "forgot_password", "", email, ip, userAgent, false, "invalid input")
+		return ErrInvalidInput
+	}
+
+	if err := s.enforcePasswordResetLimits(ctx, email, ip); err != nil {
+		s.writeAudit(ctx, "forgot_password", "", email, ip, userAgent, false, err.Error())
+		return err
+	}
+
+	user, err := s.repo.GetUserByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			_ = s.repo.CreatePasswordResetAttempt(ctx, PasswordResetAttemptRecord{
+				ID:        uuid.NewString(),
+				Email:     email,
+				UserID:    "",
+				IP:        strings.TrimSpace(ip),
+				CreatedAt: nowUTC(),
+			})
+			s.writeAudit(ctx, "forgot_password", "", email, ip, userAgent, true, "accepted for unknown user")
+			return nil
+		}
+		s.writeAudit(ctx, "forgot_password", "", email, ip, userAgent, false, err.Error())
+		return err
+	}
+	if user.Status != "active" {
+		s.writeAudit(ctx, "forgot_password", user.ID, email, ip, userAgent, false, "user inactive")
+		return ErrForbidden
+	}
+
+	rawToken, err := generateToken(32)
+	if err != nil {
+		return err
+	}
+	now := nowUTC()
+	record := PasswordResetTokenRecord{
+		ID:        uuid.NewString(),
+		UserID:    user.ID,
+		TokenHash: hashToken(rawToken),
+		ExpiresAt: now.Add(s.cfg.PasswordReset.TTL),
+		IP:        strings.TrimSpace(ip),
+		CreatedAt: now,
+	}
+
+	if err := s.repo.DeleteActivePasswordResetTokensByUserID(ctx, user.ID); err != nil {
+		return err
+	}
+	if err := s.repo.CreatePasswordResetToken(ctx, record); err != nil {
+		return err
+	}
+	if err := s.repo.CreatePasswordResetAttempt(ctx, PasswordResetAttemptRecord{
+		ID:        uuid.NewString(),
+		Email:     email,
+		UserID:    user.ID,
+		IP:        strings.TrimSpace(ip),
+		CreatedAt: now,
+	}); err != nil {
+		_ = s.repo.DeletePasswordResetTokenByID(ctx, record.ID)
+		return err
+	}
+
+	if s.mailer == nil {
+		_ = s.repo.DeletePasswordResetTokenByID(ctx, record.ID)
+		return fmt.Errorf("password reset mailer is not configured")
+	}
+
+	htmlBody, textBody := BuildPasswordResetMailTemplate(PasswordResetMailTemplateData{
+		ResetURL:      s.buildPasswordResetURL(rawToken),
+		ExpireMinutes: int(s.cfg.PasswordReset.TTL / time.Minute),
+		ProductName:   "卧龙 Trader",
+	})
+	if err := s.mailer.Send(ctx, MailMessage{
+		ToEmail:   email,
+		Subject:   "重置你的卧龙 Trader 登录密码",
+		HTMLBody:  htmlBody,
+		TextBody:  textBody,
+		Tag:       "password_reset",
+		RequestID: record.ID,
+	}); err != nil {
+		_ = s.repo.DeletePasswordResetTokenByID(ctx, record.ID)
+		s.writeAudit(ctx, "forgot_password", user.ID, email, ip, userAgent, false, err.Error())
+		return err
+	}
+
+	s.writeAudit(ctx, "forgot_password", user.ID, email, ip, userAgent, true, "ok")
+	return nil
+}
+
+func (s *Service) InspectPasswordResetToken(ctx context.Context, rawToken string) (*PasswordResetTokenStatus, error) {
+	token := strings.TrimSpace(rawToken)
+	if token == "" {
+		return &PasswordResetTokenStatus{Valid: false, Code: "TOKEN_NOT_FOUND", Detail: "重置链接无效或已失效"}, nil
+	}
+
+	record, err := s.repo.GetPasswordResetTokenByHash(ctx, hashToken(token))
+	if err != nil {
+		if errors.Is(err, ErrResetTokenNotFound) {
+			return &PasswordResetTokenStatus{Valid: false, Code: "TOKEN_NOT_FOUND", Detail: "重置链接无效或已失效"}, nil
+		}
+		return nil, err
+	}
+
+	now := nowUTC()
+	status := &PasswordResetTokenStatus{
+		Valid:     true,
+		ExpiresAt: record.ExpiresAt.Format(time.RFC3339),
+	}
+	if record.ConsumedAt != nil {
+		status.Valid = false
+		status.Code = "TOKEN_CONSUMED"
+		status.Detail = "该重置链接已经使用过，请重新申请"
+		status.ConsumedAt = record.ConsumedAt.Format(time.RFC3339)
+		return status, nil
+	}
+	if !record.ExpiresAt.After(now) {
+		status.Valid = false
+		status.Code = "TOKEN_EXPIRED"
+		status.Detail = "该重置链接已过期，请重新申请"
+	}
+	return status, nil
+}
+
+func (s *Service) ResetPassword(ctx context.Context, input ResetPasswordInput, ip string, userAgent string) error {
+	token := strings.TrimSpace(input.Token)
+	next := strings.TrimSpace(input.NewPassword)
+	if token == "" || len(next) < 8 {
+		s.writeAudit(ctx, "reset_password", "", "", ip, userAgent, false, "invalid input")
+		return ErrInvalidInput
+	}
+
+	record, err := s.repo.GetPasswordResetTokenByHash(ctx, hashToken(token))
+	if err != nil {
+		s.writeAudit(ctx, "reset_password", "", "", ip, userAgent, false, err.Error())
+		return err
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(next), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	if err := s.repo.ConsumePasswordResetTokenAndResetPassword(ctx, record.ID, record.UserID, string(hash), nowUTC()); err != nil {
+		s.writeAudit(ctx, "reset_password", record.UserID, "", ip, userAgent, false, err.Error())
+		return err
+	}
+
+	s.writeAudit(ctx, "reset_password", record.UserID, "", ip, userAgent, true, "ok")
+	return nil
 }
 
 func (s *Service) ParseAccessToken(raw string) (*AccessClaims, error) {
@@ -253,6 +415,13 @@ func (s *Service) ParseAccessToken(raw string) (*AccessClaims, error) {
 		return nil, ErrUnauthorized
 	}
 	if claims.UserID == "" || claims.ExpiresAt <= time.Now().UTC().Unix() {
+		return nil, ErrUnauthorized
+	}
+	user, err := s.repo.GetUserByID(context.Background(), claims.UserID)
+	if err != nil {
+		return nil, ErrUnauthorized
+	}
+	if claims.CredentialVersion > 0 && user.CredentialVersion != claims.CredentialVersion {
 		return nil, ErrUnauthorized
 	}
 	return claims, nil
@@ -296,10 +465,11 @@ func (s *Service) buildAccessToken(user *UserRecord) (string, time.Duration, err
 	now := time.Now().UTC()
 	expireAt := now.Add(s.cfg.AccessTTL)
 	claims := AccessClaims{
-		UserID:    user.ID,
-		Email:     user.Email,
-		IssuedAt:  now.Unix(),
-		ExpiresAt: expireAt.Unix(),
+		UserID:            user.ID,
+		Email:             user.Email,
+		CredentialVersion: user.CredentialVersion,
+		IssuedAt:          now.Unix(),
+		ExpiresAt:         expireAt.Unix(),
 	}
 	payloadBytes, err := json.Marshal(claims)
 	if err != nil {
@@ -363,6 +533,83 @@ func maskEmail(email string) string {
 		name = name[:2] + "***"
 	}
 	return name + "@" + domain
+}
+
+func (s *Service) enforcePasswordResetLimits(ctx context.Context, email string, ip string) error {
+	now := nowUTC()
+	if cooldown := s.cfg.PasswordReset.EmailCooldown; cooldown > 0 {
+		latest, err := s.repo.GetLatestPasswordResetAttemptByEmail(ctx, email)
+		if err != nil {
+			return err
+		}
+		if latest != nil {
+			retryAfter := latest.CreatedAt.Add(cooldown).Sub(now)
+			if retryAfter > 0 {
+				return &RateLimitError{RetryAfterSeconds: durationSecondsCeil(retryAfter)}
+			}
+		}
+	}
+
+	windowStart := now.Add(-s.cfg.PasswordReset.RateLimitWindow)
+	if limit := s.cfg.PasswordReset.RateLimitPerEmail; limit > 0 {
+		count, err := s.repo.CountPasswordResetAttemptsByEmailSince(ctx, email, windowStart)
+		if err != nil {
+			return err
+		}
+		if int(count) >= limit {
+			oldest, err := s.repo.GetOldestPasswordResetAttemptByEmailSince(ctx, email, windowStart)
+			if err != nil {
+				return err
+			}
+			return &RateLimitError{RetryAfterSeconds: retryAfterFromOldest(oldest, s.cfg.PasswordReset.RateLimitWindow, now)}
+		}
+	}
+
+	trimmedIP := strings.TrimSpace(ip)
+	if limit := s.cfg.PasswordReset.RateLimitPerIP; limit > 0 && trimmedIP != "" {
+		count, err := s.repo.CountPasswordResetAttemptsByIPSince(ctx, trimmedIP, windowStart)
+		if err != nil {
+			return err
+		}
+		if int(count) >= limit {
+			oldest, err := s.repo.GetOldestPasswordResetAttemptByIPSince(ctx, trimmedIP, windowStart)
+			if err != nil {
+				return err
+			}
+			return &RateLimitError{RetryAfterSeconds: retryAfterFromOldest(oldest, s.cfg.PasswordReset.RateLimitWindow, now)}
+		}
+	}
+
+	return nil
+}
+
+func (s *Service) buildPasswordResetURL(rawToken string) string {
+	base := strings.TrimRight(strings.TrimSpace(s.cfg.PasswordReset.PublicBaseURL), "/")
+	if base == "" {
+		base = "https://wolongtrader.top"
+	}
+	return base + "/reset-password?token=" + rawToken
+}
+
+func retryAfterFromOldest(record *PasswordResetAttemptRecord, window time.Duration, now time.Time) int {
+	if record == nil || window <= 0 {
+		return 1
+	}
+	return durationSecondsCeil(record.CreatedAt.Add(window).Sub(now))
+}
+
+func durationSecondsCeil(d time.Duration) int {
+	if d <= 0 {
+		return 1
+	}
+	seconds := int(d / time.Second)
+	if d%time.Second != 0 {
+		seconds++
+	}
+	if seconds <= 0 {
+		return 1
+	}
+	return seconds
 }
 
 func signAccessPayload(payloadPart string, secret string) string {

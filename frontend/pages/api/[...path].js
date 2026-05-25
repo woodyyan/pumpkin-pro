@@ -5,7 +5,7 @@ export const config = {
 };
 
 const DEFAULT_BACKEND_API_URL = 'http://localhost:8080';
-export const FORWARDED_REQUEST_HEADERS = ['content-type', 'accept', 'authorization', 'cookie', 'user-agent', 'x-forwarded-for', 'x-real-ip'];
+export const FORWARDED_REQUEST_HEADERS = ['content-type', 'accept', 'authorization', 'cookie', 'user-agent', 'x-forwarded-for', 'x-real-ip', 'x-forwarded-host', 'x-forwarded-proto'];
 
 export default async function handler(req, res) {
   const backendApiUrl = (process.env.BACKEND_API_URL || DEFAULT_BACKEND_API_URL).replace(/\/$/, '');

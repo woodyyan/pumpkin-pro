@@ -8,11 +8,16 @@ import (
 func TestLoadDefaults(t *testing.T) {
 	// Clear relevant env vars to ensure defaults
 	for _, key := range []string{
-		"PORT", "QUANT_SERVICE_URL", "BACKEND_CALLBACK_URL",
+		"PORT", "APP_PUBLIC_BASE_URL", "QUANT_SERVICE_URL", "BACKEND_CALLBACK_URL",
 		"STRATEGY_SEED_PATH",
 		"DB_TYPE", "DB_PATH", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_SSLMODE",
 		"ADMIN_SEED_EMAIL", "ADMIN_SEED_PASSWORD",
 		"AUTH_JWT_SECRET", "AUTH_ACCESS_TOKEN_TTL_MINUTES", "AUTH_REFRESH_TOKEN_TTL_HOURS",
+		"MAIL_PROVIDER", "MAIL_FROM_EMAIL", "MAIL_FROM_NAME", "MAIL_TENCENT_SECRET_ID", "MAIL_TENCENT_SECRET_KEY",
+		"MAIL_TENCENT_REGION", "MAIL_TENCENT_ENDPOINT", "MAIL_TENCENT_API_VERSION", "MAIL_TENCENT_API_ACTION",
+		"MAIL_MOCK_LOG_BODIES", "MAIL_MOCK_FAIL_DELIVERY", "MAIL_MOCK_CAPTURE_RECIPIENT",
+		"PASSWORD_RESET_TTL_MINUTES", "PASSWORD_RESET_RATE_LIMIT_PER_IP", "PASSWORD_RESET_RATE_LIMIT_PER_EMAIL",
+		"PASSWORD_RESET_RATE_LIMIT_WINDOW_MINUTES", "PASSWORD_RESET_EMAIL_COOLDOWN_SECONDS",
 		"AI_API_KEY", "AI_BASE_URL", "AI_MODEL", "AI_CONFIG_CIPHER_KEY",
 	} {
 		os.Unsetenv(key)
@@ -23,6 +28,10 @@ func TestLoadDefaults(t *testing.T) {
 	// Port
 	if cfg.Port != "8080" {
 		t.Errorf("expected default Port 8080, got %s", cfg.Port)
+	}
+
+	if cfg.AppPublicBaseURL != "https://wolongtrader.top" {
+		t.Errorf("expected AppPublicBaseURL https://wolongtrader.top, got %s", cfg.AppPublicBaseURL)
 	}
 
 	// QuantServiceURL should have trailing slash trimmed
@@ -68,6 +77,22 @@ func TestLoadDefaults(t *testing.T) {
 		t.Errorf("expected Auth.RefreshTokenTTLHours 168, got %d", cfg.Auth.RefreshTokenTTLHours)
 	}
 
+	if cfg.Mail.Provider != "mock" {
+		t.Errorf("expected Mail.Provider mock, got %s", cfg.Mail.Provider)
+	}
+	if cfg.Mail.FromEmail != "no-reply@wolongtrader.top" {
+		t.Errorf("expected Mail.FromEmail no-reply@wolongtrader.top, got %s", cfg.Mail.FromEmail)
+	}
+	if cfg.PasswordReset.TTLMinutes != 30 {
+		t.Errorf("expected PasswordReset.TTLMinutes 30, got %d", cfg.PasswordReset.TTLMinutes)
+	}
+	if cfg.PasswordReset.RateLimitPerIP != 10 {
+		t.Errorf("expected PasswordReset.RateLimitPerIP 10, got %d", cfg.PasswordReset.RateLimitPerIP)
+	}
+	if cfg.PasswordReset.RateLimitPerEmail != 3 {
+		t.Errorf("expected PasswordReset.RateLimitPerEmail 3, got %d", cfg.PasswordReset.RateLimitPerEmail)
+	}
+
 	// AI defaults
 	if cfg.AI.Model != "gpt-4o-mini" {
 		t.Errorf("expected AI.Model gpt-4o-mini, got %s", cfg.AI.Model)
@@ -84,11 +109,14 @@ func TestEnvOverride(t *testing.T) {
 		validate func(Config) bool
 	}{
 		{"PORT", "9090", func(c Config) bool { return c.Port == "9090" }},
+		{"APP_PUBLIC_BASE_URL", "https://example.com/", func(c Config) bool { return c.AppPublicBaseURL == "https://example.com" }},
 		{"QUANT_SERVICE_URL", "http://quant:9000/", func(c Config) bool { return c.QuantServiceURL == "http://quant:9000" }},
 		{"DB_TYPE", "postgres", func(c Config) bool { return c.DB.Type == "postgres" }},
 		{"DB_PORT", "5433", func(c Config) bool { return c.DB.Port == 5433 }},
 		{"AUTH_JWT_SECRET", "my-super-secret", func(c Config) bool { return c.Auth.JWTSecret == "my-super-secret" }},
 		{"AI_MODEL", "gpt-4o", func(c Config) bool { return c.AI.Model == "gpt-4o" }},
+		{"MAIL_PROVIDER", "tencent", func(c Config) bool { return c.Mail.Provider == "tencent" }},
+		{"PASSWORD_RESET_RATE_LIMIT_PER_IP", "12", func(c Config) bool { return c.PasswordReset.RateLimitPerIP == 12 }},
 		{"AI_CONFIG_CIPHER_KEY", "12345678901234567890123456789012", func(c Config) bool { return c.AI.CipherKey == "12345678901234567890123456789012" }},
 	}
 

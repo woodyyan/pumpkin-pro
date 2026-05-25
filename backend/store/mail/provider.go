@@ -11,7 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"sort"
+	"net/url"
 	"strings"
 	"time"
 
@@ -67,16 +67,17 @@ type TencentCloudProvider struct {
 }
 
 type tencentPayload struct {
-	FromEmailAddress string   `json:"FromEmailAddress"`
-	Destination      []string `json:"Destination"`
-	Subject          string   `json:"Subject"`
-	Simple           struct {
-		HTMLBody string `json:"HtmlBody"`
-		TextBody string `json:"TextBody"`
-	} `json:"Simple"`
-	ReplyToAddresses []string `json:"ReplyToAddresses,omitempty"`
-	TagName          string   `json:"TagName,omitempty"`
-	Unsubscribe      string   `json:"Unsubscribe,omitempty"`
+	FromEmailAddress string          `json:"FromEmailAddress"`
+	Destination      []string        `json:"Destination"`
+	Subject          string          `json:"Subject"`
+	ReplyToAddresses string          `json:"ReplyToAddresses,omitempty"`
+	Template         tencentTemplate `json:"Template"`
+	TagName          string          `json:"TagName,omitempty"`
+}
+
+type tencentTemplate struct {
+	TemplateID   int    `json:"TemplateID"`
+	TemplateData string `json:"TemplateData"`
 }
 
 type tencentResponse struct {
@@ -93,14 +94,31 @@ func (p *TencentCloudProvider) Send(ctx context.Context, message auth.MailMessag
 	if strings.TrimSpace(p.cfg.TencentSecretID) == "" || strings.TrimSpace(p.cfg.TencentSecretKey) == "" {
 		return fmt.Errorf("tencent mail credentials are not configured")
 	}
+	if strings.TrimSpace(p.cfg.FromEmail) == "" {
+		return fmt.Errorf("tencent mail from email is not configured")
+	}
+	if p.cfg.TencentTemplateID <= 0 {
+		return fmt.Errorf("tencent mail template id is not configured")
+	}
+	if len(message.TemplateData) == 0 {
+		return fmt.Errorf("tencent mail template data is required")
+	}
+
+	templateData, err := json.Marshal(message.TemplateData)
+	if err != nil {
+		return fmt.Errorf("marshal tencent mail template data: %w", err)
+	}
 	payload := tencentPayload{
-		FromEmailAddress: formatFromAddress(p.cfg.FromName, p.cfg.FromEmail),
+		FromEmailAddress: strings.TrimSpace(p.cfg.FromEmail),
 		Destination:      []string{strings.TrimSpace(message.ToEmail)},
 		Subject:          strings.TrimSpace(message.Subject),
-		TagName:          strings.TrimSpace(message.Tag),
+		ReplyToAddresses: strings.TrimSpace(p.cfg.FromEmail),
+		Template: tencentTemplate{
+			TemplateID:   p.cfg.TencentTemplateID,
+			TemplateData: string(templateData),
+		},
+		TagName: strings.TrimSpace(message.Tag),
 	}
-	payload.Simple.HTMLBody = message.HTMLBody
-	payload.Simple.TextBody = message.TextBody
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -121,28 +139,44 @@ func (p *TencentCloudProvider) Send(ctx context.Context, message auth.MailMessag
 	}
 	region := strings.TrimSpace(p.cfg.TencentRegion)
 	if region == "" {
-		region = "ap-guangzhou"
+		region = "ap-hongkong"
+	}
+	language := strings.TrimSpace(p.cfg.TencentLanguage)
+	if language == "" {
+		language = "zh-CN"
+	}
+
+	parsedEndpoint, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("parse tencent endpoint: %w", err)
+	}
+	host := parsedEndpoint.Host
+	if host == "" {
+		return fmt.Errorf("invalid tencent endpoint: missing host")
+	}
+	canonicalPath := parsedEndpoint.EscapedPath()
+	if canonicalPath == "" {
+		canonicalPath = "/"
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
+	req.Host = host
 	service := "ses"
-	host := strings.TrimPrefix(endpoint, "https://")
-	host = strings.TrimPrefix(host, "http://")
-	host = strings.TrimSuffix(host, "/")
 	timestamp := time.Now().UTC()
-	authorization, signedHeaders, hashedPayload := buildTC3Authorization(p.cfg.TencentSecretID, p.cfg.TencentSecretKey, service, host, action, version, region, timestamp, body)
+	authorization := buildTC3Authorization(p.cfg.TencentSecretID, p.cfg.TencentSecretKey, service, host, canonicalPath, timestamp, body)
 	req.Header.Set("Authorization", authorization)
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("Host", host)
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-TC-Action", action)
 	req.Header.Set("X-TC-Version", version)
 	req.Header.Set("X-TC-Region", region)
+	req.Header.Set("X-TC-Language", language)
 	req.Header.Set("X-TC-Timestamp", fmt.Sprintf("%d", timestamp.Unix()))
-	req.Header.Set("X-TC-SignedHeaders", signedHeaders)
-	req.Header.Set("X-TC-Content-Sha256", hashedPayload)
+	if token := strings.TrimSpace(p.cfg.TencentToken); token != "" {
+		req.Header.Set("X-TC-Token", token)
+	}
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -167,40 +201,15 @@ func (p *TencentCloudProvider) Send(ctx context.Context, message auth.MailMessag
 	return nil
 }
 
-func formatFromAddress(name string, email string) string {
-	email = strings.TrimSpace(email)
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return email
-	}
-	return fmt.Sprintf("%s <%s>", name, email)
-}
-
-func buildTC3Authorization(secretID, secretKey, service, host, action, version, region string, timestamp time.Time, body []byte) (authorization string, signedHeaders string, hashedPayload string) {
-	hashedPayload = sha256Hex(body)
-	canonicalHeaders := map[string]string{
-		"content-type": "application/json; charset=utf-8",
-		"host":         host,
-		"x-tc-action":  strings.ToLower(action),
-	}
-	headerKeys := make([]string, 0, len(canonicalHeaders))
-	for key := range canonicalHeaders {
-		headerKeys = append(headerKeys, key)
-	}
-	sort.Strings(headerKeys)
-	var headerLines strings.Builder
-	for _, key := range headerKeys {
-		headerLines.WriteString(key)
-		headerLines.WriteByte(':')
-		headerLines.WriteString(canonicalHeaders[key])
-		headerLines.WriteByte('\n')
-	}
-	signedHeaders = strings.Join(headerKeys, ";")
+func buildTC3Authorization(secretID, secretKey, service, host, canonicalPath string, timestamp time.Time, body []byte) string {
+	hashedPayload := sha256Hex(body)
+	canonicalHeaders := "content-type:application/json\nhost:" + host + "\n"
+	signedHeaders := "content-type;host"
 	canonicalRequest := strings.Join([]string{
 		http.MethodPost,
-		"/",
+		canonicalPath,
 		"",
-		headerLines.String(),
+		canonicalHeaders,
 		signedHeaders,
 		hashedPayload,
 	}, "\n")
@@ -216,10 +225,7 @@ func buildTC3Authorization(secretID, secretKey, service, host, action, version, 
 	secretService := hmacSHA256(secretDate, service)
 	secretSigning := hmacSHA256(secretService, "tc3_request")
 	signature := hex.EncodeToString(hmacSHA256(secretSigning, stringToSign))
-	authorization = fmt.Sprintf("TC3-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s", secretID, credentialScope, signedHeaders, signature)
-	_ = version
-	_ = region
-	return authorization, signedHeaders, hashedPayload
+	return fmt.Sprintf("TC3-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s", secretID, credentialScope, signedHeaders, signature)
 }
 
 func hmacSHA256(key []byte, message string) []byte {

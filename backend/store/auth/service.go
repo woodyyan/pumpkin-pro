@@ -302,17 +302,23 @@ func (s *Service) ForgotPassword(ctx context.Context, input ForgotPasswordInput,
 	}
 
 	htmlBody, textBody := BuildPasswordResetMailTemplate(PasswordResetMailTemplateData{
-		ResetURL:      s.buildPasswordResetURL(rawToken),
+		Token:         rawToken,
 		ExpireMinutes: int(s.cfg.PasswordReset.TTL / time.Minute),
 		ProductName:   "卧龙 Trader",
 	})
+	templateData := map[string]any{
+		"PRODUCT_NAME":   "卧龙 Trader",
+		"EXPIRE_MINUTES": int(s.cfg.PasswordReset.TTL / time.Minute),
+		"token":          rawToken,
+	}
 	if err := s.mailer.Send(ctx, MailMessage{
-		ToEmail:   email,
-		Subject:   "重置你的卧龙 Trader 登录密码",
-		HTMLBody:  htmlBody,
-		TextBody:  textBody,
-		Tag:       "password_reset",
-		RequestID: record.ID,
+		ToEmail:      email,
+		Subject:      "重置你的卧龙 Trader 登录密码",
+		HTMLBody:     htmlBody,
+		TextBody:     textBody,
+		TemplateData: templateData,
+		Tag:          "password_reset",
+		RequestID:    record.ID,
 	}); err != nil {
 		_ = s.repo.DeletePasswordResetTokenByID(ctx, record.ID)
 		s.writeAudit(ctx, "forgot_password", user.ID, email, ip, userAgent, false, err.Error())

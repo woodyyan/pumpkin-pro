@@ -357,6 +357,15 @@ func TestServiceForgotPasswordAndReset(t *testing.T) {
 	if !strings.Contains(message.TextBody, "/reset-password?token=") {
 		t.Fatalf("mail text body missing reset token link")
 	}
+	if message.TemplateData == nil {
+		t.Fatalf("mail template data missing")
+	}
+	if got := message.TemplateData["PRODUCT_NAME"]; got != "卧龙 Trader" {
+		t.Fatalf("PRODUCT_NAME = %#v; want 卧龙 Trader", got)
+	}
+	if got := message.TemplateData["EXPIRE_MINUTES"]; got != 30 {
+		t.Fatalf("EXPIRE_MINUTES = %#v; want 30", got)
+	}
 	start := strings.LastIndex(message.TextBody, "https://wolongtrader.top/reset-password?token=")
 	if start < 0 {
 		t.Fatalf("reset URL not found in text body")
@@ -366,6 +375,9 @@ func TestServiceForgotPasswordAndReset(t *testing.T) {
 		rawToken = rawToken[:idx]
 	}
 	rawToken = strings.TrimPrefix(rawToken, "https://wolongtrader.top/reset-password?token=")
+	if got := message.TemplateData["token"]; got != rawToken {
+		t.Fatalf("token template data = %#v; want %s", got, rawToken)
+	}
 
 	status, err := svc.InspectPasswordResetToken(ctx, rawToken)
 	if err != nil {
@@ -423,7 +435,7 @@ func TestServiceForgotPasswordUnknownEmailIsSilent(t *testing.T) {
 
 func TestBuildPasswordResetMailTemplate(t *testing.T) {
 	htmlBody, textBody := BuildPasswordResetMailTemplate(PasswordResetMailTemplateData{
-		ResetURL:      "https://wolongtrader.top/reset-password?token=abc",
+		Token:         "abc",
 		ExpireMinutes: 30,
 		ProductName:   "卧龙 Trader",
 	})

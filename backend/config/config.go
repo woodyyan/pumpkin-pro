@@ -37,10 +37,13 @@ type MailConfig struct {
 	FromName             string
 	TencentSecretID      string
 	TencentSecretKey     string
+	TencentToken         string
 	TencentRegion        string
 	TencentEndpoint      string
 	TencentAPIVersion    string
 	TencentAPIAction     string
+	TencentLanguage      string
+	TencentTemplateID    int
 	MockLogBodies        bool
 	MockFailDelivery     bool
 	MockCaptureRecipient string
@@ -120,10 +123,13 @@ func Load() Config {
 			FromName:             getEnv("MAIL_FROM_NAME", "卧龙 Trader"),
 			TencentSecretID:      getEnv("MAIL_TENCENT_SECRET_ID", ""),
 			TencentSecretKey:     getEnv("MAIL_TENCENT_SECRET_KEY", ""),
-			TencentRegion:        getEnv("MAIL_TENCENT_REGION", "ap-guangzhou"),
+			TencentToken:         getEnv("MAIL_TENCENT_TOKEN", ""),
+			TencentRegion:        getEnv("MAIL_TENCENT_REGION", "ap-hongkong"),
 			TencentEndpoint:      trimTrailingSlash(getEnv("MAIL_TENCENT_ENDPOINT", "https://ses.tencentcloudapi.com")),
 			TencentAPIVersion:    getEnv("MAIL_TENCENT_API_VERSION", "2020-10-02"),
 			TencentAPIAction:     getEnv("MAIL_TENCENT_API_ACTION", "SendEmail"),
+			TencentLanguage:      getEnv("MAIL_TENCENT_LANGUAGE", "zh-CN"),
+			TencentTemplateID:    getEnvAsInt("MAIL_TENCENT_TEMPLATE_ID", 0),
 			MockLogBodies:        getEnvAsBool("MAIL_MOCK_LOG_BODIES", true),
 			MockFailDelivery:     getEnvAsBool("MAIL_MOCK_FAIL_DELIVERY", false),
 			MockCaptureRecipient: getEnv("MAIL_MOCK_CAPTURE_RECIPIENT", "dev-null@local.invalid"),

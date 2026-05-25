@@ -6,7 +6,6 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	// Clear relevant env vars to ensure defaults
 	for _, key := range []string{
 		"PORT", "APP_PUBLIC_BASE_URL", "QUANT_SERVICE_URL", "BACKEND_CALLBACK_URL",
 		"STRATEGY_SEED_PATH",
@@ -14,7 +13,8 @@ func TestLoadDefaults(t *testing.T) {
 		"ADMIN_SEED_EMAIL", "ADMIN_SEED_PASSWORD",
 		"AUTH_JWT_SECRET", "AUTH_ACCESS_TOKEN_TTL_MINUTES", "AUTH_REFRESH_TOKEN_TTL_HOURS",
 		"MAIL_PROVIDER", "MAIL_FROM_EMAIL", "MAIL_FROM_NAME", "MAIL_TENCENT_SECRET_ID", "MAIL_TENCENT_SECRET_KEY",
-		"MAIL_TENCENT_REGION", "MAIL_TENCENT_ENDPOINT", "MAIL_TENCENT_API_VERSION", "MAIL_TENCENT_API_ACTION",
+		"MAIL_TENCENT_TOKEN", "MAIL_TENCENT_REGION", "MAIL_TENCENT_ENDPOINT", "MAIL_TENCENT_API_VERSION", "MAIL_TENCENT_API_ACTION",
+		"MAIL_TENCENT_LANGUAGE", "MAIL_TENCENT_TEMPLATE_ID",
 		"MAIL_MOCK_LOG_BODIES", "MAIL_MOCK_FAIL_DELIVERY", "MAIL_MOCK_CAPTURE_RECIPIENT",
 		"PASSWORD_RESET_TTL_MINUTES", "PASSWORD_RESET_RATE_LIMIT_PER_IP", "PASSWORD_RESET_RATE_LIMIT_PER_EMAIL",
 		"PASSWORD_RESET_RATE_LIMIT_WINDOW_MINUTES", "PASSWORD_RESET_EMAIL_COOLDOWN_SECONDS",
@@ -25,25 +25,18 @@ func TestLoadDefaults(t *testing.T) {
 
 	cfg := Load()
 
-	// Port
 	if cfg.Port != "8080" {
 		t.Errorf("expected default Port 8080, got %s", cfg.Port)
 	}
-
 	if cfg.AppPublicBaseURL != "https://wolongtrader.top" {
 		t.Errorf("expected AppPublicBaseURL https://wolongtrader.top, got %s", cfg.AppPublicBaseURL)
 	}
-
-	// QuantServiceURL should have trailing slash trimmed
 	if cfg.QuantServiceURL != "http://localhost:8000" {
 		t.Errorf("expected QuantServiceURL http://localhost:8000, got %s", cfg.QuantServiceURL)
 	}
-
 	if cfg.BackendCallbackURL != "http://localhost:8080" {
 		t.Errorf("expected BackendCallbackURL http://localhost:8080, got %s", cfg.BackendCallbackURL)
 	}
-
-	// DB defaults
 	if cfg.DB.Type != "sqlite" {
 		t.Errorf("expected DB.Type sqlite, got %s", cfg.DB.Type)
 	}
@@ -65,8 +58,6 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DB.SSLMode != "disable" {
 		t.Errorf("expected DB.SSLMode disable, got %s", cfg.DB.SSLMode)
 	}
-
-	// Auth defaults
 	if cfg.Auth.JWTSecret != "dev-only-change-me" {
 		t.Errorf("expected Auth.JWTSecret dev-only-change-me, got %s", cfg.Auth.JWTSecret)
 	}
@@ -76,12 +67,17 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Auth.RefreshTokenTTLHours != 168 {
 		t.Errorf("expected Auth.RefreshTokenTTLHours 168, got %d", cfg.Auth.RefreshTokenTTLHours)
 	}
-
 	if cfg.Mail.Provider != "mock" {
 		t.Errorf("expected Mail.Provider mock, got %s", cfg.Mail.Provider)
 	}
 	if cfg.Mail.FromEmail != "no-reply@wolongtrader.top" {
 		t.Errorf("expected Mail.FromEmail no-reply@wolongtrader.top, got %s", cfg.Mail.FromEmail)
+	}
+	if cfg.Mail.TencentRegion != "ap-hongkong" {
+		t.Errorf("expected Mail.TencentRegion ap-hongkong, got %s", cfg.Mail.TencentRegion)
+	}
+	if cfg.Mail.TencentLanguage != "zh-CN" {
+		t.Errorf("expected Mail.TencentLanguage zh-CN, got %s", cfg.Mail.TencentLanguage)
 	}
 	if cfg.PasswordReset.TTLMinutes != 30 {
 		t.Errorf("expected PasswordReset.TTLMinutes 30, got %d", cfg.PasswordReset.TTLMinutes)
@@ -92,8 +88,6 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.PasswordReset.RateLimitPerEmail != 3 {
 		t.Errorf("expected PasswordReset.RateLimitPerEmail 3, got %d", cfg.PasswordReset.RateLimitPerEmail)
 	}
-
-	// AI defaults
 	if cfg.AI.Model != "gpt-4o-mini" {
 		t.Errorf("expected AI.Model gpt-4o-mini, got %s", cfg.AI.Model)
 	}
@@ -116,6 +110,7 @@ func TestEnvOverride(t *testing.T) {
 		{"AUTH_JWT_SECRET", "my-super-secret", func(c Config) bool { return c.Auth.JWTSecret == "my-super-secret" }},
 		{"AI_MODEL", "gpt-4o", func(c Config) bool { return c.AI.Model == "gpt-4o" }},
 		{"MAIL_PROVIDER", "tencent", func(c Config) bool { return c.Mail.Provider == "tencent" }},
+		{"MAIL_TENCENT_TEMPLATE_ID", "179710", func(c Config) bool { return c.Mail.TencentTemplateID == 179710 }},
 		{"PASSWORD_RESET_RATE_LIMIT_PER_IP", "12", func(c Config) bool { return c.PasswordReset.RateLimitPerIP == 12 }},
 		{"AI_CONFIG_CIPHER_KEY", "12345678901234567890123456789012", func(c Config) bool { return c.AI.CipherKey == "12345678901234567890123456789012" }},
 	}
@@ -155,7 +150,6 @@ func TestTrimTrailingSlash(t *testing.T) {
 }
 
 func TestGetEnvAsInt(t *testing.T) {
-	// Valid integer
 	os.Setenv("TEST_INT_VAL", "42")
 	defer os.Unsetenv("TEST_INT_VAL")
 
@@ -164,13 +158,11 @@ func TestGetEnvAsInt(t *testing.T) {
 		t.Errorf("expected 42, got %d", result)
 	}
 
-	// Fallback to default when empty
 	result = getEnvAsInt("NONEXISTENT_INT", 99)
 	if result != 99 {
 		t.Errorf("expected fallback 99, got %d", result)
 	}
 
-	// Invalid value falls back to default
 	os.Setenv("BAD_INT", "abc")
 	defer os.Unsetenv("BAD_INT")
 	result = getEnvAsInt("BAD_INT", 7)

@@ -220,11 +220,69 @@ func (r *RiskDBRepository) GetDailyBarsForPeriod(ctx context.Context, symbols []
 		days = 252 // 默认一年交易日
 	}
 
-	// 计算开始日期（近似）
-	endDate := time.Now().Format("2006-01-02")
-	startDate := time.Now().AddDate(0, 0, -days*2).Format("2006-01-02") // 宽松一些
+	result := make(map[string][]DailyBarRecord)
+	var ashareSymbols []string
+	var hkSymbols []string
 
-	return r.GetDailyBars(ctx, symbols, startDate, endDate)
+	for _, symbol := range symbols {
+		if len(symbol) == 5 && isNumeric(symbol) {
+			hkSymbols = append(hkSymbols, symbol)
+		} else {
+			ashareSymbols = append(ashareSymbols, symbol)
+		}
+	}
+
+	if len(ashareSymbols) > 0 && r.cacheDB != nil {
+		ashareBars, err := r.queryLatestDailyBarsByCode(ctx, r.cacheDB, ashareSymbols, days)
+		if err != nil {
+			return nil, fmt.Errorf("查询A股最近日线失败: %w", err)
+		}
+		for code, bars := range ashareBars {
+			result[code] = bars
+		}
+	}
+
+	if len(hkSymbols) > 0 && r.hkCacheDB != nil {
+		hkBars, err := r.queryLatestDailyBarsByCode(ctx, r.hkCacheDB, hkSymbols, days)
+		if err != nil {
+			return nil, fmt.Errorf("查询港股最近日线失败: %w", err)
+		}
+		for code, bars := range hkBars {
+			result[code] = bars
+		}
+	}
+
+	return result, nil
+}
+
+func (r *RiskDBRepository) queryLatestDailyBarsByCode(ctx context.Context, db *gorm.DB, symbols []string, days int) (map[string][]DailyBarRecord, error) {
+	if len(symbols) == 0 {
+		return map[string][]DailyBarRecord{}, nil
+	}
+
+	var records []DailyBarRecord
+	query := `
+		SELECT code, date, open, close, high, low, volume, turnover_rate
+		FROM (
+			SELECT code, date, open, close, high, low, volume, turnover_rate,
+				ROW_NUMBER() OVER (PARTITION BY code ORDER BY date DESC) AS row_num
+			FROM daily_bars
+			WHERE code IN ?
+		) ranked
+		WHERE row_num <= ?
+		ORDER BY code, date
+	`
+
+	if err := db.WithContext(ctx).Raw(query, symbols, days).Scan(&records).Error; err != nil {
+		return nil, fmt.Errorf("数据库查询失败: %w", err)
+	}
+
+	result := make(map[string][]DailyBarRecord, len(symbols))
+	for _, record := range records {
+		result[record.Code] = append(result[record.Code], record)
+	}
+
+	return result, nil
 }
 
 // isNumeric 判断字符串是否全为数字

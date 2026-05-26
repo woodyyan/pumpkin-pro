@@ -110,6 +110,32 @@ func TestEnrichPositionsWithMarketValue(t *testing.T) {
 	assert.InDelta(t, 700, positions[2].MarketValue, 0.001)
 }
 
+func TestGetDailyBarsForPeriodUsesLatestAvailableBars(t *testing.T) {
+	ctx := context.Background()
+	riskRepo, _, cacheDB, hkCacheDB := setupRiskTest(t)
+
+	insertDailyBarRecords(t, cacheDB, []DailyBarRecord{
+		{Code: "000001", Date: "2026-04-21", Close: 11.5},
+		{Code: "000001", Date: "2026-04-22", Close: 12.0},
+		{Code: "000001", Date: "2026-04-24", Close: 12.5},
+	})
+	insertDailyBarRecords(t, hkCacheDB, []DailyBarRecord{
+		{Code: "00700", Date: "2026-04-23", Close: 375.0},
+		{Code: "00700", Date: "2026-04-24", Close: 380.0},
+	})
+
+	barsByCode, err := riskRepo.riskDBRepository().GetDailyBarsForPeriod(ctx, []string{"000001", "00700"}, 2)
+	assert.NoError(t, err)
+	assert.Len(t, barsByCode["000001"], 2)
+	assert.Len(t, barsByCode["00700"], 2)
+	assert.Equal(t, "2026-04-22", barsByCode["000001"][0].Date)
+	assert.Equal(t, "2026-04-24", barsByCode["000001"][1].Date)
+	assert.Equal(t, 12.5, barsByCode["000001"][1].Close)
+	assert.Equal(t, "2026-04-23", barsByCode["00700"][0].Date)
+	assert.Equal(t, "2026-04-24", barsByCode["00700"][1].Date)
+	assert.Equal(t, 380.0, barsByCode["00700"][1].Close)
+}
+
 func TestCalcLiquidityRisk(t *testing.T) {
 	ctx := context.Background()
 	riskRepo, _, cacheDB, hkCacheDB := setupRiskTest(t)

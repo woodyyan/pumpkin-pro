@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  darkMode: "class",
   content: [
     "./pages/**/*.{js,ts,jsx,tsx}",
     "./components/**/*.{js,ts,jsx,tsx}",
@@ -8,13 +9,19 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        background: "#0a0a0b",
-        foreground: "#ededed",
-        card: "#161618",
-        border: "rgba(255,255,255,0.1)",
-        primary: "#e67e22", // Wolong primary
-        positive: "#22c55e",
-        negative: "#ef4444"
+        // semantic tokens driven by CSS variables — supports light/dark themes
+        background:       "var(--color-bg-primary)",
+        "background-alt": "var(--color-bg-secondary)",
+        card:             "var(--color-bg-card)",
+        foreground:       "var(--color-text-primary)",
+        "foreground-muted":"var(--color-text-secondary)",
+        "foreground-dim": "var(--color-text-tertiary)",
+        "foreground-disabled":"var(--color-text-disabled)",
+        border:           "var(--color-border)",
+        "border-strong":  "var(--color-border-strong)",
+        primary:          "var(--color-primary)",
+        positive:         "var(--color-positive)",
+        negative:         "var(--color-negative)",
       },
     },
   },

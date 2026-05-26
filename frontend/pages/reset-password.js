@@ -6,9 +6,9 @@ import { requestJson } from '../lib/api'
 import { broadcastAuthSessionCleared, clearAuthSession } from '../lib/auth-storage'
 
 const PAGE_THEME = {
-  shell: 'min-h-screen bg-[radial-gradient(circle_at_top,#28475f,transparent_42%),linear-gradient(180deg,#0c1520,#101c29_52%,#173247)] px-4 py-10 text-white',
-  card: 'mx-auto w-full max-w-[30rem] rounded-[2rem] border border-white/10 bg-[#0e1721]/90 p-6 shadow-[0_30px_80px_rgba(0,0,0,0.32)] backdrop-blur',
-  input: 'w-full rounded-2xl border border-white/12 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-primary focus:bg-white/[0.07]',
+  shell: 'min-h-screen bg-[radial-gradient(circle_at_top,#28475f,transparent_42%),linear-gradient(180deg,#0c1520,#101c29_52%,#173247)] px-4 py-10 text-foreground',
+  card: 'mx-auto w-full max-w-[30rem] rounded-[2rem] border border-border bg-[#0e1721]/90 p-6 shadow-[0_30px_80px_rgba(0,0,0,0.32)] backdrop-blur',
+  input: 'w-full rounded-2xl border border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-foreground-dim focus:border-primary focus:bg-[var(--color-bg-hover)]',
   button: 'w-full rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-black transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60',
 }
 
@@ -102,10 +102,10 @@ export default function ResetPasswordPage() {
           <div className="mb-6 space-y-3">
             <span className="inline-flex rounded-full border border-primary/35 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-primary">Secure Reset</span>
             <h1 className="text-3xl font-semibold">设置新的登录密码</h1>
-            <p className="text-sm leading-7 text-white/70">重置成功后，当前账号在其他标签页和设备上的登录态会同时失效，你需要用新密码重新登录。</p>
+            <p className="text-sm leading-7 text-foreground-muted">重置成功后，当前账号在其他标签页和设备上的登录态会同时失效，你需要用新密码重新登录。</p>
           </div>
 
-          {checking ? <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-white/70">正在校验重置链接...</div> : null}
+          {checking ? <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] px-4 py-4 text-sm text-foreground-muted">正在校验重置链接...</div> : null}
           {!checking && !tokenStatus.valid ? <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-4 text-sm text-amber-100">{tokenStatus.detail || '该重置链接不可用，请重新申请。'}</div> : null}
 
           <form onSubmit={submit} className="mt-4 space-y-4">
@@ -128,17 +128,17 @@ export default function ResetPasswordPage() {
               disabled={checking || !tokenStatus.valid || submitting}
             />
 
-            {notice ? <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">{notice}</div> : null}
-            {error ? <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">{error}</div> : null}
+            {notice ? <div className="rounded-2xl border border-positive/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">{notice}</div> : null}
+            {error ? <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-negative">{error}</div> : null}
 
             <button type="submit" disabled={checking || !tokenStatus.valid || submitting} className={PAGE_THEME.button}>
               {submitting ? '重置中...' : '确认重置密码'}
             </button>
           </form>
 
-          <div className="mt-6 flex items-center justify-between text-xs text-white/45">
-            <a href="/forgot-password" className="transition hover:text-white">重新申请链接</a>
-            <a href="/" className="transition hover:text-white">返回首页</a>
+          <div className="mt-6 flex items-center justify-between text-xs text-foreground-dim">
+            <a href="/forgot-password" className="transition hover:text-foreground">重新申请链接</a>
+            <a href="/" className="transition hover:text-foreground">返回首页</a>
           </div>
         </div>
       </main>

@@ -3,9 +3,9 @@ import Head from 'next/head'
 import changelogData from '../data/changelog.json'
 
 const TYPE_STYLES = {
-  新功能: 'border-sky-400/35 bg-sky-500/12 text-sky-100 shadow-[0_10px_30px_rgba(56,189,248,0.12)]',
-  修复优化: 'border-emerald-400/35 bg-emerald-500/12 text-emerald-100 shadow-[0_10px_30px_rgba(16,185,129,0.12)]',
-  工程维护: 'border-amber-400/35 bg-amber-500/12 text-amber-100 shadow-[0_10px_30px_rgba(245,158,11,0.12)]',
+  新功能: 'border-sky-500/30 dark:border-sky-400/35 bg-sky-100 dark:bg-sky-500/12 text-sky-700 dark:text-sky-100 shadow-none dark:shadow-[0_10px_30px_rgba(56,189,248,0.12)]',
+  修复优化: 'border-emerald-500/30 dark:border-emerald-400/35 bg-emerald-100 dark:bg-positive/10 text-emerald-700 dark:text-emerald-100 shadow-none dark:shadow-[0_10px_30px_rgba(16,185,129,0.12)]',
+  工程维护: 'border-amber-500/30 dark:border-amber-400/35 bg-amber-100 dark:bg-amber-500/12 text-amber-700 dark:text-amber-100 shadow-none dark:shadow-[0_10px_30px_rgba(245,158,11,0.12)]',
 }
 
 function formatDisplayDate(value) {
@@ -21,7 +21,7 @@ function buildMetaCards(items) {
     {
       label: '最近更新时间',
       value: formatDisplayDate(items[0]?.date || changelogData.last_updated),
-      tone: 'text-white',
+      tone: 'text-foreground',
     },
     {
       label: '更新日志条数',
@@ -67,7 +67,7 @@ export default function ChangelogPage() {
         <meta name="description" content="卧龙AI量化交易台更新日志 — 查看最新功能、优化与修复记录。" />
         <link rel="canonical" href="https://wolongtrader.top/changelog" />
       </Head>
-      <section className="relative overflow-hidden rounded-[28px] border border-white/10 bg-[#111114] p-8 shadow-[0_24px_80px_rgba(0,0,0,0.35)] lg:p-10">
+      <section className="relative overflow-hidden rounded-[28px] border border-border bg-[var(--color-bg-secondary)] dark:bg-[#111114] p-8 shadow-[0_24px_80px_rgba(0,0,0,0.08)] dark:shadow-[0_24px_80px_rgba(0,0,0,0.35)] lg:p-10">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(230,126,34,0.18),transparent_34%),radial-gradient(circle_at_85%_20%,rgba(56,189,248,0.14),transparent_24%),linear-gradient(135deg,rgba(255,255,255,0.04),transparent_55%)]" />
         <div className="absolute inset-y-0 right-0 hidden w-1/3 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),transparent_70%)] lg:block" />
 
@@ -77,22 +77,22 @@ export default function ChangelogPage() {
               产品迭代记录
             </div>
             <h1
-              className="mt-5 max-w-2xl text-4xl leading-tight text-white md:text-5xl"
+              className="mt-5 max-w-2xl text-4xl leading-tight text-foreground md:text-5xl"
               style={{ fontFamily: 'Iowan Old Style, Palatino Linotype, Times New Roman, serif' }}
             >
               产品更新日志
             </h1>
-            <p className="mt-5 max-w-2xl text-sm leading-7 text-white/68 md:text-base">
+            <p className="mt-5 max-w-2xl text-sm leading-7 text-foreground/68 md:text-base">
               如果你有什么想要的功能可以在设置页面提交反馈告诉我们
             </p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[420px]">
             {metaCards.map((card) => (
-              <div key={card.label} className="rounded-[24px] border border-white/10 bg-black/25 px-5 py-5 backdrop-blur-sm">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-white/40">{card.label}</div>
+              <div key={card.label} className="rounded-[24px] border border-border bg-[var(--color-bg-secondary)] px-5 py-5 backdrop-blur-sm">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-foreground-dim">{card.label}</div>
                 <div className={`mt-3 text-2xl font-semibold ${card.tone}`}>{card.value}</div>
-                {card.hint ? <div className="mt-2 text-xs leading-6 text-white/42">{card.hint}</div> : null}
+                {card.hint ? <div className="mt-2 text-xs leading-6 text-foreground/42">{card.hint}</div> : null}
               </div>
             ))}
           </div>
@@ -100,8 +100,8 @@ export default function ChangelogPage() {
       </section>
 
       <section className="rounded-[28px] border border-border bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
-        <div className="border-b border-white/8 pb-5">
-          <h2 className="text-lg font-semibold text-white">最近更新</h2>
+        <div className="border-b border-border pb-5">
+          <h2 className="text-lg font-semibold text-foreground">最近更新</h2>
         </div>
 
         {groupedItems.length ? (
@@ -109,10 +109,10 @@ export default function ChangelogPage() {
             {groupedItems.map((group) => (
               <section key={group.date} className="grid gap-4 lg:grid-cols-[180px_minmax(0,1fr)] lg:gap-6">
                 <div className="lg:sticky lg:top-24 lg:self-start">
-                  <div className="rounded-[22px] border border-white/10 bg-black/20 px-4 py-4">
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-white/36">更新日期</div>
+                  <div className="rounded-[22px] border border-border bg-[var(--color-bg-hover)] px-4 py-4">
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-foreground/36">更新日期</div>
                     <div
-                      className="mt-2 text-2xl text-white"
+                      className="mt-2 text-2xl text-foreground"
                       style={{ fontFamily: 'Iowan Old Style, Palatino Linotype, Times New Roman, serif' }}
                     >
                       {formatDisplayDate(group.date)}
@@ -121,45 +121,45 @@ export default function ChangelogPage() {
                 </div>
 
                 <div className="relative space-y-4 pl-0 lg:pl-8">
-                  <div className="absolute left-0 top-0 hidden h-full w-px bg-gradient-to-b from-primary/35 via-white/12 to-transparent lg:block" />
+                  <div className="absolute left-0 top-0 hidden h-full w-px bg-gradient-to-b from-primary/35 via-[var(--color-border)] to-transparent lg:block" />
 
                   {group.items.map((item, index) => (
                     <article
                       key={`${item.date}-${item.title}`}
-                      className="relative overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.035),rgba(255,255,255,0.02))] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.2)] transition hover:-translate-y-0.5 hover:border-white/16 hover:shadow-[0_24px_56px_rgba(0,0,0,0.28)]"
+                      className="relative overflow-hidden rounded-[24px] border border-border bg-[linear-gradient(180deg,var(--color-bg-hover),transparent)] p-5 shadow-[0_18px_40px_rgba(0,0,0,0.2)] transition hover:-translate-y-0.5 hover:border-[var(--color-border-strong)] hover:shadow-[0_24px_56px_rgba(0,0,0,0.28)]"
                     >
                       <div className="absolute left-0 top-8 hidden h-3 w-3 -translate-x-[37px] rounded-full border border-primary/35 bg-background shadow-[0_0_0_6px_rgba(230,126,34,0.08)] lg:block" />
 
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="space-y-3">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${TYPE_STYLES[item.type] || 'border-white/15 bg-white/5 text-white/75'}`}>
+                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${TYPE_STYLES[item.type] || 'border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] text-foreground-muted'}`}>
                               {item.type}
                             </span>
                             {item.scope ? (
-                              <span className="inline-flex rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-white/55">
+                              <span className="inline-flex rounded-full border border-border bg-[var(--color-bg-hover)] px-2.5 py-1 text-xs text-foreground-dim">
                                 {item.scope}
                               </span>
                             ) : null}
-                            <span className="text-[11px] uppercase tracking-[0.24em] text-white/28">第 {String(index + 1).padStart(2, '0')} 条</span>
+                            <span className="text-[11px] uppercase tracking-[0.24em] text-foreground/28">第 {String(index + 1).padStart(2, '0')} 条</span>
                           </div>
 
                           <div>
                             <h3
-                              className="text-[24px] leading-tight text-white"
+                              className="text-[24px] leading-tight text-foreground"
                               style={{ fontFamily: 'Iowan Old Style, Palatino Linotype, Times New Roman, serif' }}
                             >
                               {item.title}
                             </h3>
-                            <p className="mt-3 max-w-3xl text-sm leading-7 text-white/66 md:text-[15px]">
+                            <p className="mt-3 max-w-3xl text-sm leading-7 text-foreground/66 md:text-[15px]">
                               {item.summary}
                             </p>
                           </div>
                         </div>
 
-                        <div className="shrink-0 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-left text-xs text-white/48 lg:min-w-[120px] lg:text-right">
-                          <div className="uppercase tracking-[0.22em] text-white/28">记录时间</div>
-                          <div className="mt-2 text-sm text-white/62">{formatDisplayDate(item.date)}</div>
+                        <div className="shrink-0 rounded-2xl border border-border bg-[var(--color-bg-hover)] px-4 py-3 text-left text-xs text-foreground/48 lg:min-w-[120px] lg:text-right">
+                          <div className="uppercase tracking-[0.22em] text-foreground/28">记录时间</div>
+                          <div className="mt-2 text-sm text-foreground/62">{formatDisplayDate(item.date)}</div>
                         </div>
                       </div>
                     </article>
@@ -169,7 +169,7 @@ export default function ChangelogPage() {
             ))}
           </div>
         ) : (
-          <div className="mt-6 rounded-[24px] border border-dashed border-white/10 px-4 py-10 text-center text-sm text-white/45">
+          <div className="mt-6 rounded-[24px] border border-dashed border-border px-4 py-10 text-center text-sm text-foreground-dim">
             暂时还没有可展示的更新，先别急，产品没有偷偷摸鱼。
           </div>
         )}

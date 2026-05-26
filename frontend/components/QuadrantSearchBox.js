@@ -94,8 +94,8 @@ export default function QuadrantSearchBox({
   return (
     <div ref={wrapperRef} className="relative">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className={`flex min-w-0 flex-1 items-center rounded-xl border px-3 py-2 transition ${disabled ? 'border-border/40 bg-black/10 text-white/30' : 'border-border bg-black/20 text-white focus-within:border-primary/45'}`}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mr-2 shrink-0 text-white/35">
+        <div className={`flex min-w-0 flex-1 items-center rounded-xl border px-3 py-2 transition ${disabled ? 'border-border/40 bg-[var(--color-bg-hover)] text-foreground-dim' : 'border-border bg-[var(--color-bg-hover)] text-foreground focus-within:border-primary/45'}`}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mr-2 shrink-0 text-foreground-dim">
             <circle cx="11" cy="11" r="8" />
             <path d="M21 21l-4.35-4.35" />
           </svg>
@@ -109,13 +109,13 @@ export default function QuadrantSearchBox({
               if (!disabled && (results.length > 0 || showEmptyState)) setIsOpen(true)
             }}
             placeholder={disabled ? '四象限数据加载完成后即可搜索' : '输入股票代码或名称，例如 600519 / 腾讯'}
-            className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder-white/30 outline-none disabled:cursor-not-allowed"
+            className="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder-foreground-disabled outline-none disabled:cursor-not-allowed"
           />
           {(query || normalizedSelectedCode) && !disabled && (
             <button
               type="button"
               onClick={handleClear}
-              className="ml-2 shrink-0 text-white/35 transition hover:text-white/70"
+              className="ml-2 shrink-0 text-foreground-dim transition hover:text-foreground-muted"
               aria-label="清除四象限搜索"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -132,7 +132,7 @@ export default function QuadrantSearchBox({
       </div>
 
       {isOpen && !disabled && (results.length > 0 || showEmptyState) && (
-        <div className="absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/95 shadow-2xl backdrop-blur">
+        <div className="absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-border bg-card shadow-2xl backdrop-blur">
           {results.length > 0 ? (
             <ul>
               {results.map((item, index) => {
@@ -145,21 +145,21 @@ export default function QuadrantSearchBox({
                       type="button"
                       onClick={() => handleSelect(item)}
                       onMouseEnter={() => setActiveIdx(index)}
-                      className={`w-full border-b border-white/5 px-4 py-3 text-left transition last:border-b-0 ${isActive ? 'bg-primary/15' : isSelected ? 'bg-white/[0.04]' : 'hover:bg-white/[0.04]'}`}
+                      className={`w-full border-b border-border px-4 py-3 text-left transition last:border-b-0 ${isActive ? 'bg-primary/15' : isSelected ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-bg-hover)]'}`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 text-sm text-white">
+                          <div className="flex items-center gap-2 text-sm text-foreground">
                             <span className={`font-medium ${isActive || isSelected ? 'text-primary' : ''}`}>{item.n}</span>
-                            <span className="font-mono text-[12px] text-white/45">{normalizedItemCode}</span>
+                            <span className="font-mono text-[12px] text-foreground-dim">{normalizedItemCode}</span>
                           </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-white/45">
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-foreground-dim">
                             <span className={`rounded-full px-2 py-0.5 ${quadrantBadgeClass(item.q)}`}>{item.q}区</span>
                             <span>机会 {Number(item.o || 0).toFixed(1)}</span>
                             <span>风险 {Number(item.r || 0).toFixed(1)}</span>
                           </div>
                         </div>
-                        <span className="shrink-0 text-[11px] text-white/25">{buildQuadrantDetailSymbol(item.c, normalizedMarket)}</span>
+                        <span className="shrink-0 text-[11px] text-foreground-disabled">{buildQuadrantDetailSymbol(item.c, normalizedMarket)}</span>
                       </div>
                     </button>
                   </li>
@@ -167,7 +167,7 @@ export default function QuadrantSearchBox({
               })}
             </ul>
           ) : (
-            <div className="px-4 py-4 text-center text-sm text-white/35">当前市场未找到匹配股票</div>
+            <div className="px-4 py-4 text-center text-sm text-foreground-dim">当前市场未找到匹配股票</div>
           )}
         </div>
       )}
@@ -178,13 +178,13 @@ export default function QuadrantSearchBox({
 function quadrantBadgeClass(quadrant) {
   switch (quadrant) {
     case '机会':
-      return 'bg-emerald-500/12 text-emerald-300'
+      return 'bg-positive/10 text-positive'
     case '拥挤':
       return 'bg-amber-500/12 text-amber-300'
     case '泡沫':
-      return 'bg-rose-500/12 text-rose-300'
+      return 'bg-negative/10 text-negative'
     case '防御':
-      return 'bg-white/8 text-white/70'
+      return 'bg-[var(--color-bg-secondary)] text-foreground-muted'
     default:
       return 'bg-blue-500/12 text-blue-300'
   }

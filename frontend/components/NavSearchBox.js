@@ -108,8 +108,8 @@ export default function NavSearchBox() {
   return (
     <div ref={wrapperRef} className="relative w-[200px] focus-within:w-[280px] transition-all duration-200">
       {/* Input */}
-      <div className="flex items-center bg-white/10 border border-white/15 rounded-lg px-3 py-1.5 focus-within:border-primary/40 focus-within:bg-white/12 transition">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-white/40 mr-1.5">
+      <div className="flex items-center bg-[var(--color-bg-hover)] border border-[var(--color-border-strong)] rounded-lg px-3 py-1.5 focus-within:border-primary/40 focus-within:bg-[var(--color-bg-secondary)] transition">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-foreground-dim mr-1.5">
           <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
         </svg>
         <input
@@ -119,21 +119,21 @@ export default function NavSearchBox() {
           onKeyDown={handleKeyDown}
           onFocus={() => { if (results.length > 0 && query.length >= MIN_QUERY_LEN) setIsOpen(true) }}
           placeholder="搜索代码或名称"
-          className="bg-transparent text-sm text-white placeholder-white/30 outline-none min-w-0 flex-1"
+          className="bg-transparent text-sm text-foreground placeholder-foreground-disabled outline-none min-w-0 flex-1"
         />
         {query && (
-          <button type="button" onClick={clearInput} className="shrink-0 ml-1 text-white/40 hover:text-white/70 transition" aria-label="清除">
+          <button type="button" onClick={clearInput} className="shrink-0 ml-1 text-foreground-dim hover:text-foreground-muted transition" aria-label="清除">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
           </button>
         )}
         {isLoading && (
-          <span className="shrink-0 ml-1 w-3 h-3 border border-white/20 border-t-white/60 rounded-full animate-spin" />
+          <span className="shrink-0 ml-1 w-3 h-3 border border-[var(--color-border-strong)] border-t-foreground-muted rounded-full animate-spin" />
         )}
       </div>
 
       {/* Dropdown */}
       {isOpen && (results.length > 0 || (query.length >= MIN_QUERY_LEN && !isLoading)) && (
-        <div className="absolute top-full left-0 right-0 mt-1.5 bg-slate-950 border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden">
+        <div className="absolute top-full left-0 right-0 mt-1.5 bg-card border border-border rounded-xl shadow-2xl z-50 overflow-hidden">
           {results.length > 0 ? (
             <ul>
               {results.map((item, i) => (
@@ -143,12 +143,12 @@ export default function NavSearchBox() {
                     onClick={() => handleSelect(item)}
                     onMouseEnter={() => setActiveIdx(i)}
                     className={`w-full flex items-center justify-between px-4 py-2.5 text-left text-sm transition ${
-                      i === activeIdx ? 'bg-primary/15 text-primary' : 'text-white/80 hover:bg-white/5'
+                      i === activeIdx ? 'bg-primary/15 text-primary' : 'text-foreground-muted hover:bg-[var(--color-bg-hover)]'
                     }`}
                   >
                     <span>
                       <span className={`font-mono font-semibold ${i === activeIdx ? '' : 'text-primary/80'}`}>{item.code}</span>
-                      <span className="ml-2 text-white/50">{item.name}</span>
+                      <span className="ml-2 text-foreground-dim">{item.name}</span>
                       {item.exchange === 'HKEX' && (
                         <span className="ml-1.5 inline-flex items-center px-1 rounded text-[10px] font-medium bg-blue-500/20 text-blue-300">HK</span>
                       )}
@@ -161,7 +161,7 @@ export default function NavSearchBox() {
               ))}
             </ul>
           ) : (
-            <div className="px-4 py-3 text-center text-sm text-white/30">未找到匹配股票</div>
+            <div className="px-4 py-3 text-center text-sm text-foreground-dim">未找到匹配股票</div>
           )}
         </div>
       )}

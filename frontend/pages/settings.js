@@ -279,26 +279,26 @@ export default function SettingsPage() {
       <section className="rounded-2xl border border-border bg-card p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-white">投资画像</h2>
-            <p className="mt-1 text-xs text-white/60">帮助系统了解你的投资风格，以便AI分析提供更精准的策略结果和风险提示。</p>
+            <h2 className="text-base font-semibold text-foreground">投资画像</h2>
+            <p className="mt-1 text-xs text-foreground-muted">帮助系统了解你的投资风格，以便AI分析提供更精准的策略结果和风险提示。</p>
           </div>
           {investProfile?.updated_at && (
-            <div className="text-xs text-white/55">更新：{formatDateTime(investProfile.updated_at)}</div>
+            <div className="text-xs text-foreground-dim">更新：{formatDateTime(investProfile.updated_at)}</div>
           )}
         </div>
 
         {investNotice && (
-          <div className="mt-3 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{investNotice}</div>
+          <div className="mt-3 rounded-xl border border-emerald-400/40 bg-positive/10 px-4 py-3 text-sm text-positive">{investNotice}</div>
         )}
 
-        <div className="mt-4 space-y-4 rounded-xl border border-border bg-black/20 p-4">
+        <div className="mt-4 space-y-4 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block">
-              <span className="text-xs text-white/55">风险偏好</span>
+              <span className="text-xs text-foreground-dim">风险偏好</span>
               <select
                 value={investForm.risk_preference}
                 onChange={(e) => setInvestForm((f) => ({ ...f, risk_preference: e.target.value }))}
-                className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
               >
                 <option value="">请选择</option>
                 <option value="保守">保守 — 尽量不亏，收益低一点也可以</option>
@@ -309,11 +309,11 @@ export default function SettingsPage() {
             </label>
 
             <label className="block">
-              <span className="text-xs text-white/55">投资目标</span>
+              <span className="text-xs text-foreground-dim">投资目标</span>
               <select
                 value={investForm.investment_goal}
                 onChange={(e) => setInvestForm((f) => ({ ...f, investment_goal: e.target.value }))}
-                className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
               >
                 <option value="">请选择</option>
                 <option value="长期增值">长期增值 — 买入好公司长期持有</option>
@@ -325,11 +325,11 @@ export default function SettingsPage() {
             </label>
 
             <label className="block">
-              <span className="text-xs text-white/55">投资周期</span>
+              <span className="text-xs text-foreground-dim">投资周期</span>
               <select
                 value={investForm.investment_horizon}
                 onChange={(e) => setInvestForm((f) => ({ ...f, investment_horizon: e.target.value }))}
-                className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
               >
                 <option value="">请选择</option>
                 <option value="短期">短期 — 1 年以内</option>
@@ -339,11 +339,11 @@ export default function SettingsPage() {
             </label>
 
             <label className="block">
-              <span className="text-xs text-white/55">投资经验</span>
+              <span className="text-xs text-foreground-dim">投资经验</span>
               <select
                 value={investForm.experience_level}
                 onChange={(e) => setInvestForm((f) => ({ ...f, experience_level: e.target.value }))}
-                className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
               >
                 <option value="">请选择</option>
                 <option value="新手">新手 — 刚开始接触股票投资</option>
@@ -354,24 +354,24 @@ export default function SettingsPage() {
             </label>
 
             <label className="block">
-              <span className="text-xs text-white/55">账户总资金（元）</span>
+              <span className="text-xs text-foreground-dim">账户总资金（元）</span>
               <input
                 type="number"
                 min="0"
                 step="any"
                 value={investForm.total_capital}
                 onChange={(e) => setInvestForm((f) => ({ ...f, total_capital: e.target.value }))}
-                className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
                 placeholder="选填，例：500000"
               />
             </label>
 
             <label className="block">
-              <span className="text-xs text-white/55">可承受最大回撤（%）</span>
+              <span className="text-xs text-foreground-dim">可承受最大回撤（%）</span>
               <select
                 value={investForm.max_drawdown_pct}
                 onChange={(e) => setInvestForm((f) => ({ ...f, max_drawdown_pct: e.target.value }))}
-                className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
               >
                 <option value="">请选择</option>
                 <option value="5">5% — 几乎不能接受亏损</option>
@@ -383,76 +383,76 @@ export default function SettingsPage() {
             </label>
           </div>
 
-          <div className="rounded-xl border border-white/8 bg-white/[0.03] p-4">
+          <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-white">默认手续费率</div>
-                <div className="mt-1 text-xs leading-6 text-white/45">买入 / 卖出表单会自动带出这里的费率。A 股小额买卖若按费率估算低于 ¥5.00，会按最低佣金 ¥5.00 估算。</div>
+                <div className="text-sm font-semibold text-foreground">默认手续费率</div>
+                <div className="mt-1 text-xs leading-6 text-foreground-dim">买入 / 卖出表单会自动带出这里的费率。A 股小额买卖若按费率估算低于 ¥5.00，会按最低佣金 ¥5.00 估算。</div>
               </div>
-              <div className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-white/45">可随时手动修改</div>
+              <div className="rounded-full border border-border px-2 py-0.5 text-[10px] text-foreground-dim">可随时手动修改</div>
             </div>
 
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
-              <div className="rounded-xl border border-white/8 bg-black/20 p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-white/35">A股</div>
+              <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-foreground-dim">A股</div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <label className="block">
-                    <span className="text-xs text-white/55">买入默认费率（%）</span>
+                    <span className="text-xs text-foreground-dim">买入默认费率（%）</span>
                     <input
                       type="number"
                       min="0"
                       step="any"
                       value={investForm.default_fee_rate_ashare_buy}
                       onChange={(e) => setInvestForm((f) => ({ ...f, default_fee_rate_ashare_buy: e.target.value }))}
-                      className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                      className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
                       placeholder="默认 0.03"
                     />
-                    <div className="mt-1 text-[11px] text-white/40">{describeFeeRate(parseFeeRatePercentInput(investForm.default_fee_rate_ashare_buy) ?? 0)}</div>
+                    <div className="mt-1 text-[11px] text-foreground-dim">{describeFeeRate(parseFeeRatePercentInput(investForm.default_fee_rate_ashare_buy) ?? 0)}</div>
                   </label>
                   <label className="block">
-                    <span className="text-xs text-white/55">卖出默认费率（%）</span>
+                    <span className="text-xs text-foreground-dim">卖出默认费率（%）</span>
                     <input
                       type="number"
                       min="0"
                       step="any"
                       value={investForm.default_fee_rate_ashare_sell}
                       onChange={(e) => setInvestForm((f) => ({ ...f, default_fee_rate_ashare_sell: e.target.value }))}
-                      className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                      className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
                       placeholder="默认 0.08"
                     />
-                    <div className="mt-1 text-[11px] text-white/40">{describeFeeRate(parseFeeRatePercentInput(investForm.default_fee_rate_ashare_sell) ?? 0)}</div>
+                    <div className="mt-1 text-[11px] text-foreground-dim">{describeFeeRate(parseFeeRatePercentInput(investForm.default_fee_rate_ashare_sell) ?? 0)}</div>
                   </label>
                 </div>
               </div>
 
-              <div className="rounded-xl border border-white/8 bg-black/20 p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-white/35">港股</div>
+              <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-foreground-dim">港股</div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <label className="block">
-                    <span className="text-xs text-white/55">买入默认费率（%）</span>
+                    <span className="text-xs text-foreground-dim">买入默认费率（%）</span>
                     <input
                       type="number"
                       min="0"
                       step="any"
                       value={investForm.default_fee_rate_hk_buy}
                       onChange={(e) => setInvestForm((f) => ({ ...f, default_fee_rate_hk_buy: e.target.value }))}
-                      className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                      className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
                       placeholder="默认 0.13"
                     />
-                    <div className="mt-1 text-[11px] text-white/40">{describeFeeRate(parseFeeRatePercentInput(investForm.default_fee_rate_hk_buy) ?? 0)}</div>
+                    <div className="mt-1 text-[11px] text-foreground-dim">{describeFeeRate(parseFeeRatePercentInput(investForm.default_fee_rate_hk_buy) ?? 0)}</div>
                   </label>
                   <label className="block">
-                    <span className="text-xs text-white/55">卖出默认费率（%）</span>
+                    <span className="text-xs text-foreground-dim">卖出默认费率（%）</span>
                     <input
                       type="number"
                       min="0"
                       step="any"
                       value={investForm.default_fee_rate_hk_sell}
                       onChange={(e) => setInvestForm((f) => ({ ...f, default_fee_rate_hk_sell: e.target.value }))}
-                      className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                      className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
                       placeholder="默认 0.13"
                     />
-                    <div className="mt-1 text-[11px] text-white/40">{describeFeeRate(parseFeeRatePercentInput(investForm.default_fee_rate_hk_sell) ?? 0)}</div>
+                    <div className="mt-1 text-[11px] text-foreground-dim">{describeFeeRate(parseFeeRatePercentInput(investForm.default_fee_rate_hk_sell) ?? 0)}</div>
                   </label>
                 </div>
               </div>
@@ -460,12 +460,12 @@ export default function SettingsPage() {
           </div>
 
           <label className="block">
-            <span className="text-xs text-white/55">补充说明（选填）</span>
+            <span className="text-xs text-foreground-dim">补充说明（选填）</span>
             <textarea
               value={investForm.note}
               onChange={(e) => setInvestForm((f) => ({ ...f, note: e.target.value }))}
               rows={2}
-              className="mt-1 block w-full resize-none rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+              className="mt-1 block w-full resize-none rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
               placeholder="例：主要关注港股科技板块，偏好有回购计划的公司"
             />
           </label>
@@ -508,7 +508,7 @@ export default function SettingsPage() {
                 setInvestSaving(false)
               }
             }}
-            className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {investSaving ? '保存中...' : '保存投资画像'}
           </button>
@@ -520,12 +520,12 @@ export default function SettingsPage() {
         <section className="rounded-2xl border border-border bg-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-white">桌面通知</h2>
-              <p className="mt-1 text-xs text-white/60">控制是否通过浏览器系统弹窗接收通知。</p>
+              <h2 className="text-base font-semibold text-foreground">桌面通知</h2>
+              <p className="mt-1 text-xs text-foreground-muted">控制是否通过浏览器系统弹窗接收通知。</p>
             </div>
           </div>
 
-          <div className="mt-4 space-y-3 rounded-xl border border-border bg-black/20 p-4">
+          <div className="mt-4 space-y-3 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
             <label className="flex cursor-pointer items-center gap-3">
               <input
                 type="checkbox"
@@ -535,11 +535,11 @@ export default function SettingsPage() {
                   setNotifPrefs(next)
                   saveNotificationPreferences(next)
                 }}
-                className="h-4 w-4 rounded border-border bg-black/30 text-primary accent-primary"
+                className="h-4 w-4 rounded border-border bg-[var(--color-bg-overlay)] text-primary accent-primary"
               />
               <div>
-                <div className="text-sm text-white/85">AI 分析完成时通知我</div>
-                <div className="text-[11px] text-white/40">分析完成后通过桌面弹窗提醒，即使切换到其他标签页也能收到</div>
+                <div className="text-sm text-foreground-muted">AI 分析完成时通知我</div>
+                <div className="text-[11px] text-foreground-dim">分析完成后通过桌面弹窗提醒，即使切换到其他标签页也能收到</div>
               </div>
             </label>
 
@@ -555,8 +555,8 @@ export default function SettingsPage() {
       <section className="rounded-2xl border border-border bg-card p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-white">Webhook 推送配置</h2>
-            <p className="mt-1 text-xs text-white/60">
+            <h2 className="text-base font-semibold text-foreground">Webhook 推送配置</h2>
+            <p className="mt-1 text-xs text-foreground-muted">
               用于接收所有股票的网站信号。当前支持企业微信和飞书机器人。Secret签名为可选。
               不知道如何获取 Webhook 地址？可参考
               <a href="https://open.work.weixin.qq.com/help2/pc/14931" target="_blank" rel="noopener noreferrer" className="ml-0.5 text-primary/80 underline underline-offset-2 hover:text-primary">企业微信 Webhook 配置教程</a>
@@ -564,19 +564,19 @@ export default function SettingsPage() {
               <a href="https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot?lang=zh-CN" target="_blank" rel="noopener noreferrer" className="ml-0.5 text-primary/80 underline underline-offset-2 hover:text-primary">飞书 Webhook 配置教程</a>。
             </p>
           </div>
-          <div className="text-xs text-white/55">
+          <div className="text-xs text-foreground-dim">
             {webhookConfig.updated_at ? `配置更新时间：${formatDateTime(webhookConfig.updated_at)}` : '未配置'}
           </div>
         </div>
 
         {error ? (
-          <div className="mt-3 rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          <div className="mt-3 rounded-xl border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-negative">
             <div>{error}</div>
             {errorNeedsLogin ? (
               <button
                 type="button"
                 onClick={() => openAuthModal('login', 'Webhook 配置需要登录后才能继续。')}
-                className="mt-2 inline-flex rounded-lg border border-rose-300/40 px-2.5 py-1 text-xs text-rose-100 transition hover:bg-rose-500/15"
+                className="mt-2 inline-flex rounded-lg border border-negative/40 px-2.5 py-1 text-xs text-negative transition hover:bg-negative/15"
               >
                 去登录
               </button>
@@ -585,12 +585,12 @@ export default function SettingsPage() {
         ) : null}
 
         {notice ? (
-          <div className="mt-3 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{notice}</div>
+          <div className="mt-3 rounded-xl border border-emerald-400/40 bg-positive/10 px-4 py-3 text-sm text-positive">{notice}</div>
         ) : null}
 
-        <div className="mt-4 space-y-3 rounded-xl border border-border bg-black/20 p-4">
+        <div className="mt-4 space-y-3 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
           <div>
-            <div className="mb-2 text-xs text-white/55">推送渠道</div>
+            <div className="mb-2 text-xs text-foreground-dim">推送渠道</div>
             <div className="grid gap-2 sm:grid-cols-2">
               {WEBHOOK_CHANNEL_OPTIONS.map((option) => (
                 <button
@@ -600,10 +600,10 @@ export default function SettingsPage() {
                   className={
                     webhookConfig.channel === option.value
                       ? 'rounded-lg border border-primary bg-primary/10 px-3 py-2 text-left transition shadow-[0_0_0_1px_rgba(230,126,34,0.2)]'
-                      : 'rounded-lg border border-border bg-black/20 px-3 py-2 text-left transition hover:border-white/20'
+                      : 'rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-2 text-left transition hover:border-[var(--color-border-strong)]'
                   }
                 >
-                  <div className="text-sm font-medium text-white">{option.label}</div>
+                  <div className="text-sm font-medium text-foreground">{option.label}</div>
                 </button>
               ))}
             </div>
@@ -613,22 +613,22 @@ export default function SettingsPage() {
             value={webhookConfig.url}
             onChange={(event) => setWebhookConfig((prev) => ({ ...prev, url: event.target.value.trim() }))}
             placeholder="https://example.com/webhook"
-            className="w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+            className="w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
           />
 
           <input
             value={secretInput}
             onChange={(event) => setSecretInput(event.target.value)}
             placeholder={webhookConfig.has_secret ? '留空表示不修改 Secret；输入可更新签名密钥' : '可选：输入机器人签名密钥；留空则不启用签名'}
-            className="w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+            className="w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
           />
 
-          <div className="text-xs text-white/55">
-            当前签名状态：{webhookConfig.has_secret ? <span className="text-emerald-300">已启用</span> : <span className="text-amber-300">未启用（可选）</span>}
+          <div className="text-xs text-foreground-dim">
+            当前签名状态：{webhookConfig.has_secret ? <span className="text-positive">已启用</span> : <span className="text-amber-300">未启用（可选）</span>}
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <label className="text-xs text-white/70">
+            <label className="text-xs text-foreground-muted">
               超时（毫秒）
               <input
                 type="number"
@@ -636,11 +636,11 @@ export default function SettingsPage() {
                 max={10000}
                 value={webhookConfig.timeout_ms}
                 onChange={(event) => setWebhookConfig((prev) => ({ ...prev, timeout_ms: Number(event.target.value) || 3000 }))}
-                className="mt-1 w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                className="mt-1 w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
               />
             </label>
 
-            <label className="flex items-end gap-2 text-sm text-white/80">
+            <label className="flex items-end gap-2 text-sm text-foreground-muted">
               <input
                 type="checkbox"
                 checked={webhookConfig.is_enabled}
@@ -663,23 +663,23 @@ export default function SettingsPage() {
               type="button"
               disabled={testing}
               onClick={handleTestWebhook}
-              className="rounded-lg border border-border px-3 py-1.5 text-xs text-white/80 transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground-muted transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
             >
               {testing ? '送达校验中...' : '验证 Webhook 送达'}
             </button>
           </div>
 
-          <details className="mt-3 rounded-lg border border-border/80 bg-black/30 p-3">
-            <summary className="cursor-pointer text-xs font-medium text-white/85">查看触发条件与 Payload 模板</summary>
-            <div className="mt-3 space-y-3 text-xs text-white/75">
+          <details className="mt-3 rounded-lg border border-border/80 bg-[var(--color-bg-overlay)] p-3">
+            <summary className="cursor-pointer text-xs font-medium text-foreground-muted">查看触发条件与 Payload 模板</summary>
+            <div className="mt-3 space-y-3 text-xs text-foreground-muted">
               <div className="space-y-1">
                 <div>推送渠道：当前为 {webhookChannelMeta.label} 机器人。</div>
                 <div>评估周期：系统每小时自动评估一次已开启信号的股票策略。</div>
                 <div>失败重试：最多 4 次，退避间隔 1 分钟 / 5 分钟 / 15 分钟。</div>
               </div>
               <div>
-                <div className="mb-1 text-white/65">Payload 模板（系统自动生成）</div>
-                <pre className="overflow-x-auto rounded-lg border border-border/80 bg-black/50 p-2 text-[11px] leading-5 text-emerald-200">
+                <div className="mb-1 text-foreground-muted">Payload 模板（系统自动生成）</div>
+                <pre className="overflow-x-auto rounded-lg border border-border/80 bg-[var(--color-bg-overlay)] p-2 text-[11px] leading-5 text-positive">
                   {JSON.stringify(webhookChannelMeta.payloadPreview, null, 2)}
                 </pre>
               </div>
@@ -689,52 +689,52 @@ export default function SettingsPage() {
       </section>
 
       <section className="rounded-2xl border border-border bg-card p-5">
-        <h2 className="text-base font-semibold text-white">Webhook 投递可观测</h2>
+        <h2 className="text-base font-semibold text-foreground">Webhook 投递可观测</h2>
 
         <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
-          <div className="space-y-3 rounded-xl border border-border bg-black/20 p-4">
-            <div className="text-sm font-semibold text-white">最近发送状态</div>
+          <div className="space-y-3 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
+            <div className="text-sm font-semibold text-foreground">最近发送状态</div>
             {!latestDelivery ? (
-              <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-white/50">暂无投递记录</div>
+              <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-foreground-dim">暂无投递记录</div>
             ) : (
-              <div className="space-y-2 text-xs text-white/75">
+              <div className="space-y-2 text-xs text-foreground-muted">
                 <div>标的：{latestDelivery.symbol || '--'}</div>
                 <div>状态：<span className={deliveryStatusColor(latestDelivery.status)}>{formatDeliveryStatus(latestDelivery.status)}</span></div>
                 <div>HTTP：{latestDelivery.http_status || '--'} · 耗时：{latestDelivery.latency_ms ?? '--'}ms</div>
                 <div>时间：{formatDateTime(latestDelivery.updated_at)}</div>
-                {latestDelivery.error_message ? <div className="text-rose-300">错误：{latestDelivery.error_message}</div> : null}
+                {latestDelivery.error_message ? <div className="text-negative">错误：{latestDelivery.error_message}</div> : null}
               </div>
             )}
           </div>
 
           {!deliveryItems.length ? (
-            <div className="space-y-2 rounded-xl border border-border bg-black/20 p-4">
-              <div className="text-sm font-semibold text-white">最近 20 次投递</div>
-              <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-white/50">暂无投递记录</div>
+            <div className="space-y-2 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
+              <div className="text-sm font-semibold text-foreground">最近 20 次投递</div>
+              <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-foreground-dim">暂无投递记录</div>
             </div>
           ) : (
-            <details className="group rounded-xl border border-border bg-black/20 p-4">
+            <details className="group rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
               <summary className="flex cursor-pointer list-none items-start justify-between gap-3 [&::-webkit-details-marker]:hidden">
                 <div>
-                  <div className="text-sm font-semibold text-white">最近 20 次投递</div>
-                  <div className="mt-1 text-xs text-white/45">默认收起，点开后查看最近的投递记录。</div>
+                  <div className="text-sm font-semibold text-foreground">最近 20 次投递</div>
+                  <div className="mt-1 text-xs text-foreground-dim">默认收起，点开后查看最近的投递记录。</div>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-white/55">
-                  <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-white/65">{deliveryItems.length} 条</span>
+                <div className="flex items-center gap-2 text-xs text-foreground-dim">
+                  <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-foreground-muted">{deliveryItems.length} 条</span>
                   <span className="group-open:hidden">展开</span>
                   <span className="hidden group-open:inline">收起</span>
                 </div>
               </summary>
 
-              <div className="mt-3 space-y-2 border-t border-white/8 pt-3">
+              <div className="mt-3 space-y-2 border-t border-border pt-3">
                 {deliveryItems.map((item) => (
-                  <div key={`${item.event_id}-${item.updated_at}`} className="rounded-lg border border-border bg-black/30 px-3 py-2 text-xs text-white/75">
+                  <div key={`${item.event_id}-${item.updated_at}`} className="rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-xs text-foreground-muted">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="font-medium text-white">{item.symbol || '--'} · {item.event_id}</div>
+                      <div className="font-medium text-foreground">{item.symbol || '--'} · {item.event_id}</div>
                       <div className={deliveryStatusColor(item.status)}>{formatDeliveryStatus(item.status)}</div>
                     </div>
                     <div className="mt-1">Attempt {item.attempt_no} · HTTP {item.http_status || '--'} · {item.latency_ms ?? '--'}ms · {formatDateTime(item.updated_at)}</div>
-                    {item.error_message ? <div className="mt-1 text-rose-300">{item.error_message}</div> : null}
+                    {item.error_message ? <div className="mt-1 text-negative">{item.error_message}</div> : null}
                   </div>
                 ))}
               </div>
@@ -745,21 +745,21 @@ export default function SettingsPage() {
 
       <section className="rounded-2xl border border-border bg-card p-5">
         <div>
-          <h2 className="text-base font-semibold text-white">反馈与建议</h2>
-          <p className="mt-1 text-xs text-white/60">遇到问题或有想法？我们很想听到你的声音。</p>
+          <h2 className="text-base font-semibold text-foreground">反馈与建议</h2>
+          <p className="mt-1 text-xs text-foreground-muted">遇到问题或有想法？我们很想听到你的声音。</p>
         </div>
 
         {!isLoggedIn ? (
-          <div className="mt-4 rounded-xl border border-dashed border-border bg-black/20 px-4 py-6 text-center">
-            <span className="text-sm text-white/45">
+          <div className="mt-4 rounded-xl border border-dashed border-border bg-[var(--color-bg-hover)] px-4 py-6 text-center">
+            <span className="text-sm text-foreground-dim">
               <button type="button" onClick={() => openAuthModal('login', '登录后可提交反馈和建议。')} className="text-primary hover:underline">登录</button>
               {' '}后可提交反馈和建议
             </span>
           </div>
         ) : (
-          <div className="mt-4 space-y-4 rounded-xl border border-border bg-black/20 p-4">
+          <div className="mt-4 space-y-4 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
             <div>
-              <div className="mb-2 text-xs text-white/55">反馈类型</div>
+              <div className="mb-2 text-xs text-foreground-dim">反馈类型</div>
               <div className="flex flex-wrap gap-2">
                 {[
                   { value: 'bug', label: '🐛 Bug', desc: '系统报错或功能异常' },
@@ -773,46 +773,46 @@ export default function SettingsPage() {
                     className={`rounded-xl border px-3 py-2 text-left transition ${
                       fbCategory === opt.value
                         ? 'border-primary bg-primary/10 shadow-[0_0_0_1px_rgba(230,126,34,0.2)]'
-                        : 'border-border bg-black/20 hover:border-white/20'
+                        : 'border-border bg-[var(--color-bg-hover)] hover:border-[var(--color-border-strong)]'
                     }`}
                   >
-                    <div className="text-xs font-medium text-white">{opt.label}</div>
-                    <div className="mt-0.5 text-[10px] text-white/40">{opt.desc}</div>
+                    <div className="text-xs font-medium text-foreground">{opt.label}</div>
+                    <div className="mt-0.5 text-[10px] text-foreground-dim">{opt.desc}</div>
                   </button>
                 ))}
               </div>
             </div>
 
             <label className="block">
-              <span className="text-xs text-white/55">详细描述 *</span>
+              <span className="text-xs text-foreground-dim">详细描述 *</span>
               <textarea
                 value={fbContent}
                 onChange={(e) => setFbContent(e.target.value)}
                 rows={4}
                 maxLength={2000}
-                className="mt-1 block w-full resize-none rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary"
+                className="mt-1 block w-full resize-none rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition placeholder:text-foreground-disabled focus:border-primary"
                 placeholder="请描述你遇到的问题、期望的功能、或想要的改进..."
               />
-              <div className="mt-1 text-right text-[10px] text-white/30">{fbContent.length}/2000</div>
+              <div className="mt-1 text-right text-[10px] text-foreground-dim">{fbContent.length}/2000</div>
             </label>
 
             <label className="block">
-              <span className="text-xs text-white/55">联系方式（选填）</span>
+              <span className="text-xs text-foreground-dim">联系方式（选填）</span>
               <input
                 value={fbContact}
                 onChange={(e) => setFbContact(e.target.value)}
                 maxLength={128}
-                className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary"
+                className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition placeholder:text-foreground-disabled focus:border-primary"
                 placeholder="微信号、邮箱或其他联系方式，方便我们跟进"
               />
             </label>
 
             {fbError ? (
-              <div className="rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{fbError}</div>
+              <div className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-negative">{fbError}</div>
             ) : null}
 
             {fbNotice ? (
-              <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{fbNotice}</div>
+              <div className="rounded-xl border border-emerald-400/40 bg-positive/10 px-4 py-3 text-sm text-positive">{fbNotice}</div>
             ) : null}
 
             <button
@@ -837,7 +837,7 @@ export default function SettingsPage() {
                   setFbSaving(false)
                 }
               }}
-              className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-foreground shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {fbSaving ? '提交中...' : '提交反馈'}
             </button>
@@ -862,10 +862,10 @@ function formatDeliveryStatus(status) {
 
 function deliveryStatusColor(status) {
   const normalized = String(status || '').trim().toLowerCase()
-  if (normalized === 'delivered') return 'text-emerald-300'
-  if (normalized === 'failed') return 'text-rose-300'
+  if (normalized === 'delivered') return 'text-positive'
+  if (normalized === 'failed') return 'text-negative'
   if (normalized === 'retrying') return 'text-amber-300'
-  return 'text-white/75'
+  return 'text-foreground-muted'
 }
 
 function formatDateTime(value) {

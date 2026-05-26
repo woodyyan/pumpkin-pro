@@ -7,20 +7,20 @@ export const BACKUP_TRIGGER_LABELS = {
 export const BACKUP_STATUS_COLORS = {
   success: 'text-emerald-400',
   partial: 'text-amber-400',
-  failed: 'text-rose-400',
-  skipped: 'text-white/40',
-  never: 'text-white/30',
+  failed: 'text-negative',
+  skipped: 'text-foreground-dim',
+  never: 'text-foreground-dim',
 }
 
 export const BACKUP_COS_STATUS_META = {
-  disabled: { label: '未配置', tone: 'text-white/40', symbol: '⏸' },
-  never: { label: '待首次同步', tone: 'text-white/45', symbol: '…' },
+  disabled: { label: '未配置', tone: 'text-foreground-dim', symbol: '⏸' },
+  never: { label: '待首次同步', tone: 'text-foreground-dim', symbol: '…' },
   pending: { label: '待上传', tone: 'text-sky-300', symbol: '…' },
   uploading: { label: '上传中', tone: 'text-sky-300', symbol: '⇪' },
   success: { label: '已同步', tone: 'text-emerald-400', symbol: '✅' },
   partial: { label: '部分同步', tone: 'text-amber-400', symbol: '⚠' },
-  failed: { label: '同步失败', tone: 'text-rose-400', symbol: '✕' },
-  skipped: { label: '已跳过', tone: 'text-white/40', symbol: '-' },
+  failed: { label: '同步失败', tone: 'text-negative', symbol: '✕' },
+  skipped: { label: '已跳过', tone: 'text-foreground-dim', symbol: '-' },
 }
 
 export function formatBackupBytes(bytes) {
@@ -38,7 +38,7 @@ export function formatBackupDuration(ms) {
 }
 
 export function getBackupCosMeta(status) {
-  return BACKUP_COS_STATUS_META[status] || { label: status || '--', tone: 'text-white/45', symbol: '·' }
+  return BACKUP_COS_STATUS_META[status] || { label: status || '--', tone: 'text-foreground-dim', symbol: '·' }
 }
 
 export function buildBackupStatusCards(status, stats) {

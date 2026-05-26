@@ -347,18 +347,18 @@ export default function LiveTradingOverviewPage() {
       {/* Market overview — compact index bar */}
       <section className="rounded-2xl border border-border bg-card px-5 py-3">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <span className="text-xs font-medium text-white/40">大盘</span>
+          <span className="text-xs font-medium text-foreground-dim">大盘</span>
           {[...(marketOverviewA?.indexes || []), ...(marketOverviewHK?.indexes || [])].map((index) => (
             <div key={index.code} className="flex items-baseline gap-1.5">
-              <span className="text-xs text-white/55">{formatMarketIndexTitle(index.name, index.code)}</span>
-              <span className="text-sm font-semibold tabular-nums text-white">{formatNumber(index.last, 2)}</span>
-              <span className={`text-xs font-medium tabular-nums ${index.change_rate >= 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
+              <span className="text-xs text-foreground-dim">{formatMarketIndexTitle(index.name, index.code)}</span>
+              <span className="text-sm font-semibold tabular-nums text-foreground">{formatNumber(index.last, 2)}</span>
+              <span className={`text-xs font-medium tabular-nums ${index.change_rate >= 0 ? 'text-negative' : 'text-positive'}`}>
                 {formatPercent(index.change_rate)}
               </span>
             </div>
           ))}
           {(marketOverviewA?.indexes || []).length === 0 && (marketOverviewHK?.indexes || []).length === 0 && (
-            <span className="text-xs text-white/30 animate-pulse">加载中...</span>
+            <span className="text-xs text-foreground-dim animate-pulse">加载中...</span>
           )}
         </div>
       </section>
@@ -367,9 +367,9 @@ export default function LiveTradingOverviewPage() {
       <section className="rounded-2xl border border-border bg-card p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold text-white">风险机会全景图</h3>
+            <h3 className="text-base font-semibold text-foreground">风险机会全景图</h3>
             {quadrantData?.meta?.computed_at && (
-              <div className="mt-1 flex items-center gap-2 text-xs text-white/50">
+              <div className="mt-1 flex items-center gap-2 text-xs text-foreground-dim">
                 <span>{formatCloseDateLabel(quadrantData.meta.source_trade_date, quadrantData.meta.computed_at)}</span>
                 {quadrantData.meta.total_count > 0 && <span>· {quadrantData.meta.total_count.toLocaleString()} 只</span>}
                 {(() => {
@@ -377,7 +377,7 @@ export default function LiveTradingOverviewPage() {
                   if (!staleDate) return null
                   const daysDiff = Math.floor((Date.now() - new Date(staleDate).getTime()) / (1000 * 60 * 60 * 24))
                   if (daysDiff > 3) {
-                    return <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-200">数据已过期（{daysDiff} 天前）</span>
+                    return <span className="rounded bg-amber-200 dark:bg-amber-500/15 px-1.5 py-0.5 text-amber-800 dark:text-amber-200 text-xs font-medium">数据已过期（{daysDiff} 天前）</span>
                   }
                   return null
                 })()}
@@ -385,7 +385,7 @@ export default function LiveTradingOverviewPage() {
             )}
           </div>
           {/* Exchange Tab Switch */}
-          <div className="flex items-center gap-1 rounded-lg bg-black/20 p-0.5">
+          <div className="flex items-center gap-1 rounded-lg bg-[var(--color-bg-hover)] p-0.5">
             {[
               { key: 'ASHARE', label: 'A 股' },
               { key: 'HKEX', label: '港股' },
@@ -397,7 +397,7 @@ export default function LiveTradingOverviewPage() {
                 className={`rounded-md px-3 py-1 text-xs font-medium transition ${
                   quadrantExchange === tab.key
                     ? 'bg-primary text-black'
-                    : 'text-white/55 hover:text-white/80 hover:bg-white/[0.05]'
+                    : 'text-foreground-dim hover:text-foreground-muted hover:bg-[var(--color-bg-hover)]'
                 }`}
               >
                 {tab.label}
@@ -420,7 +420,7 @@ export default function LiveTradingOverviewPage() {
         </div>
 
         {quadrantLoading && !quadrantData ? (
-          <div className="mt-6 flex items-center justify-center py-12 text-sm text-white/40">
+          <div className="mt-6 flex items-center justify-center py-12 text-sm text-foreground-dim">
             <span className="animate-pulse">加载四象限数据...</span>
           </div>
         ) : quadrantData && quadrantData.all_stocks && quadrantData.all_stocks.length > 0 ? (
@@ -438,15 +438,15 @@ export default function LiveTradingOverviewPage() {
             {highlightedQuadrantStock && (
               <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 md:flex-row md:items-center md:justify-between">
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 text-sm text-white">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">
                     <span className="font-semibold text-primary">已定位</span>
                     <span className="font-medium">{highlightedQuadrantStock.n}</span>
-                    <span className="font-mono text-xs text-white/45">{highlightedQuadrantStock.c}</span>
+                    <span className="font-mono text-xs text-foreground-dim">{highlightedQuadrantStock.c}</span>
                     <span className={`rounded-full px-2 py-0.5 text-[11px] ${quadrantBadgeClass(highlightedQuadrantStock.q)}`}>
                       {highlightedQuadrantStock.q}区
                     </span>
                   </div>
-                  <div className="mt-1 text-xs text-white/55">
+                  <div className="mt-1 text-xs text-foreground-dim">
                     机会 {Number(highlightedQuadrantStock.o || 0).toFixed(1)} / 风险 {Number(highlightedQuadrantStock.r || 0).toFixed(1)}
                   </div>
                 </div>
@@ -461,7 +461,7 @@ export default function LiveTradingOverviewPage() {
                   <button
                     type="button"
                     onClick={handleQuadrantSearchClear}
-                    className="inline-flex items-center justify-center rounded-xl border border-white/10 px-3 py-2 text-xs text-white/60 transition hover:bg-white/[0.05] hover:text-white/85"
+                    className="inline-flex items-center justify-center rounded-xl border border-border px-3 py-2 text-xs text-foreground-muted transition hover:bg-[var(--color-bg-hover)] hover:text-foreground-muted"
                   >
                     清除高亮
                   </button>
@@ -472,7 +472,7 @@ export default function LiveTradingOverviewPage() {
             {/* Summary stats */}
             <div className="mt-4 space-y-3">
               <div className="flex flex-wrap gap-3 text-xs">
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-2.5 py-1 text-emerald-300">
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-positive/10 px-2.5 py-1 text-positive">
                   <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />
                   机会区 {quadrantData.summary?.opportunity_zone || 0}
                 </span>
@@ -480,11 +480,11 @@ export default function LiveTradingOverviewPage() {
                   <span className="inline-block h-2 w-2 rounded-full bg-amber-400" />
                   拥挤区 {quadrantData.summary?.crowded_zone || 0}
                 </span>
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-rose-500/10 px-2.5 py-1 text-rose-300">
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-negative/10 px-2.5 py-1 text-negative">
                   <span className="inline-block h-2 w-2 rounded-full bg-rose-400" />
                   泡沫区 {quadrantData.summary?.bubble_zone || 0}
                 </span>
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-1 text-white/60">
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-bg-hover)] px-2.5 py-1 text-foreground-muted">
                   <span className="inline-block h-2 w-2 rounded-full bg-white/40" />
                   防御区 {quadrantData.summary?.defensive_zone || 0}
                 </span>
@@ -496,8 +496,8 @@ export default function LiveTradingOverviewPage() {
 
               {/* Watchlist details text summary */}
               {(quadrantData.watchlist_details || []).length > 0 && (
-                <div className="rounded-xl border border-border/60 bg-black/20 p-3">
-                  <div className="text-xs font-medium text-white/50">我的关注（{quadrantData.watchlist_details.length} 只）</div>
+                <div className="rounded-xl border border-border/60 bg-[var(--color-bg-hover)] p-3">
+                  <div className="text-xs font-medium text-foreground-dim">我的关注（{quadrantData.watchlist_details.length} 只）</div>
                   <div className="mt-2 space-y-1">
                     {quadrantData.watchlist_details.map((w) => (
                       <div key={w.code} className="flex items-center gap-2 text-xs">
@@ -508,10 +508,10 @@ export default function LiveTradingOverviewPage() {
                           w.quadrant === '防御' ? 'bg-white/40' :
                           'bg-blue-400'
                         }`} />
-                        <span className="font-medium text-white/80">{w.name}</span>
-                        <span className="text-white/40">—</span>
-                        <span className="text-white/60">{w.quadrant}区</span>
-                        <span className="text-white/40">（机会 {w.opportunity.toFixed(0)} / 风险 {w.risk.toFixed(0)}）</span>
+                        <span className="font-medium text-foreground-muted">{w.name}</span>
+                        <span className="text-foreground-dim">—</span>
+                        <span className="text-foreground-muted">{w.quadrant}区</span>
+                        <span className="text-foreground-dim">（机会 {w.opportunity.toFixed(0)} / 风险 {w.risk.toFixed(0)}）</span>
                       </div>
                     ))}
                   </div>
@@ -520,7 +520,7 @@ export default function LiveTradingOverviewPage() {
             </div>
           </>
         ) : (
-          <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-white/40">
+          <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-foreground-dim">
             {quadrantData?.all_stocks?.length === 0
               ? '四象限数据尚未计算，请等待凌晨定时任务完成。'
               : '加载四象限数据中...'}
@@ -540,13 +540,13 @@ export default function LiveTradingOverviewPage() {
       />
 
       {error ? (
-        <div className="rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+        <div className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-negative">
           <div>{error}</div>
           {errorNeedsLogin ? (
             <button
               type="button"
               onClick={() => openAuthModal('login', '行情看板相关操作需要登录后才能继续。')}
-              className="mt-2 inline-flex rounded-lg border border-rose-300/40 px-2.5 py-1 text-xs text-rose-100 transition hover:bg-rose-500/15"
+              className="mt-2 inline-flex rounded-lg border border-negative/40 px-2.5 py-1 text-xs text-negative transition hover:bg-negative/15"
             >
               去登录
             </button>
@@ -558,19 +558,19 @@ export default function LiveTradingOverviewPage() {
         <>
           {/* Add stock form */}
           <section className="rounded-2xl border border-border bg-card p-5">
-            <h3 className="text-base font-semibold text-white">添加关注股票</h3>
+            <h3 className="text-base font-semibold text-foreground">添加关注股票</h3>
             <form onSubmit={handleAddWatch} className="mt-3 flex flex-wrap items-end gap-3">
               <input
                 value={symbolInput}
                 onChange={(e) => setSymbolInput(e.target.value.toUpperCase())}
                 placeholder="股票代码，如 00700 或 600519"
-                className="w-48 rounded-xl border border-border bg-black/20 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                className="w-48 rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
               />
               <input
                 value={nameInput}
                 onChange={(e) => setNameInput(e.target.value)}
                 placeholder="备注名称（可选）"
-                className="w-40 rounded-xl border border-border bg-black/20 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                className="w-40 rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
               />
               <button
                 type="submit"
@@ -584,7 +584,7 @@ export default function LiveTradingOverviewPage() {
 
           {/* Stock cards grid */}
           {sortedWatchlist.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center text-sm text-white/50">
+            <div className="rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center text-sm text-foreground-dim">
               暂无关注股票，请先在上方添加。
             </div>
           ) : (
@@ -600,9 +600,9 @@ export default function LiveTradingOverviewPage() {
                 const isUp = changeRate !== null && changeRate > 0
                 const isDown = changeRate !== null && changeRate < 0
                 const borderAccent = isUp
-                  ? 'border-rose-400/30 hover:border-rose-400/50'
+                  ? 'border-negative/30 hover:border-rose-400/50'
                   : isDown
-                    ? 'border-emerald-400/30 hover:border-emerald-400/50'
+                    ? 'border-positive/30 hover:border-emerald-400/50'
                     : 'border-border hover:border-primary/50'
 
                 return (
@@ -617,15 +617,15 @@ export default function LiveTradingOverviewPage() {
                     {/* Header */}
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-white">
+                        <div className="truncate text-sm font-semibold text-foreground">
                           {displayName ? `${displayName}` : item.symbol}
                         </div>
-                        <div className="mt-0.5 text-xs text-white/45">
+                        <div className="mt-0.5 text-xs text-foreground-dim">
                           {displayName ? item.symbol : ''} · {detectExchangeLabel(item.symbol)}
                         </div>
                       </div>
                       {signalConfigMap[item.symbol]?.is_enabled && (
-                        <span className="mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+                        <span className="mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full border border-positive/30 bg-positive/10 px-2 py-0.5 text-[10px] font-medium text-positive">
                           <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
                           信号
                         </span>
@@ -635,30 +635,30 @@ export default function LiveTradingOverviewPage() {
                     {/* Price section */}
                     {snap ? (
                       <div className="mt-3">
-                        <div className={`text-xl font-bold tracking-tight ${isUp ? 'text-rose-300' : isDown ? 'text-emerald-300' : 'text-white'}`}>
+                        <div className={`text-xl font-bold tracking-tight ${isUp ? 'text-negative' : isDown ? 'text-positive' : 'text-foreground'}`}>
                           {formatNumber(snap.last_price, snap.last_price >= 100 ? 2 : 3)}
                         </div>
                         <div className="mt-1 flex items-center gap-3 text-xs">
-                          <span className={isUp ? 'text-rose-300' : isDown ? 'text-emerald-300' : 'text-white/60'}>
+                          <span className={isUp ? 'text-negative' : isDown ? 'text-positive' : 'text-foreground-muted'}>
                             {formatPercent(changeRate)}
                           </span>
                           {snap.volume_ratio > 0 && (
-                            <span className="text-white/45">量比 {formatNumber(snap.volume_ratio, 2)}</span>
+                            <span className="text-foreground-dim">量比 {formatNumber(snap.volume_ratio, 2)}</span>
                           )}
                         </div>
-                        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-white/50">
-                          <div>成交量 <span className="text-white/70">{formatCompact(snap.volume)}</span></div>
-                          <div>成交额 <span className="text-white/70">{formatCompact(snap.turnover)}</span></div>
-                          <div>振幅 <span className="text-white/70">{formatPercent(snap.amplitude)}</span></div>
+                        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-foreground-dim">
+                          <div>成交量 <span className="text-foreground-muted">{formatCompact(snap.volume)}</span></div>
+                          <div>成交额 <span className="text-foreground-muted">{formatCompact(snap.turnover)}</span></div>
+                          <div>振幅 <span className="text-foreground-muted">{formatPercent(snap.amplitude)}</span></div>
                         </div>
                       </div>
                     ) : (
-                      <div className="mt-3 text-xs text-white/40">加载中...</div>
+                      <div className="mt-3 text-xs text-foreground-dim">加载中...</div>
                     )}
 
                     {/* Footer actions */}
-                    <div className="mt-3 flex items-center justify-between border-t border-white/5 pt-3">
-                      <span className="text-[11px] text-white/40 transition group-hover:text-primary">
+                    <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
+                      <span className="text-[11px] text-foreground-dim transition group-hover:text-primary">
                         点击查看详情 →
                       </span>
                       <button
@@ -667,7 +667,7 @@ export default function LiveTradingOverviewPage() {
                           e.stopPropagation()
                           handleDelete(item.symbol)
                         }}
-                        className="rounded-lg px-2 py-1 text-[11px] text-rose-300/60 transition hover:bg-rose-500/10 hover:text-rose-300"
+                        className="rounded-lg px-2 py-1 text-[11px] text-negative/60 transition hover:bg-negative/10 hover:text-negative"
                       >
                         删除
                       </button>
@@ -682,10 +682,10 @@ export default function LiveTradingOverviewPage() {
         <section className="rounded-2xl border border-dashed border-primary/30 bg-primary/10 p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div className="space-y-2">
-              <div className="text-lg font-semibold text-white">
+              <div className="text-lg font-semibold text-foreground">
                 {ready ? '登录后开启行情看板' : '正在确认账号状态'}
               </div>
-              <p className="max-w-2xl text-sm leading-7 text-white/65">
+              <p className="max-w-2xl text-sm leading-7 text-foreground-muted">
                 {ready
                   ? '登录后可管理关注池、查看实时行情快照和独立股票详情页。'
                   : '正在检查你的登录状态，确认后会自动加载数据。'
@@ -756,13 +756,13 @@ function detectExchangeLabel(symbol) {
 function quadrantBadgeClass(quadrant) {
   switch (quadrant) {
     case '机会':
-      return 'bg-emerald-500/12 text-emerald-300'
+      return 'bg-positive/10 text-positive'
     case '拥挤':
       return 'bg-amber-500/12 text-amber-300'
     case '泡沫':
-      return 'bg-rose-500/12 text-rose-300'
+      return 'bg-negative/10 text-negative'
     case '防御':
-      return 'bg-white/8 text-white/70'
+      return 'bg-[var(--color-bg-secondary)] text-foreground-muted'
     default:
       return 'bg-blue-500/12 text-blue-300'
   }

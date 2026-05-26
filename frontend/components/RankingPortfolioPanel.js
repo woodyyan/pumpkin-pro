@@ -229,7 +229,7 @@ function RankingPortfolioChart({ series = [], benchmarkLabel = '上证指数' })
 
   if (!chartData.points.length) {
     return (
-      <div className="flex min-h-[300px] items-center justify-center rounded-2xl border border-dashed border-border/70 bg-black/10 text-sm text-white/35 xl:h-full">
+      <div className="flex min-h-[300px] items-center justify-center rounded-2xl border border-dashed border-border/70 bg-[var(--color-bg-hover)] text-sm text-foreground-dim xl:h-full">
         暂无模拟组合曲线
       </div>
     )
@@ -237,20 +237,20 @@ function RankingPortfolioChart({ series = [], benchmarkLabel = '上证指数' })
 
   return (
     <div className="overflow-hidden rounded-2xl border border-border/70 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.14),transparent_45%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))]">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-white/6 px-4 py-3 text-[11px] text-white/55">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-3 text-[11px] text-foreground-dim">
         <ChartLegendItem colorClass="bg-amber-400" label="模拟组合累计收益" />
         <ChartLegendItem colorClass="bg-slate-300" label={`${benchmarkLabel}累计收益`} />
-        <span className="text-white/30">横轴时间 · 纵轴累计收益</span>
+        <span className="text-foreground-dim">横轴时间 · 纵轴累计收益</span>
       </div>
 
       <div className="relative px-2 pb-2 pt-3">
         <div ref={containerRef} className="h-[280px] w-full" role="img" aria-label="模拟组合与基准累计收益图表" />
         {tooltip ? (
           <div
-            className="pointer-events-none absolute z-10 min-w-[180px] rounded-xl border border-white/10 bg-slate-950/94 px-3 py-2 shadow-2xl backdrop-blur"
+            className="pointer-events-none absolute z-10 min-w-[180px] rounded-xl border border-border bg-card/94 px-3 py-2 shadow-2xl backdrop-blur"
             style={{ left: tooltip.left, top: tooltip.top }}
           >
-            <div className="text-[11px] text-white/42">{tooltip.point.date}</div>
+            <div className="text-[11px] text-foreground/42">{tooltip.point.date}</div>
             <TooltipMetric label="模拟组合" value={tooltip.point.portfolioReturnPct} colorClass="bg-amber-400" />
             <TooltipMetric label={benchmarkLabel} value={tooltip.point.benchmarkReturnPct} colorClass="bg-slate-300" />
             <TooltipMetric label="超额收益" value={tooltip.point.excessReturnPct} colorClass="bg-sky-400" highlight />
@@ -327,7 +327,7 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
   if (loading && portfolios.length === 0) {
     return (
       <section className="rounded-2xl border border-border bg-card p-5">
-        <div className="flex h-56 items-center justify-center text-sm text-white/35">
+        <div className="flex h-56 items-center justify-center text-sm text-foreground-dim">
           <span className="animate-pulse">加载模拟组合收益...</span>
         </div>
       </section>
@@ -339,14 +339,14 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-semibold text-white">卧龙AI精选模拟组合</h3>
-            <span className="rounded-full border border-amber-300/20 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-200">A / B 双组合</span>
+            <h3 className="text-base font-semibold text-foreground">卧龙AI精选模拟组合</h3>
+            <span className="rounded-full border border-amber-300/40 dark:border-amber-300/20 bg-amber-100 dark:bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-800 dark:text-amber-200 font-medium">A / B 双组合</span>
           </div>
-          <p className="mt-1 text-xs leading-5 text-white/45">跟踪卧龙AI精选 A、B 两套组合表现，快速看哪套规则更稳、哪套更能跑赢基准。</p>
+          <p className="mt-1 text-xs leading-5 text-foreground-dim">跟踪卧龙AI精选 A、B 两套组合表现，快速看哪套规则更稳、哪套更能跑赢基准。</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-          <div className="flex items-center gap-1 rounded-lg bg-black/20 p-0.5">
+          <div className="flex items-center gap-1 rounded-lg bg-[var(--color-bg-hover)] p-0.5">
             {exchangeTabs.map((tab) => {
               const disabled = !portfolioMap[`${tab.key}:A`] && !portfolioMap[`${tab.key}:B`]
               return (
@@ -358,8 +358,8 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
                   className={`rounded-md px-3 py-1 text-xs font-medium transition ${
                     selectedExchange === tab.key
                       ? 'bg-primary text-black'
-                      : 'text-white/55 hover:bg-white/[0.05] hover:text-white/80'
-                  } ${disabled ? 'cursor-not-allowed opacity-35 hover:bg-transparent hover:text-white/55' : ''}`}
+                      : 'text-foreground-dim hover:bg-[var(--color-bg-hover)] hover:text-foreground-muted'
+                  } ${disabled ? 'cursor-not-allowed opacity-35 hover:bg-transparent hover:text-foreground-dim' : ''}`}
                 >
                   {tab.label}
                 </button>
@@ -367,7 +367,7 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
             })}
           </div>
 
-          <div className="flex items-center gap-1 rounded-lg bg-black/20 p-0.5">
+          <div className="flex items-center gap-1 rounded-lg bg-[var(--color-bg-hover)] p-0.5">
             {variantTabs.map((tab) => {
               const disabled = !portfolioMap[`${selectedExchange}:${tab.key}`]
               return (
@@ -379,8 +379,8 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
                   className={`rounded-md px-3 py-1 text-xs font-medium transition ${
                     selectedVariant === tab.key
                       ? 'bg-white text-slate-950'
-                      : 'text-white/55 hover:bg-white/[0.05] hover:text-white/80'
-                  } ${disabled ? 'cursor-not-allowed opacity-35 hover:bg-transparent hover:text-white/55' : ''}`}
+                      : 'text-foreground-dim hover:bg-[var(--color-bg-hover)] hover:text-foreground-muted'
+                  } ${disabled ? 'cursor-not-allowed opacity-35 hover:bg-transparent hover:text-foreground-dim' : ''}`}
                 >
                   {tab.label}
                 </button>
@@ -391,14 +391,14 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
       </div>
 
       {!selectedPortfolio ? (
-        <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-white/35">暂无模拟组合数据</div>
+        <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-foreground-dim">暂无模拟组合数据</div>
       ) : (
         <>
-          <div className="mt-3 rounded-2xl border border-white/8 bg-black/15 px-3 py-3">
+          <div className="mt-3 rounded-2xl border border-border bg-[var(--color-bg-hover)] px-3 py-3">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/45">
-                <span className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-1 text-white/70">{selectedExchange === 'HKEX' ? '港股' : 'A股'} {meta?.name || '模拟组合'}</span>
-                <span className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-1">{selectionSummary}</span>
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-foreground-dim">
+                <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-2 py-1 text-foreground-muted">{selectedExchange === 'HKEX' ? '港股' : 'A股'} {meta?.name || '模拟组合'}</span>
+                <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-2 py-1">{selectionSummary}</span>
               </div>
 
               <div className="grid grid-cols-3 gap-2 lg:min-w-[300px]">
@@ -429,9 +429,9 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
               <RankingPortfolioChart series={series} benchmarkLabel={benchmarkLabel} />
             </div>
 
-            <div className="rounded-2xl border border-border/70 bg-black/10 p-3.5 xl:h-full">
-              <div className="text-sm font-medium text-white">当前成分股</div>
-              {currentConstituentHint ? <div className="mt-1 text-[11px] leading-5 text-white/42">{currentConstituentHint}</div> : null}
+            <div className="rounded-2xl border border-border/70 bg-[var(--color-bg-hover)] p-3.5 xl:h-full">
+              <div className="text-sm font-medium text-foreground">当前成分股</div>
+              {currentConstituentHint ? <div className="mt-1 text-[11px] leading-5 text-foreground/42">{currentConstituentHint}</div> : null}
 
               {meta?.has_shortfall ? (
                 <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
@@ -443,7 +443,7 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
                 {constituents.length ? constituents.map((item) => (
                   <RankingPortfolioConstituentRow key={`${item.exchange}-${item.code}`} item={item} showSourceRank={meta?.portfolio_variant === 'B'} />
                 )) : (
-                  <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-white/35">
+                  <div className="rounded-xl border border-dashed border-border/70 px-4 py-8 text-center text-sm text-foreground-dim">
                     暂无成分股数据
                   </div>
                 )}
@@ -470,20 +470,20 @@ function ChartLegendItem({ colorClass, label }) {
 function TooltipMetric({ label, value, colorClass, highlight = false }) {
   return (
     <div className="mt-1.5 flex items-center justify-between gap-3 text-[11px] tabular-nums">
-      <div className="inline-flex items-center gap-2 text-white/62">
+      <div className="inline-flex items-center gap-2 text-foreground/62">
         <span className={`h-2 w-2 rounded-full ${colorClass}`} aria-hidden="true" />
         <span>{label}</span>
       </div>
-      <div className={highlight ? getRankingPortfolioPerformanceClass(value) : 'text-white'}>{formatRankingPortfolioPercent(value)}</div>
+      <div className={highlight ? getRankingPortfolioPerformanceClass(value) : 'text-foreground'}>{formatRankingPortfolioPercent(value)}</div>
     </div>
   )
 }
 
 function MetricCard({ label, tooltip, value, valueClass }) {
   return (
-    <div className="rounded-xl border border-white/8 bg-white/[0.04] px-2.5 py-2.5">
-      <div className="text-[11px] text-white/35">
-        <LabelWithInfo label={label} tooltip={tooltip} labelClassName="text-[11px] text-white/35" tipPlacement="top-right" tipWidthClassName="w-52 sm:w-60" />
+    <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-2.5 py-2.5">
+      <div className="text-[11px] text-foreground-dim">
+        <LabelWithInfo label={label} tooltip={tooltip} labelClassName="text-[11px] text-foreground-dim" tipPlacement="top-right" tipWidthClassName="w-52 sm:w-60" />
       </div>
       <div className={`mt-1.5 text-base font-semibold tabular-nums ${valueClass}`}>{value}</div>
     </div>
@@ -499,19 +499,19 @@ function RankingPortfolioConstituentRow({ item, showSourceRank = false }) {
   const content = (
     <>
       <div className="min-w-0">
-        <div className="truncate text-sm font-medium text-white transition group-hover:text-amber-100">{item?.name || '--'}</div>
-        <div className="mt-0.5 text-[11px] text-white/35">#{item?.rank} · {codeLabel}</div>
-        {showSourceRank ? <div className="mt-0.5 text-[11px] text-white/35">{sourceMeta}</div> : null}
+        <div className="truncate text-sm font-medium text-foreground transition group-hover:text-amber-100">{item?.name || '--'}</div>
+        <div className="mt-0.5 text-[11px] text-foreground-dim">#{item?.rank} · {codeLabel}</div>
+        {showSourceRank ? <div className="mt-0.5 text-[11px] text-foreground-dim">{sourceMeta}</div> : null}
       </div>
       <div className="text-right">
-        <div className="text-sm font-semibold text-white">{formatRankingPortfolioPercent((item?.weight || 0) * 100, 0)}</div>
-        <div className="mt-0.5 text-[11px] text-white/35">仓位</div>
+        <div className="text-sm font-semibold text-foreground">{formatRankingPortfolioPercent((item?.weight || 0) * 100, 0)}</div>
+        <div className="mt-0.5 text-[11px] text-foreground-dim">仓位</div>
       </div>
     </>
   )
 
   if (!detailHref) {
-    return <div className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2">{content}</div>
+    return <div className="flex items-center justify-between rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-2">{content}</div>
   }
 
   return (
@@ -520,7 +520,7 @@ function RankingPortfolioConstituentRow({ item, showSourceRank = false }) {
       target="_blank"
       rel="noreferrer"
       title={`查看 ${item?.name || formatRankingPortfolioCode(item?.code, item?.exchange)} 详情`}
-      className="group flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2 transition hover:border-amber-300/30 hover:bg-amber-500/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60"
+      className="group flex items-center justify-between rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-2 transition hover:border-amber-300/30 hover:bg-amber-500/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60"
     >
       {content}
     </a>
@@ -537,13 +537,13 @@ function LatestRebalanceDisclosure({ rebalance }) {
 
   return (
     <details className="mt-3">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-full border border-white/10 bg-black/15 px-2.5 py-1 text-[11px] text-white/52 transition hover:border-white/18 hover:text-white/72 marker:hidden">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-full border border-border bg-[var(--color-bg-hover)] px-2.5 py-1 text-[11px] text-foreground-disabled2 transition hover:border-white/18 hover:text-foreground/72 marker:hidden">
         <span>最近一次调仓</span>
-        <span className="rounded-full bg-white/8 px-1.5 py-0.5 text-[10px] text-white/45">{changeCount}项</span>
+        <span className="rounded-full bg-[var(--color-bg-secondary)] px-1.5 py-0.5 text-[10px] text-foreground-dim">{changeCount}项</span>
       </summary>
 
-      <div className="mt-2 rounded-xl border border-white/8 bg-white/[0.02] px-3 py-3">
-        <div className="text-[11px] leading-5 text-white/42">
+      <div className="mt-2 rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-3">
+        <div className="text-[11px] leading-5 text-foreground/42">
           生效时间：{effectiveTime}
           {tradeCostRate > 0 ? ` · 含 ${formatRankingPortfolioPercent(tradeCostRate * 100, 2)} 交易成本` : ''}
         </div>
@@ -555,7 +555,7 @@ function LatestRebalanceDisclosure({ rebalance }) {
             ))}
           </div>
         ) : (
-          <div className="mt-3 rounded-xl border border-dashed border-border/70 px-3 py-4 text-center text-sm text-white/35">
+          <div className="mt-3 rounded-xl border border-dashed border-border/70 px-3 py-4 text-center text-sm text-foreground-dim">
             本次未发生调仓
           </div>
         )}
@@ -567,21 +567,21 @@ function LatestRebalanceDisclosure({ rebalance }) {
 function LatestRebalanceRow({ item }) {
   const isSell = String(item?.action || '').toLowerCase() === 'sell'
   const badgeClass = isSell
-    ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200'
+    ? 'border-positive/20 bg-positive/10 text-positive'
     : 'border-amber-300/20 bg-amber-500/10 text-amber-200'
 
   return (
-    <div className="rounded-xl border border-white/5 bg-black/10 px-3 py-2.5">
+    <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-2.5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-full border px-2 py-0.5 text-[11px] ${badgeClass}`}>{getRankingPortfolioRebalanceActionLabel(item?.action)}</span>
-            <span className="truncate text-sm font-medium text-white">{item?.name || '--'}</span>
+            <span className="truncate text-sm font-medium text-foreground">{item?.name || '--'}</span>
           </div>
-          <div className="mt-1 text-[11px] text-white/35">{formatRankingPortfolioCode(item?.code, item?.exchange)}</div>
+          <div className="mt-1 text-[11px] text-foreground-dim">{formatRankingPortfolioCode(item?.code, item?.exchange)}</div>
         </div>
 
-        <div className="text-right text-[11px] text-white/42">
+        <div className="text-right text-[11px] text-foreground/42">
           <div>仓位 {formatRankingPortfolioWeightChange(item?.from_weight, item?.to_weight, 0)}</div>
           <div className="mt-1">参考成本价 {formatRankingPortfolioReferencePrice(item?.reference_cost_price, item?.exchange)}</div>
         </div>

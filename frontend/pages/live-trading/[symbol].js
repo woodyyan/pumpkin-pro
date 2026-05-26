@@ -1205,7 +1205,7 @@ export default function LiveTradingDetailPage() {
 
   if (!symbol) {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center text-white/50">
+      <div className="flex min-h-[40vh] items-center justify-center text-foreground-dim">
         加载中...
       </div>
     )
@@ -1223,11 +1223,11 @@ export default function LiveTradingDetailPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-2xl font-semibold tracking-tight text-white">
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">
                   {symbolName ? `${symbolName}（${symbol}）` : symbol}
                 </h1>
                 {isWatched === true ? (
-                  <span className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-white/40">
+                  <span className="inline-flex items-center gap-1 rounded-lg border border-border bg-[var(--color-bg-hover)] px-2.5 py-1 text-xs text-foreground-dim">
                     ✓ 已关注
                   </span>
                 ) : isWatched === false ? (
@@ -1268,13 +1268,13 @@ export default function LiveTradingDetailPage() {
                     type="button"
                     aria-expanded={aboutOpen ? 'true' : 'false'}
                     onClick={toggleCompanyAbout}
-                    className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${aboutOpen ? 'border-primary/45 bg-primary/12 text-primary' : 'border-white/10 bg-white/[0.04] text-white/58 hover:border-white/20 hover:text-white/78'}`}
+                    className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${aboutOpen ? 'border-primary/45 bg-primary/12 text-primary' : 'border-border bg-[var(--color-bg-hover)] text-foreground-disabled8 hover:border-[var(--color-border-strong)] hover:text-foreground/78'}`}
                   >
                     关于
                   </button>
                 ) : null}
               </div>
-              <div className="mt-1 flex items-center gap-3 text-xs text-white/55">
+              <div className="mt-1 flex items-center gap-3 text-xs text-foreground-dim">
                 <span>{detectExchangeLabel(symbol)}</span>
                 {lastUpdateAt && <span>更新：{formatDateTime(lastUpdateAt)}</span>}
                 <span>行情来源：{formatSource(snapshot?.source)}</span>
@@ -1290,13 +1290,13 @@ export default function LiveTradingDetailPage() {
                     ? 'cursor-wait bg-gradient-to-r from-indigo-500 to-violet-500 text-white opacity-80'
                     : snapshotPayload?.snapshot
                       ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-[0_0_16px_rgba(99,102,241,0.35)] hover:scale-[1.03] hover:shadow-[0_0_24px_rgba(99,102,241,0.5)] active:scale-[0.98] animate-ai-glow'
-                      : 'cursor-not-allowed border border-white/15 bg-white/5 text-white/35 opacity-50'
+                      : 'cursor-not-allowed border border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] text-foreground-dim opacity-50'
                 }`}
                 title={!snapshotPayload?.snapshot ? '等待行情数据加载' : 'AI 综合分析该股票'}
               >
                 {aiAnalyzing ? (
                   <>
-                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--color-border-strong)] border-t-white" />
                     分析中 · {formatAIElapsedCompact(aiWaitElapsedSec)}
                   </>
                 ) : '✨ AI 分析'}
@@ -1306,10 +1306,10 @@ export default function LiveTradingDetailPage() {
 
           {/* AI 分析错误提示 — 紧邻按钮，用户一眼可见 */}
           {showAiPanel && !aiAnalyzing && aiError && !aiResult && (
-            <div className="mt-3 flex items-start gap-3 rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3">
+            <div className="mt-3 flex items-start gap-3 rounded-xl border border-negative/40 bg-negative/10 px-4 py-3">
               <span className="mt-0.5 text-sm">⚠️</span>
               <div className="flex-1">
-                <p className="text-[13px] font-medium text-rose-200">{aiError}</p>
+                <p className="text-[13px] font-medium text-negative">{aiError}</p>
               </div>
               <button
                 type="button"
@@ -1321,7 +1321,7 @@ export default function LiveTradingDetailPage() {
               <button
                 type="button"
                 onClick={() => { setShowAiPanel(false); setAiError('') }}
-                className="shrink-0 rounded-lg border border-border px-2 py-1.5 text-xs text-white/40 hover:border-white/30 hover:text-white/70 transition"
+                className="shrink-0 rounded-lg border border-border px-2 py-1.5 text-xs text-foreground-dim hover:border-[var(--color-border-strong)] hover:text-foreground-muted transition"
               >
                 ✕
               </button>
@@ -1331,22 +1331,22 @@ export default function LiveTradingDetailPage() {
           {/* Inline signal config (login required) */}
           {privateAccessReady && signalConfig && (
             <div className="mt-4 border-t border-border/60 pt-4">
-              {signalError && <div className="mb-3 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{signalError}</div>}
+              {signalError && <div className="mb-3 rounded-lg border border-negative/40 bg-negative/10 px-3 py-2 text-xs text-negative">{signalError}</div>}
 
-              <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+              <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] p-3">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
-                    <div className="text-sm font-medium text-white/88">交易信号</div>
+                    <div className="text-sm font-medium text-foreground/88">交易信号</div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${signalConfig.is_enabled ? 'border-emerald-200/55 bg-emerald-400/22 text-emerald-50 shadow-[0_0_0_1px_rgba(110,231,183,0.12)]' : 'border-white/10 bg-white/[0.04] text-white/60'}`}>
+                    <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${signalConfig.is_enabled ? 'border-emerald-200/55 bg-emerald-400/22 text-emerald-50 shadow-[0_0_0_1px_rgba(110,231,183,0.12)]' : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted'}`}>
                       {signalStatusSummary}
                     </div>
                     <button
                       type="button"
                       aria-expanded={signalConfigExpanded ? 'true' : 'false'}
                       onClick={() => setSignalConfigExpanded((prev) => !prev)}
-                      className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/70 transition hover:border-white/20 hover:text-white"
+                      className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
                     >
                       {signalConfigExpanded ? '收起配置' : '配置'}
                     </button>
@@ -1354,18 +1354,18 @@ export default function LiveTradingDetailPage() {
                 </div>
 
                 {signalNotice && (
-                  <div className="mt-3 rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+                  <div className="mt-3 rounded-lg border border-emerald-400/25 bg-positive/10 px-3 py-2 text-xs text-positive">
                     {signalNotice}
                   </div>
                 )}
 
                 {signalConfigExpanded && (
-                  <div className="mt-3 border-t border-white/8 pt-3">
+                  <div className="mt-3 border-t border-border pt-3">
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                       {signalConfigMeta.map((item) => (
-                        <div key={item.label} className="rounded-lg border border-white/8 bg-white/[0.03] px-3 py-2.5">
-                          <div className="text-[11px] text-white/35">{item.label}</div>
-                          <div className={`mt-1 text-sm font-semibold ${item.tone === 'warning' ? 'text-amber-300' : 'text-white'}`}>{item.value}</div>
+                        <div key={item.label} className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-2.5">
+                          <div className="text-[11px] text-foreground-dim">{item.label}</div>
+                          <div className={`mt-1 text-sm font-semibold ${item.tone === 'warning' ? 'text-amber-300' : 'text-foreground'}`}>{item.value}</div>
                         </div>
                       ))}
                     </div>
@@ -1380,7 +1380,7 @@ export default function LiveTradingDetailPage() {
                         className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60 ${
                           signalConfig.is_enabled
                             ? 'border-emerald-300/60 bg-emerald-500/18 text-emerald-50'
-                            : 'border-white/15 bg-black/25 text-white/65 hover:border-white/30'
+                            : 'border-[var(--color-border-strong)] bg-[var(--color-bg-secondary)] text-foreground-muted hover:border-[var(--color-border-strong)]'
                         }`}
                       >
                         <span className="font-medium">
@@ -1388,14 +1388,14 @@ export default function LiveTradingDetailPage() {
                             ? (toggleTargetEnabled ? '开启中...' : '关闭中...')
                             : (signalConfig.is_enabled ? '已开启' : '已关闭')}
                         </span>
-                        <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border transition ${signalConfig.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-white/20 bg-black/30'}`}>
+                        <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border transition ${signalConfig.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-[var(--color-border-strong)] bg-[var(--color-bg-overlay)]'}`}>
                           <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${signalConfig.is_enabled ? 'left-[18px]' : 'left-0.5'}`} />
                         </span>
                       </button>
                       <select
                         value={signalConfig.strategy_id || ''}
                         onChange={(e) => updateDraftSignalConfig({ strategy_id: e.target.value })}
-                        className={`min-w-[140px] rounded-lg border bg-black/30 px-2.5 py-1.5 text-xs text-white outline-none transition focus:border-primary ${signalError.includes('请选择策略') ? 'border-rose-300/60' : 'border-border'}`}
+                        className={`min-w-[140px] rounded-lg border bg-[var(--color-bg-overlay)] px-2.5 py-1.5 text-xs text-foreground outline-none transition focus:border-primary ${signalError.includes('请选择策略') ? 'border-rose-300/60' : 'border-border'}`}
                       >
                         <option value="">请选择策略</option>
                         {activeStrategies.map((s) => (
@@ -1405,7 +1405,7 @@ export default function LiveTradingDetailPage() {
                       <select
                         value={signalConfig.eval_interval_seconds || 3600}
                         onChange={(e) => updateDraftSignalConfig({ eval_interval_seconds: Number(e.target.value) })}
-                        className="rounded-lg border border-border bg-black/30 px-2.5 py-1.5 text-xs text-white outline-none transition focus:border-primary"
+                        className="rounded-lg border border-border bg-[var(--color-bg-overlay)] px-2.5 py-1.5 text-xs text-foreground outline-none transition focus:border-primary"
                       >
                         <option value={900}>每 15 分钟</option>
                         <option value={1800}>每 30 分钟</option>
@@ -1417,7 +1417,7 @@ export default function LiveTradingDetailPage() {
                         type="button"
                         disabled={savingSignalConfig || isTogglingSignal || !signalDirty}
                         onClick={handleSaveSignalConfig}
-                        className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {savingSignalConfig ? '保存中...' : '保存配置'}
                       </button>
@@ -1425,14 +1425,14 @@ export default function LiveTradingDetailPage() {
                         type="button"
                         disabled={savingSignalConfig || isTogglingSignal || !signalDirty}
                         onClick={handleResetSignalDraft}
-                        className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-white/70 transition hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                        className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         取消修改
                       </button>
                     </div>
 
                     {signalDirty && !isTogglingSignal && (
-                      <div className="mt-2 rounded-lg border border-white/8 bg-white/5 px-3 py-1.5 text-[11px] text-white/55">
+                      <div className="mt-2 rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-[11px] text-foreground-dim">
                         当前修改尚未生效，点击「保存配置」后更新信号配置。
                       </div>
                     )}
@@ -1467,13 +1467,13 @@ export default function LiveTradingDetailPage() {
         />
 
         {error ? (
-          <div className="rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          <div className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-negative">
             <div>{error}</div>
             {errorNeedsLogin ? (
               <button
                 type="button"
                 onClick={() => openAuthModal('login', '行情看板相关操作需要登录后才能继续。')}
-                className="mt-2 inline-flex rounded-lg border border-rose-300/40 px-2.5 py-1 text-xs text-rose-100 transition hover:bg-rose-500/15"
+                className="mt-2 inline-flex rounded-lg border border-negative/40 px-2.5 py-1 text-xs text-negative transition hover:bg-negative/15"
               >
                 去登录
               </button>
@@ -1532,25 +1532,25 @@ export default function LiveTradingDetailPage() {
               className="absolute inset-0 bg-black/70"
             />
             <div className="absolute inset-x-4 top-1/2 mx-auto w-full max-w-lg -translate-y-1/2 rounded-2xl border border-rose-400/20 bg-[#12151b] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.45)]">
-              <div className="text-lg font-semibold text-white">确认删除整只股票的全部持仓记录</div>
-              <div className="mt-3 text-sm leading-7 text-white/70">
-                你将删除 <span className="font-mono text-white">{symbol}</span> 的全部买入、卖出、调均价与初始化历史。删除后，该股票会从当前持仓、最近交易、收益曲线和归因分析中移除，且无法恢复。
+              <div className="text-lg font-semibold text-foreground">确认删除整只股票的全部持仓记录</div>
+              <div className="mt-3 text-sm leading-7 text-foreground-muted">
+                你将删除 <span className="font-mono text-foreground">{symbol}</span> 的全部买入、卖出、调均价与初始化历史。删除后，该股票会从当前持仓、最近交易、收益曲线和归因分析中移除，且无法恢复。
               </div>
-              <div className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/[0.08] px-3 py-3 text-xs leading-6 text-rose-100/85">
-                为避免误删，请输入 <span className="font-mono text-rose-100">{buildPortfolioDeleteConfirmText(symbol)}</span> 后再确认。
+              <div className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/[0.08] px-3 py-3 text-xs leading-6 text-negative/85">
+                为避免误删，请输入 <span className="font-mono text-negative">{buildPortfolioDeleteConfirmText(symbol)}</span> 后再确认。
               </div>
               <input
                 type="text"
                 value={portfolioDeleteConfirmValue}
                 onChange={(event) => setPortfolioDeleteConfirmValue(event.target.value)}
                 placeholder={buildPortfolioDeleteConfirmText(symbol)}
-                className="mt-4 block w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none transition focus:border-rose-300/50"
+                className="mt-4 block w-full rounded-xl border border-border bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-foreground outline-none transition focus:border-rose-300/50"
               />
               <div className="mt-5 flex flex-wrap justify-end gap-2">
                 <button
                   type="button"
                   onClick={closePortfolioDeleteConfirm}
-                  className="rounded-lg border border-white/12 px-4 py-2 text-xs text-white/65 transition hover:border-white/25 hover:text-white"
+                  className="rounded-lg border border-[var(--color-border-strong)] px-4 py-2 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
                 >
                   取消
                 </button>
@@ -1558,7 +1558,7 @@ export default function LiveTradingDetailPage() {
                   type="button"
                   disabled={portfolioSaving}
                   onClick={deleteCurrentPortfolioHistory}
-                  className="rounded-lg border border-rose-300/30 bg-rose-500/15 px-4 py-2 text-xs font-medium text-rose-100 transition hover:bg-rose-500/22 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-lg border border-rose-300/30 bg-negative/15 px-4 py-2 text-xs font-medium text-negative transition hover:bg-rose-500/22 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {portfolioSaving ? '删除中...' : '确认永久删除'}
                 </button>
@@ -1569,9 +1569,9 @@ export default function LiveTradingDetailPage() {
 
         {/* Snapshot */}
         <section className="rounded-2xl border border-border bg-card p-5">
-          <h3 className="text-base font-semibold text-white">实时快照</h3>
+          <h3 className="text-base font-semibold text-foreground">实时快照</h3>
           {!snapshot ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">数据加载中...</div>
+            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">数据加载中...</div>
           ) : (
             <div className="mt-4 grid gap-3 md:grid-cols-4">
               <MetricMini
@@ -1596,20 +1596,20 @@ export default function LiveTradingDetailPage() {
           <section className="rounded-2xl border border-border bg-card p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="text-base font-semibold text-white">我的持仓</h3>
-                <p className="mt-1 text-xs text-white/55">查看当前仓位状态，更多记录请前往持仓管理。</p>
+                <h3 className="text-base font-semibold text-foreground">我的持仓</h3>
+                <p className="mt-1 text-xs text-foreground-dim">查看当前仓位状态，更多记录请前往持仓管理。</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Link
                   href="/portfolio"
-                  className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/60 transition hover:border-white/20 hover:text-white"
+                  className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
                 >
                   去持仓管理查看完整记录
                 </Link>
                 <button
                   type="button"
                   onClick={() => openPortfolioAction('buy')}
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-primary/85"
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-primary/85"
                 >
                   {portfolioHasPosition ? '买入 / 加仓' : '买入建仓'}
                 </button>
@@ -1617,7 +1617,7 @@ export default function LiveTradingDetailPage() {
                   <button
                     type="button"
                     onClick={() => openPortfolioAction('sell')}
-                    className="rounded-lg border border-emerald-400/35 bg-emerald-500/8 px-3 py-1.5 text-xs font-medium text-emerald-200 transition hover:border-emerald-300/60"
+                    className="rounded-lg border border-emerald-400/35 bg-emerald-500/8 px-3 py-1.5 text-xs font-medium text-positive transition hover:border-emerald-300/60"
                   >
                     卖出 / 减仓
                   </button>
@@ -1636,7 +1636,7 @@ export default function LiveTradingDetailPage() {
                     type="button"
                     disabled={portfolioSaving}
                     onClick={undoLatestPortfolioEvent}
-                    className="rounded-lg border border-white/12 px-3 py-1.5 text-xs text-white/65 transition hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-lg border border-[var(--color-border-strong)] px-3 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     撤销最近一条
                   </button>
@@ -1648,20 +1648,20 @@ export default function LiveTradingDetailPage() {
                       aria-haspopup="menu"
                       aria-expanded={portfolioDangerMenuOpen ? 'true' : 'false'}
                       onClick={togglePortfolioDangerMenu}
-                      className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs text-white/45 transition hover:border-white/20 hover:text-white/75"
+                      className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-2.5 py-1.5 text-xs text-foreground-dim transition hover:border-[var(--color-border-strong)] hover:text-foreground-muted"
                     >
                       更多
                     </button>
                     {portfolioDangerMenuOpen && (
-                      <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-56 rounded-xl border border-white/10 bg-[#131820] p-2 shadow-[0_18px_48px_rgba(0,0,0,0.35)]">
-                        <div className="px-2 pb-2 text-[11px] leading-5 text-white/35">危险操作已折叠到这里，避免干扰日常买卖与调仓。</div>
+                      <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-56 rounded-xl border border-border bg-[#131820] p-2 shadow-[0_18px_48px_rgba(0,0,0,0.35)]">
+                        <div className="px-2 pb-2 text-[11px] leading-5 text-foreground-dim">危险操作已折叠到这里，避免干扰日常买卖与调仓。</div>
                         <button
                           type="button"
                           onClick={openPortfolioDeleteConfirm}
-                          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs text-rose-200 transition hover:bg-rose-500/10"
+                          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs text-negative transition hover:bg-negative/10"
                         >
                           <span>删除全部持仓记录</span>
-                          <span className="text-[10px] text-rose-200/65">不可恢复</span>
+                          <span className="text-[10px] text-negative/65">不可恢复</span>
                         </button>
                       </div>
                     )}
@@ -1671,14 +1671,14 @@ export default function LiveTradingDetailPage() {
             </div>
 
             {portfolioNotice && (
-              <div className="mt-3 rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+              <div className="mt-3 rounded-lg border border-emerald-400/25 bg-positive/10 px-3 py-2 text-xs text-positive">
                 {portfolioNotice}
               </div>
             )}
 
             {portfolioHasPosition ? (
-              <div className="mt-4 rounded-xl border border-white/8 bg-black/15 p-4">
-                <div className="inline-flex items-center rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-200">
+              <div className="mt-4 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
+                <div className="inline-flex items-center rounded-full border border-emerald-400/25 bg-positive/10 px-2.5 py-1 text-[11px] font-medium text-positive">
                   当前有持仓
                 </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -1696,19 +1696,19 @@ export default function LiveTradingDetailPage() {
                 </div>
               </div>
             ) : (
-              <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-white/55">
+              <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-foreground-dim">
                 <div>当前未持有该股票。</div>
-                <div className="mt-1 text-xs text-white/40">你可以直接记录一笔买入，或去持仓管理查看完整历史。</div>
+                <div className="mt-1 text-xs text-foreground-dim">你可以直接记录一笔买入，或去持仓管理查看完整历史。</div>
               </div>
             )}
             {portfolioAction && (
-              <div className="mt-4 rounded-xl border border-white/8 bg-black/20 p-4">
+              <div className="mt-4 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="text-sm font-semibold text-white">
+                    <div className="text-sm font-semibold text-foreground">
                       {portfolioAction === 'buy' ? '买入 / 加仓' : portfolioAction === 'sell' ? '卖出 / 减仓' : '手动调整均价'}
                     </div>
-                    <div className="mt-1 text-xs text-white/45">
+                    <div className="mt-1 text-xs text-foreground-dim">
                       {portfolioAction === 'buy'
                         ? '记录这次买入后，系统会自动重算最新均价。'
                         : portfolioAction === 'sell'
@@ -1719,7 +1719,7 @@ export default function LiveTradingDetailPage() {
                   <button
                     type="button"
                     onClick={closePortfolioAction}
-                    className="rounded-lg border border-white/10 px-2.5 py-1 text-xs text-white/50 transition hover:border-white/20 hover:text-white/70"
+                    className="rounded-lg border border-border px-2.5 py-1 text-xs text-foreground-dim transition hover:border-[var(--color-border-strong)] hover:text-foreground-muted"
                   >
                     取消
                   </button>
@@ -1727,32 +1727,32 @@ export default function LiveTradingDetailPage() {
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
                   <label className="block">
-                    <span className="text-xs text-white/55">成交日期</span>
+                    <span className="text-xs text-foreground-dim">成交日期</span>
                     <input
                       type="date"
                       max={new Date().toISOString().split('T')[0]}
                       value={portfolioForm.trade_date}
                       onChange={(e) => setPortfolioForm((f) => ({ ...f, trade_date: e.target.value }))}
-                      className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                      className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
                     />
                   </label>
 
                   {portfolioAction !== 'adjust' ? (
                     <>
                       <label className="block">
-                        <span className="text-xs text-white/55">{portfolioAction === 'buy' ? '数量（股）' : '卖出数量（股）'}</span>
+                        <span className="text-xs text-foreground-dim">{portfolioAction === 'buy' ? '数量（股）' : '卖出数量（股）'}</span>
                         <input
                           type="number"
                           min="0"
                           step="any"
                           value={portfolioForm.quantity}
                           onChange={(e) => setPortfolioForm((f) => ({ ...f, quantity: e.target.value }))}
-                          className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                          className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
                           placeholder={portfolioAction === 'buy' ? '例：200' : '例：100'}
                         />
                       </label>
                       <label className="block">
-                        <span className="text-xs text-white/55 inline-flex items-center gap-1.5">
+                        <span className="text-xs text-foreground-dim inline-flex items-center gap-1.5">
                           成交价格
                           {priceAutoFilled ? (
                             <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">自动</span>
@@ -1767,14 +1767,14 @@ export default function LiveTradingDetailPage() {
                             setPriceAutoFilled(false)
                             setPortfolioForm((f) => ({ ...f, price: e.target.value }))
                           }}
-                          className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                          className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
                           placeholder="例：12.35"
                         />
                       </label>
                       <label className="block">
-                        <span className="text-xs text-white/55 inline-flex items-center gap-1.5">
+                        <span className="text-xs text-foreground-dim inline-flex items-center gap-1.5">
                           手续费率（%）
-                          <span className="rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] text-white/45">{describeFeeRate(portfolioPreview?.feeRate ?? 0)}</span>
+                          <span className="rounded-full border border-border px-1.5 py-0.5 text-[10px] text-foreground-dim">{describeFeeRate(portfolioPreview?.feeRate ?? 0)}</span>
                         </span>
                         <input
                           type="number"
@@ -1782,70 +1782,70 @@ export default function LiveTradingDetailPage() {
                           step="any"
                           value={portfolioForm.fee_rate}
                           onChange={(e) => setPortfolioForm((f) => ({ ...f, fee_rate: e.target.value }))}
-                          className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                          className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
                           placeholder={portfolioAction === 'buy' ? (isAShare ? '默认 0.03' : '默认 0.13') : (isAShare ? '默认 0.08' : '默认 0.13')}
                         />
-                        <div className="mt-1 text-[11px] leading-5 text-white/40">{portfolioFeeHint}</div>
+                        <div className="mt-1 text-[11px] leading-5 text-foreground-dim">{portfolioFeeHint}</div>
                       </label>
                     </>
                   ) : (
                     <label className="block md:col-span-2">
-                      <span className="text-xs text-white/55">新的买入均价</span>
+                      <span className="text-xs text-foreground-dim">新的买入均价</span>
                       <input
                         type="number"
                         min="0"
                         step="any"
                         value={portfolioForm.avg_cost_price}
                         onChange={(e) => setPortfolioForm((f) => ({ ...f, avg_cost_price: e.target.value }))}
-                        className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                        className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
                         placeholder="例：12.15"
                       />
                     </label>
                   )}
 
                   <label className={`block ${portfolioAction === 'adjust' ? 'md:col-span-2' : ''}`}>
-                    <span className="text-xs text-white/55">{portfolioAction === 'adjust' ? '调整原因（必填）' : '备注'}</span>
+                    <span className="text-xs text-foreground-dim">{portfolioAction === 'adjust' ? '调整原因（必填）' : '备注'}</span>
                     <input
                       type="text"
                       value={portfolioForm.note}
                       onChange={(e) => setPortfolioForm((f) => ({ ...f, note: e.target.value }))}
-                      className="mt-1 block w-full rounded-lg border border-border bg-black/30 px-3 py-2 text-sm text-white outline-none transition focus:border-primary"
+                      className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
                       placeholder={portfolioAction === 'adjust' ? '例：补录券商真实成本，已含手续费' : '例：午后加仓'}
                     />
                   </label>
                 </div>
 
-                <div className="mt-4 rounded-lg border border-white/8 bg-white/[0.03] px-3 py-3">
-                  <div className="text-xs font-medium text-white/65">结果预览</div>
+                <div className="mt-4 rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-3">
+                  <div className="text-xs font-medium text-foreground-muted">结果预览</div>
                   {portfolioPreview?.errors?.length > 0 ? (
                     <div className="mt-2 text-xs text-amber-200">{portfolioPreview.errors[0]}</div>
                   ) : (
                     <div className={`mt-2 grid gap-2 ${portfolioAction === 'adjust' ? 'sm:grid-cols-3' : 'sm:grid-cols-2 xl:grid-cols-4'}`}>
                       <div>
-                        <div className="text-[11px] text-white/35">变动后股数</div>
-                        <div className="text-sm font-semibold text-white">{Number(portfolioPreview?.nextShares || 0).toLocaleString('zh-CN')} 股</div>
+                        <div className="text-[11px] text-foreground-dim">变动后股数</div>
+                        <div className="text-sm font-semibold text-foreground">{Number(portfolioPreview?.nextShares || 0).toLocaleString('zh-CN')} 股</div>
                       </div>
                       <div>
-                        <div className="text-[11px] text-white/35">变动后均价</div>
-                        <div className="text-sm font-semibold text-white">{formatNumber(portfolioPreview?.nextAvgCostPrice, 3)}</div>
+                        <div className="text-[11px] text-foreground-dim">变动后均价</div>
+                        <div className="text-sm font-semibold text-foreground">{formatNumber(portfolioPreview?.nextAvgCostPrice, 3)}</div>
                       </div>
                       {portfolioAction === 'buy' ? (
                         <div>
-                          <div className="text-[11px] text-white/35">变动后成本</div>
-                          <div className="text-sm font-semibold text-white">{formatYiCurrency(portfolioPreview?.nextTotalCostAmount, isAShare ? '¥' : 'HK$')}</div>
+                          <div className="text-[11px] text-foreground-dim">变动后成本</div>
+                          <div className="text-sm font-semibold text-foreground">{formatYiCurrency(portfolioPreview?.nextTotalCostAmount, isAShare ? '¥' : 'HK$')}</div>
                         </div>
                       ) : null}
                       {portfolioAction === 'sell' ? (
                         <div>
-                          <div className="text-[11px] text-white/35">本次已实现收益</div>
-                          <div className={`text-sm font-semibold ${(portfolioPreview?.realizedPnlAmount || 0) >= 0 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                          <div className="text-[11px] text-foreground-dim">本次已实现收益</div>
+                          <div className={`text-sm font-semibold ${(portfolioPreview?.realizedPnlAmount || 0) >= 0 ? 'text-negative' : 'text-positive'}`}>
                             {(portfolioPreview?.realizedPnlAmount || 0) >= 0 ? '+' : ''}{formatYiCurrency(portfolioPreview?.realizedPnlAmount, isAShare ? '¥' : 'HK$')}
                           </div>
                         </div>
                       ) : null}
                       <div>
-                        <div className="text-[11px] text-white/35">口径说明</div>
-                        <div className="text-sm font-semibold text-white/70">
+                        <div className="text-[11px] text-foreground-dim">口径说明</div>
+                        <div className="text-sm font-semibold text-foreground-muted">
                           {portfolioAction === 'buy'
                             ? '买入后自动重算均价'
                             : portfolioAction === 'sell'
@@ -1862,14 +1862,14 @@ export default function LiveTradingDetailPage() {
                     type="button"
                     disabled={portfolioSaving}
                     onClick={submitPortfolioAction}
-                    className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {portfolioSaving ? '保存中...' : portfolioAction === 'buy' ? '确认买入' : portfolioAction === 'sell' ? '确认卖出' : '确认调整'}
                   </button>
                   <button
                     type="button"
                     onClick={closePortfolioAction}
-                    className="rounded-lg border border-border px-4 py-1.5 text-xs text-white/65 transition hover:border-white/40"
+                    className="rounded-lg border border-border px-4 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)]"
                   >
                     取消
                   </button>
@@ -1884,9 +1884,9 @@ export default function LiveTradingDetailPage() {
         <section className="rounded-2xl border border-border bg-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-base font-semibold text-white">基础面概览</h3>
+              <h3 className="text-base font-semibold text-foreground">基础面概览</h3>
               {fundamentalsMetaLine ? (
-                <p className="mt-1 text-xs text-white/55">{fundamentalsMetaLine}</p>
+                <p className="mt-1 text-xs text-foreground-dim">{fundamentalsMetaLine}</p>
               ) : null}
             </div>
             {!fundamentalsSupported && fundamentalsMeta?.warning ? (
@@ -1899,7 +1899,7 @@ export default function LiveTradingDetailPage() {
             <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{fundamentalsError}</div>
           ) : null}
           {!fundamentalsPayload && fundamentalsLoading ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">基础面数据加载中...</div>
+            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">基础面数据加载中...</div>
           ) : (
             <div className="mt-4 grid gap-3 md:grid-cols-5">
               <MetricMini label={`市值(${fundamentalsCurrencyCode})`} value={formatYiCurrency(fundamentalsItems.market_cap, fundamentalsCurrencySymbol)} emphasis tooltip="公司所有流通股按当前价格计算的总价值。市值越大，公司规模越大。" />
@@ -1919,14 +1919,14 @@ export default function LiveTradingDetailPage() {
         {/* Daily history chart */}
         <section className="rounded-2xl border border-border bg-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <h3 className="text-base font-semibold text-white">历史走势</h3>
+            <h3 className="text-base font-semibold text-foreground">历史走势</h3>
           </div>
           <div className="mt-3 flex flex-wrap gap-1.5">
             {DAILY_RANGE_LABELS.map((key) => {
               const ret = rangeReturns[key]
               const hasReturn = ret !== undefined && ret !== null
               const isUp = hasReturn && ret >= 0
-              const retColor = hasReturn ? (isUp ? 'text-rose-300' : 'text-emerald-300') : 'text-white/30'
+              const retColor = hasReturn ? (isUp ? 'text-negative' : 'text-positive') : 'text-foreground-dim'
               return (
                 <button
                   key={key}
@@ -1934,12 +1934,12 @@ export default function LiveTradingDetailPage() {
                   onClick={() => setDailyRange(key)}
                   className={`flex flex-col items-center rounded-lg px-2.5 py-1.5 text-xs font-medium transition min-w-[48px] ${
                     dailyRange === key
-                      ? 'bg-primary text-white shadow-sm'
-                      : 'bg-black/25 text-white/65 hover:bg-black/35 hover:text-white/85'
+                      ? 'bg-primary text-foreground shadow-sm'
+                      : 'bg-[var(--color-bg-secondary)] text-foreground-muted hover:bg-black/35 hover:text-foreground-muted'
                   }`}
                 >
                   <span>{key === 'ALL' ? '全部' : key.replace('D','天').replace('W','周').replace('M','月').replace('Y','年')}</span>
-                  <span className={`mt-0.5 text-[10px] leading-tight font-semibold ${dailyRange === key ? (isUp ? 'text-white/90' : 'text-white/90') : retColor}`}>
+                  <span className={`mt-0.5 text-[10px] leading-tight font-semibold ${dailyRange === key ? (isUp ? 'text-foreground/90' : 'text-foreground/90') : retColor}`}>
                     {hasReturn ? `${isUp ? '+' : ''}${(ret * 100).toFixed(1)}%` : '--'}
                   </span>
                 </button>
@@ -1947,9 +1947,9 @@ export default function LiveTradingDetailPage() {
             })}
           </div>
           {dailyLoading ? (
-            <div className="mt-4 flex items-center justify-center rounded-xl border border-dashed border-border py-16 text-sm text-white/50">加载中...</div>
+            <div className="mt-4 flex items-center justify-center rounded-xl border border-dashed border-border py-16 text-sm text-foreground-dim">加载中...</div>
           ) : dailyBars.length === 0 ? (
-            <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">暂无历史数据。</div>
+            <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">暂无历史数据。</div>
           ) : (
             <DailyHistoryChart bars={dailyBars} />
           )}
@@ -1959,16 +1959,16 @@ export default function LiveTradingDetailPage() {
         <section className="rounded-2xl border border-border bg-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-base font-semibold text-white">技术指标</h3>
-              <p className="mt-1 text-xs text-white/60">均线 / RSI / MACD / 布林带，基于最近 {MA_LOOKBACK_DAYS} 个交易日收盘价。</p>
+              <h3 className="text-base font-semibold text-foreground">技术指标</h3>
+              <p className="mt-1 text-xs text-foreground-muted">均线 / RSI / MACD / 布林带，基于最近 {MA_LOOKBACK_DAYS} 个交易日收盘价。</p>
             </div>
-            <div className="text-xs text-white/55">
+            <div className="text-xs text-foreground-dim">
               {movingAveragePayload?.updated_at ? `更新：${formatDateTime(movingAveragePayload.updated_at)}` : '等待数据'}
             </div>
           </div>
           {movingAverageError && <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{movingAverageError}</div>}
           {!movingAveragePayload ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">暂无均线数据。</div>
+            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">暂无均线数据。</div>
           ) : (
             <div className="mt-4 space-y-3">
               <div className="grid gap-3 md:grid-cols-4">
@@ -2018,8 +2018,8 @@ export default function LiveTradingDetailPage() {
         <section className="rounded-2xl border border-border bg-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-base font-semibold text-white">走势对比（个股 vs 大盘）</h3>
-              <p className="mt-1 text-xs text-white/55">
+              <h3 className="text-base font-semibold text-foreground">走势对比（个股 vs 大盘）</h3>
+              <p className="mt-1 text-xs text-foreground-dim">
                 基于日收盘价归一化对比，基准：{dailyOverlay?.benchmark || (isAShare ? 'SHCI' : 'HSI')}
               </p>
             </div>
@@ -2029,7 +2029,7 @@ export default function LiveTradingDetailPage() {
                   key={opt.value}
                   type="button"
                   onClick={() => setOverlayRange(opt.value)}
-                  className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${overlayRange === opt.value ? 'bg-primary text-white' : 'bg-black/25 text-white/60 hover:bg-black/35 hover:text-white/80'}`}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${overlayRange === opt.value ? 'bg-primary text-foreground' : 'bg-[var(--color-bg-secondary)] text-foreground-muted hover:bg-black/35 hover:text-foreground-muted'}`}
                 >
                   {opt.label}
                 </button>
@@ -2037,7 +2037,7 @@ export default function LiveTradingDetailPage() {
             </div>
           </div>
           {!dailyOverlay?.series?.length ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">走势对比数据加载中...</div>
+            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">走势对比数据加载中...</div>
           ) : (
             <div className="mt-4 space-y-4">
               <DailyOverlayChart series={dailyOverlay.series} benchmark={dailyOverlay.benchmark} symbol={dailyOverlay.symbol} />
@@ -2054,12 +2054,12 @@ export default function LiveTradingDetailPage() {
         {/* Support levels */}
         <section className="rounded-2xl border border-border bg-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <h3 className="text-base font-semibold text-white">支撑位（近{SUPPORT_LOOKBACK_DAYS}天）</h3>
-            <div className="text-xs text-white/55">{supportPayload?.meta?.updated_at ? `更新：${formatDateTime(supportPayload.meta.updated_at)}` : '等待数据'}</div>
+            <h3 className="text-base font-semibold text-foreground">支撑位（近{SUPPORT_LOOKBACK_DAYS}天）</h3>
+            <div className="text-xs text-foreground-dim">{supportPayload?.meta?.updated_at ? `更新：${formatDateTime(supportPayload.meta.updated_at)}` : '等待数据'}</div>
           </div>
           {supportError && <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{supportError}</div>}
           {!supportSummary ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">暂无支撑位数据。</div>
+            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">暂无支撑位数据。</div>
           ) : (
             <div className="mt-4 space-y-4">
               <div className="grid gap-3 md:grid-cols-4">
@@ -2080,12 +2080,12 @@ export default function LiveTradingDetailPage() {
         {/* Resistance levels */}
         <section className="rounded-2xl border border-border bg-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <h3 className="text-base font-semibold text-white">压力位（近{SUPPORT_LOOKBACK_DAYS}天）</h3>
-            <div className="text-xs text-white/55">{resistancePayload?.meta?.updated_at ? `更新：${formatDateTime(resistancePayload.meta.updated_at)}` : '等待数据'}</div>
+            <h3 className="text-base font-semibold text-foreground">压力位（近{SUPPORT_LOOKBACK_DAYS}天）</h3>
+            <div className="text-xs text-foreground-dim">{resistancePayload?.meta?.updated_at ? `更新：${formatDateTime(resistancePayload.meta.updated_at)}` : '等待数据'}</div>
           </div>
           {resistanceError && <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{resistanceError}</div>}
           {!resistanceSummary ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-white/50">暂无压力位数据。</div>
+            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">暂无压力位数据。</div>
           ) : (
             <div className="mt-4 space-y-4">
               <div className="grid gap-3 md:grid-cols-4">
@@ -2134,11 +2134,11 @@ export default function LiveTradingDetailPage() {
 function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, referenceItem, newsState, notifPromptVisible, onNotifPromptClose }) {
   const signalToneMap = {
     buy: 'text-red-200 bg-red-500/10 border-red-400/25',
-    sell: 'text-emerald-200 bg-emerald-500/10 border-emerald-400/25',
+    sell: 'text-positive bg-positive/10 border-emerald-400/25',
     hold: 'text-amber-200 bg-amber-500/10 border-amber-400/25',
   }
   const referenceSignalLabel = referenceItem?.signal ? getSignalLabel(referenceItem.signal) : ''
-  const referenceSignalTone = signalToneMap[referenceItem?.signal] || 'text-white/60 bg-white/[0.04] border-white/10'
+  const referenceSignalTone = signalToneMap[referenceItem?.signal] || 'text-foreground-muted bg-[var(--color-bg-hover)] border-border'
   const referenceValidation = referenceItem?.quality_validation || null
   const referenceQualityHeadline = buildQualityValidationHeadline(referenceValidation)
   const referenceQualityStatusLabel = buildQualityValidationStatusLabel(referenceValidation)
@@ -2155,14 +2155,14 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
             <button
               type="button"
               onClick={() => { onNotifPromptClose?.(); requestNotificationPermission() }}
-              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white transition hover:bg-primary/85"
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-primary/85"
             >
               开启通知
             </button>
             <button
               type="button"
               onClick={() => onNotifPromptClose?.()}
-              className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-white/60 transition hover:border-white/30 hover:text-white"
+              className="rounded-lg border border-[var(--color-border-strong)] px-3 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
             >
               稍后再说
             </button>
@@ -2173,9 +2173,9 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
         <div className="min-w-0">
           <div className="flex items-center gap-3">
             <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
-            <h3 className="text-base font-semibold text-white">AI 正在分析「{symbolName || symbol || '--'}」</h3>
+            <h3 className="text-base font-semibold text-foreground">AI 正在分析「{symbolName || symbol || '--'}」</h3>
           </div>
-          <p className="mt-2 text-xs leading-6 text-white/50">
+          <p className="mt-2 text-xs leading-6 text-foreground-dim">
             正在结合实时行情、技术面、基础面、新闻公告和你的持仓信息生成本次判断。
           </p>
         </div>
@@ -2184,21 +2184,21 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
         </div>
       </div>
 
-      <div className="mt-4 rounded-2xl border border-white/8 bg-black/20 p-4">
+      <div className="mt-4 rounded-2xl border border-border bg-[var(--color-bg-hover)] p-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="text-[11px] font-semibold tracking-wide text-indigo-200/90">{waitState.stage.kicker}</div>
-            <div className="mt-1 text-sm font-medium text-white/85">{waitState.stage.title}</div>
+            <div className="mt-1 text-sm font-medium text-foreground-muted">{waitState.stage.title}</div>
           </div>
-          <div className="max-w-md text-[11px] leading-5 text-white/38 sm:text-right">{waitState.stage.hint}</div>
+          <div className="max-w-md text-[11px] leading-5 text-foreground/38 sm:text-right">{waitState.stage.hint}</div>
         </div>
-        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/8">
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--color-bg-secondary)]">
           <div
             className="h-full rounded-full bg-gradient-to-r from-indigo-400 via-violet-400 to-fuchsia-400 transition-[width] duration-700 ease-out"
             style={{ width: `${waitState.progress}%` }}
           />
         </div>
-        <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-white/35">
+        <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-foreground-dim">
           <span>{waitState.progress}% 进度感</span>
           <span>结果出来后会自动展示</span>
         </div>
@@ -2223,10 +2223,10 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
                   icon: '•',
                 }
               : {
-                  wrapper: 'border-white/8 bg-white/[0.02]',
-                  title: 'text-white/68',
-                  text: 'text-white/35',
-                  badge: 'border-white/10 bg-black/20 text-white/35',
+                  wrapper: 'border-border bg-[var(--color-bg-hover)]',
+                  title: 'text-foreground/68',
+                  text: 'text-foreground-dim',
+                  badge: 'border-border bg-[var(--color-bg-hover)] text-foreground-dim',
                   icon: '·',
                 }
 
@@ -2247,8 +2247,8 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-        <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
-          <div className="text-xs font-semibold text-white/70">等待时你可以先看</div>
+        <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] p-4">
+          <div className="text-xs font-semibold text-foreground-muted">等待时你可以先看</div>
           {referenceItem ? (
             <>
               <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -2258,7 +2258,7 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
                   </span>
                 ) : null}
                 {referenceQualityHeadline ? (
-                  <span className={`rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] font-medium ${getQualityValidationReturnClass(referenceValidation)}`}>
+                  <span className={`rounded-full border border-border bg-[var(--color-bg-hover)] px-2.5 py-1 text-[11px] font-medium ${getQualityValidationReturnClass(referenceValidation)}`}>
                     {referenceQualityHeadline}
                   </span>
                 ) : null}
@@ -2270,36 +2270,36 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
                 <div>
-                  <div className="text-[10px] text-white/30">上次分析时间</div>
-                  <div className="mt-1 text-[12px] font-medium text-white/75">{formatDateTime(referenceItem.created_at)}</div>
+                  <div className="text-[10px] text-foreground-dim">上次分析时间</div>
+                  <div className="mt-1 text-[12px] font-medium text-foreground-muted">{formatDateTime(referenceItem.created_at)}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-white/30">本次标的</div>
-                  <div className="mt-1 text-[12px] font-medium text-white/75">{referenceItem.symbol || symbol || '--'}</div>
+                  <div className="text-[10px] text-foreground-dim">本次标的</div>
+                  <div className="mt-1 text-[12px] font-medium text-foreground-muted">{referenceItem.symbol || symbol || '--'}</div>
                 </div>
                 <div className="col-span-2 sm:col-span-1">
-                  <div className="text-[10px] text-white/30">本次说明</div>
-                  <div className="mt-1 text-[12px] font-medium leading-5 text-white/65">本次会基于最新行情重新评估，不会直接复用旧结论。</div>
+                  <div className="text-[10px] text-foreground-dim">本次说明</div>
+                  <div className="mt-1 text-[12px] font-medium leading-5 text-foreground-muted">本次会基于最新行情重新评估，不会直接复用旧结论。</div>
                 </div>
               </div>
             </>
           ) : (
-            <div className="mt-3 rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-3.5 py-3 text-[12px] leading-6 text-white/50">
+            <div className="mt-3 rounded-xl border border-dashed border-border bg-[var(--color-bg-hover)] px-3.5 py-3 text-[12px] leading-6 text-foreground-dim">
               这是你近期的首次 AI 分析。结果生成后会自动进入「AI 分析历史」，之后这里会优先展示最近一次观点与 5 日验证结果。
             </div>
           )}
         </div>
 
-        <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
-          <div className="text-xs font-semibold text-white/70">新闻上下文</div>
-          <div className="mt-3 rounded-xl border border-white/8 bg-white/[0.02] px-3.5 py-3">
+        <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] p-4">
+          <div className="text-xs font-semibold text-foreground-muted">新闻上下文</div>
+          <div className="mt-3 rounded-xl border border-border bg-[var(--color-bg-hover)] px-3.5 py-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-[12px] font-medium text-white/78">新闻与公告</div>
-              <span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[10px] text-white/50">
+              <div className="text-[12px] font-medium text-foreground/78">新闻与公告</div>
+              <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-2.5 py-1 text-[10px] text-foreground-dim">
                 {newsState === 'loading' ? '拉取中' : newsState === 'ready' ? '已纳入' : newsState === 'empty' ? '暂无新增' : newsState === 'error' ? '本次跳过' : '等待中'}
               </span>
             </div>
-            <div className="mt-2 text-[12px] leading-6 text-white/58">
+            <div className="mt-2 text-[12px] leading-6 text-foreground-disabled8">
               {newsState === 'loading'
                 ? '正在补充这只股票最近的媒体新闻、公司公告和财报，用来增强本次 AI 判断。'
                 : newsState === 'ready'
@@ -2311,7 +2311,7 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
                       : '即将开始拉取新闻与公告。'}
             </div>
           </div>
-          <ul className="mt-3 space-y-2 text-[12px] leading-6 text-white/55">
+          <ul className="mt-3 space-y-2 text-[12px] leading-6 text-foreground-dim">
             <li>• 这一步会比普通接口更慢，因为需要组合多类数据一起判断。</li>
             <li>• 市场波动越大、可用上下文越多，分析耗时通常也会更长。</li>
             <li>• 你可以留在当前页等待，结果出来后会自动替换当前卡片。</li>
@@ -2404,10 +2404,10 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolNam
             >
               {shareBusy ? '生成中...' : '🖼️ 生成图片'}
             </button>
-            <button type="button" onClick={onRetry} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-white/60 transition hover:border-white/30 hover:text-white">
+            <button type="button" onClick={onRetry} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground">
               🔄 重新分析
             </button>
-            <button type="button" onClick={onClose} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-white/40 transition hover:border-white/30 hover:text-white/70">
+            <button type="button" onClick={onClose} className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-foreground-dim transition hover:border-[var(--color-border-strong)] hover:text-foreground-muted">
               ✕ 关闭
             </button>
           </>
@@ -2421,7 +2421,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolNam
       ) : null}
 
       {shareError ? (
-        <div className="mt-3 rounded-xl border border-rose-400/25 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-100/85">
+        <div className="mt-3 rounded-xl border border-rose-400/25 bg-negative/10 px-3.5 py-2.5 text-xs text-negative/85">
           {shareError}
         </div>
       ) : null}
@@ -2445,8 +2445,8 @@ function formatSignalPerformancePct(value) {
 }
 
 function getSignalPerformanceReturnClass(value) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 'text-white/40'
-  return value >= 0 ? 'text-red-300' : 'text-emerald-300'
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'text-foreground-dim'
+  return value >= 0 ? 'text-negative' : 'text-positive'
 }
 
 function getSignalLabel(signal) {
@@ -2467,10 +2467,10 @@ function buildSignalPerformanceStatus(signal, perf) {
 }
 
 function getSignalPerformanceStatusClass(signal, perf) {
-  if (!perf?.direction_status || signal === 'hold') return 'text-white/35 bg-white/[0.05] border-white/10'
+  if (!perf?.direction_status || signal === 'hold') return 'text-foreground-dim bg-[var(--color-bg-hover)] border-border'
   return perf.direction_status === 'aligned'
     ? 'text-sky-200 bg-sky-500/10 border-sky-400/25'
-    : 'text-rose-200 bg-rose-500/10 border-rose-400/25'
+    : 'text-negative bg-negative/10 border-rose-400/25'
 }
 
 function isSignalPerformanceEstimated(perf) {
@@ -2512,7 +2512,7 @@ function buildQualityValidationStatusLabel(validation) {
 }
 
 function getQualityValidationReturnClass(validation) {
-  if (!hasQualityValidationReturn(validation)) return 'text-white/55'
+  if (!hasQualityValidationReturn(validation)) return 'text-foreground-dim'
   return getSignalPerformanceReturnClass(validation.primary_return_pct)
 }
 
@@ -2521,11 +2521,11 @@ function getQualityValidationStatusClass(validation) {
     case 'hit':
       return 'text-sky-200 bg-sky-500/10 border-sky-400/25'
     case 'miss':
-      return 'text-rose-200 bg-rose-500/10 border-rose-400/25'
+      return 'text-negative bg-negative/10 border-rose-400/25'
     case 'pending':
       return 'text-amber-200 bg-amber-500/10 border-amber-400/25'
     default:
-      return 'text-white/55 bg-white/[0.05] border-white/10'
+      return 'text-foreground-dim bg-[var(--color-bg-hover)] border-border'
   }
 }
 
@@ -2543,8 +2543,8 @@ function buildQualityWindowStatusLabel(window) {
 function getQualityWindowStatusClass(window) {
   if (!window?.ready) return 'text-amber-200 bg-amber-500/10 border-amber-400/25'
   if (window.direction_status === 'hit') return 'text-sky-200 bg-sky-500/10 border-sky-400/25'
-  if (window.direction_status === 'miss') return 'text-rose-200 bg-rose-500/10 border-rose-400/25'
-  return 'text-white/55 bg-white/[0.05] border-white/10'
+  if (window.direction_status === 'miss') return 'text-negative bg-negative/10 border-rose-400/25'
+  return 'text-foreground-dim bg-[var(--color-bg-hover)] border-border'
 }
 
 function buildQualityWindowValue(window, validation) {
@@ -2562,8 +2562,8 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
   const [detailData, setDetailData] = useState(null)
 
   const signalMap = {
-    buy: { label: '看多', arrow: '↑', color: 'text-red-300', dot: '🔴', bg: 'bg-red-500/12', border: 'border-red-400/40' },
-    sell: { label: '看空', arrow: '↓', color: 'text-emerald-300', dot: '🟢', bg: 'bg-emerald-500/12', border: 'border-emerald-400/40' },
+    buy: { label: '看多', arrow: '↑', color: 'text-negative', dot: '🔴', bg: 'bg-red-500/12', border: 'border-red-400/40' },
+    sell: { label: '看空', arrow: '↓', color: 'text-positive', dot: '🟢', bg: 'bg-positive/10', border: 'border-emerald-400/40' },
     hold: { label: '观望', arrow: '→', color: 'text-amber-300', dot: '🟡', bg: 'bg-amber-500/12', border: 'border-amber-400/40' },
   }
 
@@ -2605,7 +2605,7 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
   }
 
   return (
-    <section className="rounded-2xl border border-white/8 bg-card p-4">
+    <section className="rounded-2xl border border-border bg-card p-4">
       {/* 折叠标题栏 */}
       <button
         type="button"
@@ -2614,10 +2614,10 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
       >
         <div className="flex items-center gap-2">
           <span className="text-sm">📋</span>
-          <span className="text-[13px] font-medium text-white/70">分析历史</span>
-          <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/40">{items.length} 条</span>
+          <span className="text-[13px] font-medium text-foreground-muted">分析历史</span>
+          <span className="rounded-full bg-[var(--color-bg-hover)] px-2 py-0.5 text-[10px] text-foreground-dim">{items.length} 条</span>
         </div>
-        <span className={`text-white/35 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>▼</span>
+        <span className={`text-foreground-dim transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>▼</span>
       </button>
 
       {/* 展开内容 */}
@@ -2645,8 +2645,8 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
               <div key={item.id}>
                 <div
                   className={`group flex items-start justify-between gap-3 rounded-xl border px-3.5 py-2.5 transition cursor-pointer ${
-                    stale ? 'border-white/[0.06] bg-white/[0.02]' : 'border-primary/15 bg-primary/[0.04]'
-                  } ${isExpanded ? `${sig.border} ${sig.bg} ring-1 ring-inset ring-white/8` : ''}`}
+                    stale ? 'border-border bg-[var(--color-bg-hover)]' : 'border-primary/15 bg-primary/[0.04]'
+                  } ${isExpanded ? `${sig.border} ${sig.bg} ring-1 ring-inset ring-border` : ''}`}
                   onClick={() => handleToggleDetail(item.id)}
                 >
                   <div className="min-w-0 flex-1">
@@ -2655,11 +2655,11 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                       <div className="min-w-0">
                         <div className={`text-xs font-medium ${sig.color}`}>
                           {sig.label} {sig.arrow}
-                          <span className={`ml-1.5 text-[10px] ${stale ? 'text-white/25' : 'text-white/45'}`}>
+                          <span className={`ml-1.5 text-[10px] ${stale ? 'text-foreground-disabled' : 'text-foreground-dim'}`}>
                             置信度 {item.confidence_score ?? '--'}%
                           </span>
                         </div>
-                        <div className={`mt-0.5 text-[11px] truncate ${stale ? 'text-white/20' : 'text-white/35'}`}>
+                        <div className={`mt-0.5 text-[11px] truncate ${stale ? 'text-foreground-disabled' : 'text-foreground-dim'}`}>
                           {formatTimeAgo(item.created_at)}
                           {stale && <span className="ml-1.5 text-amber-400/50">⚠️ 可能已过时</span>}
                         </div>
@@ -2668,7 +2668,7 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
 
                     {qualityHeadline ? (
                       <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 pl-6">
-                        <span className={`rounded-full border border-white/10 bg-black/20 px-2 py-0.5 text-[10px] font-semibold ${qualityReturnClass}`}>
+                        <span className={`rounded-full border border-border bg-[var(--color-bg-hover)] px-2 py-0.5 text-[10px] font-semibold ${qualityReturnClass}`}>
                           {qualityHeadline}
                         </span>
                         {qualityStatusLabel ? (
@@ -2677,14 +2677,14 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                           </span>
                         ) : null}
                         {qualityEstimated ? (
-                          <span className="text-[9px] text-white/28">按收盘价估算</span>
+                          <span className="text-[9px] text-foreground/28">按收盘价估算</span>
                         ) : null}
                       </div>
                     ) : null}
 
                     {performanceSummary ? (
                       <div className="mt-1 hidden flex-wrap items-center gap-x-1.5 gap-y-1 pl-6 md:flex">
-                        <span className={`rounded-full border border-white/10 bg-black/15 px-2 py-0.5 text-[9px] font-medium ${performanceReturnClass}`}>
+                        <span className={`rounded-full border border-border bg-[var(--color-bg-hover)] px-2 py-0.5 text-[9px] font-medium ${performanceReturnClass}`}>
                           {performanceSummary}
                         </span>
                         {performanceStatus ? (
@@ -2693,19 +2693,19 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                           </span>
                         ) : null}
                         {!qualityEstimated && performanceEstimated ? (
-                          <span className="text-[9px] text-white/28">按收盘价估算</span>
+                          <span className="text-[9px] text-foreground/28">按收盘价估算</span>
                         ) : null}
                       </div>
                     ) : null}
                   </div>
                   <div className="flex items-center gap-1 shrink-0 self-start">
                     {/* 展开/收起箭头 */}
-                    <span className={`text-[10px] text-white/25 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
+                    <span className={`text-[10px] text-foreground-disabled transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
                     {/* 删除按钮 */}
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); onDelete(item.id) }}
-                      className="shrink-0 rounded-lg border border-transparent px-1.5 py-0.5 text-[10px] text-white/20 opacity-0 transition hover:border-rose-400/30 hover:text-rose-300 group-hover:opacity-100"
+                      className="shrink-0 rounded-lg border border-transparent px-1.5 py-0.5 text-[10px] text-foreground-disabled opacity-0 transition hover:border-negative/30 hover:text-negative group-hover:opacity-100"
                       title="删除此记录"
                     >
                       ✕
@@ -2715,11 +2715,11 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
 
                 {/* 展开的详情内容 */}
                 {isExpanded && (
-                  <div className="mt-1 ml-6 pl-4 border-l border-white/10 space-y-3 py-3 pr-1">
+                  <div className="mt-1 ml-6 pl-4 border-l border-border space-y-3 py-3 pr-1">
                     {detailLoading ? (
                       <div className="space-y-2">
                         {[1, 2, 3].map((i) => (
-                          <div key={i} className="animate-pulse rounded-lg bg-white/5 h-12" />
+                          <div key={i} className="animate-pulse rounded-lg bg-[var(--color-bg-hover)] h-12" />
                         ))}
                       </div>
                     ) : detailData ? (
@@ -2728,7 +2728,7 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                         {(meta.data_completeness) && (() => {
                           const dc = meta.data_completeness || {}
                           return (
-                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-white/30">
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-foreground-dim">
                               <span>数据时效：</span>
                               <span>行情 {dc.market === 'complete' ? '实时' : '缺失'}</span>
                               <span>· 技术 {dc.technical === 'complete' ? '可用' : '部分缺失'}</span>
@@ -2750,10 +2750,10 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                                 ? '实时价 + 收盘价估算'
                                 : '--'
                           return (
-                            <div className="rounded-lg border border-white/8 bg-black/20 px-3.5 py-3">
+                            <div className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3.5 py-3">
                               <div className="flex flex-wrap items-start justify-between gap-2">
                                 <div>
-                                  <div className="text-[11px] font-semibold text-white/70">🎯 质量验证</div>
+                                  <div className="text-[11px] font-semibold text-foreground-muted">🎯 质量验证</div>
                                   <p className={`mt-1 text-[12px] font-semibold ${getQualityValidationReturnClass(validation)}`}>
                                     {buildQualityValidationHeadline(validation)}
                                   </p>
@@ -2767,37 +2767,37 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
 
                               <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 md:grid-cols-4">
                                 <div>
-                                  <div className="text-[9px] text-white/30">本次分析价</div>
-                                  <div className="text-[11px] font-medium text-white/75">{formatAnalysisHistoryPrice(perf?.analysis_price, item.symbol)}</div>
+                                  <div className="text-[9px] text-foreground-dim">本次分析价</div>
+                                  <div className="text-[11px] font-medium text-foreground-muted">{formatAnalysisHistoryPrice(perf?.analysis_price, item.symbol)}</div>
                                 </div>
                                 <div>
-                                  <div className="text-[9px] text-white/30">验证周期</div>
-                                  <div className="text-[11px] font-medium text-white/75">{`${validation.primary_window_days || 5} 个交易日`}</div>
+                                  <div className="text-[9px] text-foreground-dim">验证周期</div>
+                                  <div className="text-[11px] font-medium text-foreground-muted">{`${validation.primary_window_days || 5} 个交易日`}</div>
                                 </div>
                                 <div>
-                                  <div className="text-[9px] text-white/30">已完成交易日</div>
-                                  <div className="text-[11px] font-medium text-white/75">{validation.available_days ?? 0}</div>
+                                  <div className="text-[9px] text-foreground-dim">已完成交易日</div>
+                                  <div className="text-[11px] font-medium text-foreground-muted">{validation.available_days ?? 0}</div>
                                 </div>
                                 <div>
-                                  <div className="text-[9px] text-white/30">价格口径</div>
-                                  <div className="text-[11px] font-medium text-white/60">{estimatedText}</div>
+                                  <div className="text-[9px] text-foreground-dim">价格口径</div>
+                                  <div className="text-[11px] font-medium text-foreground-muted">{estimatedText}</div>
                                 </div>
                               </div>
 
                               {Array.isArray(validation.windows) && validation.windows.length > 0 ? (
                                 <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
                                   {validation.windows.map((window) => (
-                                    <div key={window.horizon_days} className="rounded-lg border border-white/8 bg-white/[0.03] px-2.5 py-2">
+                                    <div key={window.horizon_days} className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-2.5 py-2">
                                       <div className="flex items-center justify-between gap-2">
-                                        <span className="text-[10px] text-white/45">{`${window.horizon_days}日验证`}</span>
+                                        <span className="text-[10px] text-foreground-dim">{`${window.horizon_days}日验证`}</span>
                                         <span className={`rounded-full border px-1.5 py-0.5 text-[8px] ${getQualityWindowStatusClass(window)}`}>
                                           {buildQualityWindowStatusLabel(window)}
                                         </span>
                                       </div>
-                                      <div className={`mt-1 text-[12px] font-semibold ${window.ready ? getSignalPerformanceReturnClass(window.return_pct) : 'text-white/55'}`}>
+                                      <div className={`mt-1 text-[12px] font-semibold ${window.ready ? getSignalPerformanceReturnClass(window.return_pct) : 'text-foreground-dim'}`}>
                                         {buildQualityWindowValue(window, validation)}
                                       </div>
-                                      <div className="mt-1 text-[9px] text-white/30">
+                                      <div className="mt-1 text-[9px] text-foreground-dim">
                                         {window.ready
                                           ? `收盘价 ${formatAnalysisHistoryPrice(window.close_price, item.symbol)}`
                                           : `截至 ${validation.available_days ?? 0} 个交易日`}
@@ -2808,7 +2808,7 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                               ) : null}
 
                               {qualityEstimated ? (
-                                <div className="mt-2 text-[10px] text-white/28">说明：历史记录缺少分析时价格时，系统会回退到对应交易日最近收盘价做估算。</div>
+                                <div className="mt-2 text-[10px] text-foreground/28">说明：历史记录缺少分析时价格时，系统会回退到对应交易日最近收盘价做估算。</div>
                               ) : null}
                             </div>
                           )
@@ -2823,14 +2823,14 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                           const detailReturnClass = getSignalPerformanceReturnClass(perf.return_pct)
                           const estimatedText = formatSignalPerformanceBasis(perf)
                           return (
-                            <div className="rounded-lg border border-white/8 bg-black/20 px-3.5 py-3">
+                            <div className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3.5 py-3">
                               <div className="flex flex-wrap items-start justify-between gap-2">
                                 <div>
-                                  <div className="text-[11px] font-semibold text-white/70">📏 同观点表现</div>
+                                  <div className="text-[11px] font-semibold text-foreground-muted">📏 同观点表现</div>
                                   {detailSummary ? (
                                     <p className={`mt-1 text-[12px] font-medium ${detailReturnClass}`}>{detailSummary}</p>
                                   ) : (
-                                    <p className="mt-1 text-[11px] text-white/45">首次出现该观点，暂时还没有上一条同观点可对比。</p>
+                                    <p className="mt-1 text-[11px] text-foreground-dim">首次出现该观点，暂时还没有上一条同观点可对比。</p>
                                   )}
                                 </div>
                                 {detailStatus ? (
@@ -2842,27 +2842,27 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
 
                               <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 md:grid-cols-4">
                                 <div>
-                                  <div className="text-[9px] text-white/30">本次分析价</div>
-                                  <div className="text-[11px] font-medium text-white/75">{formatAnalysisHistoryPrice(perf.analysis_price, item.symbol)}</div>
+                                  <div className="text-[9px] text-foreground-dim">本次分析价</div>
+                                  <div className="text-[11px] font-medium text-foreground-muted">{formatAnalysisHistoryPrice(perf.analysis_price, item.symbol)}</div>
                                 </div>
                                 <div>
-                                  <div className="text-[9px] text-white/30">上次同观点时间</div>
-                                  <div className="text-[11px] font-medium text-white/75">
+                                  <div className="text-[9px] text-foreground-dim">上次同观点时间</div>
+                                  <div className="text-[11px] font-medium text-foreground-muted">
                                     {perf.previous_analysis_at ? new Date(perf.previous_analysis_at).toLocaleString('zh-CN', { hour12: false }) : '--'}
                                   </div>
                                 </div>
                                 <div>
-                                  <div className="text-[9px] text-white/30">上次分析价</div>
-                                  <div className="text-[11px] font-medium text-white/75">{formatAnalysisHistoryPrice(perf.previous_analysis_price, item.symbol)}</div>
+                                  <div className="text-[9px] text-foreground-dim">上次分析价</div>
+                                  <div className="text-[11px] font-medium text-foreground-muted">{formatAnalysisHistoryPrice(perf.previous_analysis_price, item.symbol)}</div>
                                 </div>
                                 <div>
-                                  <div className="text-[9px] text-white/30">价格口径</div>
-                                  <div className="text-[11px] font-medium text-white/60">{estimatedText}</div>
+                                  <div className="text-[9px] text-foreground-dim">价格口径</div>
+                                  <div className="text-[11px] font-medium text-foreground-muted">{estimatedText}</div>
                                 </div>
                               </div>
 
                               {performanceEstimated ? (
-                                <div className="mt-2 text-[10px] text-white/28">说明：历史记录缺少分析时价格时，系统会回退到对应交易日最近收盘价做估算。</div>
+                                <div className="mt-2 text-[10px] text-foreground/28">说明：历史记录缺少分析时价格时，系统会回退到对应交易日最近收盘价做估算。</div>
                               ) : null}
                             </div>
                           )
@@ -2870,9 +2870,9 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
 
                         {/* 卧龙模型评分 */}
                         {analysis.layer_scores && Object.keys(analysis.layer_scores).length > 0 && (
-                          <div className="rounded-lg border border-white/8 bg-black/20 px-3.5 py-3">
+                          <div className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3.5 py-3">
                             <div className="flex items-center gap-2 mb-2">
-                              <span className="text-[11px] font-semibold text-white/70">📊 卧龙模型评分</span>
+                              <span className="text-[11px] font-semibold text-foreground-muted">📊 卧龙模型评分</span>
                               {analysis.market_state_label && (
                                 <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-medium text-sky-300">
                                   🏷️ {analysis.market_state_label}
@@ -2895,24 +2895,24 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                               return (
                                 <div key={key} className="mt-1.5 first:mt-0">
                                   <div className="flex items-center justify-between mb-0.5">
-                                    <span className="text-[11px] font-medium text-white/80">{m.icon} {m.label}</span>
+                                    <span className="text-[11px] font-medium text-foreground-muted">{m.icon} {m.label}</span>
                                     <span className="text-[10px]" style={{ color: dirColor }}>
                                       {dirLabel} {ls.score > 0 ? '+' : ''}{ls.score}
-                                      <span className="ml-1 text-white/30">({(ls.confidence * 100).toFixed(0)}%)</span>
+                                      <span className="ml-1 text-foreground-dim">({(ls.confidence * 100).toFixed(0)}%)</span>
                                     </span>
                                   </div>
-                                  <div className="h-1 w-full rounded-full bg-white/8 overflow-hidden">
+                                  <div className="h-1 w-full rounded-full bg-[var(--color-bg-secondary)] overflow-hidden">
                                     <div className="h-full rounded-full" style={{ width: `${barPct}%`, backgroundColor: m.color }} />
                                   </div>
-                                  {ls.reason && <p className="mt-0.5 text-[10px] leading-relaxed text-white/40">{ls.reason}</p>}
+                                  {ls.reason && <p className="mt-0.5 text-[10px] leading-relaxed text-foreground-dim">{ls.reason}</p>}
                                 </div>
                               )
                             })}
                             {analysis.total_score != null && (
-                              <div className="mt-2 pt-2 border-t border-white/8 flex items-center justify-between">
-                                <span className="text-[10px] text-white/35">综合评分</span>
+                              <div className="mt-2 pt-2 border-t border-border flex items-center justify-between">
+                                <span className="text-[10px] text-foreground-dim">综合评分</span>
                                 <span className={`text-xs font-bold font-mono ${
-                                  analysis.total_score >= 0.5 ? 'text-red-400' :
+                                  analysis.total_score >= 0.5 ? 'text-negative' :
                                   analysis.total_score <= -0.5 ? 'text-emerald-400' : 'text-amber-400'
                                 }`}>
                                   {analysis.total_score > 0 ? '+' : ''}{analysis.total_score.toFixed(2)}
@@ -2924,11 +2924,11 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
 
                         {/* 分析逻辑 */}
                         {analysis.logic_summary && (
-                          <div className="rounded-lg border border-white/8 bg-black/20 px-3.5 py-3">
-                            <span className="text-[11px] font-medium text-white/60">▾ 分析逻辑</span>
+                          <div className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3.5 py-3">
+                            <span className="text-[11px] font-medium text-foreground-muted">▾ 分析逻辑</span>
                             <div className="mt-1.5">
                               {analysis.logic_summary.split('\n').filter(Boolean).map((line, i) => (
-                                <p key={i} className="mt-1 text-[12px] leading-relaxed text-white/65 first:mt-0">
+                                <p key={i} className="mt-1 text-[12px] leading-relaxed text-foreground-muted first:mt-0">
                                   • {line.trim().replace(/^•\s*/, '')}
                                 </p>
                               ))}
@@ -2939,9 +2939,9 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                         {/* 风险提示 */}
                         {Array.isArray(analysis.risk_warnings) && analysis.risk_warnings.length > 0 && (
                           <div className="rounded-lg border border-rose-400/20 bg-rose-500/6 px-3.5 py-2.5">
-                            <span className="text-[11px] font-semibold text-rose-200/80">⚠️ 风险提示</span>
+                            <span className="text-[11px] font-semibold text-negative/80">⚠️ 风险提示</span>
                             {analysis.risk_warnings.map((w, i) => (
-                              <p key={i} className="text-[11px] leading-relaxed text-rose-200/55 mt-1 first:mt-0">⚠️ {w}</p>
+                              <p key={i} className="text-[11px] leading-relaxed text-negative/55 mt-1 first:mt-0">⚠️ {w}</p>
                             ))}
                           </div>
                         )}
@@ -2950,7 +2950,7 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                         {analysis.trading_suggestions?.action_suggestion && (
                           <div className="rounded-lg border border-sky-400/15 bg-sky-500/[0.03] px-3.5 py-2.5">
                             <span className="text-[11px] font-semibold text-sky-200/80">📋 交易建议</span>
-                            <p className="text-[12px] leading-relaxed text-white/70 mt-1">{analysis.trading_suggestions.action_suggestion}</p>
+                            <p className="text-[12px] leading-relaxed text-foreground-muted mt-1">{analysis.trading_suggestions.action_suggestion}</p>
                             <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 md:grid-cols-4">
                               {[
                                 ['建议买价', `${analysis.trading_suggestions.entry_zone?.low ?? '--'} ~ ${analysis.trading_suggestions.entry_zone?.high ?? '--'}`],
@@ -2959,8 +2959,8 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                                 ['仓位建议', `${analysis.trading_suggestions.position_size_pct || '--'}`]
                               ].map(([label, val]) => (
                                 <div key={label}>
-                                  <div className="text-[9px] text-white/30">{label}</div>
-                                  <div className="text-[11px] text-white/75 font-medium">{val}</div>
+                                  <div className="text-[9px] text-foreground-dim">{label}</div>
+                                  <div className="text-[11px] text-foreground-muted font-medium">{val}</div>
                                 </div>
                               ))}
                             </div>
@@ -2972,10 +2972,10 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                           <div className="rounded-lg border border-amber-400/15 bg-amber-500/[0.03] px-3.5 py-2.5">
                             <span className="text-[11px] font-semibold text-amber-200/80">🎯 执行触发条件</span>
                             {analysis.action_trigger.buy_trigger && (
-                              <p className="text-[11px] leading-relaxed text-red-300/70 mt-1 first:mt-0">🟢 {analysis.action_trigger.buy_trigger}</p>
+                              <p className="text-[11px] leading-relaxed text-negative/70 mt-1 first:mt-0">🟢 {analysis.action_trigger.buy_trigger}</p>
                             )}
                             {analysis.action_trigger.sell_trigger && (
-                              <p className="text-[11px] leading-relaxed text-emerald-300/70 mt-1 first:mt-0">🔴 {analysis.action_trigger.sell_trigger}</p>
+                              <p className="text-[11px] leading-relaxed text-positive/70 mt-1 first:mt-0">🔴 {analysis.action_trigger.sell_trigger}</p>
                             )}
                           </div>
                         )}
@@ -2991,7 +2991,7 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                         )}
 
                         {/* 分析时间 */}
-                        <div className="text-center text-[9px] text-white/20 pt-1">
+                        <div className="text-center text-[9px] text-foreground-disabled pt-1">
                           分析时间：{new Date(analysis.data_timestamp || item.created_at).toLocaleString('zh-CN', { hour12: false })}
                         </div>
                       </>
@@ -3002,7 +3002,7 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
             )
           })}
           {items.length > 5 && (
-            <div className="pt-1 text-center text-[10px] text-white/25">仅显示最近 5 条，更多可在后续版本中查看</div>
+            <div className="pt-1 text-center text-[10px] text-foreground-disabled">仅显示最近 5 条，更多可在后续版本中查看</div>
           )}
         </div>
       )}
@@ -3084,7 +3084,7 @@ function DailyHistoryChart({ bars }) {
     return () => { cancelled = true; cleanup() }
   }, [bars])
 
-  return <div ref={containerRef} className="mt-4 w-full overflow-hidden rounded-xl border border-border bg-black/20" />
+  return <div ref={containerRef} className="mt-4 w-full overflow-hidden rounded-xl border border-border bg-[var(--color-bg-hover)]" />
 }
 
 function DailyOverlayChart({ series, benchmark, symbol }) {
@@ -3171,12 +3171,12 @@ function DailyOverlayChart({ series, benchmark, symbol }) {
 
   return (
     <div>
-      <div className="mb-2 flex items-center gap-4 text-[11px] text-white/50">
+      <div className="mb-2 flex items-center gap-4 text-[11px] text-foreground-dim">
         <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded bg-red-400" />个股（归一化）</span>
         <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded bg-sky-400" />大盘指数（归一化）</span>
-        <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded border border-dashed border-white/25" />基准线 1.0</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded border border-dashed border-[var(--color-border-strong)]" />基准线 1.0</span>
       </div>
-      <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-black/20" />
+      <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-[var(--color-bg-hover)]" />
     </div>
   )
 }
@@ -3225,7 +3225,7 @@ function OverlayIntradayChart({ series, benchmark, symbol }) {
     return () => { cancelled = true; cleanup() }
   }, [benchmark, series, symbol])
 
-  return <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-black/20" />
+  return <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-[var(--color-bg-hover)]" />
 }
 
 const ANOMALY_TYPE_META = {
@@ -3289,14 +3289,14 @@ function PriceVolumeChart({ events }) {
   const legendItems = Object.entries(ANOMALY_TYPE_META).map(([, meta]) => meta)
   return (
     <section className="rounded-2xl border border-border bg-card p-5">
-      <h3 className="text-base font-semibold text-white">量价异动</h3>
-      <p className="mt-1 text-xs text-white/55">按时间分布的异动事件，Y 轴为评分。</p>
+      <h3 className="text-base font-semibold text-foreground">量价异动</h3>
+      <p className="mt-1 text-xs text-foreground-dim">按时间分布的异动事件，Y 轴为评分。</p>
       {!events || events.length === 0 ? (
-        <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-white/50">暂无事件</div>
+        <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-foreground-dim">暂无事件</div>
       ) : (
         <>
-          <div ref={containerRef} className="mt-3 w-full overflow-hidden rounded-xl border border-border bg-black/20" />
-          <div className="mt-2 flex flex-wrap gap-3 text-xs text-white/55">
+          <div ref={containerRef} className="mt-3 w-full overflow-hidden rounded-xl border border-border bg-[var(--color-bg-hover)]" />
+          <div className="mt-2 flex flex-wrap gap-3 text-xs text-foreground-dim">
             {legendItems.map((item) => (
               <span key={item.label} className="inline-flex items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />{item.label}
@@ -3365,14 +3365,14 @@ function BlockFlowChart({ events }) {
 
   return (
     <section className="rounded-2xl border border-border bg-card p-5">
-      <h3 className="text-base font-semibold text-white">大单流向</h3>
-      <p className="mt-1 text-xs text-white/55">柱状为净流向金额（红入绿出），折线为方向强度。</p>
+      <h3 className="text-base font-semibold text-foreground">大单流向</h3>
+      <p className="mt-1 text-xs text-foreground-dim">柱状为净流向金额（红入绿出），折线为方向强度。</p>
       {!events || events.length === 0 ? (
-        <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-white/50">暂无事件</div>
+        <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-foreground-dim">暂无事件</div>
       ) : (
         <>
-          <div ref={containerRef} className="mt-3 w-full overflow-hidden rounded-xl border border-border bg-black/20" />
-          <div className="mt-2 flex flex-wrap gap-3 text-xs text-white/55">
+          <div ref={containerRef} className="mt-3 w-full overflow-hidden rounded-xl border border-border bg-[var(--color-bg-hover)]" />
+          <div className="mt-2 flex flex-wrap gap-3 text-xs text-foreground-dim">
             <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" />资金流入</span>
             <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-green-500" />资金流出</span>
             <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 rounded-full bg-amber-500" />方向强度</span>
@@ -3391,12 +3391,12 @@ function LevelCard({ level, index, type }) {
   const statusText = isSupport ? formatSupportStatus(level.status) : formatResistanceStatus(level.status)
 
   return (
-    <div className="rounded-xl border border-border bg-black/20 px-3 py-3">
+    <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-sm font-semibold text-white">{levelLabel} · {formatNumber(level.price, 3)}</div>
-        <div className="text-xs text-white/60">{statusText}</div>
+        <div className="text-sm font-semibold text-foreground">{levelLabel} · {formatNumber(level.price, 3)}</div>
+        <div className="text-xs text-foreground-muted">{statusText}</div>
       </div>
-      <div className="mt-2 grid gap-2 text-xs text-white/70 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-2 grid gap-2 text-xs text-foreground-muted md:grid-cols-2 xl:grid-cols-4">
         <div>{isSupport ? '支撑' : '压力'}区间：{formatNumber(level.band_low, 3)} ~ {formatNumber(level.band_high, 3)}</div>
         <div>距当前价：{formatDistancePct(level.distance_pct)}</div>
         <div>强度：{level.strength || '--'}（{formatNumber(level.score, 1)}）</div>
@@ -3529,15 +3529,15 @@ function MACDChart({ series }) {
 
   return (
     <div>
-      <div className="mb-2 flex items-center gap-4 text-[11px] text-white/50">
+      <div className="mb-2 flex items-center gap-4 text-[11px] text-foreground-dim">
         <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded bg-[#60a5fa]" />DIF（快线）</span>
         <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded bg-[#fb923c]" />信号线</span>
         <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-red-500/70" />多头柱</span>
         <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-green-500/70" />空头柱</span>
-        <span className="flex items-center gap-1"><span className="text-red-400">▲</span>金叉</span>
-        <span className="flex items-center gap-1"><span className="text-green-400">▼</span>死叉</span>
+        <span className="flex items-center gap-1"><span className="text-negative">▲</span>金叉</span>
+        <span className="flex items-center gap-1"><span className="text-positive">▼</span>死叉</span>
       </div>
-      <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-black/20" />
+      <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-[var(--color-bg-hover)]" />
     </div>
   )
 }
@@ -3660,38 +3660,38 @@ function BollingerChart({ series }) {
 
   return (
     <div>
-      <div className="mb-2 flex items-center gap-4 text-[11px] text-white/50">
+      <div className="mb-2 flex items-center gap-4 text-[11px] text-foreground-dim">
         <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded" style={{ background: 'rgba(239,68,68,0.9)' }} />收盘价</span>
         <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded border border-dashed" style={{ borderColor: 'rgba(139,92,246,0.5)' }} />上轨/下轨</span>
         <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 rounded border border-dashed" style={{ borderColor: 'rgba(251,146,60,0.7)' }} />中轨(MA20)</span>
         <span className="flex items-center gap-1"><span className="inline-block h-1.5 w-1.5 rounded-full bg-red-400" />触及上轨</span>
         <span className="flex items-center gap-1"><span className="inline-block h-1.5 w-1.5 rounded-full bg-green-400" />触及下轨</span>
       </div>
-      <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-black/20" />
+      <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-[var(--color-bg-hover)]" />
     </div>
   )
 }
 
 function MetricMini({ label, value, accent = 'normal', emphasis = false, featured = false, marketAccent = false, tooltip = '' }) {
-  const risingColor = marketAccent ? 'text-rose-300' : 'text-emerald-300'
-  const fallingColor = marketAccent ? 'text-emerald-300' : 'text-rose-300'
-  const color = accent === 'up' ? risingColor : accent === 'down' ? fallingColor : 'text-white'
-  const emphasisTone = accent === 'up' ? 'border-emerald-400/45 bg-emerald-500/10 ring-1 ring-emerald-300/20' : accent === 'down' ? 'border-rose-400/45 bg-rose-500/10 ring-1 ring-rose-300/20' : 'border-primary/45 bg-primary/10 ring-1 ring-primary/25'
-  const featuredTone = accent === 'up' ? 'border-rose-400/50 bg-rose-500/12 ring-1 ring-rose-300/25 shadow-[0_10px_30px_rgba(251,113,133,0.18)]' : accent === 'down' ? 'border-emerald-400/50 bg-emerald-500/12 ring-1 ring-emerald-300/25 shadow-[0_10px_30px_rgba(52,211,153,0.18)]' : 'border-primary/55 bg-primary/12 ring-1 ring-primary/30 shadow-[0_10px_30px_rgba(76,106,255,0.16)]'
-  const containerTone = featured ? (marketAccent ? featuredTone : 'border-primary/55 bg-primary/12 ring-1 ring-primary/30 shadow-[0_10px_30px_rgba(76,106,255,0.16)]') : emphasis ? emphasisTone : 'border-border bg-black/20'
-  const featuredLabelColor = marketAccent ? (accent === 'up' ? 'text-rose-200/90' : accent === 'down' ? 'text-emerald-200/90' : 'text-primary/85') : 'text-primary/85'
+  const risingColor = marketAccent ? 'text-negative' : 'text-positive'
+  const fallingColor = marketAccent ? 'text-positive' : 'text-negative'
+  const color = accent === 'up' ? risingColor : accent === 'down' ? fallingColor : 'text-foreground'
+  const emphasisTone = accent === 'up' ? 'border-emerald-400/45 bg-positive/10 ring-1 ring-emerald-300/20' : accent === 'down' ? 'border-rose-400/45 bg-negative/10 ring-1 ring-rose-300/20' : 'border-primary/45 bg-primary/10 ring-1 ring-primary/25'
+  const featuredTone = accent === 'up' ? 'border-rose-400/50 bg-negative/10 ring-1 ring-rose-300/25 shadow-[0_10px_30px_rgba(251,113,133,0.18)]' : accent === 'down' ? 'border-emerald-400/50 bg-positive/10 ring-1 ring-emerald-300/25 shadow-[0_10px_30px_rgba(52,211,153,0.18)]' : 'border-primary/55 bg-primary/12 ring-1 ring-primary/30 shadow-[0_10px_30px_rgba(76,106,255,0.16)]'
+  const containerTone = featured ? (marketAccent ? featuredTone : 'border-primary/55 bg-primary/12 ring-1 ring-primary/30 shadow-[0_10px_30px_rgba(76,106,255,0.16)]') : emphasis ? emphasisTone : 'border-border bg-[var(--color-bg-hover)]'
+  const featuredLabelColor = marketAccent ? (accent === 'up' ? 'text-negative/90' : accent === 'down' ? 'text-positive/90' : 'text-primary/85') : 'text-primary/85'
 
   return (
     <div className={`relative rounded-xl border px-3 py-2 ${featured ? 'px-4 py-3' : ''} ${containerTone}`}>
-      <div className={`flex items-center gap-1 text-xs ${featured ? featuredLabelColor : 'text-white/50'}`}>
+      <div className={`flex items-center gap-1 text-xs ${featured ? featuredLabelColor : 'text-foreground-dim'}`}>
         <span>{label}</span>
         {tooltip ? (
           <InfoTip
             text={tooltip}
             placement="top"
             widthClassName="w-56"
-            iconClassName="h-3 w-3 border-0 p-0 text-white/40 hover:text-white/70 focus:ring-0"
-            panelClassName="rounded-xl bg-[#1a1d25]/95 px-3 py-2.5 text-[11px] leading-relaxed text-white/80"
+            iconClassName="h-3 w-3 border-0 p-0 text-foreground-dim hover:text-foreground-muted focus:ring-0"
+            panelClassName="rounded-xl bg-[#1a1d25]/95 px-3 py-2.5 text-[11px] leading-relaxed text-foreground-muted"
           />
         ) : null}
       </div>

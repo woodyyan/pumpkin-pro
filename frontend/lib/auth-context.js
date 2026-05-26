@@ -183,14 +183,16 @@ export function useAuth() {
 
 const AUTH_DIALOG_THEME = {
   overlay: 'bg-black/70 backdrop-blur-[2px]',
-  panel: 'w-full max-w-[25.5rem] rounded-[1.75rem] bg-[#121317]/95 p-6 shadow-[0_22px_68px_rgba(0,0,0,0.56)] ring-1 ring-primary/25 sm:min-w-[25.5rem]',
-  closeBtn: 'bg-[#1f232d] text-slate-300 hover:bg-[#2a303c] hover:text-white',
-  hintCard: 'rounded-2xl bg-[#1a1d25] px-4 py-3 text-sm leading-6 text-slate-200',
-  modeWrap: 'mb-6 grid grid-cols-2 gap-2 rounded-2xl bg-[#1a1d25] p-1',
+  panel: 'w-full max-w-[25.5rem] rounded-[1.75rem] bg-white dark:bg-[#121317]/95 p-6 shadow-[0_22px_68px_rgba(0,0,0,0.15)] dark:shadow-[0_22px_68px_rgba(0,0,0,0.56)] ring-1 ring-primary/25 sm:min-w-[25.5rem]',
+  closeBtn: 'bg-gray-200 dark:bg-[#1f232d] text-gray-500 dark:text-slate-300 hover:bg-gray-300 dark:hover:bg-[#2a303c] hover:text-gray-800 dark:hover:text-foreground',
+  hintCard: 'rounded-2xl bg-amber-50 dark:bg-[#1a1d25] px-4 py-3 text-sm leading-6 text-gray-700 dark:text-slate-200',
+  modeWrap: 'mb-6 grid grid-cols-2 gap-2 rounded-2xl bg-gray-100 dark:bg-[#1a1d25] p-1',
   modeActive: 'bg-primary text-black font-semibold',
-  modeIdle: 'text-slate-300 hover:bg-white/5 hover:text-white',
-  input: 'w-full rounded-2xl border border-[#303543] bg-[#191d27] px-4 py-2.5 text-sm text-white outline-none transition focus:border-primary focus:bg-[#202633]',
+  modeIdle: 'text-gray-500 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-[var(--color-bg-hover)] hover:text-gray-800 dark:hover:text-foreground',
+  input: 'w-full rounded-2xl border border-gray-300 dark:border-[#303543] bg-white dark:bg-[#191d27] px-4 py-2.5 text-sm text-gray-900 dark:text-foreground outline-none transition focus:border-primary focus:ring-1 focus:ring-primary/30',
   submit: 'w-full rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-black transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-65',
+  footerText: 'text-gray-500 dark:text-slate-400',
+  footerLink: 'text-primary hover:underline',
 }
 
 function AuthDialog({
@@ -255,8 +257,8 @@ function AuthDialog({
       <div className={theme.panel}>
         <div className="mb-5 flex items-start justify-between gap-4">
           <div className="space-y-1">
-            <h2 className="text-xl font-semibold text-white">{mode === 'register' ? '注册账号' : '登录账号'}</h2>
-            <p className="text-sm text-slate-300">{mode === 'register' ? '创建一个新账号，开始你的交易旅程。' : '欢迎回来，继续你的交易计划。'}</p>
+            <h2 className="text-xl font-semibold text-foreground">{mode === 'register' ? '注册账号' : '登录账号'}</h2>
+            <p className={`text-sm ${theme.footerText}`}>{mode === 'register' ? '创建一个新账号，开始你的交易旅程。' : '欢迎回来，继续你的交易计划。'}</p>
           </div>
           <button
             type="button"
@@ -308,14 +310,14 @@ function AuthDialog({
               className={theme.input}
             />
             {mode === 'login' ? (
-              <div className="flex items-center justify-between text-xs text-slate-400">
+              <div className={`flex items-center justify-between text-xs ${theme.footerText}`}>
                 <button
                   type="button"
                   onClick={() => {
                     onClose()
                     if (typeof window !== 'undefined') window.location.href = '/forgot-password'
                   }}
-                  className="transition hover:text-white"
+                  className="transition hover:text-foreground"
                 >
                   忘记密码？
                 </button>
@@ -334,7 +336,7 @@ function AuthDialog({
             ) : null}
           </div>
 
-          {error ? <div className="rounded-xl bg-rose-500/12 px-3 py-2 text-sm text-rose-200">{error}</div> : null}
+          {error ? <div className="rounded-xl bg-negative/10 px-3 py-2 text-sm text-negative">{error}</div> : null}
 
           <div className="pt-2">
             <button
@@ -346,11 +348,11 @@ function AuthDialog({
             </button>
           </div>
 
-          <p className="mt-3 text-center text-xs text-white/30">
+          <p className="mt-3 text-center text-xs text-foreground-dim">
             {mode === 'register' ? '注册即表示您同意' : '登录即表示您同意'}
-            <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-white/50 hover:text-white/70 underline underline-offset-2 mx-0.5">用户协议</a>
+            <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-foreground-dim hover:text-foreground-muted underline underline-offset-2 mx-0.5">用户协议</a>
             和
-            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-white/50 hover:text-white/70 underline underline-offset-2 mx-0.5">隐私政策</a>
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-foreground-dim hover:text-foreground-muted underline underline-offset-2 mx-0.5">隐私政策</a>
           </p>
         </form>
       </div>

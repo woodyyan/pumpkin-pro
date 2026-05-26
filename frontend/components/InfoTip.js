@@ -53,7 +53,7 @@ export function InfoTip({
     <span className={`group/info-tip relative inline-flex align-middle ${className}`}>
       <button
         type="button"
-        className={`inline-flex h-4 w-4 items-center justify-center rounded-full border border-white/15 text-[10px] font-semibold text-white/40 transition hover:border-primary/40 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/25 ${iconClassName}`}
+        className={`inline-flex h-4 w-4 items-center justify-center rounded-full border border-[var(--color-border-strong)] text-[10px] font-semibold text-foreground-dim transition hover:border-primary/40 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/25 ${iconClassName}`}
         aria-label={ariaLabel}
         onClick={(event) => event.stopPropagation()}
         onMouseDown={(event) => event.stopPropagation()}
@@ -61,7 +61,7 @@ export function InfoTip({
       >
         i
       </button>
-      <span className={`pointer-events-none absolute z-30 hidden rounded-lg border border-white/10 bg-[#101418]/95 px-3 py-2 text-[11px] font-normal leading-5 text-white/80 shadow-2xl backdrop-blur-sm group-hover/info-tip:block group-focus-within/info-tip:block ${widthClassName} ${classes.panel} ${panelClassName}`}>
+      <span className={`pointer-events-none absolute z-30 hidden rounded-lg border border-border bg-[#101418]/95 px-3 py-2 text-[11px] font-normal leading-5 text-foreground-muted shadow-2xl backdrop-blur-sm group-hover/info-tip:block group-focus-within/info-tip:block ${widthClassName} ${classes.panel} ${panelClassName}`}>
         {text}
         <span className={`absolute h-0 w-0 border-x-4 border-x-transparent border-y-4 border-y-transparent ${classes.arrow}`} />
       </span>

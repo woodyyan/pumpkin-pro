@@ -1,56 +1,60 @@
-# Architecture
+# 项目架构
 
-## 核心架构原则
+## 技术栈
+- **前端**: Next.js 14.2 + React 18 + Tailwind CSS 3.4
+- **后端**: Go (Gin 框架)
+- **数据**: SQLite (pumpkin.db)
+- **量化引擎**: Python (quant/)
 
-1. 后端单写入通道：所有对 SQLite 的写操作必须在 backend 容器内完成，Admin/脚本不得绕开后端直接写库。
-2. 离线任务 + 在线查询分离：数据产出由离线批处理完成，在线 API 只读已落盘结果。
-3. 前端不持有业务日期逻辑：所有用户可见的日期语义由后端提供，前端只负责渲染。
+## 前端架构
 
-## 批次级元数据体系
-
-### source_trade_date
-
-**定义**: 数据所基于的真实收盘交易日。与 `computed_at`（计算完成时间）严格区分。
-
-**归属层级**: 批次级（batch-level）。同一批计算产出的所有结果共享同一个 `source_trade_date`。
-
-**数据流**:
-
-```mermaid
-graph LR
-    A[交易日历服务] -->|前一交易日| B[离线批处理]
-    B -->|写入 source_trade_date| C[批次结果表]
-    C -->|API 返回 source_trade_date| D[前端 Helper]
-    D -->|渲染统一文案| E[用户界面]
+### 目录结构
+```
+frontend/
+├── components/     # 可复用组件
+├── lib/            # 工具库、状态管理
+├── pages/          # Next.js 页面路由
+├── styles/         # 全局样式
+├── public/         # 静态资源
+├── data/           # 静态数据 (changelog.json)
+└── __tests__/      # 测试
 ```
 
-**核心规则**:
-- 后端：每个日级收盘后批处理任务必须将 `source_trade_date` 作为批次元数据写入结果表。不得用 `computed_at` 减一天推算。
-- 前端：所有用户主界面的日期展示统一使用 `source_trade_date`，由统一 helper 渲染。禁止直接使用 `computed_at` 或 `snapshot_date` 充当用户口径日期。
-- 交易日历：A 股和港股各自维护交易日历，`source_trade_date` 必须按对应市场的交易日历查找前一交易日。
+### 状态管理
+- **AuthContext** (`lib/auth-context.js`): 用户认证状态
+- **ThemeContext** (`lib/theme-context.js`): 浅色/深色主题状态
+- 其他工具库 (lib/*.js): 无状态纯函数模块
 
-**已接入模块**:
-- 风险机会全景图（象限）
-- 卧龙 AI 精选排行榜
-- 模拟组合当前成分股
+### 样式体系 (2026-05-26 重构)
+- **CSS 变量驱动**: 所有颜色通过 CSS 自定义属性定义
+- **语义化 Token**: Tailwind `colors` 引用 CSS 变量
+  - `background`, `background-alt`, `card`
+  - `foreground`, `foreground-muted`, `foreground-dim`, `foreground-disabled`
+  - `border`, `border-strong`
+  - `primary`, `positive`, `negative`
+- **主题切换**: `darkMode: "class"` 模式，通过 `<html class="dark">` / `<html class="light">` 控制
+- **FOUC 防护**: `_document.js` 注入阻塞脚本，在 HTML 解析前设置 class
 
-**可复用模块**（未来接入）:
-- 行业榜单
-- 策略评分
-- 因子快照
-- 任何"日级收盘后产出"的策略/榜单/象限/组合
+### 路由页面
+| 路径 | 文件 | 说明 |
+|---|---|---|
+| `/` | `index.js` | 首页/落地页 |
+| `/live-trading` | `live-trading.js` | 行情看板概览 |
+| `/live-trading/[symbol]` | `live-trading/[symbol].js` | 个股详情页 (194KB) |
+| `/stock-picker` | `stock-picker.js` | 选股器 |
+| `/backtest` | `backtest.js` | 回测引擎 |
+| `/strategies` | `strategies.js` | 策略库 |
+| `/portfolio` | `portfolio.js` | 持仓管理 |
+| `/factor-lab` | `factor-lab.js` | 因子实验室 |
+| `/settings` | `settings.js` | 用户设置 |
+| `/admin` | `admin.js` | 管理后台 (独立布局) |
+| `/changelog` | `changelog.js` | 更新日志 |
+| `/share/ai-analysis-preview` | `share/ai-analysis-preview.js` | AI分析分享图预览 (独立布局) |
 
-### 字段命名规范
-
-| 场景 | 字段名 | 含义 |
-|------|--------|------|
-| 批次元数据 | `source_trade_date` | 数据基于的真实收盘交易日 |
-| 计算完成时间 | `computed_at` | 离线任务计算完成的时间戳，仅供内部运维 |
-| 快照写入时间 | `snapshot_date` | 快照落盘时间，不等于用户口径日期 |
-
-
-## 认证扩展：密码重置
-- `backend/store/auth/` 现在同时负责注册、登录、刷新、修改密码、找回密码。
-- 新增数据表：`password_reset_tokens`、`password_reset_attempts`。
-- 新增模块：`backend/store/mail/`，封装腾讯云邮件推送与本地 mock provider。
-- 前端新增独立页面：`/forgot-password`、`/reset-password`。
+### 关键组件
+- `ThemeToggle.js`: 主题切换按钮（三态：浅色/深色/跟随系统）
+- `NavSearchBox.js`: 导航栏股票搜索
+- `QuadrantChart.js`: 四象限风险图表
+- `RankingPanel.js` / `RankingPortfolioPanel.js`: 排行榜
+- `PortfolioAttributionSection.js`: 持仓归因分析
+- `AIAnalysisReportContent.js`: AI分析报告内容

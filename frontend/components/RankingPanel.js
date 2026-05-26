@@ -28,7 +28,7 @@ export default function RankingPanel({ items = [], meta = null, loading = false,
     return (
       <section className="rounded-2xl border border-border bg-card p-5">
         <RankingHeader exchange={exchange} onExchangeChange={onExchangeChange} />
-        <div className="mt-6 flex items-center justify-center py-12 text-sm text-white/40">
+        <div className="mt-6 flex items-center justify-center py-12 text-sm text-foreground-dim">
           <span className="animate-pulse">加载精选榜单...</span>
         </div>
       </section>
@@ -40,7 +40,7 @@ export default function RankingPanel({ items = [], meta = null, loading = false,
     return (
       <section className="rounded-2xl border border-border bg-card p-5">
         <RankingHeader exchange={exchange} onExchangeChange={onExchangeChange} />
-        <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-white/40">
+        <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-foreground-dim">
           当前市场暂无可展示精选标的，建议稍后再看。
         </div>
       </section>
@@ -66,7 +66,7 @@ export default function RankingPanel({ items = [], meta = null, loading = false,
       </div>
 
       {/* Disclaimer */}
-      <p className="mt-4 text-[11px] text-white/30 text-center">
+      <p className="mt-4 text-[11px] text-foreground-dim text-center">
         以上数据基于卧龙AI模型每日分析，仅供参考，不构成投资建议。
       </p>
     </section>
@@ -99,15 +99,15 @@ function RankingHeader({ exchange, onExchangeChange, meta }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h3 className="text-base font-semibold text-white">★ 卧龙AI精选</h3>
-        <div className="mt-1 text-[11px] text-white/35">基于卧龙AI模型每日分析</div>
-        <div className="mt-1 max-w-2xl text-xs leading-5 text-white/45">
+        <h3 className="text-base font-semibold text-foreground">★ 卧龙AI精选</h3>
+        <div className="mt-1 text-[11px] text-foreground-dim">基于卧龙AI模型每日分析</div>
+        <div className="mt-1 max-w-2xl text-xs leading-5 text-foreground-dim">
           {metaSummary}
         </div>
       </div>
 
       {/* Tab Switch */}
-      <div className="flex items-center gap-1 rounded-lg bg-black/20 p-0.5">
+      <div className="flex items-center gap-1 rounded-lg bg-[var(--color-bg-hover)] p-0.5">
         {tabs.map((tab) => (
           <button
             key={tab.key}
@@ -116,7 +116,7 @@ function RankingHeader({ exchange, onExchangeChange, meta }) {
             className={`rounded-md px-3 py-1 text-xs font-medium transition ${
               exchange === tab.key
                 ? 'bg-primary text-black'
-                : 'text-white/55 hover:bg-white/[0.05] hover:text-white/80'
+                : 'text-foreground-dim hover:bg-[var(--color-bg-hover)] hover:text-foreground-muted'
             }`}
           >
             {tab.label}
@@ -131,8 +131,8 @@ function RankRow({ item, onClick }) {
   const medal = getMedal(item.rank)
   const primaryScore = getPrimaryScoreValue(item)
   const primaryScoreLabel = getPrimaryScoreLabel(item.exchange)
-  const oppClass = primaryScore >= 90 ? 'text-emerald-300' : primaryScore >= 70 ? 'text-white/80' : 'text-white/55'
-  const riskClass = item.risk < 30 ? 'text-emerald-300' : item.risk < 50 ? 'text-amber-300' : 'text-white/55'
+  const oppClass = primaryScore >= 90 ? 'text-positive' : primaryScore >= 70 ? 'text-foreground-muted' : 'text-foreground-dim'
+  const riskClass = item.risk < 30 ? 'text-positive' : item.risk < 50 ? 'text-amber-300' : 'text-foreground-dim'
   const returnClass = getReturnTextClass(item.return_pct)
   const consecutiveClass = getConsecutiveValueClass(item.consecutive_days)
 
@@ -142,7 +142,7 @@ function RankRow({ item, onClick }) {
       tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onClick()}
       onClick={onClick}
-      className="group flex cursor-pointer items-center gap-4 rounded-xl px-3 py-3 transition hover:bg-white/[0.04]"
+      className="group flex cursor-pointer items-center gap-4 rounded-xl px-3 py-3 transition hover:bg-[var(--color-bg-hover)]"
     >
       {/* Rank badge */}
       <span className={`flex w-7 shrink-0 items-center justify-center text-xs font-bold ${medal.className}`}>
@@ -151,10 +151,10 @@ function RankRow({ item, onClick }) {
 
       {/* Identity */}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[15px] font-semibold leading-5 text-white transition group-hover:text-primary">
+        <div className="truncate text-[15px] font-semibold leading-5 text-foreground transition group-hover:text-primary">
           {item.name}
         </div>
-        <div className="mt-0.5 text-[11px] text-white/35">
+        <div className="mt-0.5 text-[11px] text-foreground-dim">
           {formatCode(item.code, item.exchange)} · {exchangeLabel(item.exchange)}
         </div>
       </div>
@@ -165,11 +165,11 @@ function RankRow({ item, onClick }) {
           <div className={`text-[18px] font-semibold leading-none tabular-nums ${returnClass}`}>
             {formatReturnPctDisplay(item.return_pct)}
           </div>
-          <div className="mt-1 text-[10px] text-white/30">上榜以来</div>
+          <div className="mt-1 text-[10px] text-foreground-dim">上榜以来</div>
         </div>
 
-        <div className="hidden min-[860px]:inline-flex items-center rounded-full bg-white/[0.05] px-2.5 py-1 text-[11px] font-medium">
-          <span className="text-white/40">连续上榜</span>
+        <div className="hidden min-[860px]:inline-flex items-center rounded-full bg-[var(--color-bg-hover)] px-2.5 py-1 text-[11px] font-medium">
+          <span className="text-foreground-dim">连续上榜</span>
           <span className={`ml-1.5 ${consecutiveClass}`}>{item.consecutive_days > 0 ? `${item.consecutive_days} 日` : '--'}</span>
         </div>
       </div>
@@ -183,13 +183,13 @@ function RankRow({ item, onClick }) {
         <ScoreBar label="流动" value={item.liquidity ?? 50} max={100} width="w-16" amount={item.avg_amount_5d} />
       </div>
 
-      <div className="hidden lg:flex xl:hidden shrink-0 flex-col items-end gap-0.5 text-[10px] text-white/30 tabular-nums">
+      <div className="hidden lg:flex xl:hidden shrink-0 flex-col items-end gap-0.5 text-[10px] text-foreground-dim tabular-nums">
         <span>{`${primaryScoreLabel} ${primaryScore.toFixed(1)}`}</span>
         <span>{`风险评分 ${item.risk.toFixed(1)}`}</span>
       </div>
 
       {/* Arrow */}
-      <span className="shrink-0 text-white/20 transition group-hover:translate-x-0.5 group-hover:text-primary">→</span>
+      <span className="shrink-0 text-foreground-disabled transition group-hover:translate-x-0.5 group-hover:text-primary">→</span>
     </div>
   )
 }
@@ -207,7 +207,7 @@ function RankCard({ item, onClick }) {
       tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onClick()}
       onClick={onClick}
-      className="cursor-pointer rounded-xl border border-border/50 bg-black/15 p-3 transition hover:border-primary/40 active:scale-[0.98]"
+      className="cursor-pointer rounded-xl border border-border/50 bg-[var(--color-bg-hover)] p-3 transition hover:border-primary/40 active:scale-[0.98]"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-start gap-2">
@@ -215,8 +215,8 @@ function RankCard({ item, onClick }) {
             {medal.icon || item.rank}
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold text-white">{item.name}</div>
-            <div className="mt-0.5 text-[11px] text-white/40">
+            <div className="truncate text-sm font-semibold text-foreground">{item.name}</div>
+            <div className="mt-0.5 text-[11px] text-foreground-dim">
               {formatCode(item.code, item.exchange)} · {exchangeLabel(item.exchange)}
             </div>
           </div>
@@ -226,22 +226,22 @@ function RankCard({ item, onClick }) {
           <div className={`text-base font-semibold leading-none tabular-nums ${returnClass}`}>
             {formatReturnPctDisplay(item.return_pct)}
           </div>
-          <div className="mt-1 text-[10px] text-white/30">上榜以来</div>
+          <div className="mt-1 text-[10px] text-foreground-dim">上榜以来</div>
         </div>
       </div>
 
       <div className="mt-3 flex items-center justify-between gap-2">
-        <div className="inline-flex max-w-full items-center rounded-full bg-white/[0.05] px-2 py-1 text-[10px] font-medium">
-          <span className="text-white/40">连续上榜</span>
+        <div className="inline-flex max-w-full items-center rounded-full bg-[var(--color-bg-hover)] px-2 py-1 text-[10px] font-medium">
+          <span className="text-foreground-dim">连续上榜</span>
           <span className={`ml-1.5 ${consecutiveClass}`}>{item.consecutive_days > 0 ? `${item.consecutive_days} 日` : '--'}</span>
         </div>
-        <div className="text-[10px] text-white/30 tabular-nums">
+        <div className="text-[10px] text-foreground-dim tabular-nums">
           {`${primaryScoreLabel} ${primaryScore.toFixed(1)} · 风险评分 ${item.risk.toFixed(1)}`}
         </div>
       </div>
 
-      <div className="mt-3 rounded-lg bg-white/[0.02] px-3 py-2">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-white/35 tabular-nums">
+      <div className="mt-3 rounded-lg bg-[var(--color-bg-hover)] px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-foreground-dim tabular-nums">
           <span>{`趋势 ${item.trend.toFixed(0)}`}</span>
           <span>{`资金 ${item.flow.toFixed(0)}`}</span>
           <span title={item.avg_amount_5d ? `近5日均成交额 ${formatAmount(item.avg_amount_5d)}` : undefined}>
@@ -249,7 +249,7 @@ function RankCard({ item, onClick }) {
           </span>
         </div>
 
-        <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.05]">
+        <div className="mt-2 h-1 overflow-hidden rounded-full bg-[var(--color-bg-hover)]">
           <div
             className="h-full rounded-full bg-gradient-to-r from-emerald-400/60 to-cyan-400/40 transition-all"
             style={{ width: `${Math.min(100, primaryScore)}%` }}
@@ -264,7 +264,7 @@ function MetricStat({ label, value, valueClass }) {
   return (
     <div className="text-right">
       <div className={`text-[12px] tabular-nums ${valueClass}`}>{value}</div>
-      <div className="mt-0.5 text-[10px] text-white/25">{label}</div>
+      <div className="mt-0.5 text-[10px] text-foreground-disabled">{label}</div>
     </div>
   )
 }
@@ -273,20 +273,20 @@ function ScoreBar({ label, value, max, width, amount = null }) {
   const pct = Math.min(100, Math.max(0, (value / max) * 100))
   return (
     <div className={`${width} hidden xl:block`}>
-      <div className="mb-0.5 text-[10px] text-white/25">{label}</div>
+      <div className="mb-0.5 text-[10px] text-foreground-disabled">{label}</div>
       <div className="flex items-center gap-1.5">
-        <div className="h-1 w-full overflow-hidden rounded-full bg-white/[0.05]">
+        <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--color-bg-hover)]">
           <div
             className="h-full rounded-full bg-gradient-to-r from-emerald-400/55 to-cyan-400/35"
             style={{ width: `${pct}%` }}
           />
         </div>
         {amount != null && amount > 0 ? (
-          <span className="text-[9px] text-white/30 tabular-nums" title={`近5日均成交额 ${formatAmount(amount)}`}>
+          <span className="text-[9px] text-foreground-dim tabular-nums" title={`近5日均成交额 ${formatAmount(amount)}`}>
             {formatAmount(amount)}
           </span>
         ) : (
-          <span className="w-5 text-right text-[9px] text-white/35 tabular-nums">{value.toFixed(0)}</span>
+          <span className="w-5 text-right text-[9px] text-foreground-dim tabular-nums">{value.toFixed(0)}</span>
         )}
       </div>
     </div>
@@ -323,13 +323,13 @@ function formatReturnPctDisplay(value) {
 }
 
 function getReturnTextClass(value) {
-  if (!hasReturnPct(value)) return 'text-white/25'
-  return value >= 0 ? 'text-red-400' : 'text-green-400'
+  if (!hasReturnPct(value)) return 'text-foreground-disabled'
+  return value >= 0 ? 'text-negative' : 'text-positive'
 }
 
 function getConsecutiveValueClass(value) {
-  if (!value || value <= 0) return 'text-white/25'
-  return value >= 7 ? 'text-emerald-300' : 'text-white/75'
+  if (!value || value <= 0) return 'text-foreground-disabled'
+  return value >= 7 ? 'text-positive' : 'text-foreground-muted'
 }
 
 // ── Pure helpers ──
@@ -338,8 +338,8 @@ function getMedal(rank) {
   if (rank === 1) return { icon: '🥇', className: '' }
   if (rank === 2) return { icon: '🥈', className: '' }
   if (rank === 3) return { icon: '🥉', className: '' }
-  if (rank <= 10) return { icon: null, className: 'rounded-full bg-white/10 text-white text-[10px]' }
-  return { icon: null, className: 'text-white/35 text-[10px]' }
+  if (rank <= 10) return { icon: null, className: 'rounded-full bg-[var(--color-bg-hover)] text-foreground text-[10px]' }
+  return { icon: null, className: 'text-foreground-dim text-[10px]' }
 }
 
 function formatCode(code, exchange) {

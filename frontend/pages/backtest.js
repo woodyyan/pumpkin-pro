@@ -597,11 +597,11 @@ export default function BacktestPage() {
                   className={`rounded-2xl border p-4 text-left transition ${
                     form.dataSource === option.value
                       ? 'border-primary bg-primary/10 shadow-[0_0_0_1px_rgba(230,126,34,0.25)]'
-                      : 'border-border bg-black/20 hover:border-white/20'
+                      : 'border-border bg-[var(--color-bg-hover)] hover:border-[var(--color-border-strong)]'
                   }`}
                 >
-                  <div className="text-sm font-medium text-white">{option.label}</div>
-                  <div className="mt-2 text-xs leading-6 text-white/60">{option.description}</div>
+                  <div className="text-sm font-medium text-foreground">{option.label}</div>
+                  <div className="mt-2 text-xs leading-6 text-foreground-muted">{option.description}</div>
                 </button>
               ))}
             </div>
@@ -632,7 +632,7 @@ export default function BacktestPage() {
                   />
                 </Field>
                 <Field label="说明">
-                  <div className="rounded-xl border border-dashed border-border bg-black/20 px-4 py-3 text-sm leading-6 text-white/60">
+                  <div className="rounded-xl border border-dashed border-border bg-[var(--color-bg-hover)] px-4 py-3 text-sm leading-6 text-foreground-muted">
                     自动识别市场：6 位数字按 A 股处理，5 位数字按港股处理。
                   </div>
                 </Field>
@@ -642,24 +642,24 @@ export default function BacktestPage() {
             {form.dataSource === 'csv' && (
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label="上传本地 CSV">
-                  <label className="flex min-h-[108px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-black/20 px-4 text-center transition hover:border-primary/40">
-                    <span className="text-sm font-medium text-white">点击选择 CSV 文件</span>
-                    <span className="mt-2 text-xs leading-6 text-white/50">需要包含 date / open / high / low / close / volume 列，支持中英文列名。</span>
+                  <label className="flex min-h-[108px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-[var(--color-bg-hover)] px-4 text-center transition hover:border-primary/40">
+                    <span className="text-sm font-medium text-foreground">点击选择 CSV 文件</span>
+                    <span className="mt-2 text-xs leading-6 text-foreground-dim">需要包含 date / open / high / low / close / volume 列，支持中英文列名。</span>
                     <input type="file" accept=".csv,text/csv" className="hidden" onChange={handleFileUpload} />
                   </label>
                 </Field>
                 <Field label="文件状态">
-                  <div className="rounded-2xl border border-border bg-black/20 px-4 py-4 text-sm leading-7 text-white/70">
+                  <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] px-4 py-4 text-sm leading-7 text-foreground-muted">
                     <div>
-                      <span className="text-white/50">当前文件：</span>
-                      <span className="text-white">{form.csvFilename || '未上传'}</span>
+                      <span className="text-foreground-dim">当前文件：</span>
+                      <span className="text-foreground">{form.csvFilename || '未上传'}</span>
                     </div>
                     <div>
-                      <span className="text-white/50">解析模式：</span>
+                      <span className="text-foreground-dim">解析模式：</span>
                       <span>按所选日期区间截取后回测</span>
                     </div>
                     <div>
-                      <span className="text-white/50">兼容列：</span>
+                      <span className="text-foreground-dim">兼容列：</span>
                       <span>日期/Date、开盘/Open、收盘/Close 等</span>
                     </div>
                   </div>
@@ -689,9 +689,9 @@ export default function BacktestPage() {
         <SectionCard
           title="策略设置"
           action={
-            <div className="inline-flex items-center gap-2 self-start rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-xs text-white/60">
-              <span className="text-white/35">已启用策略</span>
-              <span className="font-semibold text-white">{strategiesLoading ? '加载中...' : `${strategies.length} 条`}</span>
+            <div className="inline-flex items-center gap-2 self-start rounded-full border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-xs text-foreground-muted">
+              <span className="text-foreground-dim">已启用策略</span>
+              <span className="font-semibold text-foreground">{strategiesLoading ? '加载中...' : `${strategies.length} 条`}</span>
             </div>
           }
         >
@@ -700,7 +700,7 @@ export default function BacktestPage() {
               <select
                 value={form.strategyId}
                 onChange={(event) => selectStrategy(event.target.value)}
-                className="w-full rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition focus:border-primary"
+                className="w-full rounded-xl border border-border bg-[var(--color-bg-secondary)] px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary"
                 disabled={strategiesLoading || strategies.length === 0}
               >
                 {strategiesLoading ? (
@@ -717,33 +717,33 @@ export default function BacktestPage() {
               </select>
             </Field>
 
-            <div className="rounded-2xl border border-border bg-black/20 p-4">
-              <div className="mb-3 text-sm font-medium text-white">策略参数（只读）</div>
+            <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] p-4">
+              <div className="mb-3 text-sm font-medium text-foreground">策略参数（只读）</div>
               {selectedStrategy ? (() => {
                 const preset = getStrategyPresetByImplementation(selectedStrategy.implementation_key)
                 const paramSchema = preset?.paramSchema || selectedStrategy.param_schema || []
                 const defaultParams = selectedStrategy.default_params || {}
                 if (paramSchema.length === 0) {
-                  return <div className="text-sm text-white/50">该策略暂无可配置参数。</div>
+                  return <div className="text-sm text-foreground-dim">该策略暂无可配置参数。</div>
                 }
                 return (
                   <div className={`grid gap-3 ${paramSchema.length >= 3 ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
                     {paramSchema.map((item) => (
-                      <div key={item.key} className="rounded-xl border border-white/5 bg-black/20 p-3">
-                        <div className="text-xs text-white/50">{item.label}</div>
-                        <div className="mt-1.5 text-lg font-semibold text-white">{formatParamDisplay(defaultParams[item.key])}</div>
-                        {item.description ? <div className="mt-1 text-[11px] leading-5 text-white/35">{item.description}</div> : null}
+                      <div key={item.key} className="rounded-xl border border-border bg-[var(--color-bg-hover)] p-3">
+                        <div className="text-xs text-foreground-dim">{item.label}</div>
+                        <div className="mt-1.5 text-lg font-semibold text-foreground">{formatParamDisplay(defaultParams[item.key])}</div>
+                        {item.description ? <div className="mt-1 text-[11px] leading-5 text-foreground-dim">{item.description}</div> : null}
                       </div>
                     ))}
                   </div>
                 )
               })() : (
-                <div className="text-sm text-white/50">请先选择策略。</div>
+                <div className="text-sm text-foreground-dim">请先选择策略。</div>
               )}
             </div>
 
-            <div className="rounded-2xl border border-border bg-black/20 p-4 text-sm leading-7 text-white/65">
-              <div className="font-medium text-white">已选策略说明</div>
+            <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] p-4 text-sm leading-7 text-foreground-muted">
+              <div className="font-medium text-foreground">已选策略说明</div>
               <div className="mt-2">{selectedStrategy?.description || '请先到策略库创建并启用策略。'}</div>
             </div>
 
@@ -751,7 +751,7 @@ export default function BacktestPage() {
               type="button"
               onClick={runBacktest}
               disabled={loading || strategiesLoading || !selectedStrategy}
-              className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-foreground transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? '回测运行中...' : '运行历史回测'}
             </button>
@@ -768,18 +768,18 @@ export default function BacktestPage() {
             <button
               type="button"
               onClick={() => setHistoryExpanded((prev) => !prev)}
-              className="flex items-center gap-2 text-lg font-semibold text-white hover:text-primary transition"
+              className="flex items-center gap-2 text-lg font-semibold text-foreground hover:text-primary transition"
             >
               <span className={`inline-block transition-transform ${historyExpanded ? 'rotate-90' : ''}`}>▸</span>
               历史运行
-              {historyTotal > 0 && <span className="text-sm font-normal text-white/40">({historyTotal})</span>}
+              {historyTotal > 0 && <span className="text-sm font-normal text-foreground-dim">({historyTotal})</span>}
             </button>
             {historyRuns.length > 0 && (
               <button
                 type="button"
                 onClick={fetchHistory}
                 disabled={historyLoading}
-                className="text-xs text-white/40 hover:text-white/70 transition disabled:opacity-50"
+                className="text-xs text-foreground-dim hover:text-foreground-muted transition disabled:opacity-50"
               >
                 {historyLoading ? '刷新中...' : '刷新'}
               </button>
@@ -788,9 +788,9 @@ export default function BacktestPage() {
           {historyExpanded && (
             <>
               {historyLoading && historyRuns.length === 0 ? (
-                <div className="py-8 text-center text-sm text-white/40">加载中...</div>
+                <div className="py-8 text-center text-sm text-foreground-dim">加载中...</div>
               ) : historyRuns.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border bg-black/20 px-4 py-8 text-center text-sm text-white/40">
+                <div className="rounded-xl border border-dashed border-border bg-[var(--color-bg-hover)] px-4 py-8 text-center text-sm text-foreground-dim">
                   运行回测后，结果会自动保存在这里。
                 </div>
               ) : (
@@ -838,7 +838,7 @@ export default function BacktestPage() {
 
       {!isLoggedIn && (
         <div className="rounded-2xl border border-dashed border-border bg-card/60 px-6 py-6 text-center">
-          <span className="text-sm text-white/45">
+          <span className="text-sm text-foreground-dim">
             <button type="button" onClick={() => openAuthModal('login', '登录后可保存和查看回测历史记录。')} className="text-primary hover:underline">登录</button>
             {' '}后可保存和查看回测历史记录
           </span>
@@ -846,7 +846,7 @@ export default function BacktestPage() {
       )}
 
       {!result && !loading && (
-        <div className="rounded-2xl border border-dashed border-border bg-card/60 px-6 py-16 text-center text-white/45">
+        <div className="rounded-2xl border border-dashed border-border bg-card/60 px-6 py-16 text-center text-foreground-dim">
           选择数据源与策略后，点击"运行历史回测"，这里会展示 K 线、资产曲线、回撤分析和交易结果。
         </div>
       )}
@@ -879,12 +879,12 @@ export default function BacktestPage() {
         <>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             <div className="rounded-2xl border border-border bg-card px-5 py-4">
-              <div className="text-xs uppercase tracking-[0.18em] text-white/35">回测标的</div>
+              <div className="text-xs uppercase tracking-[0.18em] text-foreground-dim">回测标的</div>
               <div className="mt-2 flex items-center gap-2">
-                <span className="text-sm font-medium text-white/80">{result.data_summary?.ticker_display || result.data_summary?.ticker || '示例/CSV'}</span>
+                <span className="text-sm font-medium text-foreground-muted">{result.data_summary?.ticker_display || result.data_summary?.ticker || '示例/CSV'}</span>
                 {showWatch && (
                   isWatched ? (
-                    <span className="inline-flex items-center gap-0.5 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] text-white/35">✓ 已关注</span>
+                    <span className="inline-flex items-center gap-0.5 rounded-full border border-border bg-[var(--color-bg-hover)] px-2 py-0.5 text-[11px] text-foreground-dim">✓ 已关注</span>
                   ) : (
                     <button
                       type="button"
@@ -913,8 +913,8 @@ export default function BacktestPage() {
           <section className="rounded-2xl border border-border bg-card p-5">
             <div className="flex items-center justify-between">
               <div className="space-y-1">
-                <div className="text-sm font-semibold text-white">✨ AI 优化建议</div>
-                <div className="text-xs text-white/45">AI 分析当前回测指标，给出调参建议并可一键应用重新回测。</div>
+                <div className="text-sm font-semibold text-foreground">✨ AI 优化建议</div>
+                <div className="text-xs text-foreground-dim">AI 分析当前回测指标，给出调参建议并可一键应用重新回测。</div>
               </div>
               <button
                 type="button"
@@ -926,32 +926,32 @@ export default function BacktestPage() {
               </button>
             </div>
             {aiOptLoading ? (
-              <div className="mt-4 flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+              <div className="mt-4 flex items-center gap-2 rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-3">
                 <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                <span className="text-xs text-white/55">AI 正在分析回测结果...</span>
+                <span className="text-xs text-foreground-dim">AI 正在分析回测结果...</span>
               </div>
             ) : null}
             {aiOptError ? (
-              <div className="mt-4 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{aiOptError}</div>
+              <div className="mt-4 rounded-lg border border-negative/40 bg-negative/10 px-3 py-2 text-xs text-negative">{aiOptError}</div>
             ) : null}
             {aiOptResult ? (
               <div className="mt-4 space-y-3">
-                <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="space-y-2 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-white">🔍 诊断</span>
+                    <span className="text-sm font-medium text-foreground">🔍 诊断</span>
                     <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${
-                      aiOptResult.confidence === 'high' ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-300'
-                      : aiOptResult.confidence === 'low' ? 'border-rose-400/40 bg-rose-500/10 text-rose-300'
+                      aiOptResult.confidence === 'high' ? 'border-emerald-400/40 bg-positive/10 text-positive'
+                      : aiOptResult.confidence === 'low' ? 'border-negative/40 bg-negative/10 text-negative'
                       : 'border-amber-400/40 bg-amber-500/10 text-amber-300'
                     }`}>
                       置信度：{aiOptResult.confidence === 'high' ? '高' : aiOptResult.confidence === 'low' ? '低' : '中'}
                     </span>
                   </div>
-                  <p className="text-sm leading-7 text-white/70">{aiOptResult.diagnosis}</p>
+                  <p className="text-sm leading-7 text-foreground-muted">{aiOptResult.diagnosis}</p>
                 </div>
-                <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-4">
-                  <div className="text-sm font-medium text-white">💡 优化建议</div>
-                  <p className="text-sm leading-7 text-white/70">{aiOptResult.suggestion}</p>
+                <div className="space-y-2 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
+                  <div className="text-sm font-medium text-foreground">💡 优化建议</div>
+                  <p className="text-sm leading-7 text-foreground-muted">{aiOptResult.suggestion}</p>
                   {aiOptResult.suggested_params ? (
                     <div className="flex flex-wrap gap-2 pt-1">
                       {Object.entries(aiOptResult.suggested_params).map(([key, value]) => (
@@ -967,7 +967,7 @@ export default function BacktestPage() {
                     type="button"
                     onClick={handleApplyAISuggestion}
                     disabled={loading}
-                    className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-foreground transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {loading ? '回测中...' : '应用建议并重新回测'}
                   </button>
@@ -979,7 +979,7 @@ export default function BacktestPage() {
           <SectionCard title="价格走势与交易信号" description="展示 K 线、策略指标叠加以及买卖点位。">
             <div ref={priceChartContainerRef} className="h-[430px] w-full" />
             {priceChartLegend.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/55">
+              <div className="mt-3 flex flex-wrap gap-4 text-xs text-foreground-dim">
                 {priceChartLegend.map((item) => (
                   <span key={item.label} className="inline-flex items-center gap-2">
                     <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />{item.label}
@@ -992,7 +992,7 @@ export default function BacktestPage() {
           <section className="grid gap-6 xl:grid-cols-2">
             <SectionCard title="资产曲线" description="橙色为策略收益曲线，蓝色为买入并持有（全仓不动）基准。">
               <div ref={equityChartContainerRef} className="h-[240px] w-full" />
-              <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/55">
+              <div className="mt-3 flex flex-wrap gap-4 text-xs text-foreground-dim">
                 <span className="inline-flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-full bg-[#e67e22]" />策略收益
                 </span>
@@ -1026,7 +1026,7 @@ export default function BacktestPage() {
               <div className="grid grid-cols-3 gap-4">
                 <SignalCard label="买入" value={result.signal_summary?.buy || 0} color="text-positive" />
                 <SignalCard label="卖出" value={result.signal_summary?.sell || 0} color="text-negative" />
-                <SignalCard label="持有" value={result.signal_summary?.hold || 0} color="text-white" />
+                <SignalCard label="持有" value={result.signal_summary?.hold || 0} color="text-foreground" />
               </div>
             </SectionCard>
           </section>
@@ -1034,24 +1034,24 @@ export default function BacktestPage() {
           <section className="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
             <TableCard title="月度收益" description="按月聚合的回测收益表现。">
               <div className="max-h-[420px] overflow-auto rounded-xl border border-border">
-                <table className="min-w-full divide-y divide-white/5 text-sm">
-                  <thead className="bg-black/30 text-left text-white/50">
+                <table className="min-w-full divide-y divide-border text-sm">
+                  <thead className="bg-[var(--color-bg-overlay)] text-left text-foreground-dim">
                     <tr>
                       <th className="px-4 py-3 font-medium">月份</th>
                       <th className="px-4 py-3 font-medium">月收益率</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/5">
+                  <tbody className="divide-y divide-border">
                     {(result.analysis?.monthly_returns || []).length === 0 ? (
                       <tr>
-                        <td colSpan={2} className="px-4 py-10 text-center text-white/40">
+                        <td colSpan={2} className="px-4 py-10 text-center text-foreground-dim">
                           暂无月度收益数据
                         </td>
                       </tr>
                     ) : (
                       result.analysis.monthly_returns.map((item) => (
                         <tr key={item.month}>
-                          <td className="px-4 py-3 text-white/75">{item.month}</td>
+                          <td className="px-4 py-3 text-foreground-muted">{item.month}</td>
                           <td className={`px-4 py-3 font-medium ${item.return_pct >= 0 ? 'text-positive' : 'text-negative'}`}>
                             {formatPercent(item.return_pct)}
                           </td>
@@ -1065,8 +1065,8 @@ export default function BacktestPage() {
 
             <TableCard title="交易记录" description="展示策略产生的逐笔交易明细。">
               <div className="max-h-[420px] overflow-auto rounded-xl border border-border">
-                <table className="min-w-full divide-y divide-white/5 text-sm">
-                  <thead className="bg-black/30 text-left text-white/50">
+                <table className="min-w-full divide-y divide-border text-sm">
+                  <thead className="bg-[var(--color-bg-overlay)] text-left text-foreground-dim">
                     <tr>
                       <th className="px-4 py-3 font-medium">日期</th>
                       <th className="px-4 py-3 font-medium">方向</th>
@@ -1076,24 +1076,24 @@ export default function BacktestPage() {
                       <th className="px-4 py-3 font-medium">手续费</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/5">
+                  <tbody className="divide-y divide-border">
                     {(result.trades || []).length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-10 text-center text-white/40">
+                        <td colSpan={6} className="px-4 py-10 text-center text-foreground-dim">
                           当前回测没有成交记录
                         </td>
                       </tr>
                     ) : (
                       result.trades.map((trade, index) => (
                         <tr key={`${trade.date}-${trade.type}-${index}`}>
-                          <td className="px-4 py-3 text-white/75">{trade.date}</td>
+                          <td className="px-4 py-3 text-foreground-muted">{trade.date}</td>
                           <td className={`px-4 py-3 font-medium ${trade.type === 'buy' ? 'text-positive' : 'text-negative'}`}>
                             {trade.type === 'buy' ? '买入' : '卖出'}
                           </td>
-                          <td className="px-4 py-3 text-white/75">{formatNumber(trade.price, 2)}</td>
-                          <td className="px-4 py-3 text-white/75">{formatInteger(trade.shares)}</td>
-                          <td className="px-4 py-3 text-white/75">{formatCurrency(trade.amount)}</td>
-                          <td className="px-4 py-3 text-white/75">{formatCurrency(trade.fee)}</td>
+                          <td className="px-4 py-3 text-foreground-muted">{formatNumber(trade.price, 2)}</td>
+                          <td className="px-4 py-3 text-foreground-muted">{formatInteger(trade.shares)}</td>
+                          <td className="px-4 py-3 text-foreground-muted">{formatCurrency(trade.amount)}</td>
+                          <td className="px-4 py-3 text-foreground-muted">{formatCurrency(trade.fee)}</td>
                         </tr>
                       ))
                     )}
@@ -1272,22 +1272,22 @@ function formatInteger(value) {
 function Field({ label, children }) {
   return (
     <div className="space-y-2">
-      <div className="text-sm font-medium text-white/70">{label}</div>
+      <div className="text-sm font-medium text-foreground-muted">{label}</div>
       {children}
     </div>
   );
 }
 
 function Input(props) {
-  return <input {...props} className="w-full box-border min-w-0 rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary" />;
+  return <input {...props} className="w-full box-border min-w-0 rounded-xl border border-border bg-[var(--color-bg-secondary)] px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-foreground-disabled focus:border-primary" />;
 }
 
 function TableCard({ title, description, children }) {
   return (
     <section className="rounded-2xl border border-border bg-card p-6">
       <div className="mb-5">
-        <h2 className="text-lg font-semibold text-white">{title}</h2>
-        {description && <p className="mt-2 text-sm leading-6 text-white/55">{description}</p>}
+        <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+        {description && <p className="mt-2 text-sm leading-6 text-foreground-dim">{description}</p>}
       </div>
       {children}
     </section>
@@ -1299,8 +1299,8 @@ function SectionCard({ title, description, action, children }) {
     <section className="rounded-2xl border border-border bg-card p-6">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0 flex-1">
-          <h2 className="text-lg font-semibold text-white sm:whitespace-nowrap">{title}</h2>
-          {description && <p className="mt-2 text-sm leading-6 text-white/55">{description}</p>}
+          <h2 className="text-lg font-semibold text-foreground sm:whitespace-nowrap">{title}</h2>
+          {description && <p className="mt-2 text-sm leading-6 text-foreground-dim">{description}</p>}
         </div>
         {action ? <div className="w-full sm:w-auto">{action}</div> : null}
       </div>
@@ -1312,8 +1312,8 @@ function SectionCard({ title, description, action, children }) {
 function SummaryPill({ label, value }) {
   return (
     <div className="rounded-2xl border border-border bg-card px-5 py-4">
-      <div className="text-xs uppercase tracking-[0.18em] text-white/35">{label}</div>
-      <div className="mt-2 text-sm font-medium text-white/80">{value || '--'}</div>
+      <div className="text-xs uppercase tracking-[0.18em] text-foreground-dim">{label}</div>
+      <div className="mt-2 text-sm font-medium text-foreground-muted">{value || '--'}</div>
     </div>
   );
 }
@@ -1321,7 +1321,7 @@ function SummaryPill({ label, value }) {
 function MetricCard({ title, value, type }) {
   const numeric = Number(value);
   const isNegative = !Number.isNaN(numeric) && numeric < 0;
-  const colorClass = isNegative ? 'text-negative' : 'text-white';
+  const colorClass = isNegative ? 'text-negative' : 'text-foreground';
 
   let displayValue = '--';
   if (type === 'currency') displayValue = formatCurrency(value);
@@ -1331,24 +1331,24 @@ function MetricCard({ title, value, type }) {
 
   return (
     <div className="rounded-2xl border border-border bg-card p-5">
-      <div className="text-sm text-white/45">{title}</div>
+      <div className="text-sm text-foreground-dim">{title}</div>
       <div className={`mt-3 text-2xl font-semibold ${colorClass}`}>{displayValue}</div>
     </div>
   );
 }
 function StatRow({ label, value }) {
   return (
-    <div className="flex items-center justify-between rounded-xl border border-white/5 bg-black/20 px-4 py-3 text-sm">
-      <span className="text-white/50">{label}</span>
-      <span className="font-medium text-white/80">{value || '--'}</span>
+    <div className="flex items-center justify-between rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-3 text-sm">
+      <span className="text-foreground-dim">{label}</span>
+      <span className="font-medium text-foreground-muted">{value || '--'}</span>
     </div>
   );
 }
 
 function SignalCard({ label, value, color }) {
   return (
-    <div className="rounded-2xl border border-border bg-black/20 px-4 py-5 text-center">
-      <div className="text-sm text-white/45">{label}</div>
+    <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] px-4 py-5 text-center">
+      <div className="text-sm text-foreground-dim">{label}</div>
       <div className={`mt-3 text-3xl font-semibold ${color}`}>{formatInteger(value)}</div>
     </div>
   );
@@ -1370,7 +1370,7 @@ function HistoryRunCard({ run, isActive, onSelect, onDelete }) {
       className={`group relative cursor-pointer rounded-2xl border p-4 transition ${
         isActive
           ? 'border-primary bg-primary/10 shadow-[0_0_0_1px_rgba(230,126,34,0.25)]'
-          : 'border-border bg-black/20 hover:border-white/20'
+          : 'border-border bg-[var(--color-bg-hover)] hover:border-[var(--color-border-strong)]'
       }`}
       onClick={onSelect}
     >
@@ -1380,7 +1380,7 @@ function HistoryRunCard({ run, isActive, onSelect, onDelete }) {
           event.stopPropagation();
           onDelete();
         }}
-        className="absolute right-3 top-3 hidden rounded-full p-1 text-white/25 transition hover:bg-white/10 hover:text-red-400 group-hover:block"
+        className="absolute right-3 top-3 hidden rounded-full p-1 text-foreground-disabled transition hover:bg-[var(--color-bg-hover)] hover:text-negative group-hover:block"
         title="删除"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1389,11 +1389,11 @@ function HistoryRunCard({ run, isActive, onSelect, onDelete }) {
         </svg>
       </button>
 
-      <div className="mb-2 pr-8 text-sm font-medium text-white leading-tight truncate" title={run.title}>
+      <div className="mb-2 pr-8 text-sm font-medium text-foreground leading-tight truncate" title={run.title}>
         {run.title || '回测记录'}
       </div>
 
-      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-white/55 min-w-0">
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-foreground-dim min-w-0">
         {totalReturn != null && (
           <span>
             收益{' '}
@@ -1405,7 +1405,7 @@ function HistoryRunCard({ run, isActive, onSelect, onDelete }) {
         {maxDrawdown != null && (
           <span>
             回撤{' '}
-            <span className="font-medium text-white/70">
+            <span className="font-medium text-foreground-muted">
               -{Math.abs(Number(maxDrawdown)).toFixed(2)}%
             </span>
           </span>
@@ -1413,22 +1413,22 @@ function HistoryRunCard({ run, isActive, onSelect, onDelete }) {
         {sharpe != null && (
           <span>
             夏普{' '}
-            <span className="font-medium text-white/70">{Number(sharpe).toFixed(2)}</span>
+            <span className="font-medium text-foreground-muted">{Number(sharpe).toFixed(2)}</span>
           </span>
         )}
         {trades != null && (
           <span>
             交易{' '}
-            <span className="font-medium text-white/70">{trades}笔</span>
+            <span className="font-medium text-foreground-muted">{trades}笔</span>
           </span>
         )}
       </div>
 
-      <div className="mt-2 flex items-center gap-2 overflow-x-auto text-[11px] text-white/30 whitespace-nowrap scrollbar-none">
+      <div className="mt-2 flex items-center gap-2 overflow-x-auto text-[11px] text-foreground-dim whitespace-nowrap scrollbar-none">
         <span className="shrink-0">{run.start_date} ~ {run.end_date}</span>
         {createdAt && <span className="shrink-0">{createdAt}</span>}
         {run.status === 'failed' && (
-          <span className="shrink-0 rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] text-red-300">失败</span>
+          <span className="shrink-0 rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] text-negative">失败</span>
         )}
       </div>
     </div>

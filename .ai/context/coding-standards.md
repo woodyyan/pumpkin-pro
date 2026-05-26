@@ -1,26 +1,47 @@
-# Coding Standards
+# 前端编码规范
 
-## source_trade_date 工程规范
+## 颜色使用规范
 
-### 后端
+### ❌ 禁止的写法
+```jsx
+// 禁止硬编码不透明颜色
+<div className="text-white/60 bg-slate-900 border-white/10" />
+```
 
-1. **所有日级收盘后批处理必须写入 `source_trade_date`**。写入值由交易日历服务查询"前一交易日"得到，不得用 `computed_at - 1 day` 推算。
-2. **交易日历按市场区分**。A 股和港股交易日不完全一致（如港股有台风休市、A股有春节长假），`source_trade_date` 必须按对应市场独立计算。
-3. **批次级字段**。同一批计算产出的所有结果共享同一 `source_trade_date`，作为批次元数据而非行级字段。
-4. **API 响应必须包含 `source_trade_date`**。任何返回"日级收盘后数据"的 API 必须在顶层或批次级包含 `source_trade_date`，供前端渲染。
-5. **禁止在用户口径中使用 `computed_at` 或 `snapshot_date` 替代 `source_trade_date`**。`computed_at` 仅用于内部运维日志和排障。
+### ✅ 正确的写法
+```jsx
+// 使用语义化 token
+<div className="text-foreground-muted bg-background border-border" />
+```
 
-### 前端
+### 语义化 Token 速查表
 
-1. **统一 helper 渲染日期文案**。所有用户可见的日期展示必须通过统一 helper 函数，格式为：`按 {source_trade_date} 收盘后数据生成`。
-2. **禁止绕过 helper 直接使用 `computed_at`**。不得在其他模块中偷用 `computed_at` 做用户日期展示。
-3. **Helper 入口单一**。项目内只维护一个日期渲染 helper，避免多个模块各自格式化导致口径不一致。
+| Token | 浅色模式 | 深色模式 | 用途 |
+|---|---|---|---|
+| `text-foreground` | `#1a1a2e` | `#ededed` | 主文字 |
+| `text-foreground-muted` | `#4a4a6a` | `rgba(255,255,255,0.6)` | 次级文字 |
+| `text-foreground-dim` | `rgba(0,0,0,0.5)` | `rgba(255,255,255,0.35)` | 三级文字 |
+| `text-foreground-disabled` | `rgba(0,0,0,0.25)` | `rgba(255,255,255,0.18)` | 禁用态文字 |
+| `bg-background` | `#ffffff` | `#0a0a0b` | 页面背景 |
+| `bg-card` | `#ffffff` | `#161618` | 卡片背景 |
+| `border-border` | `rgba(0,0,0,0.08)` | `rgba(255,255,255,0.08)` | 边框 |
+| `text-primary` | `#e67e22` | `#e67e22` | 品牌色 |
+| `text-positive` | `#16a34a` | `#22c55e` | 上涨绿 |
+| `text-negative` | `#dc2626` | `#ef4444` | 下跌红 |
 
-### 新模块接入清单
+### 特殊情况
+- 模态弹窗遮罩: 可以用 `bg-black/70`（深浅模式都需要黑色半透明）
+- 固定颜色指示器: 可以用 `bg-white/40` 等固定值
+- 内联渐变中的特殊颜色: 使用 `var(--color-bg-hover)` 或 `var(--color-border)` 替代
 
-新模块如需展示"日级收盘后"数据日期，必须满足：
+### 自定义 CSS 变量
+```css
+/* 引用 CSS 变量时使用方括号语法 */
+bg-[var(--color-bg-hover)]
+bg-[var(--color-bg-overlay)]
+bg-[var(--color-bg-secondary)]
+border-[var(--color-border-strong)]
+```
 
-- [ ] 后端批处理写入 `source_trade_date`（按市场交易日历）
-- [ ] API 响应包含 `source_trade_date`
-- [ ] 前端使用统一 helper 渲染文案
-- [ ] 不直接使用 `computed_at` 或 `snapshot_date` 作为用户口径日期
+### 图表颜色
+图表组件的颜色应在 JS 中根据 `useTheme().resolvedTheme` 选择对应的配色方案，不要硬编码在 JSX className 中。

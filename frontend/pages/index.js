@@ -59,8 +59,8 @@ const SCENARIOS = [
       '点击顶部「✨AI分析」按钮，等待 AI 综合诊断报告',
     ],
     aiPreview: [
-      { icon: '🟢', text: '建议：观望', color: 'text-emerald-300', highlight: true },
-      { text: '置信度：72%（中高）', color: 'text-white/60' },
+      { icon: '🟢', text: '建议：观望', color: 'text-positive', highlight: true },
+      { text: '置信度：72%（中高）', color: 'text-foreground/60' },
       { icon: '⚠️', text: '风险提示：短期波动较大', color: 'text-amber-300/80' },
     ],
   },
@@ -77,8 +77,8 @@ const SCENARIOS = [
       'AI 自动解析条件并全市场扫描，展示匹配结果列表',
     ],
     aiPreview: [
-      { icon: '📋', text: '找到 12 只匹配标的', color: 'text-white', highlight: true },
-      { text: '已按收益率排序，可逐个查看详情', color: 'text-white/55' },
+      { icon: '📋', text: '找到 12 只匹配标的', color: 'text-foreground', highlight: true },
+      { text: '已按收益率排序，可逐个查看详情', color: 'text-foreground/55' },
     ],
   },
   {
@@ -94,8 +94,8 @@ const SCENARIOS = [
       '设置参数后运行回测，查看收益曲线和关键指标',
     ],
     aiPreview: [
-      { icon: '📈', text: '年化 +23.4%', color: 'text-red-300', highlight: true },
-      { text: '夏普比率 1.82 · 最大回撤 12%', color: 'text-white/60' },
+      { icon: '📈', text: '年化 +23.4%', color: 'text-negative', highlight: true },
+      { text: '夏普比率 1.82 · 最大回撤 12%', color: 'text-foreground/60' },
     ],
   },
   {
@@ -111,8 +111,8 @@ const SCENARIOS = [
       '继续查看下方「卧龙AI精选」，打开感兴趣股票的详情页',
     ],
     aiPreview: [
-      { icon: '★', text: '卧龙AI精选：机会区 Top 标的', color: 'text-white', highlight: true },
-      { text: '先看全景，再看精选，效率更高', color: 'text-white/55' },
+      { icon: '★', text: '卧龙AI精选：机会区 Top 标的', color: 'text-foreground', highlight: true },
+      { text: '先看全景，再看精选，效率更高', color: 'text-foreground/55' },
     ],
   },
   {
@@ -128,8 +128,8 @@ const SCENARIOS = [
       '需要调整时，直接进入对应个股详情页继续维护持仓',
     ],
     aiPreview: [
-      { icon: '📦', text: '组合视角查看持仓和盈亏', color: 'text-white', highlight: true },
-      { text: '适合日常复盘和仓位检查', color: 'text-white/55' },
+      { icon: '📦', text: '组合视角查看持仓和盈亏', color: 'text-foreground', highlight: true },
+      { text: '适合日常复盘和仓位检查', color: 'text-foreground/55' },
     ],
   },
   {
@@ -145,8 +145,8 @@ const SCENARIOS = [
       '前往「设置」页面配置 Webhook，验证送达后开始接收提醒',
     ],
     aiPreview: [
-      { icon: '⚡', text: '策略触发后自动推送', color: 'text-white', highlight: true },
-      { text: '适合盘中盯信号，不必一直盯盘', color: 'text-white/55' },
+      { icon: '⚡', text: '策略触发后自动推送', color: 'text-foreground', highlight: true },
+      { text: '适合盘中盯信号，不必一直盯盘', color: 'text-foreground/55' },
     ],
   },
 ]
@@ -259,15 +259,15 @@ function Accordion({ items }) {
             <button
               type="button"
               onClick={() => setOpenIdx(isOpen ? -1 : i)}
-              className="w-full flex items-center justify-between px-5 py-4 text-left text-sm font-medium text-white/90 hover:bg-white/3 transition"
+              className="w-full flex items-center justify-between px-5 py-4 text-left text-sm font-medium text-foreground hover:bg-[var(--color-bg-hover)] transition"
             >
               <span>{item.q}</span>
-              <span className={`text-white/40 transition-transform ${isOpen ? 'rotate-90' : ''}`}>▸</span>
+              <span className={`text-foreground-dim transition-transform ${isOpen ? 'rotate-90' : ''}`}>▸</span>
             </button>
             <div className={`grid transition-all duration-300 ease-in-out ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
               <div className="overflow-hidden">
                 <div className="px-5 pb-4 space-y-3">
-                  <ol className="list-decimal pl-5 space-y-1.5 text-sm text-white/65 leading-6">
+                  <ol className="list-decimal pl-5 space-y-1.5 text-sm text-foreground-muted leading-6">
                     {item.steps.map((s, j) => <li key={j}>{s}</li>)}
                   </ol>
                   {item.tip && (
@@ -316,10 +316,10 @@ export default function HomePage() {
         <h1 className="relative text-3xl md:text-5xl font-bold tracking-tight bg-gradient-to-r from-amber-200 via-primary to-amber-500 bg-clip-text text-transparent">
           卧龙 AI 量化交易台
         </h1>
-        <p className="relative mt-3 text-base md:text-lg text-white/50 font-medium">
+        <p className="relative mt-3 text-base md:text-lg text-foreground/50 font-medium">
           智能分析 · 行情看板 · 信号推送
         </p>
-        <p className="relative mt-4 max-w-xl text-sm md:text-base text-white/40 leading-7">
+        <p className="relative mt-4 max-w-xl text-sm md:text-base text-foreground-dim leading-7">
           面向个人投资者的 AI 量化分析平台，帮你用数据和策略看清市场，做出更理性的投资决策。
         </p>
 
@@ -333,7 +333,7 @@ export default function HomePage() {
           </button>
           <a
             href="#features"
-            className="rounded-xl border border-white/15 px-6 py-3 text-sm text-white/60 transition hover:border-white/30 hover:text-white"
+            className="rounded-xl border border-border px-6 py-3 text-sm text-foreground-muted transition hover:border-border-strong hover:text-foreground"
           >
             查看功能介绍 ↓
           </a>
@@ -341,11 +341,11 @@ export default function HomePage() {
 
         <div className="relative grid grid-cols-1 sm:grid-cols-3 gap-4 mt-12 w-full max-w-2xl">
           {HIGHLIGHTS.map((h, i) => (
-            <div key={i} className="rounded-xl border border-white/8 bg-white/[0.03] backdrop-blur-sm px-5 py-4 text-center">
+            <div key={i} className="rounded-xl border border-border bg-[var(--color-bg-hover)] backdrop-blur-sm px-5 py-4 text-center">
               <div className="text-xl md:text-2xl font-bold bg-gradient-to-r from-amber-300 to-primary bg-clip-text text-transparent">
                 {h.value}
               </div>
-              <div className="mt-1 text-xs text-white/40">{h.desc}</div>
+              <div className="mt-1 text-xs text-foreground-dim">{h.desc}</div>
             </div>
           ))}
         </div>
@@ -355,7 +355,7 @@ export default function HomePage() {
       <section className="px-4 py-16 md:py-24 max-w-5xl mx-auto">
         <div className="text-center mb-12">
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight">🚀 快速上手</h2>
-          <p className="mt-3 text-sm text-white/40">选择你的使用场景，3 步开始体验，共 6 条路径</p>
+          <p className="mt-3 text-sm text-foreground-dim">选择你的使用场景，3 步开始体验，共 6 条路径</p>
         </div>
 
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
@@ -366,7 +366,7 @@ export default function HomePage() {
               className={`group relative rounded-2xl border bg-card p-6 transition hover:-translate-y-1 hover:shadow-lg ${
                 s.recommended
                   ? 'border-primary/40 shadow-primary/[0.04]'
-                  : 'border-border hover:border-white/15'
+                  : 'border-border hover:border-border-strong'
               }`}
             >
               {s.recommended && (
@@ -375,7 +375,7 @@ export default function HomePage() {
 
               <div className="flex items-center gap-2.5 mb-4">
                 <span className="text-2xl">{s.icon}</span>
-                <h3 className="text-lg font-semibold text-white">{s.title}</h3>
+                <h3 className="text-lg font-semibold text-foreground">{s.title}</h3>
               </div>
 
               {/* Steps */}
@@ -383,7 +383,7 @@ export default function HomePage() {
                 {s.steps.map((step, j) => (
                   <div key={j} className="flex items-start gap-2.5">
                     <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">{j + 1}</span>
-                    <span className="text-[13px] leading-relaxed text-white/65">{step}</span>
+                    <span className="text-[13px] leading-relaxed text-foreground-muted">{step}</span>
                   </div>
                 ))}
               </div>
@@ -393,7 +393,7 @@ export default function HomePage() {
                 <div className="rounded-xl bg-gradient-to-r from-primary/[0.07] to-transparent border border-primary/12 p-3.5 mb-4">
                   <div className="space-y-1.5">
                     {s.aiPreview.map((line, k) => (
-                      <div key={k} className={`text-[13px] ${line.highlight ? 'font-semibold text-white' : line.color || 'text-white/55'}`}>
+                      <div key={k} className={`text-[13px] ${line.highlight ? 'font-semibold text-foreground' : line.color || 'text-foreground/55'}`}>
                         {line.icon && <span className="mr-1.5">{line.icon}</span>}
                         {line.text}
                       </div>
@@ -403,7 +403,7 @@ export default function HomePage() {
               )}
 
               {/* Value tag */}
-              <p className="mb-4 text-xs text-white/35 italic">{s.value}</p>
+              <p className="mb-4 text-xs text-foreground/35 italic">{s.value}</p>
 
               {/* CTA */}
               <span className="inline-flex items-center text-sm font-medium text-primary group-hover:text-primary transition">
@@ -418,7 +418,7 @@ export default function HomePage() {
       <section id="features" className="px-4 py-16 md:py-24 max-w-6xl mx-auto">
         <div className="text-center mb-12">
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight">我们提供什么</h2>
-          <p className="mt-3 text-sm text-white/40">一站式量化分析工具，覆盖投研全流程</p>
+          <p className="mt-3 text-sm text-foreground-dim">一站式量化分析工具，覆盖投研全流程</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -426,11 +426,11 @@ export default function HomePage() {
             <Link
               key={i}
               href={f.href}
-              className="group rounded-2xl border border-border bg-card p-6 transition hover:-translate-y-1 hover:border-white/15 hover:shadow-lg"
+              className="group rounded-2xl border border-border bg-card p-6 transition hover:-translate-y-1 hover:border-border-strong hover:shadow-lg"
             >
               <div className="text-4xl mb-4">{f.icon}</div>
-              <h3 className="text-lg font-semibold text-white mb-3">{f.title}</h3>
-              <ul className="space-y-1.5 text-sm text-white/50 leading-6 mb-4">
+              <h3 className="text-lg font-semibold text-foreground mb-3">{f.title}</h3>
+              <ul className="space-y-1.5 text-sm text-foreground/50 leading-6 mb-4">
                 {f.points.map((p, j) => <li key={j} className="flex items-start gap-2"><span className="text-primary/60 mt-0.5">•</span>{p}</li>)}
               </ul>
               <span className="inline-flex items-center text-sm text-primary/80 font-medium group-hover:text-primary transition">
@@ -445,17 +445,17 @@ export default function HomePage() {
       <section className="px-4 py-16 md:py-24 max-w-3xl mx-auto">
         <div className="text-center mb-10">
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight">使用教程</h2>
-          <p className="mt-3 text-sm text-white/40">点击展开查看详细操作步骤</p>
+          <p className="mt-3 text-sm text-foreground-dim">点击展开查看详细操作步骤</p>
         </div>
         <Accordion items={TUTORIALS} />
       </section>
 
       {/* ── Section 6: Risk Disclaimer + CTA ── */}
       <section className="px-4 py-16 md:py-20 max-w-3xl mx-auto text-center">
-        <div className="rounded-2xl border border-amber-400/15 bg-amber-500/[0.04] px-6 py-5 mb-10">
-          <p className="text-sm text-amber-200/70 leading-6">
-            <strong className="text-amber-200/90">⚠️ 风险提示：</strong>本平台仅提供数据分析和策略回测工具，不构成任何投资建议。股票市场有风险，投资需谨慎。详见
-            <Link href="/disclaimer" className="underline underline-offset-2 hover:text-amber-100 mx-0.5">《免责声明》</Link>
+        <div className="rounded-2xl border border-amber-600/30 dark:border-amber-400/15 bg-amber-100/60 dark:bg-amber-500/[0.04] px-6 py-5 mb-10">
+          <p className="text-sm text-amber-800 dark:text-amber-200/70 leading-6">
+            <strong className="text-amber-900 dark:text-amber-200/90">⚠️ 风险提示：</strong>本平台仅提供数据分析和策略回测工具，不构成任何投资建议。股票市场有风险，投资需谨慎。详见
+            <Link href="/disclaimer" className="underline underline-offset-2 text-amber-700 hover:text-amber-900 dark:text-amber-200/70 dark:hover:text-amber-100 mx-0.5">《免责声明》</Link>
           </p>
         </div>
 

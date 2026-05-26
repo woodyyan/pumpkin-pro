@@ -193,12 +193,12 @@ export function formatPortfolioEventSubline(event, symbol) {
 }
 
 export function getPortfolioEventAccent(event) {
-  if (!event) return 'text-white/70'
-  if (event.event_type === 'buy') return 'text-rose-300'
-  if (event.event_type === 'sell') return 'text-emerald-300'
+  if (!event) return 'text-foreground-muted'
+  if (event.event_type === 'buy') return 'text-negative'
+  if (event.event_type === 'sell') return 'text-positive'
   if (event.event_type === 'adjust_avg_cost') return 'text-sky-300'
   if (event.event_type === 'init' || event.event_type === 'sync_position') return 'text-amber-200'
-  return 'text-white/70'
+  return 'text-foreground-muted'
 }
 
 export function buildPortfolioSummaryMetrics({ portfolioData, snapshot, currencySymbol = '¥' } = {}) {

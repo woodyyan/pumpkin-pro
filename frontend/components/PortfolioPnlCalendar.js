@@ -66,7 +66,7 @@ export function getSelectedDay(data, selectedDate) {
 
 function CalendarMetricValue({ day, metric, scope }) {
   if (!day?.has_data) {
-    return <span className="text-white/18">--</span>
+    return <span className="text-foreground/18">--</span>
   }
   const value = metric === 'rate' ? day.pnl_rate : day.pnl_amount
   const text = metric === 'rate' ? formatCalendarPnlRate(value) : formatCalendarCellPnlAmount(value)
@@ -106,10 +106,10 @@ export default function PortfolioPnlCalendar({
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:p-5">
+    <section className="flex h-full min-h-0 flex-col rounded-2xl border border-border bg-[var(--color-bg-hover)] p-4 sm:p-5">
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-white/80">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground-muted">
             <svg className="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="4" width="18" height="17" rx="2" />
               <path d="M8 2v4M16 2v4M3 10h18" />
@@ -119,7 +119,7 @@ export default function PortfolioPnlCalendar({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex items-center rounded-xl border border-white/10 bg-black/20 p-1">
+          <div className="inline-flex items-center rounded-xl border border-border bg-[var(--color-bg-hover)] p-1">
             {METRIC_OPTIONS.map((option) => (
               <button
                 key={option.value}
@@ -128,21 +128,21 @@ export default function PortfolioPnlCalendar({
                 className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition ${
                   displayMetric === option.value
                     ? 'bg-primary/[0.14] text-primary'
-                    : 'text-white/45 hover:bg-white/[0.05] hover:text-white/80'
+                    : 'text-foreground-dim hover:bg-[var(--color-bg-hover)] hover:text-foreground-muted'
                 }`}
               >
                 {option.label}
               </button>
             ))}
           </div>
-          <InfoTip text={CALENDAR_TOOLTIP} iconClassName="border-white/12 text-white/30 hover:border-white/25 hover:text-white/55" />
+          <InfoTip text={CALENDAR_TOOLTIP} iconClassName="border-[var(--color-border-strong)] text-foreground-dim hover:border-[var(--color-border-strong)] hover:text-foreground-dim" />
         </div>
       </div>
 
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
           {visibleScopes.length > 1 ? (
-            <div className="inline-flex items-center rounded-xl border border-white/10 bg-black/20 p-1">
+            <div className="inline-flex items-center rounded-xl border border-border bg-[var(--color-bg-hover)] p-1">
               {visibleScopes.map((item) => (
                 <button
                   key={item}
@@ -151,7 +151,7 @@ export default function PortfolioPnlCalendar({
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                     scope === item
                       ? 'bg-primary/[0.14] text-primary'
-                      : 'text-white/45 hover:bg-white/[0.05] hover:text-white/80'
+                      : 'text-foreground-dim hover:bg-[var(--color-bg-hover)] hover:text-foreground-muted'
                   }`}
                 >
                   {SCOPE_LABELS[item] || item}
@@ -159,45 +159,45 @@ export default function PortfolioPnlCalendar({
               ))}
             </div>
           ) : (
-            <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-1.5 text-xs text-white/55">
+            <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-xs text-foreground-dim">
               {SCOPE_LABELS[scope] || 'A股'}
             </div>
           )}
 
-          <div className="inline-flex items-center gap-1 rounded-xl border border-white/10 bg-black/20 p-1">
-            <button type="button" onClick={handlePrevMonth} className="rounded-lg px-2 py-1 text-xs text-white/45 transition hover:bg-white/[0.05] hover:text-white/85">上一月</button>
+          <div className="inline-flex items-center gap-1 rounded-xl border border-border bg-[var(--color-bg-hover)] p-1">
+            <button type="button" onClick={handlePrevMonth} className="rounded-lg px-2 py-1 text-xs text-foreground-dim transition hover:bg-[var(--color-bg-hover)] hover:text-foreground-muted">上一月</button>
             <input
               type="month"
               value={monthInputValue}
               onChange={handleMonthInput}
-              className="rounded-lg border border-white/10 bg-black/25 px-2 py-1 text-xs text-white/70 outline-none transition focus:border-primary/40"
+              className="rounded-lg border border-border bg-[var(--color-bg-secondary)] px-2 py-1 text-xs text-foreground-muted outline-none transition focus:border-primary/40"
             />
-            <button type="button" onClick={handleNextMonth} className="rounded-lg px-2 py-1 text-xs text-white/45 transition hover:bg-white/[0.05] hover:text-white/85">下一月</button>
+            <button type="button" onClick={handleNextMonth} className="rounded-lg px-2 py-1 text-xs text-foreground-dim transition hover:bg-[var(--color-bg-hover)] hover:text-foreground-muted">下一月</button>
           </div>
         </div>
 
         {data ? (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-white/35 sm:justify-end">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-foreground-dim sm:justify-end">
             <span className={monthAmountColor}>本月收益 {formatCalendarPnlAmount(data.month_pnl_amount || 0, scope)}</span>
-            <span className="text-white/20">·</span>
+            <span className="text-foreground-disabled">·</span>
             <span className={monthRateColor}>本月收益率 {formatCalendarPnlRate(data.month_pnl_rate)}</span>
-            <span className="text-white/20">·</span>
+            <span className="text-foreground-disabled">·</span>
             <span>{data.currency_code || (scope === 'HKEX' ? 'HKD' : 'CNY')}</span>
           </div>
         ) : null}
       </div>
 
       {error ? (
-        <div className="rounded-xl border border-rose-400/25 bg-rose-500/[0.08] px-4 py-3 text-sm text-rose-200">
+        <div className="rounded-xl border border-rose-400/25 bg-rose-500/[0.08] px-4 py-3 text-sm text-negative">
           {error}
-          <button type="button" onClick={onRetry} className="ml-3 underline decoration-rose-200/40 underline-offset-4 transition hover:text-white">
+          <button type="button" onClick={onRetry} className="ml-3 underline decoration-rose-200/40 underline-offset-4 transition hover:text-foreground">
             重试
           </button>
         </div>
       ) : null}
 
       <div className={`relative flex-1 ${loading ? 'pointer-events-none opacity-55' : ''}`}>
-        <div className="grid grid-cols-7 gap-1.5 text-center text-[10px] text-white/28 sm:gap-2">
+        <div className="grid grid-cols-7 gap-1.5 text-center text-[10px] text-foreground/28 sm:gap-2">
           {WEEKDAY_LABELS.map((label) => (
             <div key={label} className="py-1 font-medium">{label}</div>
           ))}
@@ -206,7 +206,7 @@ export default function PortfolioPnlCalendar({
         <div className="mt-1 grid grid-cols-7 gap-1.5 sm:gap-2">
           {grid.map((cell) => {
             if (!cell.inMonth) {
-              return <div key={cell.key} className="min-h-[68px] rounded-xl border border-white/[0.03] bg-white/[0.01] sm:min-h-[72px]" />
+              return <div key={cell.key} className="min-h-[68px] rounded-xl border border-border bg-[var(--color-bg-primary)] sm:min-h-[72px]" />
             }
             const day = cell.data || { date: cell.date, day: cell.day, has_data: false }
             const isSelected = selectedDate === cell.date
@@ -220,11 +220,11 @@ export default function PortfolioPnlCalendar({
                     ? 'border-primary/45 bg-primary/[0.10] shadow-[0_0_0_1px_rgba(245,158,11,0.12)]'
                     : day.is_today
                       ? 'border-primary/20 bg-primary/[0.04]'
-                      : 'border-white/[0.06] bg-black/15 hover:border-white/14 hover:bg-white/[0.035]'
+                      : 'border-border bg-[var(--color-bg-hover)] hover:border-white/14 hover:bg-white/[0.035]'
                 }`}
               >
                 <div className="flex items-center justify-between gap-1">
-                  <span className={`text-[11px] font-medium ${day.is_today ? 'text-primary' : 'text-white/55'}`}>{cell.day}</span>
+                  <span className={`text-[11px] font-medium ${day.is_today ? 'text-primary' : 'text-foreground-dim'}`}>{cell.day}</span>
                   {day.is_today ? <span className="rounded-full bg-primary/15 px-1 text-[9px] text-primary">今</span> : null}
                 </div>
                 <div className="mt-2 whitespace-normal break-words text-center text-[10px] font-semibold leading-tight tabular-nums sm:text-[11px]">
@@ -236,8 +236,8 @@ export default function PortfolioPnlCalendar({
         </div>
 
         {loading ? (
-          <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/20 backdrop-blur-[1px]">
-            <div className="rounded-full border border-white/10 bg-black/50 px-3 py-1.5 text-xs text-white/45">加载日历中...</div>
+          <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-[var(--color-bg-hover)] backdrop-blur-[1px]">
+            <div className="rounded-full border border-border bg-[var(--color-bg-overlay)] px-3 py-1.5 text-xs text-foreground-dim">加载日历中...</div>
           </div>
         ) : null}
       </div>

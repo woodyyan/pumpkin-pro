@@ -139,9 +139,9 @@ export function inferPortfolioTradeMarket(symbol, fallback = 'ASHARE') {
 
 // ── 格式化工具 ──
 
-const PNL_COLOR_POSITIVE = 'text-rose-400' // 涨/盈 → 红（中国市场惯例）
+const PNL_COLOR_POSITIVE = 'text-negative' // 涨/盈 → 红（中国市场惯例）
 const PNL_COLOR_NEGATIVE = 'text-emerald-400' // 跌/亏 → 绿
-const NEUTRAL_COLOR = 'text-white/55'
+const NEUTRAL_COLOR = 'text-foreground-dim'
 
 export function formatPnl(value, opts = {}) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '--'

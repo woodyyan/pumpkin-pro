@@ -21,3 +21,5 @@ quant/data/cache/
 .workb/
 /docs/
 backend/.cache/
+output/
+.session_tmps/

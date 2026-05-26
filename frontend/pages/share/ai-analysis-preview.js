@@ -41,7 +41,7 @@ export default function AIAnalysisSharePreviewPage() {
           {payload ? (
             <AIAnalysisShareCard payload={payload} />
           ) : (
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-6 py-5 text-sm text-white/45">
+            <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] px-6 py-5 text-sm text-foreground-dim">
               等待分享内容...
             </div>
           )}

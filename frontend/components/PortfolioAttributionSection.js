@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { LabelWithInfo } from './InfoTip'
+import { useTheme } from '../lib/theme-context'
 import {
   ATTRIBUTION_RANGE_OPTIONS,
   attributionToneClass,
@@ -62,7 +63,7 @@ function formatEventTypeLabel(value) {
 
 function EmptyState({ text, compact = false }) {
   return (
-    <div className={`rounded-2xl border border-dashed border-white/10 bg-black/20 px-4 text-center text-sm text-white/40 ${compact ? 'py-5' : 'py-10'}`}>
+    <div className={`rounded-2xl border border-dashed border-border bg-[var(--color-bg-hover)] px-4 text-center text-sm text-foreground-dim ${compact ? 'py-5' : 'py-10'}`}>
       {text}
     </div>
   )
@@ -70,17 +71,17 @@ function EmptyState({ text, compact = false }) {
 
 function HeroSkeleton() {
   return (
-    <div className="space-y-4 rounded-3xl border border-white/10 bg-white/[0.03] p-4 sm:p-6">
+    <div className="space-y-4 rounded-3xl border border-border bg-[var(--color-bg-hover)] p-4 sm:p-6">
       <div className="flex flex-wrap items-center gap-2">
         {Array.from({ length: 4 }).map((_, index) => (
-          <div key={index} className="h-8 w-16 animate-pulse rounded-full bg-white/[0.06]" />
+          <div key={index} className="h-8 w-16 animate-pulse rounded-full bg-[var(--color-bg-secondary)]" />
         ))}
       </div>
-      <div className="h-5 w-3/4 animate-pulse rounded bg-white/[0.06]" />
-      <div className="h-64 animate-pulse rounded-3xl bg-white/[0.04]" />
+      <div className="h-5 w-3/4 animate-pulse rounded bg-[var(--color-bg-secondary)]" />
+      <div className="h-64 animate-pulse rounded-3xl bg-[var(--color-bg-hover)]" />
       <div className="grid gap-3 sm:grid-cols-3">
         {Array.from({ length: 3 }).map((_, index) => (
-          <div key={index} className="h-20 animate-pulse rounded-2xl bg-white/[0.04]" />
+          <div key={index} className="h-20 animate-pulse rounded-2xl bg-[var(--color-bg-hover)]" />
         ))}
       </div>
     </div>
@@ -89,9 +90,9 @@ function HeroSkeleton() {
 
 function SectionCard({ title, tooltip, children, action, compact = false }) {
   return (
-    <div className={`rounded-2xl border border-white/10 bg-white/[0.03] ${compact ? 'p-3.5' : 'p-4 sm:p-5'}`}>
+    <div className={`rounded-2xl border border-border bg-[var(--color-bg-hover)] ${compact ? 'p-3.5' : 'p-4 sm:p-5'}`}>
       <div className="mb-3 flex items-start justify-between gap-3">
-        <h4 className="text-sm font-semibold text-white/84">
+        <h4 className="text-sm font-semibold text-foreground/84">
           <LabelWithInfo label={title} tooltip={tooltip} />
         </h4>
         {action ? <div className="shrink-0">{action}</div> : null}
@@ -103,10 +104,10 @@ function SectionCard({ title, tooltip, children, action, compact = false }) {
 
 function MetricBadge({ badge }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/20 px-3.5 py-3">
-      <div className="text-[11px] text-white/40">{badge.label}</div>
+    <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] px-3.5 py-3">
+      <div className="text-[11px] text-foreground-dim">{badge.label}</div>
       <div className={`mt-1 text-sm font-semibold ${attributionToneClass(badge.toneValue)}`}>{badge.value}</div>
-      {badge.subValue ? <div className="mt-1 text-[11px] text-white/36">{badge.subValue}</div> : null}
+      {badge.subValue ? <div className="mt-1 text-[11px] text-foreground/36">{badge.subValue}</div> : null}
     </div>
   )
 }
@@ -115,7 +116,7 @@ function DetailListSkeleton({ rows = 3 }) {
   return (
     <div className="space-y-2.5">
       {Array.from({ length: rows }).map((_, index) => (
-        <div key={index} className="h-16 animate-pulse rounded-2xl bg-white/[0.04]" />
+        <div key={index} className="h-16 animate-pulse rounded-2xl bg-[var(--color-bg-hover)]" />
       ))}
     </div>
   )
@@ -163,8 +164,8 @@ function WaterfallChart({ group }) {
 
   return (
     <div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-64 w-full rounded-3xl border border-white/10 bg-black/25 p-2">
-        <line x1={left} x2={width - right} y1={zeroY} y2={zeroY} stroke="rgba(255,255,255,0.12)" strokeDasharray="4 4" />
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-64 w-full rounded-3xl border border-border bg-[var(--color-bg-secondary)] p-2">
+        <line x1={left} x2={width - right} y1={zeroY} y2={zeroY} stroke="var(--color-border)" strokeDasharray="4 4" />
 
         {series.map((item, index) => {
           const x = left + index * stepWidth + stepWidth * 0.18
@@ -187,15 +188,15 @@ function WaterfallChart({ group }) {
                   x2={left + (index + 1) * stepWidth + stepWidth * 0.18}
                   y1={connectorY}
                   y2={connectorY}
-                  stroke="rgba(255,255,255,0.18)"
+                  stroke="var(--color-border)"
                   strokeDasharray="4 4"
                 />
               ) : null}
               <rect x={x} y={y} width={barWidth} height={barHeight} rx="12" fill={fill} opacity={item.isTotal ? 0.92 : 0.88} />
-              <text x={x + barWidth / 2} y={Math.max(y - 8, 12)} textAnchor="middle" fontSize="10" fill="rgba(255,255,255,0.88)">
+              <text x={x + barWidth / 2} y={Math.max(y - 8, 12)} textAnchor="middle" fontSize="10" fill="var(--color-text-primary)">
                 {formatAttributionMoney(item.amount, group?.currency_symbol, { compact: true })}
               </text>
-              <text x={x + barWidth / 2} y={height - 28} textAnchor="middle" fontSize="11" fill="rgba(255,255,255,0.72)">
+              <text x={x + barWidth / 2} y={height - 28} textAnchor="middle" fontSize="11" fill="var(--color-text-secondary)">
                 {item.label}
               </text>
             </g>
@@ -204,9 +205,9 @@ function WaterfallChart({ group }) {
       </svg>
       <div className="mt-3 grid gap-2 sm:grid-cols-5">
         {series.map((item) => (
-          <div key={`${group?.scope || 'ALL'}-legend-${item.key}`} className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2.5">
-            <div className="text-[11px] text-white/42">{item.label}</div>
-            <div className={`mt-1 text-sm font-medium ${attributionToneClass(item.amount, item.isTotal ? 'text-white' : 'text-white/82')}`}>
+          <div key={`${group?.scope || 'ALL'}-legend-${item.key}`} className="rounded-2xl border border-border bg-[var(--color-bg-hover)] px-3 py-2.5">
+            <div className="text-[11px] text-foreground/42">{item.label}</div>
+            <div className={`mt-1 text-sm font-medium ${attributionToneClass(item.amount, item.isTotal ? 'text-foreground' : 'text-foreground/82')}`}>
               {formatAttributionMoney(item.amount, group?.currency_symbol, { compact: true })}
             </div>
           </div>
@@ -220,7 +221,7 @@ function ScopeSwitch({ scopes, activeScope, onChange }) {
   if (!Array.isArray(scopes) || scopes.length <= 1) return null
 
   return (
-    <div className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/25 p-1">
+    <div className="inline-flex items-center gap-1 rounded-full border border-border bg-[var(--color-bg-secondary)] p-1">
       {scopes.map((scope) => (
         <button
           key={scope.scope}
@@ -229,7 +230,7 @@ function ScopeSwitch({ scopes, activeScope, onChange }) {
           className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
             activeScope === scope.scope
               ? 'bg-white text-slate-950'
-              : 'text-white/48 hover:bg-white/[0.06] hover:text-white/84'
+              : 'text-foreground/48 hover:bg-[var(--color-bg-secondary)] hover:text-foreground/84'
           }`}
         >
           {scope.label}
@@ -247,20 +248,20 @@ function StockHighlightList({ items, currencySymbol, emptyText }) {
   return (
     <div className="space-y-2.5">
       {items.map((item) => (
-        <div key={item.symbol} className="rounded-2xl bg-black/20 px-3.5 py-3">
+        <div key={item.symbol} className="rounded-2xl bg-[var(--color-bg-hover)] px-3.5 py-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-sm text-white/86">{item.symbol}</span>
-                <span className="truncate text-sm text-white/68">{item.name}</span>
+                <span className="font-mono text-sm text-foreground/86">{item.symbol}</span>
+                <span className="truncate text-sm text-foreground/68">{item.name}</span>
               </div>
-              <div className="mt-1 text-[11px] text-white/36">{item.driver_label || '归因解释待补充'}</div>
+              <div className="mt-1 text-[11px] text-foreground/36">{item.driver_label || '归因解释待补充'}</div>
             </div>
             <div className="text-right">
               <div className={`text-sm font-semibold ${attributionToneClass(item.total_pnl_amount)}`}>
                 {formatAttributionMoney(item.total_pnl_amount, currencySymbol, { compact: true })}
               </div>
-              <div className="mt-1 text-[11px] text-white/36">贡献 {formatAttributionPercent(item.contribution_ratio, 1)}</div>
+              <div className="mt-1 text-[11px] text-foreground/36">贡献 {formatAttributionPercent(item.contribution_ratio, 1)}</div>
             </div>
           </div>
         </div>
@@ -277,21 +278,21 @@ function TradeHighlightList({ items, currencySymbol, emptyText }) {
   return (
     <div className="space-y-2.5">
       {items.map((item) => (
-        <div key={item.event_id} className="rounded-2xl bg-black/20 px-3.5 py-3">
+        <div key={item.event_id} className="rounded-2xl bg-[var(--color-bg-hover)] px-3.5 py-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="flex items-center gap-2 text-sm text-white/84">
+              <div className="flex items-center gap-2 text-sm text-foreground/84">
                 <span>{item.trade_date}</span>
-                <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-white/44">{formatEventTypeLabel(item.event_type)}</span>
-                <span className="font-mono text-white/52">{item.symbol}</span>
+                <span className="rounded-full border border-border px-2 py-0.5 text-[10px] text-foreground/44">{formatEventTypeLabel(item.event_type)}</span>
+                <span className="font-mono text-foreground-disabled2">{item.symbol}</span>
               </div>
-              <div className="mt-1 text-[11px] text-white/36">{item.note || item.name || '关键交易'}</div>
+              <div className="mt-1 text-[11px] text-foreground/36">{item.note || item.name || '关键交易'}</div>
             </div>
             <div className="text-right">
               <div className={`text-sm font-semibold ${attributionToneClass(item.timing_effect_amount)}`}>
                 {formatAttributionMoney(item.timing_effect_amount, currencySymbol, { compact: true })}
               </div>
-              <div className="mt-1 text-[11px] text-white/36">已实现 {formatAttributionMoney(item.realized_pnl_amount, currencySymbol, { compact: true })}</div>
+              <div className="mt-1 text-[11px] text-foreground/36">已实现 {formatAttributionMoney(item.realized_pnl_amount, currencySymbol, { compact: true })}</div>
             </div>
           </div>
         </div>
@@ -323,11 +324,11 @@ function MarketSeriesChart({ series = [] }) {
 
   return (
     <div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-36 w-full rounded-2xl border border-white/8 bg-black/20">
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-36 w-full rounded-2xl border border-border bg-[var(--color-bg-hover)]">
         <path d={buildPath('portfolio_nav')} fill="none" stroke="#fb7185" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
         <path d={buildPath('benchmark_nav')} fill="none" stroke="#60a5fa" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="5 4" />
       </svg>
-      <div className="mt-2 flex flex-wrap items-center gap-4 text-[11px] text-white/42">
+      <div className="mt-2 flex flex-wrap items-center gap-4 text-[11px] text-foreground/42">
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-rose-400" />组合净值</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-sky-400" />基准净值</span>
       </div>
@@ -340,7 +341,7 @@ function ExpandButton({ open, label, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5 text-[11px] font-medium text-white/70 transition hover:border-white/20 hover:bg-white/[0.05] hover:text-white"
+      className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-[11px] font-medium text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-hover)] hover:text-foreground"
     >
       <span>{label}</span>
       <span>{open ? '收起' : '展开'}</span>
@@ -372,12 +373,12 @@ function DetailContent({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-sm font-semibold text-white/86">详细归因</div>
+        <div className="text-sm font-semibold text-foreground/86">详细归因</div>
         {onClose ? (
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-white/10 px-3 py-1.5 text-[11px] text-white/60 transition hover:bg-white/[0.05] hover:text-white/88"
+            className="rounded-full border border-border px-3 py-1.5 text-[11px] text-foreground-muted transition hover:bg-[var(--color-bg-hover)] hover:text-foreground/88"
           >
             收起详情
           </button>
@@ -393,11 +394,11 @@ function DetailContent({
           ) : (
             <div className="grid gap-3 lg:grid-cols-2">
               <div>
-                <div className="mb-2 text-[11px] text-white/42">最大正贡献</div>
+                <div className="mb-2 text-[11px] text-foreground/42">最大正贡献</div>
                 <StockHighlightList items={stockHighlights.positive} currencySymbol={currencySymbol} emptyText="当前没有明显的正贡献股票。" />
               </div>
               <div>
-                <div className="mb-2 text-[11px] text-white/42">最大负贡献</div>
+                <div className="mb-2 text-[11px] text-foreground/42">最大负贡献</div>
                 <StockHighlightList items={stockHighlights.negative} currencySymbol={currencySymbol} emptyText="当前没有明显的负贡献股票。" />
               </div>
             </div>
@@ -412,11 +413,11 @@ function DetailContent({
           ) : (
             <div className="grid gap-3 lg:grid-cols-2">
               <div>
-                <div className="mb-2 text-[11px] text-white/42">最有效交易</div>
+                <div className="mb-2 text-[11px] text-foreground/42">最有效交易</div>
                 <TradeHighlightList items={tradingHighlights.positive} currencySymbol={currencySymbol} emptyText="当前没有明显加分的交易。" />
               </div>
               <div>
-                <div className="mb-2 text-[11px] text-white/42">最拖后腿交易</div>
+                <div className="mb-2 text-[11px] text-foreground/42">最拖后腿交易</div>
                 <TradeHighlightList items={tradingHighlights.negative} currencySymbol={currencySymbol} emptyText="当前没有明显拖累的交易。" />
               </div>
             </div>
@@ -436,26 +437,26 @@ function DetailContent({
         ) : marketSnapshot ? (
           <div className="space-y-4">
             <div className="grid gap-2.5 sm:grid-cols-3">
-              <div className="rounded-2xl bg-black/20 px-3.5 py-3">
-                <div className="text-[11px] text-white/40">组合收益率</div>
+              <div className="rounded-2xl bg-[var(--color-bg-hover)] px-3.5 py-3">
+                <div className="text-[11px] text-foreground-dim">组合收益率</div>
                 <div className={`mt-1 text-sm font-semibold ${attributionToneClass(marketSnapshot.portfolio_return_pct)}`}>
                   {formatAttributionPercent(marketSnapshot.portfolio_return_pct, 1)}
                 </div>
               </div>
-              <div className="rounded-2xl bg-black/20 px-3.5 py-3">
-                <div className="text-[11px] text-white/40">基准收益率</div>
+              <div className="rounded-2xl bg-[var(--color-bg-hover)] px-3.5 py-3">
+                <div className="text-[11px] text-foreground-dim">基准收益率</div>
                 <div className={`mt-1 text-sm font-semibold ${attributionToneClass(marketSnapshot.benchmark_return_pct)}`}>
                   {formatAttributionPercent(marketSnapshot.benchmark_return_pct, 1)}
                 </div>
               </div>
-              <div className="rounded-2xl bg-black/20 px-3.5 py-3">
-                <div className="text-[11px] text-white/40">超额收益率</div>
+              <div className="rounded-2xl bg-[var(--color-bg-hover)] px-3.5 py-3">
+                <div className="text-[11px] text-foreground-dim">超额收益率</div>
                 <div className={`mt-1 text-sm font-semibold ${attributionToneClass(marketSnapshot.excess_return_pct)}`}>
                   {formatAttributionPercent(marketSnapshot.excess_return_pct, 1)}
                 </div>
               </div>
             </div>
-            <div className="text-[11px] text-white/38">
+            <div className="text-[11px] text-foreground/38">
               <LabelWithInfo label={`基准：${marketSnapshot.benchmark_name || marketSnapshot.benchmark_code || '--'}`} tooltip={ATTRIBUTION_TIPS.benchmark} />
             </div>
             <MarketSeriesChart series={marketSnapshot.series} />
@@ -477,7 +478,7 @@ function DetailContent({
         ) : sectorHighlights.group ? (
           <div className="grid gap-3 lg:grid-cols-2">
             <div>
-              <div className="mb-2 text-[11px] text-white/42">正贡献行业</div>
+              <div className="mb-2 text-[11px] text-foreground/42">正贡献行业</div>
               <StockHighlightList
                 items={sectorHighlights.positive.map((item) => ({
                   symbol: item.sector_name || '未分类',
@@ -491,7 +492,7 @@ function DetailContent({
               />
             </div>
             <div>
-              <div className="mb-2 text-[11px] text-white/42">负贡献行业</div>
+              <div className="mb-2 text-[11px] text-foreground/42">负贡献行业</div>
               <StockHighlightList
                 items={sectorHighlights.negative.map((item) => ({
                   symbol: item.sector_name || '未分类',
@@ -575,17 +576,17 @@ export default function PortfolioAttributionSection({
 
   return (
     <section className="space-y-4">
-      <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 sm:p-6">
+      <div className="rounded-3xl border border-border bg-[var(--color-bg-hover)] p-4 sm:p-6">
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <h3 className="text-sm font-semibold text-white/86">
+            <h3 className="text-sm font-semibold text-foreground/86">
               <LabelWithInfo label="绩效归因分析" tooltip={ATTRIBUTION_TIPS.section} />
             </h3>
-            <div className="text-[11px] text-white/34">计算于 {formatComputedAt(summary?.computed_at)}</div>
+            <div className="text-[11px] text-foreground/34">计算于 {formatComputedAt(summary?.computed_at)}</div>
           </div>
 
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="inline-flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-black/20 p-1">
+            <div className="inline-flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-[var(--color-bg-hover)] p-1">
               {ATTRIBUTION_RANGE_OPTIONS.map((option) => (
                 <button
                   key={option.value}
@@ -594,7 +595,7 @@ export default function PortfolioAttributionSection({
                   className={`rounded-xl px-3 py-1.5 text-xs font-medium transition ${
                     range === option.value
                       ? 'border border-primary/35 bg-primary/20 text-primary'
-                      : 'text-white/48 hover:bg-white/[0.05] hover:text-white/82'
+                      : 'text-foreground/48 hover:bg-[var(--color-bg-hover)] hover:text-foreground/82'
                   }`}
                 >
                   {option.label}
@@ -605,15 +606,15 @@ export default function PortfolioAttributionSection({
             <ScopeSwitch scopes={hero.availableScopes} activeScope={hero.activeScope} onChange={setActiveScope} />
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-black/20 p-4 sm:p-5">
+          <div className="rounded-3xl border border-border bg-[var(--color-bg-hover)] p-4 sm:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="max-w-2xl">
-                <div className="text-lg font-semibold leading-8 text-white/92">{hero.headline || '这段时间的收益拆解结果如下。'}</div>
+                <div className="text-lg font-semibold leading-8 text-foreground/92">{hero.headline || '这段时间的收益拆解结果如下。'}</div>
               </div>
               <button
                 type="button"
                 onClick={() => setDetailOpen((prev) => !prev)}
-                className="inline-flex items-center justify-center rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-white/78 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
+                className="inline-flex items-center justify-center rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground/78 transition hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-secondary)] hover:text-foreground"
               >
                 {detailOpen ? '收起详情' : '查看详细归因'}
               </button>
@@ -632,7 +633,7 @@ export default function PortfolioAttributionSection({
 
       {detailOpen ? (
         <div className="hidden sm:block">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.02] p-4 sm:p-5">
+          <div className="rounded-3xl border border-border bg-[var(--color-bg-hover)] p-4 sm:p-5">
             <DetailContent
               activeScope={hero.activeScope}
               stocks={stocks}
@@ -654,9 +655,9 @@ export default function PortfolioAttributionSection({
 
       {detailOpen ? (
         <div className="sm:hidden">
-          <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px]" onClick={() => setDetailOpen(false)} />
-          <div className="fixed inset-x-0 bottom-0 z-50 max-h-[78vh] overflow-y-auto rounded-t-3xl border border-white/10 bg-[#0f1115] px-4 pb-6 pt-3">
-            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-white/15" />
+          <div className="fixed inset-0 z-40 bg-[var(--color-bg-overlay)] backdrop-blur-[2px]" onClick={() => setDetailOpen(false)} />
+          <div className="fixed inset-x-0 bottom-0 z-50 max-h-[78vh] overflow-y-auto rounded-t-3xl border border-border bg-[#0f1115] px-4 pb-6 pt-3">
+            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-[var(--color-border-strong)]" />
             <DetailContent
               activeScope={hero.activeScope}
               stocks={stocks}

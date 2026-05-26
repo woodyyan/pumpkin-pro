@@ -123,7 +123,7 @@ export default function MiniChart({
 
   if (!data || data.length === 0) {
     return (
-      <div className="flex items-center justify-center text-xs text-white/20" style={{ width, height }}>
+      <div className="flex items-center justify-center text-xs text-foreground-disabled" style={{ width, height }}>
         暂无数据
       </div>
     )

@@ -2,31 +2,120 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ================================================================
+   CSS 变量体系 — 浅色模式（默认 :root）
+   ================================================================ */
+:root {
+  --color-bg-primary:    #ffffff;
+  --color-bg-secondary:  #f8f9fa;
+  --color-bg-card:       #ffffff;
+  --color-bg-hover:      rgba(0, 0, 0, 0.04);
+  --color-bg-overlay:    rgba(255, 255, 255, 0.97);
+
+  --color-text-primary:  #1a1a2e;
+  --color-text-secondary:#4a4a6a;
+  --color-text-tertiary: rgba(0, 0, 0, 0.5);
+  --color-text-disabled: rgba(0, 0, 0, 0.25);
+
+  --color-border:        rgba(0, 0, 0, 0.08);
+  --color-border-strong: rgba(0, 0, 0, 0.15);
+
+  --color-positive:      #16a34a;
+  --color-negative:      #dc2626;
+  --color-primary:       #e67e22;
+
+  --scrollbar-track:     #e5e5e5;
+  --scrollbar-thumb:     #c0c0c0;
+  --scrollbar-thumb-hover: #a0a0a0;
+
+  --color-radial-accent: rgba(230, 126, 34, 0.04);
+}
+
+/* ================================================================
+   CSS 变量体系 — 深色模式（.dark）
+   ================================================================ */
+.dark {
+  --color-bg-primary:    #0a0a0b;
+  --color-bg-secondary:  #111113;
+  --color-bg-card:       #161618;
+  --color-bg-hover:      rgba(255, 255, 255, 0.05);
+  --color-bg-overlay:    rgba(0, 0, 0, 0.9);
+
+  --color-text-primary:  #ededed;
+  --color-text-secondary:rgba(255, 255, 255, 0.6);
+  --color-text-tertiary: rgba(255, 255, 255, 0.35);
+  --color-text-disabled: rgba(255, 255, 255, 0.18);
+
+  --color-border:        rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.15);
+
+  --color-positive:      #22c55e;
+  --color-negative:      #ef4444;
+  --color-primary:       #e67e22;
+
+  --scrollbar-track:     transparent;
+  --scrollbar-thumb:     #333;
+  --scrollbar-thumb-hover: #555;
+
+  --color-radial-accent: rgba(230, 126, 34, 0.08);
+}
+
+/* ================================================================
+   Tailwind 无法直接使用 CSS 变量的场景 — 自定义 utility
+   ================================================================ */
+@layer utilities {
+  .bg-hover-var {
+    background-color: var(--color-bg-hover);
+  }
+  .bg-overlay-var {
+    background-color: var(--color-bg-overlay);
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+}
+
+/* ================================================================
+   Body 基础样式 — 使用 CSS 变量（支持深浅模式）
+   ================================================================ */
 body {
-  background-color: #0a0a0b;
-  color: #ededed;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   margin: 0;
   padding: 0;
 }
 
-/* 隐藏滚动条但保留滚动功能 */
+/* ================================================================
+   滚动条样式 — 使用 CSS 变量
+   ================================================================ */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--scrollbar-track);
 }
 ::-webkit-scrollbar-thumb {
-  background: #333;
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: var(--scrollbar-thumb-hover);
 }
 
-/* AI 按钮呼吸光晕动画 */
+/* ================================================================
+   主题切换过渡动画
+   ================================================================ */
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.15s ease !important;
+}
+
+/* ================================================================
+   AI 按钮呼吸光晕动画
+   ================================================================ */
 @keyframes ai-glow {
   0%, 100% { box-shadow: 0 0 16px rgba(99, 102, 241, 0.35); }
   50% { box-shadow: 0 0 24px rgba(139, 92, 246, 0.45); }

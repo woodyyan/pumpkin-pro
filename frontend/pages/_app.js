@@ -8,6 +8,8 @@ import { AuthProvider, useAuth } from '../lib/auth-context'
 import { buildPageViewHeaders } from '../lib/pageview'
 import changelogData from '../data/changelog.json'
 import NavSearchBox from '../components/NavSearchBox'
+import ThemeToggle from '../components/ThemeToggle'
+import { ThemeProvider } from '../lib/theme-context'
 
 const NAV_ITEMS = [
   { href: '/live-trading', label: '行情看板' },
@@ -197,7 +199,7 @@ function AppLayout({ Component, pageProps }) {
         `}} />
       </Head>
       <div className="min-h-screen bg-background text-foreground flex flex-col">
-        <nav ref={mobileMenuRef} className="fixed top-0 left-0 right-0 bg-black/60 backdrop-blur-md border-b border-white/10 z-50">
+        <nav ref={mobileMenuRef} className="fixed top-0 left-0 right-0 bg-[var(--color-bg-overlay)] backdrop-blur-md border-b border-border z-50">
           {/* ── Top bar ── */}
           <div className="h-16 flex items-center justify-between px-4 md:px-6 gap-3">
             {/* Logo + title */}
@@ -217,8 +219,8 @@ function AppLayout({ Component, pageProps }) {
                     href={item.href}
                     className={`inline-flex items-center rounded-lg border px-3 py-1.5 transition ${
                       isActive
-                        ? 'border-primary/50 bg-primary/15 text-white font-semibold shadow-[0_0_8px_rgba(230,126,34,0.15)]'
-                        : 'border-transparent text-white/60 hover:border-white/10 hover:bg-white/5 hover:text-white'
+                        ? 'border-primary/50 bg-primary/15 text-primary font-semibold shadow-[0_0_8px_rgba(230,126,34,0.15)]'
+                        : 'border-transparent text-foreground-muted hover:border-border hover:bg-[var(--color-bg-hover)] hover:text-foreground'
                     }`}
                   >
                     {item.label}
@@ -228,17 +230,19 @@ function AppLayout({ Component, pageProps }) {
               <DesktopMoreMenu items={DESKTOP_MORE_ITEMS} unreadCount={unreadCount} currentPath={router.pathname} />
             </div>
 
-            {/* Right side: search + hamburger (mobile) + account */}
+            {/* Right side: search + hamburger (mobile) + theme + account */}
             <div className="flex items-center gap-2 shrink-0">
               {/* Search — desktop only */}
               <div className="hidden md:block">
                 <NavSearchBox />
               </div>
+              {/* Theme toggle */}
+              <ThemeToggle />
               {/* Hamburger button — mobile only */}
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen((v) => !v)}
-                className="md:hidden inline-flex items-center justify-center w-9 h-9 rounded-lg border border-white/15 text-white/70 transition hover:bg-white/10 hover:text-white"
+                className="md:hidden inline-flex items-center justify-center w-9 h-9 rounded-lg border border-border text-foreground-muted transition hover:bg-[var(--color-bg-hover)] hover:text-foreground"
                 aria-label="菜单"
               >
                 {mobileMenuOpen ? (
@@ -255,7 +259,7 @@ function AppLayout({ Component, pageProps }) {
 
           {/* ── Mobile dropdown menu ── */}
           {mobileMenuOpen && (
-            <div className="md:hidden border-t border-white/10 bg-black/80 backdrop-blur-md px-4 py-3 space-y-1">
+            <div className="md:hidden border-t border-border bg-[var(--color-bg-overlay)] backdrop-blur-md px-4 py-3 space-y-1">
               {NAV_ITEMS.map((item) => {
                 const isActive = router.pathname === item.href
                 return (
@@ -264,14 +268,14 @@ function AppLayout({ Component, pageProps }) {
                     href={item.href}
                     className={`block rounded-lg px-3 py-2.5 text-sm font-medium transition ${
                       isActive
-                        ? 'bg-primary/15 text-white border-l-2 border-primary'
-                        : 'text-white/60 hover:bg-white/5 hover:text-white'
+                        ? 'bg-primary/15 text-foreground border-l-2 border-primary'
+                        : 'text-foreground-muted hover:bg-[var(--color-bg-hover)] hover:text-foreground'
                     }`}
                   >
                     <span className="inline-flex items-center">
                       {item.label}
                       {item.badgeKey === 'changelog' && unreadCount > 0 && (
-                        <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white leading-none">
+                        <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-foreground leading-none">
                           {unreadCount > 99 ? '99+' : unreadCount}
                         </span>
                       )}
@@ -287,18 +291,18 @@ function AppLayout({ Component, pageProps }) {
           <Component {...pageProps} />
         </main>
 
-        <footer className="border-t border-white/8 py-6 px-6 text-center text-xs text-white/30 space-y-2">
+        <footer className="border-t border-border py-6 px-6 text-center text-xs text-foreground-dim space-y-2">
           <div className="flex items-center justify-center gap-3">
-            <Link href="/privacy" className="hover:text-white/60 transition">隐私政策</Link>
+            <Link href="/privacy" className="hover:text-foreground-muted transition">隐私政策</Link>
             <span>·</span>
-            <Link href="/terms" className="hover:text-white/60 transition">用户协议</Link>
+            <Link href="/terms" className="hover:text-foreground-muted transition">用户协议</Link>
             <span>·</span>
-            <Link href="/disclaimer" className="hover:text-white/60 transition">免责声明</Link>
+            <Link href="/disclaimer" className="hover:text-foreground-muted transition">免责声明</Link>
           </div>
           <div className="flex items-center justify-center gap-3">
-            <a href="mailto:easystudio@outlook.com" className="hover:text-white/60 transition">📧 easystudio@outlook.com</a>
+            <a href="mailto:easystudio@outlook.com" className="hover:text-foreground-muted transition">📧 easystudio@outlook.com</a>
             <span>·</span>
-            <a href="https://weibo.com/u/5613355795" target="_blank" rel="noopener noreferrer" className="hover:text-white/60 transition">微博</a>
+            <a href="https://weibo.com/u/5613355795" target="_blank" rel="noopener noreferrer" className="hover:text-foreground-muted transition">微博</a>
           </div>
           <p>© {new Date().getFullYear()} Easy Studio Inc. All rights reserved.</p>
         </footer>
@@ -346,15 +350,15 @@ function DesktopMoreMenu({ items, unreadCount, currentPath }) {
         onClick={() => setOpen((prev) => !prev)}
         className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 transition ${
           isActive
-            ? 'border-primary/50 bg-primary/15 text-white font-semibold shadow-[0_0_8px_rgba(230,126,34,0.15)]'
-            : 'border-transparent text-white/60 hover:border-white/10 hover:bg-white/5 hover:text-white'
+            ? 'border-primary/50 bg-primary/15 text-primary font-semibold shadow-[0_0_8px_rgba(230,126,34,0.15)]'
+            : 'border-transparent text-foreground-muted hover:border-border hover:bg-[var(--color-bg-hover)] hover:text-foreground'
         }`}
         aria-haspopup="menu"
         aria-expanded={open}
       >
         <span>更多</span>
         {unreadCount > 0 ? (
-          <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white leading-none">
+          <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-foreground leading-none">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         ) : null}
@@ -364,7 +368,7 @@ function DesktopMoreMenu({ items, unreadCount, currentPath }) {
       </button>
 
       {open ? (
-        <div className="absolute right-0 mt-2 w-48 rounded-xl border border-white/10 bg-slate-950/95 p-2 shadow-2xl backdrop-blur">
+        <div className="absolute right-0 mt-2 w-48 rounded-xl border border-border bg-card p-2 shadow-2xl backdrop-blur">
           {items.map((item) => {
             const itemActive = currentPath === item.href
             return (
@@ -373,13 +377,13 @@ function DesktopMoreMenu({ items, unreadCount, currentPath }) {
                 href={item.href}
                 className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm transition ${
                   itemActive
-                    ? 'bg-primary/15 text-white'
-                    : 'text-white/70 hover:bg-white/5 hover:text-white'
+                    ? 'bg-primary/15 text-foreground'
+                    : 'text-foreground-muted hover:bg-[var(--color-bg-hover)] hover:text-foreground'
                 }`}
               >
                 <span>{item.label}</span>
                 {item.badgeKey === 'changelog' && unreadCount > 0 ? (
-                  <span className="ml-3 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white leading-none">
+                  <span className="ml-3 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-foreground leading-none">
                     {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 ) : null}
@@ -416,7 +420,7 @@ function AccountEntry() {
   if (!ready) {
     return (
       <div className="flex items-center gap-2 shrink-0">
-        <span className="text-sm text-white/30">···</span>
+        <span className="text-sm text-foreground-dim">···</span>
       </div>
     )
   }
@@ -427,7 +431,7 @@ function AccountEntry() {
         <button
           type="button"
           onClick={() => openAuthModal('login')}
-          className="rounded-lg border border-white/20 px-3 py-1.5 text-sm text-white/85 transition hover:border-white/35 hover:bg-white/10 hover:text-white"
+          className="rounded-lg border border-border px-3 py-1.5 text-sm text-foreground-muted transition hover:border-border-strong hover:bg-[var(--color-bg-hover)] hover:text-foreground"
         >
           登录
         </button>
@@ -449,23 +453,23 @@ function AccountEntry() {
       <button
         type="button"
         onClick={() => setMenuOpen((prev) => !prev)}
-        className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-3 py-1.5 text-sm text-white/85 transition hover:border-white/35 hover:bg-white/10 hover:text-white"
+        className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground-muted transition hover:border-border-strong hover:bg-[var(--color-bg-hover)] hover:text-foreground"
       >
         <span className="max-w-[180px] truncate">{accountLabel}</span>
-        <span className="text-xs text-white/55">▼</span>
+        <span className="text-xs text-foreground-dim">▼</span>
       </button>
 
       {menuOpen ? (
-        <div className="absolute right-0 mt-2 w-64 rounded-xl border border-white/10 bg-slate-950 p-2 shadow-2xl">
-          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
-            <div className="text-xs text-white/45">当前账号</div>
-            <div className="mt-1 truncate text-sm text-white/90">{user?.email || '--'}</div>
+        <div className="absolute right-0 mt-2 w-64 rounded-xl border border-border bg-card p-2 shadow-2xl">
+          <div className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-2">
+            <div className="text-xs text-foreground-dim">当前账号</div>
+            <div className="mt-1 truncate text-sm text-foreground">{user?.email || '--'}</div>
           </div>
 
           <Link
             href="/settings"
             onClick={() => setMenuOpen(false)}
-            className="mt-2 block w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-left text-sm text-white/75 transition hover:bg-white/10 hover:text-white"
+            className="mt-2 block w-full rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-2 text-left text-sm text-foreground-muted transition hover:bg-[var(--color-bg-hover)] hover:text-foreground"
           >
             ⚙️ 设置
           </Link>
@@ -476,7 +480,7 @@ function AccountEntry() {
               setMenuOpen(false)
               await logout()
             }}
-            className="mt-2 w-full rounded-lg border border-rose-400/35 bg-rose-500/10 px-3 py-2 text-left text-sm text-rose-200 transition hover:bg-rose-500/20"
+            className="mt-2 w-full rounded-lg border border-negative/35 bg-negative/10 px-3 py-2 text-left text-sm text-negative transition hover:bg-negative/20"
           >
             退出登录
           </button>
@@ -494,7 +498,7 @@ function MobileSearchButton() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="md:hidden inline-flex items-center justify-center w-9 h-9 rounded-lg border border-white/15 text-white/70 transition hover:bg-white/10 hover:text-white"
+        className="md:hidden inline-flex items-center justify-center w-9 h-9 rounded-lg border border-border text-foreground-muted transition hover:bg-[var(--color-bg-hover)] hover:text-foreground"
         aria-label="搜索股票"
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
@@ -502,10 +506,10 @@ function MobileSearchButton() {
 
       {/* Full-screen overlay */}
       {open && (
-        <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm md:hidden flex items-start pt-20 px-4">
+        <div className="fixed inset-0 z-[60] bg-[var(--color-bg-overlay)] backdrop-blur-sm md:hidden flex items-start pt-20 px-4">
           <div className="w-full max-w-lg mx-auto relative">
-            <div className="flex items-center bg-white/10 border border-primary/30 rounded-xl px-4 py-3 focus-within:border-primary/60 transition">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-white/40 mr-3">
+            <div className="flex items-center bg-[var(--color-bg-hover)] border border-primary/30 rounded-xl px-4 py-3 focus-within:border-primary/60 transition">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-foreground-dim mr-3">
                 <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
               </svg>
               <MobileSearchInner onSelect={(code) => { setOpen(false); window.open(`/live-trading/${code}`, '_blank') }} />
@@ -513,7 +517,7 @@ function MobileSearchButton() {
             <button
               type="button"
               onClick={() => setOpen(false)}
-              className="absolute -top-12 right-0 text-white/50 hover:text-white text-sm flex items-center gap-1"
+              className="absolute -top-12 right-0 text-foreground-dim hover:text-foreground text-sm flex items-center gap-1"
             >
               取消
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
@@ -560,20 +564,20 @@ function MobileSearchInner({ onSelect }) {
         value={query}
         onChange={e => setQuery(e.target.value)}
         placeholder="输入代码或名称搜索股票..."
-        className="flex-1 bg-transparent text-base text-white placeholder-white/30 outline-none min-w-0"
+        className="flex-1 bg-transparent text-base text-foreground placeholder-foreground-disabled outline-none min-w-0"
       />
       {results.length > 0 && (
-        <ul className="absolute top-full left-0 right-0 mt-2 bg-slate-900/95 border border-white/10 rounded-xl shadow-2xl z-10 max-h-[60vh] overflow-y-auto">
+        <ul className="absolute top-full left-0 right-0 mt-2 bg-card border border-border rounded-xl shadow-2xl z-10 max-h-[60vh] overflow-y-auto">
           {results.map(item => (
             <li key={item.code}>
               <button
                 type="button"
                 onClick={() => onSelect(item.code)}
-                className="w-full flex items-center justify-between px-4 py-3 text-left text-sm text-white/80 hover:bg-primary/15 transition border-b border-white/5 last:border-b-0"
+                className="w-full flex items-center justify-between px-4 py-3 text-left text-sm text-foreground-muted hover:bg-primary/15 transition border-b border-border last:border-b-0"
               >
                 <span>
                   <span className="font-mono font-semibold text-primary">{item.code}</span>
-                  <span className="ml-2 text-white/50">{item.name}</span>
+                  <span className="ml-2 text-foreground-dim">{item.name}</span>
                   {item.exchange === 'HKEX' && <span className="ml-1.5 inline-flex items-center px-1 rounded text-[10px] font-medium bg-blue-500/20 text-blue-300">HK</span>}
                 </span>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 opacity-30"><path d="M7 17L17 7M7 7h10v10" /></svg>
@@ -583,7 +587,7 @@ function MobileSearchInner({ onSelect }) {
         </ul>
       )}
       {!isLoading && query.length >= 2 && results.length === 0 && (
-        <div className="mt-2 text-center text-sm text-white/30 py-3">未找到匹配股票</div>
+        <div className="mt-2 text-center text-sm text-foreground-dim py-3">未找到匹配股票</div>
       )}
     </>
   )
@@ -600,8 +604,10 @@ export default function MyApp({ Component, pageProps, router }) {
   }
 
   return (
-    <AuthProvider>
-      <AppLayout Component={Component} pageProps={pageProps} />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <AppLayout Component={Component} pageProps={pageProps} />
+      </AuthProvider>
+    </ThemeProvider>
   )
 }

@@ -395,7 +395,7 @@ function getColorClass(value) {
   if (isNaN(num)) return ''
   if (num > 0) return 'text-red-500'
   if (num < 0) return 'text-green-500'
-  return 'text-white/50'
+  return 'text-foreground-dim'
 }
 
 // code + exchange → 带交易所后缀的 symbol（用于跳转详情页）
@@ -786,10 +786,10 @@ export default function StockPickerPage() {
         <div className="flex items-center gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">选股器</h1>
-            <p className="mt-1 text-sm text-white/50">{exchange === 'HKEX' ? '港股全市场多维指标筛选，实时行情数据' : 'A 股全市场多维指标筛选，实时行情数据'}</p>
+            <p className="mt-1 text-sm text-foreground-dim">{exchange === 'HKEX' ? '港股全市场多维指标筛选，实时行情数据' : 'A 股全市场多维指标筛选，实时行情数据'}</p>
           </div>
           {/* 市场 Tab 切换 */}
-          <div className="flex rounded-xl border border-white/10 bg-white/[0.03] p-0.5">
+          <div className="flex rounded-xl border border-border bg-[var(--color-bg-hover)] p-0.5">
             {[
               { key: 'ASHARE', label: '📊 A 股' },
               { key: 'HKEX', label: '🇭🇰 港股' },
@@ -801,7 +801,7 @@ export default function StockPickerPage() {
                 className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
                   exchange === tab.key
                     ? 'bg-primary text-black shadow-sm'
-                    : 'text-white/55 hover:text-white/80'
+                    : 'text-foreground-dim hover:text-foreground-muted'
                 }`}
               >
                 {tab.label}
@@ -817,7 +817,7 @@ export default function StockPickerPage() {
 
       {/* ─── AI 自然语言选股 ─── */}
       <section className="rounded-2xl border border-border bg-card px-5 py-3">
-        <div className="mb-2 text-xs font-medium text-white/50">AI 一句话选股</div>
+        <div className="mb-2 text-xs font-medium text-foreground-dim">AI 一句话选股</div>
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
             <input
@@ -825,7 +825,7 @@ export default function StockPickerPage() {
               onChange={(e) => setAiQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !aiParsing && handleAIParse()}
               placeholder={exchange === 'HKEX' ? '描述你想找的港股，如"香港科技龙头"' : '描述你想找的 A 股，如"最近涨得好的科技股"'}
-              className="w-full rounded-xl border border-white/15 bg-white/5 py-2 pl-3 pr-20 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary/50 focus:ring-1 focus:ring-primary/30"
+              className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] py-2 pl-3 pr-20 text-sm text-foreground outline-none transition placeholder:text-foreground-disabled focus:border-primary/50 focus:ring-1 focus:ring-primary/30"
             />
             <button
               type="button"
@@ -838,14 +838,14 @@ export default function StockPickerPage() {
           </div>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] text-white/30">试试：</span>
+          <span className="text-[11px] text-foreground-dim">试试：</span>
           {aiExampleQueries.map((example) => (
             <button
               key={example}
               type="button"
               disabled={aiParsing}
               onClick={() => { setAiQuery(example); }}
-              className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-white/45 transition hover:border-primary/30 hover:bg-primary/10 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-full border border-border bg-[var(--color-bg-hover)] px-2.5 py-1 text-[11px] text-foreground-dim transition hover:border-primary/30 hover:bg-primary/10 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
             >
               {example}
             </button>
@@ -857,7 +857,7 @@ export default function StockPickerPage() {
           </p>
         )}
         {aiError && (
-          <p className="mt-2 text-xs text-red-300">{aiError}</p>
+          <p className="mt-2 text-xs text-negative">{aiError}</p>
         )}
       </section>
 
@@ -868,7 +868,7 @@ export default function StockPickerPage() {
           onClick={() => setFiltersExpanded((prev) => !prev)}
           className="flex w-full items-center justify-between px-5 py-3 text-left"
         >
-          <span className="text-sm font-medium text-white/80">
+          <span className="text-sm font-medium text-foreground-muted">
             筛选条件
             {hasActiveFilters && (
               <span className="ml-2 rounded-full bg-primary/20 px-2 py-0.5 text-xs text-primary">
@@ -876,7 +876,7 @@ export default function StockPickerPage() {
               </span>
             )}
           </span>
-          <span className="text-xs text-white/40">{filtersExpanded ? '收起 ▲' : '展开 ▼'}</span>
+          <span className="text-xs text-foreground-dim">{filtersExpanded ? '收起 ▲' : '展开 ▼'}</span>
         </button>
 
         {filtersExpanded && (
@@ -896,11 +896,11 @@ export default function StockPickerPage() {
                 type="button"
                 disabled={!hasActiveFilters}
                 onClick={handleReset}
-                className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-white/60 transition hover:border-white/25 hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-lg border border-[var(--color-border-strong)] px-3 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground-muted disabled:cursor-not-allowed disabled:opacity-40"
               >
                 重置筛选
               </button>
-              {loading && <span className="text-xs text-white/40 animate-pulse">正在查询...</span>}
+              {loading && <span className="text-xs text-foreground-dim animate-pulse">正在查询...</span>}
             </div>
           </div>
         )}
@@ -935,7 +935,7 @@ export default function StockPickerPage() {
 
       {/* ─── 错误提示 ─── */}
       {error && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-negative">
           {error}
         </div>
       )}
@@ -945,12 +945,12 @@ export default function StockPickerPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border bg-white/[0.02]">
+              <tr className="border-b border-border bg-[var(--color-bg-hover)]">
                 {visibleColumns.map((col) => (
                   <th
                     key={col.key}
-                    className={`whitespace-nowrap px-3 py-2.5 text-left text-xs font-medium text-white/50 ${
-                      col.sortable ? 'cursor-pointer select-none hover:text-white/80 transition' : ''
+                    className={`whitespace-nowrap px-3 py-2.5 text-left text-xs font-medium text-foreground-dim ${
+                      col.sortable ? 'cursor-pointer select-none hover:text-foreground-muted transition' : ''
                     }`}
                     style={{ minWidth: col.width }}
                     onClick={() => col.sortable && handleSort(col.key)}
@@ -963,7 +963,7 @@ export default function StockPickerPage() {
                     </span>
                   </th>
                 ))}
-                <th className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-medium text-white/50" style={{ minWidth: 70 }}>
+                <th className="whitespace-nowrap px-3 py-2.5 text-center text-xs font-medium text-foreground-dim" style={{ minWidth: 70 }}>
                   操作
                 </th>
               </tr>
@@ -971,20 +971,20 @@ export default function StockPickerPage() {
             <tbody>
               {loading && items.length === 0 ? (
                 Array.from({ length: SKELETON_ROWS }).map((_, rowIdx) => (
-                  <tr key={`skeleton-${rowIdx}`} className="border-b border-white/[0.04]">
+                  <tr key={`skeleton-${rowIdx}`} className="border-b border-border">
                     {visibleColumns.map((col) => (
                       <td key={col.key} className="px-3 py-2" style={{ minWidth: col.width }}>
-                        <div className={`h-4 rounded bg-white/[0.06] animate-pulse ${col.key === 'name' ? 'w-16' : col.key === 'code' ? 'w-14' : 'w-12'}`} />
+                        <div className={`h-4 rounded bg-[var(--color-bg-secondary)] animate-pulse ${col.key === 'name' ? 'w-16' : col.key === 'code' ? 'w-14' : 'w-12'}`} />
                       </td>
                     ))}
                     <td className="px-3 py-2" style={{ minWidth: 70 }}>
-                      <div className="h-4 w-10 rounded bg-white/[0.06] animate-pulse mx-auto" />
+                      <div className="h-4 w-10 rounded bg-[var(--color-bg-secondary)] animate-pulse mx-auto" />
                     </td>
                   </tr>
                 ))
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={visibleColumns.length + 1} className="py-16 text-center text-white/40">
+                  <td colSpan={visibleColumns.length + 1} className="py-16 text-center text-foreground-dim">
                     {error ? '查询失败' : '无匹配结果'}
                   </td>
                 </tr>
@@ -997,7 +997,7 @@ export default function StockPickerPage() {
                   return (
                     <tr
                       key={row.code || idx}
-                      className="border-b border-white/[0.04] transition hover:bg-white/[0.03]"
+                      className="border-b border-border transition hover:bg-[var(--color-bg-hover)]"
                     >
                       {visibleColumns.map((col) => {
                         const colorClass = col.colorize ? getColorClass(row[col.key]) : ''
@@ -1015,7 +1015,7 @@ export default function StockPickerPage() {
                                 className={`text-left transition ${
                                   col.key === 'code'
                                     ? 'font-mono text-primary/80 hover:text-primary hover:underline underline-offset-2'
-                                    : 'text-white/90 hover:text-primary hover:underline underline-offset-2'
+                                    : 'text-foreground/90 hover:text-primary hover:underline underline-offset-2'
                                 }`}
                               >
                                 {formatValue(row[col.key], col.format, exchange)}
@@ -1035,7 +1035,7 @@ export default function StockPickerPage() {
                       })}
                       <td className="whitespace-nowrap px-3 py-2 text-center" style={{ minWidth: 70 }}>
                         {isWatched ? (
-                          <span className="inline-flex items-center gap-0.5 text-[11px] text-white/30">
+                          <span className="inline-flex items-center gap-0.5 text-[11px] text-foreground-dim">
                             <span>✓</span> 已关注
                           </span>
                         ) : (
@@ -1059,7 +1059,7 @@ export default function StockPickerPage() {
 
         {/* ─── 分页 ─── */}
         {total > 0 && (
-          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-white/50">
+          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-foreground-dim">
             <span>
               共 {total.toLocaleString('zh-CN')} 只 · 第 {page}/{totalPages} 页
             </span>
@@ -1072,7 +1072,7 @@ export default function StockPickerPage() {
               </PaginationButton>
               {getPageNumbers(page, totalPages).map((p, i) =>
                 p === '...' ? (
-                  <span key={`ellipsis-${i}`} className="px-2 text-white/30">
+                  <span key={`ellipsis-${i}`} className="px-2 text-foreground-dim">
                     ...
                   </span>
                 ) : (
@@ -1104,9 +1104,9 @@ export default function StockPickerPage() {
 function MiniStat({ label, value, suffix }) {
   return (
     <div className="flex items-baseline gap-1 rounded-lg border border-border bg-card px-3 py-2">
-      <span className="text-white/45">{label}</span>
-      <span className="font-semibold text-white tabular-nums">{value}</span>
-      {suffix && <span className="text-white/45">{suffix}</span>}
+      <span className="text-foreground-dim">{label}</span>
+      <span className="font-semibold text-foreground tabular-nums">{value}</span>
+      {suffix && <span className="text-foreground-dim">{suffix}</span>}
     </div>
   )
 }
@@ -1115,21 +1115,21 @@ function FilterSelect({ field, selectedIdx, onChange }) {
   const isActive = selectedIdx > 0
   return (
     <div className="space-y-1">
-      <label className={`block text-xs ${isActive ? 'text-primary font-medium' : 'text-white/45'}`}>
+      <label className={`block text-xs ${isActive ? 'text-primary font-medium' : 'text-foreground-dim'}`}>
         {field.label}
         {isActive && <span className="ml-1 text-primary/60">●</span>}
       </label>
       <select
         value={selectedIdx}
         onChange={(e) => onChange(field.key, Number(e.target.value))}
-        className={`w-full appearance-none rounded-md border bg-white/5 px-2 py-1.5 text-xs outline-none transition cursor-pointer ${
+        className={`w-full appearance-none rounded-md border bg-[var(--color-bg-hover)] px-2 py-1.5 text-xs outline-none transition cursor-pointer ${
           isActive
             ? 'border-primary/40 text-primary'
-            : 'border-white/10 text-white/60'
+            : 'border-border text-foreground-muted'
         } focus:border-primary/50 focus:ring-1 focus:ring-primary/30`}
       >
         {field.options.map((opt, idx) => (
-          <option key={idx} value={idx} className="bg-[#1a1a2e] text-white">
+          <option key={idx} value={idx} className="bg-[#1a1a2e] text-foreground">
             {opt.label}
           </option>
         ))}
@@ -1148,8 +1148,8 @@ function PaginationButton({ children, disabled, active, onClick }) {
         active
           ? 'border border-primary/40 bg-primary/15 text-primary font-medium'
           : disabled
-          ? 'text-white/20 cursor-not-allowed'
-          : 'text-white/55 hover:bg-white/10 hover:text-white/80'
+          ? 'text-foreground-disabled cursor-not-allowed'
+          : 'text-foreground-dim hover:bg-[var(--color-bg-hover)] hover:text-foreground-muted'
       }`}
     >
       {children}
@@ -1267,8 +1267,8 @@ function WatchlistToolbar({
   return (
     <section className="rounded-2xl border border-border bg-card px-5 py-3">
       <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2 text-sm text-white/70">
-          <span className="text-xs font-medium text-white/50">我的自选表</span>
+        <div className="flex items-center gap-2 text-sm text-foreground-muted">
+          <span className="text-xs font-medium text-foreground-dim">我的自选表</span>
           {!isLoggedIn && (
             <button
               type="button"
@@ -1296,9 +1296,9 @@ function WatchlistToolbar({
       {isLoggedIn && (
         <div className="mt-2">
           {wlLoading ? (
-            <span className="text-xs text-white/30 animate-pulse">加载中...</span>
+            <span className="text-xs text-foreground-dim animate-pulse">加载中...</span>
           ) : watchlists.length === 0 ? (
-            <span className="text-xs text-white/25">暂无保存的自选表</span>
+            <span className="text-xs text-foreground-disabled">暂无保存的自选表</span>
           ) : (
             <div className="flex flex-wrap gap-2">
               {watchlists.map((wl) => {
@@ -1310,17 +1310,17 @@ function WatchlistToolbar({
                     className={`group inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs transition ${
                       isActive
                         ? 'border-primary/40 bg-primary/10 text-primary'
-                        : 'border-white/10 bg-white/5 text-white/60 hover:border-white/20 hover:text-white/80'
+                        : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted hover:border-[var(--color-border-strong)] hover:text-foreground-muted'
                     }`}
                   >
                     <button type="button" onClick={() => onLoad(wl.id)} className="flex items-center gap-1">
                       <span>{wl.name}</span>
                       <span className="text-[10px] opacity-50">({wl.stock_count})</span>
                       {wl.exchange === 'HKEX' && (
-                        <span className="text-[9px] rounded bg-white/10 px-1 py-0.5 text-white/40">港股</span>
+                        <span className="text-[9px] rounded bg-[var(--color-bg-hover)] px-1 py-0.5 text-foreground-dim">港股</span>
                       )}
                       {(!wl.exchange || wl.exchange === 'ASHARE') && (
-                        <span className="text-[9px] rounded bg-white/10 px-1 py-0.5 text-white/40">A股</span>
+                        <span className="text-[9px] rounded bg-[var(--color-bg-hover)] px-1 py-0.5 text-foreground-dim">A股</span>
                       )}
                     </button>
                     {isDeleting ? (
@@ -1328,7 +1328,7 @@ function WatchlistToolbar({
                         <button
                           type="button"
                           onClick={() => { onDelete(wl.id); setConfirmDeleteId(null) }}
-                          className="text-red-400 hover:text-red-300"
+                          className="text-negative hover:text-negative"
                           title="确认删除"
                         >
                           ✓
@@ -1336,7 +1336,7 @@ function WatchlistToolbar({
                         <button
                           type="button"
                           onClick={() => setConfirmDeleteId(null)}
-                          className="text-white/40 hover:text-white/60"
+                          className="text-foreground-dim hover:text-foreground-muted"
                           title="取消"
                         >
                           ✗
@@ -1346,7 +1346,7 @@ function WatchlistToolbar({
                       <button
                         type="button"
                         onClick={() => setConfirmDeleteId(wl.id)}
-                        className="ml-0.5 text-white/20 hover:text-red-400 transition opacity-0 group-hover:opacity-100"
+                        className="ml-0.5 text-foreground-disabled hover:text-negative transition opacity-0 group-hover:opacity-100"
                         title="删除"
                       >
                         ×
@@ -1380,14 +1380,14 @@ function WatchlistToolbar({
 // ─── 保存自选表弹窗 ──────────────────────────────────────────
 function SaveWatchlistDialog({ name, onNameChange, stockCount, saving, error, onSave, onClose }) {
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-[2px] px-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--color-bg-overlay)] backdrop-blur-[2px] px-4">
       <div className="w-full max-w-sm rounded-2xl border border-border bg-[#121317]/95 p-5 shadow-xl ring-1 ring-primary/20">
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-white">保存为自选表</h3>
+          <h3 className="text-base font-semibold text-foreground">保存为自选表</h3>
           <button
             type="button"
             onClick={onClose}
-            className="grid size-7 place-items-center rounded-full bg-white/5 text-white/40 hover:bg-white/10 hover:text-white/70 transition"
+            className="grid size-7 place-items-center rounded-full bg-[var(--color-bg-hover)] text-foreground-dim hover:bg-[var(--color-bg-hover)] hover:text-foreground-muted transition"
           >
             ×
           </button>
@@ -1400,19 +1400,19 @@ function SaveWatchlistDialog({ name, onNameChange, stockCount, saving, error, on
             maxLength={64}
             autoFocus
             onKeyDown={(e) => e.key === 'Enter' && !saving && onSave()}
-            className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none transition focus:border-primary/50 focus:ring-1 focus:ring-primary/30"
+            className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary/50 focus:ring-1 focus:ring-primary/30"
           />
-          <p className="text-xs text-white/40">
+          <p className="text-xs text-foreground-dim">
             将当前页 {stockCount} 只股票保存到自选表（单表最多 500 只）
           </p>
           {error && (
-            <p className="text-xs text-red-300">{error}</p>
+            <p className="text-xs text-negative">{error}</p>
           )}
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-white/60 transition hover:border-white/25 hover:text-white/80"
+              className="rounded-lg border border-[var(--color-border-strong)] px-3 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground-muted"
             >
               取消
             </button>

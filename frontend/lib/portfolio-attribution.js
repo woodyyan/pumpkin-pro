@@ -112,9 +112,9 @@ export function formatAttributionPercent(value, digits = 1, options = {}) {
   return `${sign}${pct.toFixed(digits)}%`
 }
 
-export function attributionToneClass(value, fallback = 'text-white/82') {
+export function attributionToneClass(value, fallback = 'text-foreground/82') {
   if (typeof value !== 'number' || Number.isNaN(value)) return fallback
-  if (value > 0) return 'text-rose-400'
+  if (value > 0) return 'text-negative'
   if (value < 0) return 'text-emerald-400'
   return fallback
 }
@@ -122,11 +122,11 @@ export function attributionToneClass(value, fallback = 'text-white/82') {
 export function attributionSeverityClass(severity) {
   switch (severity) {
     case 'positive':
-      return 'border-rose-500/20 bg-rose-500/[0.06] text-rose-200'
+      return 'border-rose-500/20 bg-rose-500/[0.06] text-negative'
     case 'warning':
       return 'border-amber-500/20 bg-amber-500/[0.08] text-amber-100'
     default:
-      return 'border-white/10 bg-white/[0.03] text-white/78'
+      return 'border-border bg-[var(--color-bg-hover)] text-foreground/78'
   }
 }
 

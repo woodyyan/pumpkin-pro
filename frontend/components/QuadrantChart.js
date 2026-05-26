@@ -5,6 +5,7 @@ import {
   normalizeQuadrantMarket,
   normalizeQuadrantStockCode,
 } from '../lib/quadrant-search'
+import { useTheme } from '../lib/theme-context'
 
 /**
  * QuadrantChart — Canvas-based cross quadrant scatter plot.
@@ -16,13 +17,39 @@ import {
  *   onClickStock: (code) => void
  */
 
-// Quadrant colours (semi-transparent fills)
+// Quadrant colours (semi-transparent fills) — same for both themes
 const QUADRANT_COLOURS = {
   '机会': { bg: 'rgba(34,197,94,0.08)',  dot: 'rgba(34,197,94,0.18)',  label: '#22c55e' },
   '拥挤': { bg: 'rgba(234,179,8,0.08)',   dot: 'rgba(234,179,8,0.18)',   label: '#eab308' },
   '泡沫': { bg: 'rgba(239,68,68,0.08)',   dot: 'rgba(239,68,68,0.18)',   label: '#ef4444' },
   '防御': { bg: 'rgba(156,163,175,0.06)', dot: 'rgba(156,163,175,0.15)', label: '#9ca3af' },
   '中性': { bg: 'rgba(96,165,250,0.05)',  dot: 'rgba(96,165,250,0.12)',  label: '#60a5fa' },
+}
+
+// Canvas theme-aware colours
+const CANVAS_THEMES = {
+  dark: {
+    bgClear: '#0a0a0b',
+    crossLine: 'rgba(255,255,255,0.12)',
+    axisLabel: 'rgba(255,255,255,0.4)',
+    tickLabel: 'rgba(255,255,255,0.25)',
+    quadrantPillBg: '#0d0f14',
+    quadrantPillAlpha: 0.55,
+    quadrantPillTextAlpha: 0.85,
+    stockNameColor: 'rgba(255,255,255,0.85)',
+    highlightStroke: 'rgba(255,255,255,0.95)',
+  },
+  light: {
+    bgClear: '#ffffff',
+    crossLine: 'rgba(0,0,0,0.08)',
+    axisLabel: 'rgba(0,0,0,0.4)',
+    tickLabel: 'rgba(0,0,0,0.3)',
+    quadrantPillBg: 'rgba(0,0,0,0.75)',
+    quadrantPillAlpha: 0.7,
+    quadrantPillTextAlpha: 1.0,
+    stockNameColor: 'rgba(0,0,0,0.85)',
+    highlightStroke: 'rgba(0,0,0,0.95)',
+  },
 }
 
 const PADDING = { top: 40, right: 30, bottom: 50, left: 50 }
@@ -83,9 +110,10 @@ export default function QuadrantChart({
 }) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
-  // Spatial index for hover detection
   const gridRef = useRef(null)
   const hoveredRef = useRef(null)
+  const { resolvedTheme } = useTheme()
+  const canvasColors = CANVAS_THEMES[resolvedTheme] || CANVAS_THEMES.dark
 
   // Responsive sizing: fill parent container, fallback to props
   const [size, setSize] = useState({ w: propWidth || 600, h: propHeight || 500 })
@@ -151,6 +179,9 @@ export default function QuadrantChart({
     canvas.height = height * dpr
     ctx.scale(dpr, dpr)
     ctx.clearRect(0, 0, width, height)
+    // Fill canvas background
+    ctx.fillStyle = canvasColors.bgClear
+    ctx.fillRect(0, 0, width, height)
 
     // ── L0: Background quadrants ──
     const midX = PADDING.left + plotW * 0.5
@@ -170,7 +201,7 @@ export default function QuadrantChart({
     ctx.fillRect(midX, midY, plotW * 0.5, plotH * 0.5)
 
     // Cross lines
-    ctx.strokeStyle = 'rgba(255,255,255,0.12)'
+    ctx.strokeStyle = canvasColors.crossLine
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(midX, PADDING.top)
@@ -180,7 +211,7 @@ export default function QuadrantChart({
     ctx.stroke()
 
     // Axis labels
-    ctx.fillStyle = 'rgba(255,255,255,0.4)'
+    ctx.fillStyle = canvasColors.axisLabel
     ctx.font = '11px system-ui, sans-serif'
     ctx.textAlign = 'center'
     ctx.fillText('Opportunity →', PADDING.left + plotW / 2, height - 8)
@@ -205,13 +236,13 @@ export default function QuadrantChart({
       const px = lbl.align === 'right' ? lbl.x - pw : lbl.x
       const py = lbl.y - 14
       // Dark pill background
-      ctx.globalAlpha = 0.55
-      ctx.fillStyle = '#0d0f14'
+      ctx.globalAlpha = canvasColors.quadrantPillAlpha
+      ctx.fillStyle = canvasColors.quadrantPillBg
       ctx.beginPath()
       ctx.roundRect(px, py, pw, ph, 4)
       ctx.fill()
       // Colored text
-      ctx.globalAlpha = 0.85
+      ctx.globalAlpha = canvasColors.quadrantPillTextAlpha
       ctx.fillStyle = lbl.color
       ctx.textAlign = lbl.align
       ctx.fillText(lbl.text, lbl.align === 'right' ? lbl.x - 6 : lbl.x + 6, lbl.y)
@@ -219,7 +250,7 @@ export default function QuadrantChart({
     ctx.globalAlpha = 1.0
 
     // Tick marks on axes
-    ctx.fillStyle = 'rgba(255,255,255,0.25)'
+    ctx.fillStyle = canvasColors.tickLabel
     ctx.font = '10px system-ui, sans-serif'
     ctx.textAlign = 'center'
     for (let v = 0; v <= 100; v += 20) {
@@ -263,7 +294,7 @@ export default function QuadrantChart({
       ctx.globalAlpha = 1.0
 
       // Name label
-      ctx.fillStyle = 'rgba(255,255,255,0.85)'
+      ctx.fillStyle = canvasColors.stockNameColor
       ctx.font = 'bold 11px system-ui, sans-serif'
       ctx.textAlign = 'left'
       ctx.fillText(w.name, x + 10, y + 4)
@@ -285,7 +316,7 @@ export default function QuadrantChart({
       ctx.fill()
       ctx.restore()
 
-      ctx.strokeStyle = 'rgba(255,255,255,0.95)'
+      ctx.strokeStyle = canvasColors.highlightStroke
       ctx.lineWidth = 2.5
       ctx.beginPath()
       ctx.arc(x, y, radius + 1.5, 0, Math.PI * 2)
@@ -310,7 +341,7 @@ export default function QuadrantChart({
       ctx.fillStyle = colour.label
       ctx.fillText(label, pillX + 7, pillY + 13.5)
     }
-  }, [allStocks, watchlist, highlightedItem, watchlistCodes, width, height, plotW, plotH])
+  }, [allStocks, watchlist, highlightedItem, watchlistCodes, width, height, plotW, plotH, canvasColors])
 
   // Draw + build grid when data changes
   useEffect(() => {
@@ -435,14 +466,14 @@ export default function QuadrantChart({
       {activeTooltip && (
         <div
           data-quadrant-tooltip
-          className="absolute z-10 rounded-lg border border-border bg-card/95 px-3 py-2.5 text-xs text-white shadow-xl backdrop-blur-sm"
+          className="absolute z-10 rounded-lg border border-border bg-card/95 px-3 py-2.5 text-xs text-foreground shadow-xl backdrop-blur-sm"
           style={{
             left: Math.min(activeTooltip.x + 12, width - 180),
             top: Math.max(activeTooltip.y - 10, 0),
           }}
         >
           <div className="font-medium">{activeTooltip.name} ({formatCodeDisplay(activeTooltip.code)})</div>
-          <div className="mt-1 text-white/60">
+          <div className="mt-1 text-foreground-muted">
             机会: {activeTooltip.opportunity.toFixed(1)} | 风险: {activeTooltip.risk.toFixed(1)}
             {activeTooltip.quadrant && <span> | {activeTooltip.quadrant}</span>}
           </div>

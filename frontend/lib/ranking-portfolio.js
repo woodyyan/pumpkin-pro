@@ -20,8 +20,8 @@ function resolveRankingPortfolioReturnPct(item, returnKey, navKey) {
 }
 
 export function getRankingPortfolioPerformanceClass(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'text-white/35'
-  return Number(value) >= 0 ? 'text-rose-300' : 'text-emerald-300'
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'text-foreground-dim'
+  return Number(value) >= 0 ? 'text-negative' : 'text-positive'
 }
 
 export function formatRankingPortfolioDateTime(value) {

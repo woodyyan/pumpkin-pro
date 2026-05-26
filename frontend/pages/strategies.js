@@ -456,9 +456,9 @@ export default function StrategyLibraryPage() {
           description={null}
           action={
             <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="inline-flex items-center gap-2 self-start rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-xs text-white/60">
-                <span className="text-white/35">策略数量</span>
-                <span className="font-semibold text-white">{strategies.length} 条</span>
+              <div className="inline-flex items-center gap-2 self-start rounded-full border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-xs text-foreground-muted">
+                <span className="text-foreground-dim">策略数量</span>
+                <span className="font-semibold text-foreground">{strategies.length} 条</span>
               </div>
               <div className="flex items-center gap-2 self-start sm:self-auto">
                 <button
@@ -492,18 +492,18 @@ export default function StrategyLibraryPage() {
                     type="button"
                     onClick={() => requestWorkspaceAction({ type: 'select', strategyId: strategy.id })}
                     className={`w-full rounded-2xl border p-4 text-left transition ${
-                      isSelected ? 'border-primary bg-primary/10' : 'border-border bg-black/20 hover:border-white/20'
+                      isSelected ? 'border-primary bg-primary/10' : 'border-border bg-[var(--color-bg-hover)] hover:border-[var(--color-border-strong)]'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <div className="text-sm font-medium text-white">{strategy.name}</div>
+                      <div className="text-sm font-medium text-foreground">{strategy.name}</div>
                       <StatusBadge status={strategy.status} />
                     </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-white/45">
-                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">{preset?.shortLabel || preset?.typeLabel || '策略'}</span>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-foreground-dim">
+                      <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-2 py-1">{preset?.shortLabel || preset?.typeLabel || '策略'}</span>
                     </div>
-                    <div className="mt-3 text-sm leading-6 text-white/60">{strategy.description_summary || '暂无说明'}</div>
-                    <div className="mt-3 text-xs text-white/35">更新于 {formatDateTime(strategy.updated_at)}</div>
+                    <div className="mt-3 text-sm leading-6 text-foreground-muted">{strategy.description_summary || '暂无说明'}</div>
+                    <div className="mt-3 text-xs text-foreground-dim">更新于 {formatDateTime(strategy.updated_at)}</div>
                   </button>
                 );
               })
@@ -512,11 +512,11 @@ export default function StrategyLibraryPage() {
         </PanelCard>
 
         <section className="rounded-2xl border border-border bg-card p-6">
-          <div className="flex flex-col gap-5 border-b border-white/5 pb-5">
+          <div className="flex flex-col gap-5 border-b border-border pb-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-xs font-medium text-white/65">
+                  <span className="inline-flex rounded-full border border-border bg-[var(--color-bg-hover)] px-2.5 py-1 text-xs font-medium text-foreground-muted">
                     {mode === 'create' ? '新建中' : mode === 'edit' ? '编辑中' : '只读详情'}
                   </span>
                   {selectedDetail?.status && mode !== 'create' ? <StatusBadge status={selectedDetail.status} /> : null}
@@ -527,16 +527,16 @@ export default function StrategyLibraryPage() {
                   ) : null}
                 </div>
                 <div>
-                  <h2 className="text-2xl font-semibold text-white">{workspaceTitle}</h2>
-                  {workspaceDescription ? <p className="mt-2 max-w-3xl text-sm leading-6 text-white/55">{workspaceDescription}</p> : null}
+                  <h2 className="text-2xl font-semibold text-foreground">{workspaceTitle}</h2>
+                  {workspaceDescription ? <p className="mt-2 max-w-3xl text-sm leading-6 text-foreground-dim">{workspaceDescription}</p> : null}
                 </div>
                 {selectedDetail && mode !== 'create' ? (
-                  <div className="flex flex-wrap gap-3 text-xs text-white/40">
+                  <div className="flex flex-wrap gap-3 text-xs text-foreground-dim">
                     <span>版本：v{selectedDetail.version}</span>
                     <span>更新时间：{formatDateTime(selectedDetail.updated_at)}</span>
                   </div>
                 ) : mode === 'create' ? (
-                  <div className="text-xs text-white/40">
+                  <div className="text-xs text-foreground-dim">
                     系统已自动生成默认名称，你可以直接修改名称并完善参数。
                   </div>
                 ) : null}
@@ -549,7 +549,7 @@ export default function StrategyLibraryPage() {
                       type="button"
                       onClick={startEdit}
                       disabled={!selectedDetail || loadingDetail}
-                      className="rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-white whitespace-nowrap transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-foreground whitespace-nowrap transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       编辑当前策略
                     </button>
@@ -568,7 +568,7 @@ export default function StrategyLibraryPage() {
                     <button
                       type="button"
                       onClick={cancelEditing}
-                      className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-white/75 transition hover:border-white/20 hover:text-white"
+                      className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-2 text-xs font-medium text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
                     >
                       {mode === 'create' ? '取消创建' : '取消编辑'}
                     </button>
@@ -576,7 +576,7 @@ export default function StrategyLibraryPage() {
                       type="button"
                       onClick={() => handleSave()}
                       disabled={saving}
-                      className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {saving ? '保存中...' : mode === 'create' ? '创建策略' : '保存修改'}
                     </button>
@@ -616,7 +616,7 @@ export default function StrategyLibraryPage() {
                           <select
                             value={draft?.status || 'draft'}
                             onChange={(event) => updateDraftField('status', event.target.value)}
-                            className="w-full rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition focus:border-primary"
+                            className="w-full rounded-xl border border-border bg-[var(--color-bg-secondary)] px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary"
                           >
                             {STATUS_OPTIONS.map((option) => (
                               <option key={option.value} value={option.value}>{option.label}</option>
@@ -659,7 +659,7 @@ export default function StrategyLibraryPage() {
                             value={draft?.params?.[item.key] ?? ''}
                             onChange={(event) => updateParamField(item.key, event.target.value)}
                           />
-                          {item.description ? <div className="text-xs leading-6 text-white/45">{item.description}</div> : null}
+                          {item.description ? <div className="text-xs leading-6 text-foreground-dim">{item.description}</div> : null}
                         </Field>
                       ))}
                     </div>
@@ -728,7 +728,7 @@ export default function StrategyLibraryPage() {
 function CreateStrategyDropdown({ open, onToggle, onSelect, variant = 'primary' }) {
   const buttonClass = variant === 'primary'
     ? 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/20'
-    : 'border-white/10 bg-black/20 text-white/75 hover:border-white/20 hover:text-white';
+    : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted hover:border-[var(--color-border-strong)] hover:text-foreground';
 
   return (
     <div className="relative">
@@ -740,18 +740,18 @@ function CreateStrategyDropdown({ open, onToggle, onSelect, variant = 'primary' 
         新建策略
       </button>
       {open ? (
-        <div className="absolute right-0 z-30 mt-2 w-72 rounded-2xl border border-white/10 bg-slate-950 p-2 shadow-2xl">
-          <div className="px-3 py-2 text-xs uppercase tracking-[0.16em] text-white/35">选择策略</div>
+        <div className="absolute right-0 z-30 mt-2 w-72 rounded-2xl border border-border bg-card p-2 shadow-2xl">
+          <div className="px-3 py-2 text-xs uppercase tracking-[0.16em] text-foreground-dim">选择策略</div>
           <div className="space-y-1">
             {STRATEGY_PRESETS.map((preset) => (
               <button
                 key={preset.typeKey}
                 type="button"
                 onClick={() => onSelect(preset.typeKey)}
-                className="w-full rounded-xl border border-transparent px-3 py-3 text-left transition hover:border-white/10 hover:bg-white/5"
+                className="w-full rounded-xl border border-transparent px-3 py-3 text-left transition hover:border-border hover:bg-[var(--color-bg-hover)]"
               >
-                <div className="text-sm font-medium text-white">{preset.typeLabel}</div>
-                <div className="mt-1 text-xs leading-6 text-white/45">{preset.defaultDescription}</div>
+                <div className="text-sm font-medium text-foreground">{preset.typeLabel}</div>
+                <div className="mt-1 text-xs leading-6 text-foreground-dim">{preset.defaultDescription}</div>
               </button>
             ))}
           </div>
@@ -766,8 +766,8 @@ function PanelCard({ title, description, action, children }) {
     <section className="rounded-2xl border border-border bg-card p-6">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0 flex-1">
-          <h2 className="text-lg font-semibold text-white sm:whitespace-nowrap">{title}</h2>
-          {description ? <p className="mt-2 text-sm leading-6 text-white/55">{description}</p> : null}
+          <h2 className="text-lg font-semibold text-foreground sm:whitespace-nowrap">{title}</h2>
+          {description ? <p className="mt-2 text-sm leading-6 text-foreground-dim">{description}</p> : null}
         </div>
         <div className="w-full sm:w-auto">{action}</div>
       </div>
@@ -777,10 +777,10 @@ function PanelCard({ title, description, action, children }) {
 }
 function SectionBlock({ title, description, children }) {
   return (
-    <section className="space-y-4 rounded-2xl border border-white/5 bg-black/15 p-4 md:p-5">
+    <section className="space-y-4 rounded-2xl border border-border bg-[var(--color-bg-hover)] p-4 md:p-5">
       <div>
-        <h3 className="text-sm font-semibold text-white">{title}</h3>
-        {description ? <p className="mt-2 text-sm leading-6 text-white/50">{description}</p> : null}
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        {description ? <p className="mt-2 text-sm leading-6 text-foreground-dim">{description}</p> : null}
       </div>
       {children}
     </section>
@@ -793,28 +793,28 @@ function DetailGrid({ children }) {
 
 function DetailItem({ label, value }) {
   return (
-    <div className="rounded-xl border border-white/5 bg-black/20 px-4 py-3 text-sm">
-      <div className="text-white/45">{label}</div>
-      <div className="mt-2 font-medium text-white/85">{value || '--'}</div>
+    <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-3 text-sm">
+      <div className="text-foreground-dim">{label}</div>
+      <div className="mt-2 font-medium text-foreground-muted">{value || '--'}</div>
     </div>
   );
 }
 
 function InfoBlock({ title, content }) {
   return (
-    <div className="space-y-3 rounded-2xl border border-white/5 bg-black/20 p-4">
-      <div className="text-sm font-medium text-white">{title}</div>
-      <div className="text-sm leading-7 text-white/75">{content}</div>
+    <div className="space-y-3 rounded-2xl border border-border bg-[var(--color-bg-hover)] p-4">
+      <div className="text-sm font-medium text-foreground">{title}</div>
+      <div className="text-sm leading-7 text-foreground-muted">{content}</div>
     </div>
   );
 }
 
 function ParamValueCard({ label, description, value }) {
   return (
-    <div className="rounded-2xl border border-white/5 bg-black/20 p-4">
-      <div className="text-sm font-medium text-white">{label}</div>
-      <div className="mt-3 text-2xl font-semibold text-white">{formatParamValue(value)}</div>
-      {description ? <div className="mt-2 text-xs leading-6 text-white/45">{description}</div> : null}
+    <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] p-4">
+      <div className="text-sm font-medium text-foreground">{label}</div>
+      <div className="mt-3 text-2xl font-semibold text-foreground">{formatParamValue(value)}</div>
+      {description ? <div className="mt-2 text-xs leading-6 text-foreground-dim">{description}</div> : null}
     </div>
   );
 }
@@ -822,23 +822,23 @@ function ParamValueCard({ label, description, value }) {
 function Field({ label, children }) {
   return (
     <div className="space-y-2">
-      <div className="text-sm font-medium text-white/70">{label}</div>
+      <div className="text-sm font-medium text-foreground-muted">{label}</div>
       {children}
     </div>
   );
 }
 
 function Input(props) {
-  return <input {...props} className="w-full rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary disabled:opacity-60" />;
+  return <input {...props} className="w-full rounded-xl border border-border bg-[var(--color-bg-secondary)] px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-foreground-disabled focus:border-primary disabled:opacity-60" />;
 }
 
 function Textarea(props) {
-  return <textarea {...props} className="w-full rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary" />;
+  return <textarea {...props} className="w-full rounded-xl border border-border bg-[var(--color-bg-secondary)] px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-foreground-disabled focus:border-primary" />;
 }
 
 function ReadonlyField({ value }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm font-medium text-white/80">
+    <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-3 text-sm font-medium text-foreground-muted">
       {value || '--'}
     </div>
   );
@@ -847,16 +847,16 @@ function ReadonlyField({ value }) {
 function ConfirmDialog({ title, description, onSaveAndContinue, onDiscardAndContinue, onStay, saving }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
+      <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl">
         <div className="space-y-3">
-          <div className="text-lg font-semibold text-white">{title}</div>
-          <p className="text-sm leading-7 text-white/65">{description}</p>
+          <div className="text-lg font-semibold text-foreground">{title}</div>
+          <p className="text-sm leading-7 text-foreground-muted">{description}</p>
         </div>
         <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <button
             type="button"
             onClick={onStay}
-            className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm font-medium text-white/75 transition hover:border-white/20 hover:text-white"
+            className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-2.5 text-sm font-medium text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
           >
             留在当前页
           </button>
@@ -871,7 +871,7 @@ function ConfirmDialog({ title, description, onSaveAndContinue, onDiscardAndCont
             type="button"
             onClick={onSaveAndContinue}
             disabled={saving}
-            className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-foreground transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {saving ? '保存中...' : '保存并切换'}
           </button>
@@ -885,37 +885,37 @@ function DeleteConfirmDialog({ strategyName, deleting, refs, onCancel, onConfirm
   const hasRefs = Array.isArray(refs) && refs.length > 0;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
+      <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl">
         <div className="space-y-3">
-          <div className="text-lg font-semibold text-white">
+          <div className="text-lg font-semibold text-foreground">
             {hasRefs ? '无法删除' : '确认删除策略'}
           </div>
           {hasRefs ? (
             <>
-              <p className="text-sm leading-7 text-white/65">
+              <p className="text-sm leading-7 text-foreground-muted">
                 「{strategyName || '当前策略'}」正在被以下股票的交易信号配置使用，无法删除：
               </p>
-              <div className="max-h-52 overflow-y-auto rounded-xl border border-white/10 bg-black/30 px-4 py-3">
-                <ul className="space-y-2 text-sm text-white/85">
+              <div className="max-h-52 overflow-y-auto rounded-xl border border-border bg-[var(--color-bg-overlay)] px-4 py-3">
+                <ul className="space-y-2 text-sm text-foreground-muted">
                   {refs.map((ref, i) => (
                     <li key={i} className="flex items-center gap-3">
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-400" />
-                      <span className="font-mono text-white/90">{`${ref.symbol}${ref.name ? ` ${ref.name}` : ''}`}</span>
+                      <span className="font-mono text-foreground/90">{`${ref.symbol}${ref.name ? ` ${ref.name}` : ''}`}</span>
                     </li>
                   ))}
                 </ul>
               </div>
-              <p className="flex items-start gap-2 text-sm leading-7 text-white/45">
+              <p className="flex items-start gap-2 text-sm leading-7 text-foreground-dim">
                 <span>💡</span>
                 <span>请先在「股票详情」页中将这些股票的信号策略更换为其他策略，再回来删除。</span>
               </p>
             </>
           ) : (
             <>
-              <p className="text-sm leading-7 text-white/65">
+              <p className="text-sm leading-7 text-foreground-muted">
                 确认删除「{strategyName || '当前策略'}」？删除后不可恢复。
               </p>
-              <p className="text-xs leading-6 text-white/45">
+              <p className="text-xs leading-6 text-foreground-dim">
                 若该策略仍被股票信号配置引用，系统会阻止删除并提示你先替换引用。
               </p>
             </>
@@ -926,7 +926,7 @@ function DeleteConfirmDialog({ strategyName, deleting, refs, onCancel, onConfirm
             <button
               type="button"
               onClick={onCancel}
-              className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm font-medium text-white/75 transition hover:border-white/20 hover:text-white"
+              className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-2.5 text-sm font-medium text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
             >
               关闭
             </button>
@@ -936,7 +936,7 @@ function DeleteConfirmDialog({ strategyName, deleting, refs, onCancel, onConfirm
                 type="button"
                 onClick={onCancel}
                 disabled={deleting}
-                className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm font-medium text-white/75 transition hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-2.5 text-sm font-medium text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
               >
                 取消
               </button>
@@ -958,7 +958,7 @@ function DeleteConfirmDialog({ strategyName, deleting, refs, onCancel, onConfirm
 
 function EmptyState({ text }) {
   return (
-    <div className="rounded-2xl border border-dashed border-border bg-black/20 px-6 py-14 text-center text-sm text-white/45">
+    <div className="rounded-2xl border border-dashed border-border bg-[var(--color-bg-hover)] px-6 py-14 text-center text-sm text-foreground-dim">
       {text}
     </div>
   );
@@ -966,7 +966,7 @@ function EmptyState({ text }) {
 
 function StatusBadge({ status }) {
   const map = {
-    draft: 'bg-white/10 text-white/70 border-white/10',
+    draft: 'bg-[var(--color-bg-hover)] text-foreground-muted border-border',
     active: 'bg-positive/10 text-green-200 border-positive/20',
     archived: 'bg-negative/10 text-red-200 border-negative/20',
   };
@@ -985,9 +985,9 @@ function StatusBadge({ status }) {
 
 function MiniStat({ label, value }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-      <div className="text-xs uppercase tracking-[0.16em] text-white/35">{label}</div>
-      <div className="mt-2 text-sm font-medium text-white/85">{value}</div>
+    <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] px-4 py-3">
+      <div className="text-xs uppercase tracking-[0.16em] text-foreground-dim">{label}</div>
+      <div className="mt-2 text-sm font-medium text-foreground-muted">{value}</div>
     </div>
   );
 }
@@ -1000,7 +1000,7 @@ function ErrorBanner({ text, showLoginAction = false, onLogin }) {
         <button
           type="button"
           onClick={onLogin}
-          className="mt-2 inline-flex rounded-lg border border-rose-300/40 px-2.5 py-1 text-xs text-rose-100 transition hover:bg-rose-500/15"
+          className="mt-2 inline-flex rounded-lg border border-negative/40 px-2.5 py-1 text-xs text-negative transition hover:bg-negative/15"
         >
           去登录
         </button>
@@ -1064,9 +1064,9 @@ function formatParamValue(value) {
 }
 
 const CONFIDENCE_META = {
-  high: { label: '高', color: 'text-emerald-300 border-emerald-400/40 bg-emerald-500/10' },
+  high: { label: '高', color: 'text-positive border-emerald-400/40 bg-positive/10' },
   medium: { label: '中', color: 'text-amber-300 border-amber-400/40 bg-amber-500/10' },
-  low: { label: '低', color: 'text-rose-300 border-rose-400/40 bg-rose-500/10' },
+  low: { label: '低', color: 'text-negative border-negative/40 bg-negative/10' },
 };
 
 function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoading, backtestData, error, onGenerate, onAdopt, onClose }) {
@@ -1081,13 +1081,13 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
   const hasResult = Boolean(rec);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 backdrop-blur-md">
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-white/25 bg-[#121620]/95 p-6 shadow-[0_8px_48px_rgba(0,0,0,0.6)] ring-1 ring-white/10">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--color-bg-overlay)] px-4 backdrop-blur-md">
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-[var(--color-border-strong)] bg-card p-6 shadow-[0_8px_48px_rgba(0,0,0,0.6)] ring-1 ring-border">
         {!hasResult ? (
           <>
             <div className="space-y-3">
-              <div className="text-lg font-semibold text-white">✨ AI 智能生成策略</div>
-              <p className="text-sm leading-7 text-white/65">
+              <div className="text-lg font-semibold text-foreground">✨ AI 智能生成策略</div>
+              <p className="text-sm leading-7 text-foreground-muted">
                 输入一只股票代码，AI 会分析该股票近期走势，推荐最合适的策略类型和参数，并用近 6 个月数据自动回测验证。
               </p>
             </div>
@@ -1097,16 +1097,16 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
                 onChange={(e) => onTickerChange(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && !loading && onGenerate()}
                 placeholder="输入股票代码，如 600519 或 00700"
-                className="w-full rounded-xl border border-border bg-black px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-primary"
+                className="w-full rounded-xl border border-border bg-[var(--color-bg-secondary)] px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-foreground-disabled focus:border-primary"
                 autoFocus
               />
             </div>
-            {error ? <div className="mt-3 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{error}</div> : null}
+            {error ? <div className="mt-3 rounded-lg border border-negative/40 bg-negative/10 px-3 py-2 text-xs text-negative">{error}</div> : null}
             <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm font-medium text-white/75 transition hover:border-white/20 hover:text-white"
+                className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-2.5 text-sm font-medium text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
               >
                 取消
               </button>
@@ -1114,7 +1114,7 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
                 type="button"
                 onClick={onGenerate}
                 disabled={loading || !ticker.trim()}
-                className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-foreground transition hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loading ? '分析中（含回测验证）...' : '开始分析'}
               </button>
@@ -1123,10 +1123,10 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
         ) : (
           <>
             <div className="space-y-3">
-              <div className="text-lg font-semibold text-white">✨ AI 策略匹配结果</div>
+              <div className="text-lg font-semibold text-foreground">✨ AI 策略匹配结果</div>
               {summary ? (
-                <div className="flex flex-wrap items-center gap-2 text-xs text-white/55">
-                  <span className="font-medium text-white/80">{summary.name}（{summary.ticker}）</span>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-foreground-dim">
+                  <span className="font-medium text-foreground-muted">{summary.name}（{summary.ticker}）</span>
                   <span>最新价 {summary.price}</span>
                 </div>
               ) : null}
@@ -1143,18 +1143,18 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
               </div>
             ) : null}
 
-            <div className="mt-4 space-y-3 rounded-xl border border-white/10 bg-black/20 p-4">
+            <div className="mt-4 space-y-3 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-white">🎯 {rec.strategy_label}</span>
+                <span className="text-sm font-semibold text-foreground">🎯 {rec.strategy_label}</span>
                 <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${confidenceMeta.color}`}>
                   置信度：{confidenceMeta.label}
                 </span>
               </div>
-              <p className="text-sm leading-7 text-white/70">{rec.reason}</p>
+              <p className="text-sm leading-7 text-foreground-muted">{rec.reason}</p>
               {rec.params ? (
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(rec.params).map(([key, value]) => (
-                    <span key={key} className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white/55">
+                    <span key={key} className="rounded-full border border-border bg-[var(--color-bg-hover)] px-2.5 py-1 text-[11px] text-foreground-dim">
                       {key}={String(value)}
                     </span>
                   ))}
@@ -1164,22 +1164,22 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
 
             {backtestLoading ? (
               <div className="mt-4 space-y-2">
-                <div className="text-sm font-semibold text-white">📊 近 6 个月回测验证</div>
-                <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                <div className="text-sm font-semibold text-foreground">📊 近 6 个月回测验证</div>
+                <div className="flex items-center gap-2 rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-3">
                   <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                  <span className="text-xs text-white/55">正在用近 6 个月历史数据回测验证 + 迭代优化中...</span>
+                  <span className="text-xs text-foreground-dim">正在用近 6 个月历史数据回测验证 + 迭代优化中...</span>
                 </div>
               </div>
             ) : btError ? (
               <div className="mt-4 space-y-2">
-                <div className="text-sm font-semibold text-white">📊 近 6 个月回测验证</div>
+                <div className="text-sm font-semibold text-foreground">📊 近 6 个月回测验证</div>
                 <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                   ⚠️ {btError}
                 </div>
               </div>
             ) : btPreview ? (
               <div className="mt-4 space-y-2">
-                <div className="text-sm font-semibold text-white">📊 近 6 个月回测验证</div>
+                <div className="text-sm font-semibold text-foreground">📊 近 6 个月回测验证</div>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <BacktestMiniCard label="总收益" value={fmtPct(btPreview.total_return)} accent={btPreview.total_return >= 0 ? 'up' : 'down'} />
                   <BacktestMiniCard label="最大回撤" value={fmtPct(btPreview.max_drawdown)} accent="down" />
@@ -1191,11 +1191,11 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
                   <BacktestMiniCard label="年化收益" value={fmtPct(btPreview.annual_return)} accent={btPreview.annual_return >= 0 ? 'up' : 'down'} />
                 </div>
                 {btPreview.total_return < 0 ? (
-                  <div className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                  <div className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-xs text-negative">
                     ⚠️ 该策略在近 6 个月回测中收益为负（{fmtPct(btPreview.total_return)}），建议谨慎采纳，或在回测引擎中调整参数后重新验证。
                   </div>
                 ) : null}
-                <div className="text-[10px] text-white/30">
+                <div className="text-[10px] text-foreground-dim">
                   ⓘ 回测基于近 6 个月历史数据，结果仅供参考，不代表未来收益。
                 </div>
               </div>
@@ -1206,7 +1206,7 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
                 <button
                   type="button"
                   onClick={() => setShowIterations(!showIterations)}
-                  className="flex items-center gap-1 text-xs font-medium text-white/50 transition hover:text-white/70"
+                  className="flex items-center gap-1 text-xs font-medium text-foreground-dim transition hover:text-foreground-muted"
                 >
                   <span>{showIterations ? '▼' : '▶'}</span>
                   <span>迭代优化过程（{iterations.length} 轮）</span>
@@ -1214,10 +1214,10 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
                 {showIterations ? (
                   <div className="mt-2 space-y-2">
                     {iterations.map((iter) => (
-                      <div key={iter.round} className="rounded-lg border border-white/5 bg-black/30 p-3">
+                      <div key={iter.round} className="rounded-lg border border-border bg-[var(--color-bg-overlay)] p-3">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-white/65">第 {iter.round} 轮</span>
-                          <div className="flex items-center gap-2 text-[10px] text-white/40">
+                          <span className="text-xs font-medium text-foreground-muted">第 {iter.round} 轮</span>
+                          <div className="flex items-center gap-2 text-[10px] text-foreground-dim">
                             <span>收益 {fmtPct(iter.backtest_preview?.total_return)}</span>
                             <span>夏普 {iter.backtest_preview?.sharpe_ratio?.toFixed(2)}</span>
                             <span>回撤 {fmtPct(iter.backtest_preview?.max_drawdown)}</span>
@@ -1226,14 +1226,14 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
                         {iter.params ? (
                           <div className="mt-1.5 flex flex-wrap gap-1.5">
                             {Object.entries(iter.params).map(([k, v]) => (
-                              <span key={k} className="rounded-full border border-white/5 bg-white/5 px-2 py-0.5 text-[10px] text-white/45">
+                              <span key={k} className="rounded-full border border-border bg-[var(--color-bg-hover)] px-2 py-0.5 text-[10px] text-foreground-dim">
                                 {k}={String(v)}
                               </span>
                             ))}
                           </div>
                         ) : null}
                         {iter.adjustment ? (
-                          <div className="mt-1.5 text-[11px] leading-5 text-white/50">💡 {iter.adjustment}</div>
+                          <div className="mt-1.5 text-[11px] leading-5 text-foreground-dim">💡 {iter.adjustment}</div>
                         ) : null}
                       </div>
                     ))}
@@ -1248,13 +1248,13 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
               </div>
             ) : null}
 
-            {error ? <div className="mt-3 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{error}</div> : null}
+            {error ? <div className="mt-3 rounded-lg border border-negative/40 bg-negative/10 px-3 py-2 text-xs text-negative">{error}</div> : null}
 
             <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={() => { onTickerChange(ticker); onClose(); }}
-                className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-sm font-medium text-white/75 transition hover:border-white/20 hover:text-white"
+                className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-2.5 text-sm font-medium text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
               >
                 关闭
               </button>
@@ -1269,7 +1269,7 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
               <button
                 type="button"
                 onClick={onAdopt}
-                className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-500"
+                className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-foreground transition hover:bg-orange-500"
               >
                 采纳并创建策略
               </button>
@@ -1282,10 +1282,10 @@ function AIGenerateDialog({ ticker, onTickerChange, loading, result, backtestLoa
 }
 
 function BacktestMiniCard({ label, value, accent }) {
-  const color = accent === 'up' ? 'text-rose-300' : accent === 'down' ? 'text-emerald-300' : 'text-white/80';
+  const color = accent === 'up' ? 'text-negative' : accent === 'down' ? 'text-positive' : 'text-foreground-muted';
   return (
-    <div className="rounded-lg border border-white/5 bg-black/30 px-2.5 py-1.5">
-      <div className="text-[10px] text-white/40">{label}</div>
+    <div className="rounded-lg border border-border bg-[var(--color-bg-overlay)] px-2.5 py-1.5">
+      <div className="text-[10px] text-foreground-dim">{label}</div>
       <div className={`mt-0.5 text-xs font-medium ${color}`}>{value ?? '--'}</div>
     </div>
   );
@@ -1297,10 +1297,10 @@ function fmtPct(value) {
 }
 
 function MiniInfo({ label, value, accent }) {
-  const color = accent === 'up' ? 'text-rose-300' : accent === 'down' ? 'text-emerald-300' : 'text-white/80';
+  const color = accent === 'up' ? 'text-negative' : accent === 'down' ? 'text-positive' : 'text-foreground-muted';
   return (
-    <div className="rounded-lg border border-white/5 bg-black/30 px-2.5 py-1.5">
-      <div className="text-[10px] text-white/40">{label}</div>
+    <div className="rounded-lg border border-border bg-[var(--color-bg-overlay)] px-2.5 py-1.5">
+      <div className="text-[10px] text-foreground-dim">{label}</div>
       <div className={`mt-0.5 text-xs font-medium ${color}`}>{value ?? '--'}</div>
     </div>
   );

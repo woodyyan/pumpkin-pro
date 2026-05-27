@@ -31,7 +31,7 @@ def seed_snapshots(conn: sqlite3.Connection):
         INSERT INTO factor_snapshots
         (snapshot_date, code, symbol, name, board, listing_age_days, is_new_stock, available_trading_days,
          close_price, market_cap, pe, pb, ps, dividend_yield, earning_growth, revenue_growth,
-         performance_1y, performance_since_listing, momentum_1m, roe, operating_cf_margin, asset_to_equity,
+         performance_1y, performance_since_listing, momentum_1m, roe, fcf_margin, asset_to_equity,
          volatility_1m, beta_1y, data_quality_flags, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
@@ -69,6 +69,7 @@ def test_compute_scores_writes_rank_and_factor_scores(tmp_path):
         assert len(rank_rows) == 3
         assert len(factor_rows) == 3
         assert coverage["pe_rank_score"] == 3
+        assert coverage["fcf_margin_rank_score"] == 3
         assert coverage["value_score"] == 3
         module.write_scores(conn, "2026-05-08", rank_rows, factor_rows)
         rank = conn.execute("SELECT pe_rank_score FROM factor_rank_scores WHERE code = '000001'").fetchone()
@@ -86,3 +87,14 @@ def test_factor_score_normalizes_missing_component_weights():
     factor = next(item for item in module.FACTORS if item.key == "value")
     score = module.weighted_score(rank_row, factor)
     assert round(score, 4) == round((100 * 0.4 + 50 * 0.2) / 0.6, 4)
+
+
+def test_quality_factor_uses_fcf_margin_component():
+    quality = next(item for item in module.FACTORS if item.key == "quality")
+    rank_row = {
+        "roe_rank_score": 90.0,
+        "fcf_margin_rank_score": 60.0,
+        "asset_to_equity_rank_score": 30.0,
+    }
+    score = module.weighted_score(rank_row, quality)
+    assert round(score, 4) == round(90.0 * 0.35 + 60.0 * 0.33 + 30.0 * 0.32, 4)

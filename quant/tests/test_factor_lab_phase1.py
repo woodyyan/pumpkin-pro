@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import importlib.util
 import sqlite3
 import sys
@@ -67,6 +68,7 @@ def test_compute_snapshot_for_security_full_metrics():
         total_assets=200_000_000.0,
         total_equity=100_000_000.0,
         operating_cash_flow=24_000_000.0,
+        capex=6_000_000.0,
     )
     dividend = module.DividendRecord(
         report_period="2025-12-31",
@@ -82,7 +84,7 @@ def test_compute_snapshot_for_security_full_metrics():
     assert row[12] == 3.0  # PS
     assert round(row[13], 6) == round(0.5 / 36.0, 6)  # dividend_yield from cash_dividend_per_share
     assert row[19] == 12.0  # ROE %
-    assert row[20] == 20.0  # operating_cf_margin %
+    assert row[20] == 15.0  # fcf_margin % = (24m - 6m) / 120m * 100
     assert row[21] == 2.0   # asset_to_equity
     assert row[23] is not None
 
@@ -126,7 +128,7 @@ def test_compute_snapshots_reads_local_tables(tmp_path):
                 date = "2026-05-08"
             conn.execute("INSERT INTO factor_daily_bars (code, trade_date, open, close, high, low, volume, amount, adjusted, source, updated_at) VALUES ('000001',?,?,?,?,?,?,?,'qfq','test','now')", (date, 10 + idx, 10 + idx, 10 + idx, 10 + idx, 1000, 10000))
             conn.execute("INSERT INTO factor_index_daily_bars (index_code, trade_date, close, pct_change, source, updated_at) VALUES ('000985',?,?,1,'test','now')", (date, 100 + idx))
-        conn.execute("INSERT INTO factor_financial_metrics (code, report_period, revenue, revenue_yoy, net_profit, net_profit_yoy, total_assets, total_equity, operating_cash_flow, source, updated_at) VALUES ('000001','2026-03-31',1000000,10,100000,20,2000000,1000000,200000,'test','now')")
+        conn.execute("INSERT INTO factor_financial_metrics (code, report_period, revenue, revenue_yoy, net_profit, net_profit_yoy, total_assets, total_equity, operating_cash_flow, capex, source, updated_at) VALUES ('000001','2026-03-31',1000000,10,100000,20,2000000,1000000,200000,50000,'test','now')")
         conn.commit()
         args = module.parse_args(["--snapshot-date", "2026-05-08", "--limit", "1", "--progress-interval", "1"])
         rows, coverage = module.compute_snapshots(conn, args, "run-test")
@@ -136,3 +138,38 @@ def test_compute_snapshots_reads_local_tables(tmp_path):
         assert coverage.excluded == {}
     finally:
         conn.close()
+
+
+def test_compute_snapshot_marks_missing_capex_as_no_fcf_margin():
+    bars = make_bars(260)
+    returns = module.daily_returns(bars)
+    index_returns = {date: ret / 2 for date, ret in returns}
+    market = module.MarketMetric(
+        close_price=36.0,
+        market_cap=360_000_000.0,
+        pe=12.0,
+        pb=1.5,
+        volume=1000,
+        amount=36000,
+        turnover_rate=1.2,
+        is_suspended=False,
+        trade_date="2026-05-08",
+    )
+    financial = module.FinancialMetric(
+        report_period="2026-03-31",
+        revenue=120_000_000.0,
+        revenue_yoy=20.0,
+        net_profit=12_000_000.0,
+        net_profit_yoy=30.0,
+        total_assets=200_000_000.0,
+        total_equity=100_000_000.0,
+        operating_cash_flow=24_000_000.0,
+        capex=None,
+    )
+    result, reason = module.compute_snapshot_for_security(make_security(), market, bars, financial, None, index_returns, "2026-05-08")
+    assert reason == "included"
+    assert result is not None
+    assert result.row[20] is None
+    flags = json.loads(result.row[24])
+    assert "no_capex" in flags
+    assert "no_fcf_margin" in flags

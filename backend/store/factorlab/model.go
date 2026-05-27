@@ -89,6 +89,7 @@ type FactorFinancialMetric struct {
 	TotalAssets       *float64  `json:"total_assets"`
 	TotalEquity       *float64  `json:"total_equity"`
 	OperatingCashFlow *float64  `json:"operating_cash_flow"`
+	Capex             *float64  `json:"capex"`
 	Source            string    `gorm:"size:64;not null;default:''" json:"source"`
 	UpdatedAt         time.Time `gorm:"not null" json:"updated_at"`
 }
@@ -131,7 +132,7 @@ type FactorSnapshot struct {
 	PerformanceSinceListing *float64  `json:"performance_since_listing"`
 	Momentum1M              *float64  `gorm:"column:momentum_1m" json:"momentum_1m"`
 	ROE                     *float64  `gorm:"column:roe" json:"roe"`
-	OperatingCFMargin       *float64  `gorm:"column:operating_cf_margin" json:"operating_cf_margin"`
+	FCFMargin               *float64  `gorm:"column:fcf_margin" json:"fcf_margin"`
 	AssetToEquity           *float64  `json:"asset_to_equity"`
 	Volatility1M            *float64  `gorm:"column:volatility_1m" json:"volatility_1m"`
 	Beta1Y                  *float64  `gorm:"column:beta_1y" json:"beta_1y"`
@@ -152,23 +153,23 @@ type FactorSecurityIndustry struct {
 func (FactorSecurityIndustry) TableName() string { return "factor_security_industries" }
 
 type FactorRankScore struct {
-	SnapshotDate               string    `gorm:"primaryKey;size:10;index" json:"snapshot_date"`
-	Code                       string    `gorm:"primaryKey;size:16" json:"code"`
-	PERankScore                *float64  `gorm:"column:pe_rank_score" json:"pe_rank_score"`
-	PBRankScore                *float64  `gorm:"column:pb_rank_score" json:"pb_rank_score"`
-	PSRankScore                *float64  `gorm:"column:ps_rank_score" json:"ps_rank_score"`
-	DividendYieldRankScore     *float64  `json:"dividend_yield_rank_score"`
-	EarningGrowthRankScore     *float64  `json:"earning_growth_rank_score"`
-	RevenueGrowthRankScore     *float64  `json:"revenue_growth_rank_score"`
-	Performance1YRankScore     *float64  `gorm:"column:performance_1y_rank_score" json:"performance_1y_rank_score"`
-	ROERankScore               *float64  `gorm:"column:roe_rank_score" json:"roe_rank_score"`
-	OperatingCFMarginRankScore *float64  `gorm:"column:operating_cf_margin_rank_score" json:"operating_cf_margin_rank_score"`
-	AssetToEquityRankScore     *float64  `json:"asset_to_equity_rank_score"`
-	Momentum1MRankScore        *float64  `gorm:"column:momentum_1m_rank_score" json:"momentum_1m_rank_score"`
-	MarketCapRankScore         *float64  `json:"market_cap_rank_score"`
-	Volatility1MRankScore      *float64  `gorm:"column:volatility_1m_rank_score" json:"volatility_1m_rank_score"`
-	Beta1YRankScore            *float64  `gorm:"column:beta_1y_rank_score" json:"beta_1y_rank_score"`
-	CreatedAt                  time.Time `gorm:"not null" json:"created_at"`
+	SnapshotDate           string    `gorm:"primaryKey;size:10;index" json:"snapshot_date"`
+	Code                   string    `gorm:"primaryKey;size:16" json:"code"`
+	PERankScore            *float64  `gorm:"column:pe_rank_score" json:"pe_rank_score"`
+	PBRankScore            *float64  `gorm:"column:pb_rank_score" json:"pb_rank_score"`
+	PSRankScore            *float64  `gorm:"column:ps_rank_score" json:"ps_rank_score"`
+	DividendYieldRankScore *float64  `json:"dividend_yield_rank_score"`
+	EarningGrowthRankScore *float64  `json:"earning_growth_rank_score"`
+	RevenueGrowthRankScore *float64  `json:"revenue_growth_rank_score"`
+	Performance1YRankScore *float64  `gorm:"column:performance_1y_rank_score" json:"performance_1y_rank_score"`
+	ROERankScore           *float64  `gorm:"column:roe_rank_score" json:"roe_rank_score"`
+	FCFMarginRankScore     *float64  `gorm:"column:fcf_margin_rank_score" json:"fcf_margin_rank_score"`
+	AssetToEquityRankScore *float64  `json:"asset_to_equity_rank_score"`
+	Momentum1MRankScore    *float64  `gorm:"column:momentum_1m_rank_score" json:"momentum_1m_rank_score"`
+	MarketCapRankScore     *float64  `json:"market_cap_rank_score"`
+	Volatility1MRankScore  *float64  `gorm:"column:volatility_1m_rank_score" json:"volatility_1m_rank_score"`
+	Beta1YRankScore        *float64  `gorm:"column:beta_1y_rank_score" json:"beta_1y_rank_score"`
+	CreatedAt              time.Time `gorm:"not null" json:"created_at"`
 }
 
 func (FactorRankScore) TableName() string { return "factor_rank_scores" }

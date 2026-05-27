@@ -79,6 +79,7 @@ class FinancialMetric:
     total_assets: Optional[float]
     total_equity: Optional[float]
     operating_cash_flow: Optional[float]
+    capex: Optional[float]
 
 
 @dataclass
@@ -274,7 +275,7 @@ def load_index_returns(conn: sqlite3.Connection, index_code: str, snapshot_date:
 def load_latest_financial(conn: sqlite3.Connection, code: str, snapshot_date: str) -> Optional[FinancialMetric]:
     row = conn.execute(
         """
-        SELECT report_period, revenue, revenue_yoy, net_profit, net_profit_yoy, total_assets, total_equity, operating_cash_flow
+        SELECT report_period, revenue, revenue_yoy, net_profit, net_profit_yoy, total_assets, total_equity, operating_cash_flow, capex
         FROM factor_financial_metrics
         WHERE code = ? AND report_period <= ?
         ORDER BY report_period DESC
@@ -293,6 +294,7 @@ def load_latest_financial(conn: sqlite3.Connection, code: str, snapshot_date: st
         total_assets=safe_float(row[5]),
         total_equity=safe_float(row[6]),
         operating_cash_flow=safe_float(row[7]),
+        capex=safe_float(row[8]),
     )
 
 
@@ -428,20 +430,25 @@ def compute_snapshot_for_security(
 
     if financial is None:
         flags.append("no_financial")
-        ps = earning_growth = revenue_growth = roe = operating_cf_margin = asset_to_equity = None
+        ps = earning_growth = revenue_growth = roe = fcf_margin = asset_to_equity = None
     else:
         ps = safe_ratio(market_cap, financial.revenue)
         earning_growth = financial.net_profit_yoy
         revenue_growth = financial.revenue_yoy
         roe = safe_ratio(financial.net_profit, financial.total_equity, 100.0)
-        operating_cf_margin = safe_ratio(financial.operating_cash_flow, financial.revenue, 100.0)
+        free_cash_flow = None
+        if financial.operating_cash_flow is not None and financial.capex is not None:
+            free_cash_flow = financial.operating_cash_flow - financial.capex
+        fcf_margin = safe_ratio(free_cash_flow, financial.revenue, 100.0)
         asset_to_equity = safe_ratio(financial.total_assets, financial.total_equity)
         if ps is None:
             flags.append("no_ps")
         if roe is None:
             flags.append("no_roe")
-        if operating_cf_margin is None:
-            flags.append("no_operating_cf_margin")
+        if financial.capex is None:
+            flags.append("no_capex")
+        if fcf_margin is None:
+            flags.append("no_fcf_margin")
         if asset_to_equity is None:
             flags.append("no_asset_to_equity")
 
@@ -476,7 +483,7 @@ def compute_snapshot_for_security(
         performance_since_listing,
         momentum_1m,
         roe,
-        operating_cf_margin,
+        fcf_margin,
         asset_to_equity,
         volatility_1m,
         beta_1y,
@@ -500,7 +507,7 @@ def metric_coverage(rows: list[tuple[Any, ...]]) -> dict[str, int]:
         "performance_since_listing": 17,
         "momentum_1m": 18,
         "roe": 19,
-        "operating_cf_margin": 20,
+        "fcf_margin": 20,
         "asset_to_equity": 21,
         "volatility_1m": 22,
         "beta_1y": 23,
@@ -514,7 +521,7 @@ def insert_snapshots(conn: sqlite3.Connection, rows: list[tuple[Any, ...]]) -> N
         INSERT OR REPLACE INTO factor_snapshots
         (snapshot_date, code, symbol, name, board, listing_age_days, is_new_stock, available_trading_days,
          close_price, market_cap, pe, pb, ps, dividend_yield, earning_growth, revenue_growth,
-         performance_1y, performance_since_listing, momentum_1m, roe, operating_cf_margin, asset_to_equity,
+         performance_1y, performance_since_listing, momentum_1m, roe, fcf_margin, asset_to_equity,
          volatility_1m, beta_1y, data_quality_flags, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,

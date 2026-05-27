@@ -240,14 +240,14 @@ func validatePipelineRunRequest(request PipelineRunRequest) error {
 	if !containsString([]string{"all", "securities", "daily-bars", "index-bars", "financials", "dividends"}, request.Phase0Mode) {
 		return fmt.Errorf("unsupported phase0 mode: %s", request.Phase0Mode)
 	}
-	if !containsString([]string{"incremental", "repair_missing_dividend_yield", "repair_missing_operating_cash_flow"}, request.Scope) {
+	if !containsString([]string{"incremental", "repair_missing_dividend_yield", "repair_missing_fcfm_inputs"}, request.Scope) {
 		return fmt.Errorf("unsupported factor lab scope: %s", request.Scope)
 	}
 	if request.Scope == "repair_missing_dividend_yield" && (request.Phase0Mode != "dividends" || !containsString([]string{"all", "phase0"}, request.Phase)) {
 		return fmt.Errorf("repair_missing_dividend_yield requires phase=all|phase0 and phase0_mode=dividends")
 	}
-	if request.Scope == "repair_missing_operating_cash_flow" && (request.Phase0Mode != "financials" || !containsString([]string{"all", "phase0"}, request.Phase)) {
-		return fmt.Errorf("repair_missing_operating_cash_flow requires phase=all|phase0 and phase0_mode=financials")
+	if request.Scope == "repair_missing_fcfm_inputs" && (request.Phase0Mode != "financials" || !containsString([]string{"all", "phase0"}, request.Phase)) {
+		return fmt.Errorf("repair_missing_fcfm_inputs requires phase=all|phase0 and phase0_mode=financials")
 	}
 	return nil
 }

@@ -56,9 +56,15 @@ def test_ensure_schema_creates_phase0_tables(tmp_path):
         assert "factor_rank_scores" in tables
         assert "factor_scores" in tables
         dividend_columns = module.table_columns(conn, "factor_dividend_records")
+        financial_columns = module.table_columns(conn, "factor_financial_metrics")
+        snapshot_columns = module.table_columns(conn, "factor_snapshots")
+        rank_score_columns = module.table_columns(conn, "factor_rank_scores")
         assert "dividend_yield" in dividend_columns
         assert "dividend_yield_source" in dividend_columns
         assert "raw_plan" in dividend_columns
+        assert "capex" in financial_columns
+        assert "fcf_margin" in snapshot_columns
+        assert "fcf_margin_rank_score" in rank_score_columns
     finally:
         conn.close()
 
@@ -251,3 +257,10 @@ def test_source_args_are_available_for_all_modes():
     assert args.dividends_source == "eastmoney"
     assert args.progress_interval == 3
     assert args.verbose is True
+
+
+def test_normalize_capex_value_keeps_cash_outflow_non_negative():
+    assert module.normalize_capex_value(None) is None
+    assert module.normalize_capex_value(123.0) == 123.0
+    assert module.normalize_capex_value(-123.0) == 123.0
+    assert module.normalize_capex_value("-456") == 456.0

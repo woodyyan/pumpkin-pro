@@ -50,7 +50,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--db", default="", help="pumpkin.db 路径；默认自动查找 data/pumpkin.db")
     parser.add_argument("--write", action="store_true", help="实际写入数据库；默认 dry-run")
     parser.add_argument("--modes", default=",".join(DEFAULT_MODES), help="逗号分隔的模式列表")
-    parser.add_argument("--scope", choices=["incremental", "repair_missing_dividend_yield", "repair_missing_operating_cash_flow"], default="incremental", help="增量或字段修复范围")
+    parser.add_argument("--scope", choices=["incremental", "repair_missing_dividend_yield", "repair_missing_fcfm_inputs"], default="incremental", help="增量或字段修复范围")
     parser.add_argument("--critical-modes", default=",".join(sorted(DEFAULT_CRITICAL_MODES)), help="失败后必须返回 failed 的关键模式")
     parser.add_argument("--lookback-days", type=int, default=DEFAULT_LOOKBACK_DAYS, help="无本地日期时的兜底回看自然日")
     parser.add_argument("--buffer-days", type=int, default=DEFAULT_BUFFER_DAYS, help="从本地最新日期向前回退的增量缓冲天数")
@@ -152,16 +152,24 @@ def latest_report_candidates(limit: int) -> list[str]:
     return [item for item in candidates if item <= parsed_today][:max(limit, 1)]
 
 
-def codes_missing_operating_cash_flow(conn: sqlite3.Connection) -> list[str]:
+def codes_missing_fcfm_inputs(conn: sqlite3.Connection) -> list[str]:
     try:
         rows = conn.execute(
             """
-            SELECT DISTINCT s.code
+            SELECT s.code
             FROM factor_securities s
-            JOIN factor_financial_metrics f ON f.code = s.code
+            LEFT JOIN factor_financial_metrics f ON f.code = s.code AND f.report_period = (
+              SELECT MAX(f2.report_period)
+              FROM factor_financial_metrics f2
+              WHERE f2.code = s.code
+            )
             WHERE s.is_active = 1 AND s.is_st = 0 AND s.board IN ('MAIN', 'CHINEXT')
-              AND f.revenue IS NOT NULL
-              AND f.operating_cash_flow IS NULL
+              AND (
+                f.code IS NULL
+                OR f.revenue IS NULL
+                OR f.operating_cash_flow IS NULL
+                OR f.capex IS NULL
+              )
             ORDER BY s.code ASC
             """
         ).fetchall()
@@ -278,10 +286,10 @@ def build_mode_command(args: argparse.Namespace, mode: str, conn: sqlite3.Connec
         else:
             cmd.extend(["--lookback-days", str(args.lookback_days)])
     elif mode == "financials":
-        if args.scope == "repair_missing_operating_cash_flow":
-            codes = codes_missing_operating_cash_flow(conn)
-            cmd.append("--require-operating-cash-flow")
-            log_step(f"incremental: financials repair_missing_operating_cash_flow codes={len(codes)} source={args.financials_source}")
+        if args.scope == "repair_missing_fcfm_inputs":
+            codes = codes_missing_fcfm_inputs(conn)
+            cmd.append("--require-fcfm-inputs")
+            log_step(f"incremental: financials repair_missing_fcfm_inputs codes={len(codes)} source={args.financials_source}")
         else:
             codes = codes_missing_financial_reports(conn, args.financial_report_limit)
             log_step(f"incremental: financials missing_codes={len(codes)} source={args.financials_source}")

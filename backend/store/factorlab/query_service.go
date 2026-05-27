@@ -20,7 +20,7 @@ var factorDefinitions = []FactorDefinition{
 	{Key: "value", Label: "价值", Format: "score", Description: "PE、PB、PS 排名分加权后的估值风格得分。"},
 	{Key: "dividend_yield", Label: "股息率", Format: "score", Description: "股息收益率排名分。"},
 	{Key: "growth", Label: "成长", Format: "score", Description: "盈利增长、收入增长与近一年涨幅排名分加权后的成长得分。"},
-	{Key: "quality", Label: "质量", Format: "score", Description: "ROE、经营现金流率与资产权益比排名分加权后的质量得分。"},
+	{Key: "quality", Label: "质量", Format: "score", Description: "ROE、自由现金流率（FCFM）与资产权益比排名分加权后的质量得分。"},
 	{Key: "momentum", Label: "动量", Format: "score", Description: "近一年涨幅与近一月动量排名分加权后的动量得分。"},
 	{Key: "size", Label: "规模", Format: "score", Description: "市值排名分，小市值得分更高。"},
 	{Key: "low_volatility", Label: "低波动", Format: "score", Description: "近一月波动率与近一年 Beta 排名分加权后的低波动得分。"},
@@ -128,7 +128,7 @@ func buildCoverageWarnings(total int64, raw, factors map[string]int64) []string 
 		return []string{}
 	}
 	warnings := []string{}
-	for _, key := range []string{"dividend_yield", "performance_1y", "operating_cf_margin"} {
+	for _, key := range []string{"dividend_yield", "performance_1y", "fcf_margin"} {
 		if float64(raw[key])/float64(total) < 0.8 {
 			warnings = append(warnings, fmt.Sprintf("%s 覆盖率低于 80%%", key))
 		}

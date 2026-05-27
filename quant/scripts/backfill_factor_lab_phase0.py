@@ -53,6 +53,13 @@ NET_PROFIT_YOY_ALIASES = ["净利润-同比增长", "净利润同比增长", "�
 TOTAL_ASSETS_ALIASES = ["资产总计", "总资产", "资产总计-资产总计"]
 TOTAL_EQUITY_ALIASES = ["所有者权益合计", "股东权益合计", "归属于母公司股东权益合计", "所有者权益(或股东权益)合计"]
 OPERATING_CF_ALIASES = ["经营活动产生的现金流量净额", "经营现金流量净额", "经营活动现金流量净额"]
+CAPEX_ALIASES = [
+    "购建固定资产、无形资产和其他长期资产支付的现金",
+    "购建固定资产、无形资产和长期资产支付的现金",
+    "购建固定资产无形资产和其他长期资产支付的现金",
+    "购建固定资产、无形资产及其他长期资产支付的现金",
+    "购建固定资产、无形资产和其他长期资产所支付的现金",
+]
 REPORT_DATE_ALIASES = ["最新公告日期", "公告日期", "业绩披露日期"]
 DIVIDEND_PER_SHARE_ALIASES = ["每股现金红利", "派息", "现金分红-每股现金红利", "现金分红-派息比例"]
 TOTAL_DIVIDEND_ALIASES = ["现金分红总额", "分红总额", "现金分红-现金分红总额"]
@@ -148,6 +155,7 @@ SCHEMA_SQL = [
         total_assets REAL,
         total_equity REAL,
         operating_cash_flow REAL,
+        capex REAL,
         source TEXT NOT NULL DEFAULT '',
         updated_at DATETIME NOT NULL,
         PRIMARY KEY (code, report_period)
@@ -190,7 +198,7 @@ SCHEMA_SQL = [
         performance_since_listing REAL,
         momentum_1m REAL,
         roe REAL,
-        operating_cf_margin REAL,
+        fcf_margin REAL,
         asset_to_equity REAL,
         volatility_1m REAL,
         beta_1y REAL,
@@ -242,7 +250,7 @@ SCHEMA_SQL = [
         revenue_growth_rank_score REAL,
         performance_1y_rank_score REAL,
         roe_rank_score REAL,
-        operating_cf_margin_rank_score REAL,
+        fcf_margin_rank_score REAL,
         asset_to_equity_rank_score REAL,
         momentum_1m_rank_score REAL,
         market_cap_rank_score REAL,
@@ -449,6 +457,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     for statement in SCHEMA_SQL:
         conn.execute(statement)
     ensure_factor_dividend_columns(conn)
+    ensure_factor_financial_columns(conn)
+    ensure_factor_snapshot_columns(conn)
+    ensure_factor_rank_score_columns(conn)
     conn.commit()
 
 
@@ -458,6 +469,36 @@ def ensure_factor_dividend_columns(conn: sqlite3.Connection) -> None:
         "dividend_yield": "ALTER TABLE factor_dividend_records ADD COLUMN dividend_yield REAL",
         "dividend_yield_source": "ALTER TABLE factor_dividend_records ADD COLUMN dividend_yield_source TEXT NOT NULL DEFAULT ''",
         "raw_plan": "ALTER TABLE factor_dividend_records ADD COLUMN raw_plan TEXT NOT NULL DEFAULT ''",
+    }
+    for column, statement in migrations.items():
+        if column not in columns:
+            conn.execute(statement)
+
+
+def ensure_factor_financial_columns(conn: sqlite3.Connection) -> None:
+    columns = table_columns(conn, "factor_financial_metrics")
+    migrations = {
+        "capex": "ALTER TABLE factor_financial_metrics ADD COLUMN capex REAL",
+    }
+    for column, statement in migrations.items():
+        if column not in columns:
+            conn.execute(statement)
+
+
+def ensure_factor_snapshot_columns(conn: sqlite3.Connection) -> None:
+    columns = table_columns(conn, "factor_snapshots")
+    migrations = {
+        "fcf_margin": "ALTER TABLE factor_snapshots ADD COLUMN fcf_margin REAL",
+    }
+    for column, statement in migrations.items():
+        if column not in columns:
+            conn.execute(statement)
+
+
+def ensure_factor_rank_score_columns(conn: sqlite3.Connection) -> None:
+    columns = table_columns(conn, "factor_rank_scores")
+    migrations = {
+        "fcf_margin_rank_score": "ALTER TABLE factor_rank_scores ADD COLUMN fcf_margin_rank_score REAL",
     }
     for column, statement in migrations.items():
         if column not in columns:
@@ -1219,6 +1260,13 @@ def frame_by_code(df: Any, value_aliases: list[str], extra_aliases: Optional[lis
     return result
 
 
+def normalize_capex_value(value: Any) -> Optional[float]:
+    parsed = safe_float(value)
+    if parsed is None:
+        return None
+    return abs(parsed)
+
+
 def parse_financial_frame_rows(yjbb: Any, zcfz: Any, xjll: Any, report_date: str, target_codes: set[str], source: str) -> list[tuple[Any, ...]]:
     if yjbb is None or yjbb.empty:
         return []
@@ -1231,7 +1279,7 @@ def parse_financial_frame_rows(yjbb: Any, zcfz: Any, xjll: Any, report_date: str
     profit_yoy_col = find_column(yjbb.columns, NET_PROFIT_YOY_ALIASES)
     report_date_col = find_column(yjbb.columns, REPORT_DATE_ALIASES)
     assets = frame_by_code(zcfz, TOTAL_ASSETS_ALIASES, TOTAL_EQUITY_ALIASES)
-    cashflows = frame_by_code(xjll, OPERATING_CF_ALIASES)
+    cashflows = frame_by_code(xjll, OPERATING_CF_ALIASES, CAPEX_ALIASES)
     rows: list[tuple[Any, ...]] = []
     now = utc_now()
     for _, row in yjbb.iterrows():
@@ -1251,6 +1299,7 @@ def parse_financial_frame_rows(yjbb: Any, zcfz: Any, xjll: Any, report_date: str
             safe_float(asset_row.get("value")),
             safe_float(asset_row.get("extra")),
             safe_float(cf_row.get("value")),
+            normalize_capex_value(cf_row.get("extra")),
             source,
             now,
         ))
@@ -1362,6 +1411,7 @@ def fetch_financials_tencent(conn: sqlite3.Connection, args: argparse.Namespace)
             None,
             None,
             None,
+            None,
             "tencent+fundamentals:fallback",
             now,
         ))
@@ -1386,8 +1436,8 @@ def fetch_financial_rows_with_fallback(conn: sqlite3.Connection, args: argparse.
                 rows = fetch_financials_tencent(conn, args)
             else:
                 raise ValueError(f"未知 source: {item}")
-            if args.require_operating_cash_flow and not any(row[9] is not None for row in rows):
-                raise RuntimeError(f"{item} 未返回经营现金流字段")
+            if args.require_fcfm_inputs and not any(row[3] is not None and row[9] is not None and row[10] is not None for row in rows):
+                raise RuntimeError(f"{item} 未返回 FCFM 所需字段（revenue/operating_cash_flow/capex）")
             log_step(f"financials: 数据源 {item} 成功，记录 {len(rows)} 条")
             return rows, item
         except Exception as exc:  # noqa: BLE001
@@ -1408,8 +1458,8 @@ def backfill_financials(conn: sqlite3.Connection, args: argparse.Namespace, run_
     conn.executemany(
         """
         INSERT OR REPLACE INTO factor_financial_metrics
-        (code, report_period, report_date, revenue, revenue_yoy, net_profit, net_profit_yoy, total_assets, total_equity, operating_cash_flow, source, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (code, report_period, report_date, revenue, revenue_yoy, net_profit, net_profit_yoy, total_assets, total_equity, operating_cash_flow, capex, source, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows,
     )
@@ -1674,7 +1724,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--index-bars-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="指数日线数据源；auto=AKShare→东方财富→腾讯")
     parser.add_argument("--financials-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="财务数据源；auto=AKShare→东方财富→腾讯基础面兜底")
     parser.add_argument("--dividends-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="分红数据源；auto=AKShare→东方财富→腾讯基础面兜底")
-    parser.add_argument("--require-operating-cash-flow", action="store_true", help="财务回填要求至少一个经营现金流字段，否则继续尝试下一数据源")
+    parser.add_argument("--require-fcfm-inputs", "--require-operating-cash-flow", dest="require_fcfm_inputs", action="store_true", help="财务回填要求至少一个 revenue/operating_cash_flow/capex 组合可用于计算 FCFM，否则继续尝试下一数据源")
     parser.add_argument("--progress-interval", type=int, default=50, help="每处理多少项输出一次进度")
     parser.add_argument("--verbose", action="store_true", help="输出外部源失败的完整 traceback")
     parser.add_argument("--sleep", type=float, default=0.05, help="单股票请求间隔秒数，避免外部源限流")

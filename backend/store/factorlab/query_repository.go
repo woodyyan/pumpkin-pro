@@ -16,20 +16,20 @@ var factorScoreColumns = map[string]string{
 }
 
 var rawMetricColumns = map[string]string{
-	"pe":                  "pe",
-	"pb":                  "pb",
-	"ps":                  "ps",
-	"dividend_yield":      "dividend_yield",
-	"earning_growth":      "earning_growth",
-	"revenue_growth":      "revenue_growth",
-	"performance_1y":      "performance_1y",
-	"roe":                 "roe",
-	"operating_cf_margin": "operating_cf_margin",
-	"asset_to_equity":     "asset_to_equity",
-	"momentum_1m":         "momentum_1m",
-	"market_cap":          "market_cap",
-	"volatility_1m":       "volatility_1m",
-	"beta_1y":             "beta_1y",
+	"pe":              "pe",
+	"pb":              "pb",
+	"ps":              "ps",
+	"dividend_yield":  "dividend_yield",
+	"earning_growth":  "earning_growth",
+	"revenue_growth":  "revenue_growth",
+	"performance_1y":  "performance_1y",
+	"roe":             "roe",
+	"fcf_margin":      "fcf_margin",
+	"asset_to_equity": "asset_to_equity",
+	"momentum_1m":     "momentum_1m",
+	"market_cap":      "market_cap",
+	"volatility_1m":   "volatility_1m",
+	"beta_1y":         "beta_1y",
 }
 
 func (r *Repository) LatestSnapshotDate(ctx context.Context) (string, error) {

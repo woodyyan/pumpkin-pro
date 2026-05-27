@@ -29,7 +29,7 @@ describe('portfolio market overview card structure', () => {
   it('merges profit and loss counts into the overview UI', () => {
     assert.match(pageSource, /function ProfitLossCount/)
     assert.match(pageSource, /<ProfitLossCount profit=\{block\.profit_position_count\} loss=\{block\.loss_position_count\} \/>/)
-    assert.match(pageSource, /<h3 className="text-sm font-semibold text-white\/80">分市场总览<\/h3>/)
+    assert.match(pageSource, /<h3 className="text-sm font-semibold text-foreground-muted">分市场总览<\/h3>/)
     assert.match(pageSource, /<ProfitLossCount profit=\{summary\.profit_position_count\} loss=\{summary\.loss_position_count\} \/>/)
   })
 

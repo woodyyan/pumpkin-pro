@@ -9,7 +9,7 @@ function formatSignalPerformancePct(value) {
 
 function getSignalPerformanceReturnClass(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 'text-white/40'
-  return value >= 0 ? 'text-red-300' : 'text-emerald-300'
+  return value >= 0 ? 'text-red-300' : 'text-positive'
 }
 
 function hasQualityValidationReturn(validation) {
@@ -103,7 +103,7 @@ describe('quality validation detail window helpers', () => {
   it('formats ready windows with signed returns and chinese-market colors', () => {
     assert.equal(buildQualityWindowStatusLabel({ ready: true, direction_status: 'hit' }), '命中')
     assert.equal(buildQualityWindowValue({ ready: true, return_pct: -4.12 }, { available_days: 5 }), '-4.1%')
-    assert.equal(getSignalPerformanceReturnClass(-4.12), 'text-emerald-300')
+    assert.equal(getSignalPerformanceReturnClass(-4.12), 'text-positive')
   })
 
   it('formats pending windows with progress', () => {

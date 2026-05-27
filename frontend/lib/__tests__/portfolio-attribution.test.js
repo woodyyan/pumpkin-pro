@@ -225,9 +225,9 @@ describe('portfolio attribution helpers', () => {
   })
 
   it('maps positive/negative values to chinese-market tone classes', () => {
-    assert.equal(attributionToneClass(1.2), 'text-rose-400')
-    assert.equal(attributionToneClass(-1.2), 'text-emerald-400')
-    assert.equal(attributionToneClass(0), 'text-white/82')
+    assert.equal(attributionToneClass(1.2), 'text-negative')
+    assert.equal(attributionToneClass(-1.2), 'text-positive')
+    assert.equal(attributionToneClass(0), 'text-foreground')
   })
 
   it('builds hero badges from the selected scope waterfall', () => {

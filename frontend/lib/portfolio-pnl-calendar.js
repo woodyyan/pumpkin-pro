@@ -1,8 +1,8 @@
 import { requestJson } from './api'
 
 const PNL_COLOR_POSITIVE = 'text-negative'
-const PNL_COLOR_NEGATIVE = 'text-emerald-400'
-const PNL_COLOR_NEUTRAL = 'text-foreground/42'
+const PNL_COLOR_NEGATIVE = 'text-positive'
+const PNL_COLOR_NEUTRAL = 'text-foreground-dim'
 
 export function getCalendarPnlColor(value) {
   if (typeof value !== 'number' || Number.isNaN(value) || value === 0) return PNL_COLOR_NEUTRAL

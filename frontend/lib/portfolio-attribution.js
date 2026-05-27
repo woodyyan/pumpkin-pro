@@ -112,10 +112,10 @@ export function formatAttributionPercent(value, digits = 1, options = {}) {
   return `${sign}${pct.toFixed(digits)}%`
 }
 
-export function attributionToneClass(value, fallback = 'text-foreground/82') {
+export function attributionToneClass(value, fallback = 'text-foreground') {
   if (typeof value !== 'number' || Number.isNaN(value)) return fallback
   if (value > 0) return 'text-negative'
-  if (value < 0) return 'text-emerald-400'
+  if (value < 0) return 'text-positive'
   return fallback
 }
 

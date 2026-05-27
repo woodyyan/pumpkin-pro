@@ -175,7 +175,7 @@ describe('portfolio event copy helpers', () => {
     }
     assert.equal(formatPortfolioEventHeadline(event, '600036').includes('买入 200 股'), true)
     assert.equal(formatPortfolioEventSubline(event, '600036').includes('100 股 → 300 股'), true)
-    assert.equal(getPortfolioEventAccent(event), 'text-rose-300')
+    assert.equal(getPortfolioEventAccent(event), 'text-negative')
   })
 
   it('formats sell and adjust events', () => {

@@ -13,8 +13,8 @@ function getMedal(rank) {
   if (rank === 1) return { icon: '🥇', className: '' }
   if (rank === 2) return { icon: '🥈', className: '' }
   if (rank === 3) return { icon: '🥉', className: '' }
-  if (rank <= 10) return { icon: null, className: 'rounded-full bg-white/10 text-white text-[10px]' }
-  return { icon: null, className: 'text-white/35 text-[10px]' }
+  if (rank <= 10) return { icon: null, className: 'rounded-full bg-[var(--color-bg-hover)] text-foreground text-[10px]' }
+  return { icon: null, className: 'text-foreground-dim text-[10px]' }
 }
 
 function formatCode(code, exchange) {
@@ -86,13 +86,13 @@ function formatReturnPctDisplay(value) {
 }
 
 function getReturnTextClass(value) {
-  if (!hasReturnPct(value)) return 'text-white/25'
-  return value >= 0 ? 'text-red-400' : 'text-green-400'
+  if (!hasReturnPct(value)) return 'text-foreground-disabled'
+  return value >= 0 ? 'text-negative' : 'text-positive'
 }
 
 function getConsecutiveValueClass(value) {
-  if (!value || value <= 0) return 'text-white/25'
-  return value >= 7 ? 'text-emerald-300' : 'text-white/75'
+  if (!value || value <= 0) return 'text-foreground-disabled'
+  return value >= 7 ? 'text-positive' : 'text-foreground'
 }
 
 function buildMobileKeyFacts(days, pct) {
@@ -179,7 +179,7 @@ describe('getMedal (ranking badge)', () => {
     assert.equal(m11.icon, null)
     assert.ok(!m11.className.includes('rounded-full'))
     assert.ok(m11.className.includes('text-[10px]'))
-    assert.ok(m20.className.includes('text-white/35'))
+    assert.ok(m20.className.includes('text-foreground-dim'))
   })
 })
 
@@ -281,16 +281,16 @@ describe('return_pct display helpers', () => {
 describe('result emphasis helpers', () => {
 
   it('maps return values to the correct emphasis color', () => {
-    assert.equal(getReturnTextClass(null), 'text-white/25')
-    assert.equal(getReturnTextClass(0), 'text-red-400')
-    assert.equal(getReturnTextClass(3.5), 'text-red-400')
-    assert.equal(getReturnTextClass(-1.2), 'text-green-400')
+    assert.equal(getReturnTextClass(null), 'text-foreground-disabled')
+    assert.equal(getReturnTextClass(0), 'text-negative')
+    assert.equal(getReturnTextClass(3.5), 'text-negative')
+    assert.equal(getReturnTextClass(-1.2), 'text-positive')
   })
 
   it('maps consecutive days to the correct badge color', () => {
-    assert.equal(getConsecutiveValueClass(0), 'text-white/25')
-    assert.equal(getConsecutiveValueClass(3), 'text-white/75')
-    assert.equal(getConsecutiveValueClass(7), 'text-emerald-300')
+    assert.equal(getConsecutiveValueClass(0), 'text-foreground-disabled')
+    assert.equal(getConsecutiveValueClass(3), 'text-foreground')
+    assert.equal(getConsecutiveValueClass(7), 'text-positive')
   })
 })
 

@@ -31,7 +31,7 @@ describe('formatBackupDuration()', () => {
 
 describe('getBackupCosMeta()', () => {
   it('returns fallback for unknown status', () => {
-    assert.deepEqual(getBackupCosMeta('unknown'), { label: 'unknown', tone: 'text-white/45', symbol: '·' })
+    assert.deepEqual(getBackupCosMeta('unknown'), { label: 'unknown', tone: 'text-foreground-dim', symbol: '·' })
   })
 })
 

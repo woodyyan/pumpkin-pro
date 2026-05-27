@@ -13,7 +13,7 @@ function formatSignalPerformancePct(value) {
 
 function getSignalPerformanceReturnClass(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 'text-white/40'
-  return value >= 0 ? 'text-red-300' : 'text-emerald-300'
+  return value >= 0 ? 'text-red-300' : 'text-positive'
 }
 
 function buildSignalPerformanceSummary(signal, perf) {
@@ -81,7 +81,7 @@ describe('signal performance visual helpers', () => {
   it('maps return sign to chinese-market colors', () => {
     assert.equal(getSignalPerformanceReturnClass(0), 'text-red-300')
     assert.equal(getSignalPerformanceReturnClass(2.1), 'text-red-300')
-    assert.equal(getSignalPerformanceReturnClass(-2.1), 'text-emerald-300')
+    assert.equal(getSignalPerformanceReturnClass(-2.1), 'text-positive')
     assert.equal(getSignalPerformanceReturnClass(null), 'text-white/40')
   })
 

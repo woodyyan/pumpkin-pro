@@ -28,8 +28,8 @@ function formatPercentValue(value, digits = 2) {
 }
 
 function getPerformanceClass(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'text-white/35'
-  return Number(value) >= 0 ? 'text-rose-300' : 'text-emerald-300'
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'text-foreground-dim'
+  return Number(value) >= 0 ? 'text-negative' : 'text-positive'
 }
 
 function buildChartPoints(series, width, height, padding) {
@@ -69,10 +69,10 @@ describe('RankingPortfolioPanel helpers', () => {
   })
 
   it('maps performance color correctly', () => {
-    assert.equal(getPerformanceClass(0), 'text-rose-300')
-    assert.equal(getPerformanceClass(-0.1), 'text-emerald-300')
-    assert.equal(getPerformanceClass(undefined), 'text-white/35')
-    assert.equal(getRankingPortfolioPerformanceClass(-0.1), 'text-emerald-300')
+    assert.equal(getPerformanceClass(0), 'text-negative')
+    assert.equal(getPerformanceClass(-0.1), 'text-positive')
+    assert.equal(getPerformanceClass(undefined), 'text-foreground-dim')
+    assert.equal(getRankingPortfolioPerformanceClass(-0.1), 'text-positive')
   })
 
   it('builds svg paths for series data', () => {

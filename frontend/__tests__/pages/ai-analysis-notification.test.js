@@ -113,7 +113,7 @@ describe('settings page notification preferences', () => {
 
 describe('settings page webhook delivery history', () => {
   it('renders delivery history as collapsed details by default', () => {
-    assert.match(settingsPageSource, /<details className="group rounded-xl border border-border bg-black\/20 p-4">/)
+    assert.match(settingsPageSource, /<details className="group rounded-xl border border-border bg-\[var\(--color-bg-hover\)\] p-4">/)
     assert.match(settingsPageSource, /默认收起，点开后查看最近的投递记录。/)
     assert.match(settingsPageSource, /group-open:hidden/)
     assert.match(settingsPageSource, /group-open:inline/)

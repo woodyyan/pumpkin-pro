@@ -5,7 +5,7 @@ export const BACKUP_TRIGGER_LABELS = {
 }
 
 export const BACKUP_STATUS_COLORS = {
-  success: 'text-emerald-400',
+  success: 'text-positive',
   partial: 'text-amber-400',
   failed: 'text-negative',
   skipped: 'text-foreground-dim',
@@ -17,7 +17,7 @@ export const BACKUP_COS_STATUS_META = {
   never: { label: '待首次同步', tone: 'text-foreground-dim', symbol: '…' },
   pending: { label: '待上传', tone: 'text-sky-300', symbol: '…' },
   uploading: { label: '上传中', tone: 'text-sky-300', symbol: '⇪' },
-  success: { label: '已同步', tone: 'text-emerald-400', symbol: '✅' },
+  success: { label: '已同步', tone: 'text-positive', symbol: '✅' },
   partial: { label: '部分同步', tone: 'text-amber-400', symbol: '⚠' },
   failed: { label: '同步失败', tone: 'text-negative', symbol: '✕' },
   skipped: { label: '已跳过', tone: 'text-foreground-dim', symbol: '-' },

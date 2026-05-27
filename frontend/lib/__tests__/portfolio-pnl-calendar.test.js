@@ -40,9 +40,9 @@ describe('portfolio pnl calendar helpers', () => {
   })
 
   it('uses Chinese market pnl colors', () => {
-    assert.equal(helpers.getCalendarPnlColor(1), 'text-rose-400')
-    assert.equal(helpers.getCalendarPnlColor(-1), 'text-emerald-400')
-    assert.equal(helpers.getCalendarPnlColor(0), 'text-white/42')
+    assert.equal(helpers.getCalendarPnlColor(1), 'text-negative')
+    assert.equal(helpers.getCalendarPnlColor(-1), 'text-positive')
+    assert.equal(helpers.getCalendarPnlColor(0), 'text-foreground-dim')
   })
 
   it('does not default mixed all-market calendars to ALL', () => {

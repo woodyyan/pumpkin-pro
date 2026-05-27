@@ -13,8 +13,8 @@ describe('admin page theme integration', () => {
 
   it('uses semantic card and input backgrounds instead of hardcoded dark colors', () => {
     assert.match(pageSource, /bg-card/)
-    assert.match(pageSource, /bg-background-secondary/)
-    assert.match(pageSource, /focus:bg-background-tertiary/)
+    assert.match(pageSource, /bg-background-alt/)
+    assert.match(pageSource, /focus:bg-\[var\(--color-bg-hover\)\]/) 
     assert.doesNotMatch(pageSource, /bg-\[#121317\]|bg-\[#15171e\]|bg-\[#171a21\]|bg-\[#111318\]|bg-\[#191d27\]|bg-\[#202633\]|bg-\[#1b1f28\]|bg-\[#0f1117\]/)
   })
 

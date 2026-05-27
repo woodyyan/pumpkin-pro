@@ -134,7 +134,7 @@ function AdminLoginForm({ onLogin }) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="email"
-                className="w-full rounded-xl border border-border bg-background-secondary px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-amber-400 focus:bg-background-tertiary"
+                className="w-full rounded-xl border border-border bg-background-alt px-4 py-2.5 text-sm text-foreground outline-none transition placeholder:text-foreground-disabled focus:border-primary focus:bg-[var(--color-bg-hover)]"
                 placeholder="admin@example.com"
               />
             </div>
@@ -145,7 +145,7 @@ function AdminLoginForm({ onLogin }) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
-                className="w-full rounded-xl border border-border bg-background-secondary px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-amber-400 focus:bg-background-tertiary"
+                className="w-full rounded-xl border border-border bg-background-alt px-4 py-2.5 text-sm text-foreground outline-none transition placeholder:text-foreground-disabled focus:border-primary focus:bg-[var(--color-bg-hover)]"
                 placeholder="••••••••"
               />
             </div>
@@ -442,7 +442,7 @@ function AIProviderConfigPanel({ onUnauthorized }) {
             type="text"
             value={draft.base_url}
             onChange={(e) => updateDraft('base_url', e.target.value)}
-            className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground outline-none transition focus:border-amber-400/60 focus:bg-background-tertiary"
+            className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/60 focus:bg-[var(--color-bg-hover)]"
             placeholder="https://api.openai.com/v1"
           />
         </div>
@@ -452,7 +452,7 @@ function AIProviderConfigPanel({ onUnauthorized }) {
             type="text"
             value={draft.model_id}
             onChange={(e) => updateDraft('model_id', e.target.value)}
-            className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground outline-none transition focus:border-amber-400/60 focus:bg-background-tertiary"
+            className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/60 focus:bg-[var(--color-bg-hover)]"
             placeholder="gpt-4o-mini"
           />
         </div>
@@ -464,7 +464,7 @@ function AIProviderConfigPanel({ onUnauthorized }) {
           type="password"
           value={draft.api_key}
           onChange={(e) => updateDraft('api_key', e.target.value)}
-          className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground outline-none transition focus:border-amber-400/60 focus:bg-background-tertiary"
+          className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground outline-none transition focus:border-primary/60 focus:bg-[var(--color-bg-hover)]"
           placeholder="留空表示保持当前 key"
         />
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-foreground-dim">
@@ -1348,9 +1348,9 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
       <div className="mt-4 rounded-xl border border-border bg-card p-4">
         <div className="mb-3 text-xs text-foreground-dim">手动运行</div>
         <div className="grid gap-3 md:grid-cols-4">
-          <label className="text-xs text-foreground-dim">阶段<select value={manualPhase} onChange={(e) => setManualPhase(e.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background-secondary px-2 py-2 text-foreground-muted"><option value="all">完整流水线</option><option value="phase0">只跑 Phase0</option><option value="phase1">只跑 Phase1</option><option value="phase2">只跑 Phase2</option><option value="phase1_phase2">Phase1 + Phase2</option></select></label>
-          <label className="text-xs text-foreground-dim">Phase0 mode<select value={phase0Mode} onChange={(e) => setPhase0Mode(e.target.value)} disabled={!['all', 'phase0'].includes(manualPhase)} className="mt-1 w-full rounded-lg border border-border bg-background-secondary px-2 py-2 text-foreground-muted disabled:opacity-40"><option value="all">all</option><option value="securities">securities</option><option value="daily-bars">daily-bars</option><option value="index-bars">index-bars</option><option value="financials">financials</option><option value="dividends">dividends</option></select></label>
-          <label className="text-xs text-foreground-dim">范围<select value={manualScope} onChange={(e) => setManualScope(e.target.value)} disabled={!['all', 'phase0'].includes(manualPhase)} className="mt-1 w-full rounded-lg border border-border bg-background-secondary px-2 py-2 text-foreground-muted disabled:opacity-40"><option value="incremental">incremental</option><option value="repair_missing_dividend_yield">修复股息率</option><option value="repair_missing_fcfm_inputs">修复自由现金流率</option></select></label>
+          <label className="text-xs text-foreground-dim">阶段<select value={manualPhase} onChange={(e) => setManualPhase(e.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background-alt px-2 py-2 text-foreground outline-none transition focus:border-primary"><option value="all">完整流水线</option><option value="phase0">只跑 Phase0</option><option value="phase1">只跑 Phase1</option><option value="phase2">只跑 Phase2</option><option value="phase1_phase2">Phase1 + Phase2</option></select></label>
+          <label className="text-xs text-foreground-dim">Phase0 mode<select value={phase0Mode} onChange={(e) => setPhase0Mode(e.target.value)} disabled={!['all', 'phase0'].includes(manualPhase)} className="mt-1 w-full rounded-lg border border-border bg-background-alt px-2 py-2 text-foreground outline-none transition focus:border-primary disabled:cursor-not-allowed disabled:text-foreground-disabled disabled:opacity-40"><option value="all">all</option><option value="securities">securities</option><option value="daily-bars">daily-bars</option><option value="index-bars">index-bars</option><option value="financials">financials</option><option value="dividends">dividends</option></select></label>
+          <label className="text-xs text-foreground-dim">范围<select value={manualScope} onChange={(e) => setManualScope(e.target.value)} disabled={!['all', 'phase0'].includes(manualPhase)} className="mt-1 w-full rounded-lg border border-border bg-background-alt px-2 py-2 text-foreground outline-none transition focus:border-primary disabled:cursor-not-allowed disabled:text-foreground-disabled disabled:opacity-40"><option value="incremental">incremental</option><option value="repair_missing_dividend_yield">修复股息率</option><option value="repair_missing_fcfm_inputs">修复自由现金流率</option></select></label>
           <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline()} className="self-end rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-foreground transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50">{triggering ? '触发中...' : '按选择运行'}</button>
         </div>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">

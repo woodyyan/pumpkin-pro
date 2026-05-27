@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { useTheme } from '../lib/theme-context'
 import { LabelWithInfo } from './InfoTip'
 import { formatCloseDateLabel } from '../lib/trade-date-label'
 import {
@@ -21,7 +22,8 @@ const CHART_COLORS = {
   baseline: 'rgba(148,163,184,0.35)',
   grid: 'rgba(148,163,184,0.10)',
   border: 'rgba(148,163,184,0.20)',
-  text: 'rgba(255,255,255,0.72)',
+  textDark: 'rgba(255,255,255,0.72)',
+  textLight: 'rgba(30,41,59,0.78)',
 }
 
 function formatChartTick(time) {
@@ -54,6 +56,7 @@ function buildTooltipPosition(point, container) {
 }
 
 function RankingPortfolioChart({ series = [], benchmarkLabel = '上证指数' }) {
+  const { resolvedTheme } = useTheme()
   const containerRef = useRef(null)
   const chartRef = useRef(null)
   const chartData = useMemo(() => buildRankingPortfolioChartSeriesData(series), [series])
@@ -90,7 +93,7 @@ function RankingPortfolioChart({ series = [], benchmarkLabel = '上证指数' })
         height: 280,
         layout: {
           background: { type: ColorType.Solid, color: 'transparent' },
-          textColor: CHART_COLORS.text,
+          textColor: resolvedTheme === 'light' ? CHART_COLORS.textLight : CHART_COLORS.textDark,
           fontSize: 11,
         },
         grid: {
@@ -225,7 +228,7 @@ function RankingPortfolioChart({ series = [], benchmarkLabel = '上证指数' })
       cancelled = true
       cleanup()
     }
-  }, [benchmarkLabel, chartData.baseline, chartData.benchmark, chartData.points.length, chartData.portfolio, pointMap])
+  }, [benchmarkLabel, chartData.baseline, chartData.benchmark, chartData.points.length, chartData.portfolio, pointMap, resolvedTheme])
 
   if (!chartData.points.length) {
     return (
@@ -589,3 +592,6 @@ function LatestRebalanceRow({ item }) {
     </div>
   )
 }
+
+
+

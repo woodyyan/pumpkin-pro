@@ -114,7 +114,7 @@ function AdminLoginForm({ onLogin }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0b0f] flex items-center justify-center px-4">
+    <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <img src="/logo.png" alt="卧龙" width={56} height={56} className="mx-auto rounded" />
@@ -124,7 +124,7 @@ function AdminLoginForm({ onLogin }) {
 
         <form
           onSubmit={submit}
-          className="rounded-2xl border border-border bg-[#121317]/95 p-6 shadow-2xl"
+          className="rounded-2xl border border-border bg-card/95 p-6 shadow-2xl"
         >
           <div className="space-y-4">
             <div>
@@ -134,7 +134,7 @@ function AdminLoginForm({ onLogin }) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="email"
-                className="w-full rounded-xl border border-[#303543] bg-[#191d27] px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-amber-400 focus:bg-[#202633]"
+                className="w-full rounded-xl border border-border bg-background-secondary px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-amber-400 focus:bg-background-tertiary"
                 placeholder="admin@example.com"
               />
             </div>
@@ -145,7 +145,7 @@ function AdminLoginForm({ onLogin }) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
-                className="w-full rounded-xl border border-[#303543] bg-[#191d27] px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-amber-400 focus:bg-[#202633]"
+                className="w-full rounded-xl border border-border bg-background-secondary px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-amber-400 focus:bg-background-tertiary"
                 placeholder="••••••••"
               />
             </div>
@@ -172,7 +172,7 @@ function AdminLoginForm({ onLogin }) {
 
 function StatCard({ label, value, sub }) {
   return (
-    <div className="rounded-xl border border-border bg-[#15171e] px-4 py-3">
+    <div className="rounded-xl border border-border bg-card px-4 py-3">
       <div className="text-xs text-foreground-dim mb-1">{label}</div>
       <div className="text-2xl font-bold text-foreground tabular-nums">{value ?? '--'}</div>
       {sub && <div className="mt-0.5 text-xs text-foreground-dim">{sub}</div>}
@@ -214,15 +214,15 @@ const AI_CONFIG_STATUS_META = {
   },
   invalid_model: {
     label: '模型不可用',
-    badgeClassName: 'border-amber-400/25 bg-amber-500/12 text-amber-100',
+    badgeClassName: 'border-amber-500/30 bg-amber-50 text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/12 dark:text-amber-100',
   },
   timeout: {
     label: '请求超时',
-    badgeClassName: 'border-amber-400/25 bg-amber-500/12 text-amber-100',
+    badgeClassName: 'border-amber-500/30 bg-amber-50 text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/12 dark:text-amber-100',
   },
   network_error: {
     label: '网络异常',
-    badgeClassName: 'border-amber-400/25 bg-amber-500/12 text-amber-100',
+    badgeClassName: 'border-amber-500/30 bg-amber-50 text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/12 dark:text-amber-100',
   },
   provider_error: {
     label: '服务异常',
@@ -271,7 +271,7 @@ function formatAdminDateTime(value) {
 
 function AIConfigMetric({ label, value, sub }) {
   return (
-    <div className="rounded-2xl border border-border bg-[#171a21] px-4 py-3">
+    <div className="rounded-2xl border border-border bg-card px-4 py-3">
       <div className="text-[11px] text-foreground-dim">{label}</div>
       <div className="mt-1 text-sm font-semibold text-foreground">{value || '--'}</div>
       {sub ? <div className="mt-1 text-[11px] text-foreground-dim">{sub}</div> : null}
@@ -400,14 +400,14 @@ function AIProviderConfigPanel({ onUnauthorized }) {
 
   if (aiConfigResource.loading && !view) {
     return (
-      <section className="rounded-2xl border border-border bg-[#111318] p-5">
+      <section className="rounded-2xl border border-border bg-card p-5">
         <div className="text-sm text-foreground-dim">加载 AI 配置中…</div>
       </section>
     )
   }
 
   return (
-    <section className="rounded-2xl border border-border bg-[#111318] p-4 sm:p-5">
+    <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <h2 className="text-base font-semibold text-foreground-muted">🤖 AI 模型配置</h2>
@@ -442,7 +442,7 @@ function AIProviderConfigPanel({ onUnauthorized }) {
             type="text"
             value={draft.base_url}
             onChange={(e) => updateDraft('base_url', e.target.value)}
-            className="w-full rounded-2xl border border-border bg-[#171a21] px-4 py-3 text-sm text-foreground outline-none transition focus:border-amber-400/60 focus:bg-[#1b1f28]"
+            className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground outline-none transition focus:border-amber-400/60 focus:bg-background-tertiary"
             placeholder="https://api.openai.com/v1"
           />
         </div>
@@ -452,7 +452,7 @@ function AIProviderConfigPanel({ onUnauthorized }) {
             type="text"
             value={draft.model_id}
             onChange={(e) => updateDraft('model_id', e.target.value)}
-            className="w-full rounded-2xl border border-border bg-[#171a21] px-4 py-3 text-sm text-foreground outline-none transition focus:border-amber-400/60 focus:bg-[#1b1f28]"
+            className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground outline-none transition focus:border-amber-400/60 focus:bg-background-tertiary"
             placeholder="gpt-4o-mini"
           />
         </div>
@@ -464,7 +464,7 @@ function AIProviderConfigPanel({ onUnauthorized }) {
           type="password"
           value={draft.api_key}
           onChange={(e) => updateDraft('api_key', e.target.value)}
-          className="w-full rounded-2xl border border-border bg-[#171a21] px-4 py-3 text-sm text-foreground outline-none transition focus:border-amber-400/60 focus:bg-[#1b1f28]"
+          className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground outline-none transition focus:border-amber-400/60 focus:bg-background-tertiary"
           placeholder="留空表示保持当前 key"
         />
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-foreground-dim">
@@ -475,7 +475,7 @@ function AIProviderConfigPanel({ onUnauthorized }) {
         </div>
       </div>
 
-      <label className="mt-4 flex items-start gap-3 rounded-2xl border border-border bg-[#171a21] px-4 py-3">
+      <label className="mt-4 flex items-start gap-3 rounded-2xl border border-border bg-card px-4 py-3">
         <input
           type="checkbox"
           checked={draft.is_enabled}
@@ -501,7 +501,7 @@ function AIProviderConfigPanel({ onUnauthorized }) {
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="rounded-2xl border border-amber-400/30 bg-amber-500/12 px-4 py-3 text-sm font-medium text-amber-100 transition hover:bg-amber-500/18 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-2xl border border-amber-500/30 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/30 dark:bg-amber-500/12 dark:text-amber-100 dark:hover:bg-amber-500/18 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {saving ? '保存中…' : '保存配置'}
         </button>
@@ -567,9 +567,9 @@ function AdminDashboard({ session, onLogout }) {
   }, [onLogout])
 
   return (
-    <div className="min-h-screen bg-[#0a0b0f] text-foreground">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-border bg-[#0a0b0f]/90 backdrop-blur-md">
+      <header className="sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="卧龙" width={32} height={32} className="rounded" />
@@ -617,10 +617,10 @@ function AdminDashboard({ session, onLogout }) {
               </div>
               {/* Trend charts */}
               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="rounded-xl border border-border bg-[#15171e] p-3">
+                <div className="rounded-xl border border-border bg-card p-3">
                   <MiniChart data={stats.trends?.daily_registrations} label="每日注册" width={380} height={130} color="#22c55e" />
                 </div>
-                <div className="rounded-xl border border-border bg-[#15171e] p-3">
+                <div className="rounded-xl border border-border bg-card p-3">
                   <MiniChart data={stats.trends?.daily_active_users} label="DAU（日活跃）" width={380} height={130} color="#60a5fa" />
                 </div>
               </div>
@@ -652,7 +652,7 @@ function AdminDashboard({ session, onLogout }) {
                 <StatCard label="选股用户" value={stats.features?.screener_users} />
               </div>
               {stats.trends?.daily_portfolio_ops && stats.trends.daily_portfolio_ops.length > 0 && (
-                <div className="mt-4 rounded-xl border border-border bg-[#15171e] p-3">
+                <div className="mt-4 rounded-xl border border-border bg-card p-3">
                   <MiniChart data={stats.trends.daily_portfolio_ops} label="每日持仓操作（30天）" width={780} height={130} type="bar" color="#14b8a6" />
                 </div>
               )}
@@ -696,7 +696,7 @@ function AdminDashboard({ session, onLogout }) {
                 <StatCard label="今日投递" value={stats.signals.today_deliveries} />
               </div>
               {stats.trends?.daily_signal_events && stats.trends.daily_signal_events.length > 0 && (
-                <div className="mt-4 rounded-xl border border-border bg-[#15171e] p-3">
+                <div className="mt-4 rounded-xl border border-border bg-card p-3">
                   <MiniChart data={stats.trends.daily_signal_events} label="每日信号事件" width={780} height={130} type="bar" color="#eab308" />
                 </div>
               )}
@@ -726,7 +726,7 @@ function AdminDashboard({ session, onLogout }) {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* Device Type */}
-                  <div className="rounded-xl border border-border bg-[#15171e] p-4">
+                  <div className="rounded-xl border border-border bg-card p-4">
                     <div className="text-xs text-foreground-dim mb-3 text-center">设备类型</div>
                     {deviceAnalytics.device_types && deviceAnalytics.device_types.length > 0 ? (
                       <>
@@ -739,7 +739,7 @@ function AdminDashboard({ session, onLogout }) {
                   </div>
 
                   {/* OS */}
-                  <div className="rounded-xl border border-border bg-[#15171e] p-4">
+                  <div className="rounded-xl border border-border bg-card p-4">
                     <div className="text-xs text-foreground-dim mb-3 text-center">操作系统</div>
                     {deviceAnalytics.os_families && deviceAnalytics.os_families.length > 0 ? (
                       <>
@@ -752,7 +752,7 @@ function AdminDashboard({ session, onLogout }) {
                   </div>
 
                   {/* Browser */}
-                  <div className="rounded-xl border border-border bg-[#15171e] p-4">
+                  <div className="rounded-xl border border-border bg-card p-4">
                     <div className="text-xs text-foreground-dim mb-3 text-center">浏览器</div>
                     {deviceAnalytics.browser_families && deviceAnalytics.browser_families.length > 0 ? (
                       <>
@@ -767,7 +767,7 @@ function AdminDashboard({ session, onLogout }) {
 
                 {/* Top Active Users */}
                 {deviceAnalytics.top_active_users && deviceAnalytics.top_active_users.length > 0 && (
-                  <div className="mt-4 rounded-xl border border-border bg-[#15171e] p-4">
+                  <div className="mt-4 rounded-xl border border-border bg-card p-4">
                     <div className="text-xs text-foreground-dim mb-3">最活跃用户浏览器偏好（Top {deviceAnalytics.top_active_users.length}）</div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs text-left">
@@ -811,16 +811,16 @@ function AdminDashboard({ session, onLogout }) {
                   <StatCard label="30天 UV" value={analytics.month_uv} />
                 </div>
                 <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="rounded-xl border border-border bg-[#15171e] p-3">
+                  <div className="rounded-xl border border-border bg-card p-3">
                     <MiniChart data={analytics.daily_pv} label="每日 PV" width={380} height={130} color="#a78bfa" />
                   </div>
-                  <div className="rounded-xl border border-border bg-[#15171e] p-3">
+                  <div className="rounded-xl border border-border bg-card p-3">
                     <MiniChart data={analytics.daily_uv} label="每日 UV" width={380} height={130} color="#34d399" />
                   </div>
                 </div>
                 {/* Top pages */}
                 {analytics.top_pages && analytics.top_pages.length > 0 && (
-                  <div className="mt-4 rounded-xl border border-border bg-[#15171e] p-4">
+                  <div className="mt-4 rounded-xl border border-border bg-card p-4">
                     <div className="text-xs text-foreground-dim mb-3">页面访问排行（30天）</div>
                     <div className="space-y-2">
                       {analytics.top_pages.map((p, i) => {
@@ -848,7 +848,7 @@ function AdminDashboard({ session, onLogout }) {
                 <h2 className="text-base font-semibold text-foreground-muted mb-3">🌍 流量来源</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* UTM Source breakdown (user registration source) */}
-                  <div className="rounded-xl border border-border bg-[#15171e] p-4">
+                  <div className="rounded-xl border border-border bg-card p-4">
                     <div className="text-xs text-foreground-dim mb-3">注册来源（UTM Source）</div>
                     {(stats.traffic.utm_sources || []).length === 0 ? (
                       <p className="text-xs text-foreground-disabled">暂无数据（推广链接加 ?utm_source=xxx 即可追踪）</p>
@@ -871,7 +871,7 @@ function AdminDashboard({ session, onLogout }) {
                     )}
                   </div>
                   {/* Referrer breakdown (pageview referrer) */}
-                  <div className="rounded-xl border border-border bg-[#15171e] p-4">
+                  <div className="rounded-xl border border-border bg-card p-4">
                     <div className="text-xs text-foreground-dim mb-3">访问来源（Referrer · 30天）</div>
                     {(stats.traffic.referrers || []).length === 0 ? (
                       <p className="text-xs text-foreground-disabled">暂无数据</p>
@@ -962,14 +962,14 @@ function AdminDashboard({ session, onLogout }) {
                   <StatCard label="近30天输出 Token" value={fmt(aiUsage?.summary?.completion_tokens)} />
                 </div>
 
-                <div className="mt-3 rounded-xl border border-amber-400/15 bg-amber-500/[0.06] px-4 py-3 text-xs leading-6 text-amber-100/85">
+                <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-50 px-4 py-3 text-xs leading-6 text-amber-800 dark:border-amber-400/15 dark:bg-amber-500/[0.06] dark:text-amber-100/85">
                   当前 token 面板基于 `ai_call_logs` 的真实 usage 字段聚合；旧日志或 provider 未返回 usage 的请求会记为 0，所以这部分数据会从本次版本上线后逐步变完整。
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
                   {/* 调用次数按功能分布 */}
                   {stats.ai.by_feature && stats.ai.by_feature.length > 0 && (
-                    <div className="rounded-xl border border-border bg-[#15171e] p-4">
+                    <div className="rounded-xl border border-border bg-card p-4">
                       <div className="text-xs text-foreground-dim mb-3">按功能分布（调用次数）</div>
                       <div className="space-y-2">
                         {stats.ai.by_feature.map((f) => {
@@ -991,7 +991,7 @@ function AdminDashboard({ session, onLogout }) {
 
                   {/* Token 按功能分布 */}
                   {stats.ai.by_feature_tokens && stats.ai.by_feature_tokens.length > 0 && (
-                    <div className="rounded-xl border border-border bg-[#15171e] p-4">
+                    <div className="rounded-xl border border-border bg-card p-4">
                       <div className="text-xs text-foreground-dim mb-3">按功能分布（Token 消耗）</div>
                       <div className="space-y-2">
                         {stats.ai.by_feature_tokens.map((f) => {
@@ -1014,12 +1014,12 @@ function AdminDashboard({ session, onLogout }) {
 
                 <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
                   {stats.ai.daily_trend && stats.ai.daily_trend.length > 1 && (
-                    <div className="rounded-xl border border-border bg-[#15171e] p-3">
+                    <div className="rounded-xl border border-border bg-card p-3">
                       <MiniChart data={stats.ai.daily_trend} label="每日 AI 调用趋势（30天）" width={380} height={130} type="bar" color="#a78bfa" />
                     </div>
                   )}
                   {stats.ai.daily_token_trend && stats.ai.daily_token_trend.length > 1 && (
-                    <div className="rounded-xl border border-border bg-[#15171e] p-3">
+                    <div className="rounded-xl border border-border bg-card p-3">
                       <MiniChart data={stats.ai.daily_token_trend} label="每日 Token 用量（30天）" width={380} height={130} type="bar" color="#ec4899" />
                     </div>
                   )}
@@ -1028,7 +1028,7 @@ function AdminDashboard({ session, onLogout }) {
                 <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
                   {/* TOP 调用用户 */}
                   {stats.ai.top_users && stats.ai.top_users.length > 0 && (
-                    <div className="rounded-xl border border-border bg-[#15171e] p-4">
+                    <div className="rounded-xl border border-border bg-card p-4">
                       <div className="text-xs text-foreground-dim mb-3">TOP 调用用户（前 10）</div>
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs text-left">
@@ -1062,7 +1062,7 @@ function AdminDashboard({ session, onLogout }) {
 
                   {/* TOP Token 用户 */}
                   {stats.ai.top_token_users && stats.ai.top_token_users.length > 0 && (
-                    <div className="rounded-xl border border-border bg-[#15171e] p-4">
+                    <div className="rounded-xl border border-border bg-card p-4">
                       <div className="text-xs text-foreground-dim mb-3">TOP Token 用户（前 10）</div>
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs text-left">
@@ -1099,7 +1099,7 @@ function AdminDashboard({ session, onLogout }) {
 
                 {/* 每日每用户 token 明细 */}
                 {aiUsage?.daily_users && aiUsage.daily_users.length > 0 && (
-                  <div className="mt-4 rounded-xl border border-border bg-[#15171e] p-4">
+                  <div className="mt-4 rounded-xl border border-border bg-card p-4">
                     <div className="flex items-center justify-between gap-3 mb-3">
                       <div>
                         <div className="text-xs text-foreground-dim">每日每用户 Token 用量（近 {aiUsage.days || 30} 天）</div>
@@ -1254,7 +1254,7 @@ function CompanyProfilesAdminPanel({ onUnauthorized }) {
         <StatCard label="新股发现" value={refresh.new_count || 0} />
         <StatCard label="退市标记" value={refresh.delisted_count || 0} />
       </div>
-      <div className="mt-4 rounded-xl border border-border bg-[#15171e] p-4">
+      <div className="mt-4 rounded-xl border border-border bg-card p-4">
         <div className="mb-3 text-xs text-foreground-dim">失败项 / 待补全（最近 30 条）</div>
         {(data?.failures || []).length === 0 ? (
           <p className="text-xs text-foreground-disabled">暂无失败项。</p>
@@ -1345,16 +1345,16 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
         <StatCard label="下一次运行" value={formatAdminDateTime(worker.next_run_at)} />
         <StatCard label="当前阶段" value={worker.current?.current_phase || '--'} />
       </div>
-      <div className="mt-4 rounded-xl border border-border bg-[#15171e] p-4">
+      <div className="mt-4 rounded-xl border border-border bg-card p-4">
         <div className="mb-3 text-xs text-foreground-dim">手动运行</div>
         <div className="grid gap-3 md:grid-cols-4">
-          <label className="text-xs text-foreground-dim">阶段<select value={manualPhase} onChange={(e) => setManualPhase(e.target.value)} className="mt-1 w-full rounded-lg border border-border bg-[#0f1117] px-2 py-2 text-foreground-muted"><option value="all">完整流水线</option><option value="phase0">只跑 Phase0</option><option value="phase1">只跑 Phase1</option><option value="phase2">只跑 Phase2</option><option value="phase1_phase2">Phase1 + Phase2</option></select></label>
-          <label className="text-xs text-foreground-dim">Phase0 mode<select value={phase0Mode} onChange={(e) => setPhase0Mode(e.target.value)} disabled={!['all', 'phase0'].includes(manualPhase)} className="mt-1 w-full rounded-lg border border-border bg-[#0f1117] px-2 py-2 text-foreground-muted disabled:opacity-40"><option value="all">all</option><option value="securities">securities</option><option value="daily-bars">daily-bars</option><option value="index-bars">index-bars</option><option value="financials">financials</option><option value="dividends">dividends</option></select></label>
-          <label className="text-xs text-foreground-dim">范围<select value={manualScope} onChange={(e) => setManualScope(e.target.value)} disabled={!['all', 'phase0'].includes(manualPhase)} className="mt-1 w-full rounded-lg border border-border bg-[#0f1117] px-2 py-2 text-foreground-muted disabled:opacity-40"><option value="incremental">incremental</option><option value="repair_missing_dividend_yield">修复股息率</option><option value="repair_missing_operating_cash_flow">修复经营现金流</option></select></label>
+          <label className="text-xs text-foreground-dim">阶段<select value={manualPhase} onChange={(e) => setManualPhase(e.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background-secondary px-2 py-2 text-foreground-muted"><option value="all">完整流水线</option><option value="phase0">只跑 Phase0</option><option value="phase1">只跑 Phase1</option><option value="phase2">只跑 Phase2</option><option value="phase1_phase2">Phase1 + Phase2</option></select></label>
+          <label className="text-xs text-foreground-dim">Phase0 mode<select value={phase0Mode} onChange={(e) => setPhase0Mode(e.target.value)} disabled={!['all', 'phase0'].includes(manualPhase)} className="mt-1 w-full rounded-lg border border-border bg-background-secondary px-2 py-2 text-foreground-muted disabled:opacity-40"><option value="all">all</option><option value="securities">securities</option><option value="daily-bars">daily-bars</option><option value="index-bars">index-bars</option><option value="financials">financials</option><option value="dividends">dividends</option></select></label>
+          <label className="text-xs text-foreground-dim">范围<select value={manualScope} onChange={(e) => setManualScope(e.target.value)} disabled={!['all', 'phase0'].includes(manualPhase)} className="mt-1 w-full rounded-lg border border-border bg-background-secondary px-2 py-2 text-foreground-muted disabled:opacity-40"><option value="incremental">incremental</option><option value="repair_missing_dividend_yield">修复股息率</option><option value="repair_missing_operating_cash_flow">修复经营现金流</option></select></label>
           <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline()} className="self-end rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-foreground transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50">{triggering ? '触发中...' : '按选择运行'}</button>
         </div>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline({ phase: 'phase0', phase0_mode: 'dividends', scope: 'repair_missing_dividend_yield' })} className="rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-1.5 text-amber-100 disabled:opacity-40">只修复股息率</button>
+          <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline({ phase: 'phase0', phase0_mode: 'dividends', scope: 'repair_missing_dividend_yield' })} className="rounded-lg border border-amber-500/25 bg-amber-50 px-3 py-1.5 text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/10 dark:text-amber-100 disabled:opacity-40">只修复股息率</button>
           <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline({ phase: 'phase0', phase0_mode: 'financials', scope: 'repair_missing_operating_cash_flow' })} className="rounded-lg border border-blue-400/25 bg-blue-500/10 px-3 py-1.5 text-blue-100 disabled:opacity-40">只修复经营现金流</button>
           <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline({ phase: 'phase1_phase2', phase0_mode: 'all', scope: 'incremental' })} className="rounded-lg border border-emerald-400/25 bg-positive/10 px-3 py-1.5 text-emerald-100 disabled:opacity-40">只重算 Phase1+2</button>
         </div>
@@ -1365,12 +1365,12 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
           return <PhaseCard key={name} phase={phase} />
         })}
       </div>
-      {coverage.warnings?.length > 0 && <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-100">{coverage.warnings.join('；')}</div>}
+      {coverage.warnings?.length > 0 && <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-100">{coverage.warnings.join('；')}</div>}
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <CoverageTable title="原始指标覆盖率" rows={coverage.raw_metrics} total={coverage.universe} />
         <CoverageTable title="因子得分覆盖率" rows={coverage.factors} total={coverage.universe} />
       </div>
-      <div className="mt-4 rounded-xl border border-border bg-[#15171e] p-4">
+      <div className="mt-4 rounded-xl border border-border bg-card p-4">
         <div className="mb-3 flex items-center justify-between text-xs"><span className="text-foreground-dim">最近 10 次流水线运行</span><span className={`rounded-full border px-2 py-0.5 ${statusClass}`}>{worker.running ? 'running' : (worker.current?.status || 'idle')}</span></div>
         {history.length === 0 ? <p className="text-xs text-foreground-disabled">暂无流水线运行历史。</p> : (
           <div className="overflow-x-auto">
@@ -1406,7 +1406,7 @@ function normalizeFactorRunSelection(phase, phase0Mode, scope) {
 function PhaseCard({ phase }) {
   const logs = phase.log_tail || []
   return (
-    <div className="rounded-xl border border-border bg-[#15171e] p-4">
+    <div className="rounded-xl border border-border bg-card p-4">
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold text-foreground-muted">{phaseLabel(phase.name)}</div>
         <span className={`rounded-full border px-2 py-0.5 text-[11px] ${resolveFactorStatusClass(phase.status)}`}>{phase.status}</span>
@@ -1430,7 +1430,7 @@ function PhaseCard({ phase }) {
 
 function CoverageTable({ title, rows, total }) {
   const entries = Object.entries(rows || {}).sort((a, b) => a[0].localeCompare(b[0]))
-  return <div className="rounded-xl border border-border bg-[#15171e] p-4"><div className="mb-3 text-xs text-foreground-dim">{title}</div>{entries.length === 0 ? <p className="text-xs text-foreground-disabled">暂无数据</p> : <div className="space-y-2">{entries.map(([key, count]) => { const pct = total > 0 ? Math.round((Number(count || 0) / total) * 100) : 0; return <div key={key} className="text-xs"><div className="mb-1 flex justify-between gap-3"><span className="truncate text-foreground-muted">{factorAdminLabel(key)}</span><span className={pct < 80 ? 'text-amber-200' : 'text-foreground-dim'}>{formatNumber(count)} / {pct}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[var(--color-bg-hover)]"><div className={`h-full rounded-full ${pct < 80 ? 'bg-amber-400/60' : 'bg-primary/60'}`} style={{ width: `${Math.min(100, pct)}%` }} /></div></div> })}</div>}</div>
+  return <div className="rounded-xl border border-border bg-card p-4"><div className="mb-3 text-xs text-foreground-dim">{title}</div>{entries.length === 0 ? <p className="text-xs text-foreground-disabled">暂无数据</p> : <div className="space-y-2">{entries.map(([key, count]) => { const pct = total > 0 ? Math.round((Number(count || 0) / total) * 100) : 0; return <div key={key} className="text-xs"><div className="mb-1 flex justify-between gap-3"><span className="truncate text-foreground-muted">{factorAdminLabel(key)}</span><span className={pct < 80 ? 'text-amber-700 dark:text-amber-200' : 'text-foreground-dim'}>{formatNumber(count)} / {pct}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[var(--color-bg-hover)]"><div className={`h-full rounded-full ${pct < 80 ? 'bg-amber-400/60' : 'bg-primary/60'}`} style={{ width: `${Math.min(100, pct)}%` }} /></div></div> })}</div>}</div>
 }
 
 function factorAdminLabel(key) {
@@ -1446,7 +1446,7 @@ function resolveFactorStatusClass(status) {
   if (status === 'success') return 'border-emerald-400/25 bg-positive/10 text-positive'
   if (status === 'failed') return 'border-rose-400/25 bg-negative/10 text-negative'
   if (status === 'running') return 'border-blue-400/25 bg-blue-500/12 text-blue-200'
-  if (status === 'partial') return 'border-amber-400/25 bg-amber-500/12 text-amber-100'
+  if (status === 'partial') return 'border-amber-500/30 bg-amber-50 text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/12 dark:text-amber-100'
   return 'border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] text-foreground-dim'
 }
 
@@ -1526,7 +1526,7 @@ function QuadrantAdminPanel({ onUnauthorized }) {
     const barPulse = isRunning ? 'animate-pulse' : ''
 
     return (
-      <div className="rounded-xl border border-border bg-[#15171e] p-4">
+      <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-semibold text-foreground-muted">{label} 四象限</span>
           <span className="flex items-center gap-1.5 text-xs font-medium">
@@ -1625,7 +1625,7 @@ function QuadrantAdminPanel({ onUnauthorized }) {
           {/* Per-exchange quadrant breakdown */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {overview.exchanges.filter(e => e.total_count > 0).map(ex => (
-              <div key={ex.exchange} className="rounded-xl border border-border bg-[#15171e] p-4">
+              <div key={ex.exchange} className="rounded-xl border border-border bg-card p-4">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm font-semibold text-foreground-muted">{ex.exchange} 象限分布</span>
                   <span className="text-xs text-foreground-dim">{ex.total_count.toLocaleString()} 只</span>
@@ -1772,7 +1772,7 @@ function FeedbackPanel({ onUnauthorized }) {
       ) : (
         <div className="space-y-2">
           {items.map((item) => (
-            <div key={item.id} className="rounded-lg border border-border bg-[#15171e] px-4 py-3">
+            <div key={item.id} className="rounded-lg border border-border bg-card px-4 py-3">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                 <span className="font-medium text-foreground-muted">{FB_CATEGORY_LABELS[item.category] || item.category}</span>
                 <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${FB_STATUS_COLORS[item.status] || FB_STATUS_COLORS.pending}`}>
@@ -1907,13 +1907,13 @@ function SystemHealthPanel({ onUnauthorized }) {
         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Trend */}
           {trends.length > 1 && (
-            <div className="rounded-xl border border-border bg-[#15171e] p-3">
+            <div className="rounded-xl border border-border bg-card p-3">
               <MiniChart data={trends} label="错误趋势（14天）" width={380} height={130} type="bar" color="#ef4444" />
             </div>
           )}
           {/* Top Error Endpoints */}
           {topEndpoints.length > 0 && (
-            <div className="rounded-xl border border-border bg-[#15171e] p-4">
+            <div className="rounded-xl border border-border bg-card p-4">
               <div className="text-xs text-foreground-dim mb-3">Top 出错接口（今日）</div>
               <div className="space-y-2">
                 {topEndpoints.slice(0, 8).map((ep, i) => (
@@ -1939,7 +1939,7 @@ function SystemHealthPanel({ onUnauthorized }) {
 
       {/* Recent Errors Table */}
       {recentErrors.length > 0 ? (
-        <div className="mt-4 rounded-xl border border-border bg-[#15171e] overflow-hidden">
+        <div className="mt-4 rounded-xl border border-border bg-card overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
             <div className="text-xs text-foreground-dim">
               最近报错日志（{data?.generated_at ? `更新于 ${new Date(data.generated_at).toLocaleTimeString('zh-CN')}` : ''}）
@@ -2071,7 +2071,7 @@ function UserFunnelPanel({ onUnauthorized }) {
       <h2 className="text-base font-semibold text-foreground-muted mb-3">📊 用户转化漏斗</h2>
 
       {/* Funnel Visualization */}
-      <div className="rounded-xl border border-border bg-[#15171e] p-5">
+      <div className="rounded-xl border border-border bg-card p-5">
         <div className="flex flex-col gap-2">
           {steps.map((step, i) => {
             const w = Math.max((step.count_all / maxAll) * 100, i === 0 ? 4 : 2)
@@ -2370,7 +2370,7 @@ export default function AdminPage() {
           <title>管理后台 — Wolong Pro</title>
           <meta name="robots" content="noindex, nofollow" />
         </Head>
-        <div className="min-h-screen bg-[#0a0b0f]" />
+        <div className="min-h-screen bg-background" />
       </>
     )
   }

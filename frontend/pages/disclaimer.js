@@ -25,7 +25,7 @@ export default function Disclaimer() {
           <p>本平台不具备证券投资咨询资质，未持有中国证监会颁发的证券投资咨询业务许可证。本平台的任何内容均不应被理解为对任何证券的买入、卖出或持有的推荐。</p>
 
           <h2 className="text-lg font-semibold text-foreground">2. 投资风险提示</h2>
-          <div className="rounded-xl border border-rose-400/20 bg-rose-500/8 px-4 py-3 text-negative/90">
+          <div className="rounded-xl border border-amber-600/30 dark:border-amber-400/20 bg-amber-50 dark:bg-amber-500/8 px-4 py-3 text-amber-800 dark:text-amber-200/90">
             <strong>股票市场存在风险，投资需谨慎。过往的回测业绩和策略表现不代表未来收益，任何策略都可能产生亏损。</strong>
           </div>
           <p>2.1 您基于本平台的信息所做出的任何投资决策，均为您的<strong>个人行为</strong>，由此产生的盈亏和风险<strong>完全由您自行承担</strong>。</p>

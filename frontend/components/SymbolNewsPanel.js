@@ -26,7 +26,7 @@ export default function SymbolNewsPanel({
   return (
     <div className="fixed inset-0 z-[70]">
       <div className="absolute inset-0 bg-[var(--color-bg-overlay)] backdrop-blur-[2px]" onClick={onClose} />
-      <div className="absolute inset-x-0 bottom-0 top-16 overflow-hidden rounded-t-[28px] border border-border bg-[#0f1117] shadow-2xl md:inset-y-0 md:right-0 md:left-auto md:top-0 md:w-[460px] md:rounded-none md:border-l md:border-t-0 md:border-r-0 md:border-b-0">
+      <div className="absolute inset-x-0 bottom-0 top-16 overflow-hidden rounded-t-[28px] border border-border bg-white dark:bg-[#0f1117] shadow-2xl md:inset-y-0 md:right-0 md:left-auto md:top-0 md:w-[460px] md:rounded-none md:border-l md:border-t-0 md:border-r-0 md:border-b-0">
         <div className="flex h-full flex-col">
           <div className="border-b border-border px-4 py-4 sm:px-5">
             <div className="flex items-start justify-between gap-3">
@@ -78,7 +78,7 @@ export default function SymbolNewsPanel({
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
-            {error ? <div className="rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">{error}</div> : null}
+            {error ? <div className="rounded-lg border border-amber-400/25 dark:border-amber-400/25 bg-amber-50 dark:bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">{error}</div> : null}
             {loading ? (
               <div className="rounded-xl border border-dashed border-border px-4 py-8 text-sm text-foreground-dim">新闻加载中...</div>
             ) : filtered.length === 0 ? (

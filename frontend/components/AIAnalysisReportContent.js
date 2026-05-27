@@ -3,7 +3,7 @@ import InfoTip from './InfoTip'
 const SIGNAL_MAP = {
   buy: { label: '看多', arrow: '↑', hint: '偏多配置', color: 'text-negative', bg: 'bg-red-500/12', border: 'border-red-400/40', dot: '🔴' },
   sell: { label: '看空', arrow: '↓', hint: '注意风险', color: 'text-positive', bg: 'bg-positive/10', border: 'border-emerald-400/40', dot: '🟢' },
-  hold: { label: '观望', arrow: '→', hint: '持仓不变', color: 'text-amber-300', bg: 'bg-amber-500/12', border: 'border-amber-400/40', dot: '🟡' },
+  hold: { label: '观望', arrow: '→', hint: '持仓不变', color: 'text-amber-600 dark:text-amber-300', bg: 'bg-amber-100 dark:bg-amber-500/12', border: 'border-amber-400/40', dot: '🟡' },
 }
 
 function formatDateTime(value) {
@@ -94,7 +94,7 @@ export default function AIAnalysisReportContent({
                   style={{ width: `${confidencePct}%` }}
                 />
               </div>
-              <span className={`text-xs font-medium ${confidencePct >= 70 ? 'text-negative' : confidencePct >= 40 ? 'text-amber-300' : 'text-gray-400'}`}>{confidencePct}%（{confidenceLabel}）</span>
+              <span className={`text-xs font-medium ${confidencePct >= 70 ? 'text-negative' : confidencePct >= 40 ? 'text-amber-600 dark:text-amber-300' : 'text-gray-500 dark:text-gray-400'}`}>{confidencePct}%（{confidenceLabel}）</span>
             </div>
           </div>
         </div>
@@ -114,7 +114,7 @@ export default function AIAnalysisReportContent({
           <div className="mb-3 flex items-center gap-2">
             <span className="text-xs font-semibold text-foreground-muted">📊 卧龙模型评分</span>
             {analysis.market_state && (
-              <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${analysis.market_state === 'trend' ? 'bg-red-500/15 text-negative' : analysis.market_state === 'speculative' ? 'bg-purple-500/15 text-purple-300' : analysis.market_state === 'bubble' ? 'bg-orange-500/15 text-orange-300' : analysis.market_state === 'decline' ? 'bg-emerald-500/15 text-positive' : 'bg-sky-500/15 text-sky-300'}`}>
+              <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${analysis.market_state === 'trend' ? 'bg-red-500/15 text-negative' : analysis.market_state === 'speculative' ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300' : analysis.market_state === 'bubble' ? 'bg-orange-500/15 text-orange-700 dark:text-orange-300' : analysis.market_state === 'decline' ? 'bg-emerald-500/15 text-positive' : 'bg-sky-500/15 text-sky-700 dark:text-sky-300'}`}>
                 🏷️ {analysis.market_state_label || analysis.market_state}
               </span>
             )}
@@ -197,7 +197,7 @@ export default function AIAnalysisReportContent({
 
       {ts.action_suggestion && (
         <div className="mt-4 rounded-xl border border-sky-400/20 bg-sky-500/5 px-4 py-3">
-          <div className="mb-2 text-xs font-semibold text-sky-200/90">📋 交易建议</div>
+          <div className="mb-2 text-xs font-semibold text-sky-700 dark:text-sky-200/90">📋 交易建议</div>
           <p className="text-[13px] leading-relaxed text-foreground-muted">{ts.action_suggestion}</p>
           <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 md:grid-cols-4">
             <MetricMini label="建议买价" value={`${entryZone.low ?? '--'} ~ ${entryZone.high ?? '--'}`} emphasis tooltip="建议的买入价格区间" />
@@ -211,7 +211,7 @@ export default function AIAnalysisReportContent({
 
       {analysis.action_trigger && (analysis.action_trigger.buy_trigger || analysis.action_trigger.sell_trigger) && (
         <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/5 px-4 py-3">
-          <div className="mb-2 text-xs font-semibold text-amber-200/90">🎯 执行触发条件</div>
+          <div className="mb-2 text-xs font-semibold text-amber-700 dark:text-amber-200/90">🎯 执行触发条件</div>
           {analysis.action_trigger.buy_trigger ? (
             <div className="mt-1.5 flex items-start gap-2 first:mt-0">
               <span className="mt-0.5 text-xs">🟢</span>
@@ -235,9 +235,9 @@ export default function AIAnalysisReportContent({
 
       {Array.isArray(analysis.key_catalysts) && analysis.key_catalysts.length > 0 && (
         <div className="mt-4 rounded-xl border border-sky-400/15 bg-sky-500/[0.04] px-4 py-3">
-          <div className="mb-2 text-xs font-semibold text-sky-200/90">✨ 潜在催化因素</div>
+          <div className="mb-2 text-xs font-semibold text-sky-700 dark:text-sky-200/90">✨ 潜在催化因素</div>
           {analysis.key_catalysts.map((item, index) => (
-            <p key={index} className="mt-1.5 text-[12px] leading-relaxed text-sky-200/65 first:mt-0">💡 {item}</p>
+            <p key={index} className="mt-1.5 text-[12px] leading-relaxed text-sky-700 dark:text-sky-200/65 first:mt-0">💡 {item}</p>
           ))}
         </div>
       )}

@@ -15,11 +15,11 @@ export default function Disclaimer() {
           <p className="text-sm text-foreground-dim">最后更新日期：2026 年 4 月 2 日 · 生效日期：2026 年 4 月 2 日</p>
         </header>
 
-        <div className="prose prose-invert prose-sm max-w-none space-y-6 text-foreground-muted leading-7">
+        <div className="prose dark:prose-invert prose-sm max-w-none space-y-6 text-foreground-muted leading-7">
           <p>在使用「卧龙AI量化交易台」（以下简称「本平台」）前，请您仔细阅读以下免责声明。使用本平台即表示您已理解并接受以下全部条款。本平台由 Easy Studio Inc. 运营。</p>
 
           <h2 className="text-lg font-semibold text-foreground">1. 非投资建议声明</h2>
-          <div className="rounded-xl border border-amber-400/20 bg-amber-500/8 px-4 py-3 text-amber-200/90">
+          <div className="rounded-xl border border-amber-600/30 dark:border-amber-400/20 bg-amber-50 dark:bg-amber-500/8 px-4 py-3 text-amber-800 dark:text-amber-200/90">
             <strong>本平台提供的所有数据、分析、策略回测结果、交易信号及其他内容，均仅供参考和学习研究之用，不构成任何形式的投资建议、投资推荐或投资决策依据。</strong>
           </div>
           <p>本平台不具备证券投资咨询资质，未持有中国证监会颁发的证券投资咨询业务许可证。本平台的任何内容均不应被理解为对任何证券的买入、卖出或持有的推荐。</p>

@@ -8,6 +8,7 @@ import AIAnalysisReportContent from '../../components/AIAnalysisReportContent'
 import AIAnalysisShareCard from '../../components/AIAnalysisShareCard'
 import SymbolNewsPanel from '../../components/SymbolNewsPanel'
 import SymbolNewsSummaryCard from '../../components/SymbolNewsSummaryCard'
+import { useTheme } from '../../lib/theme-context'
 import CompanyAboutPanel from '../../components/CompanyAboutPanel'
 import { requestJson } from '../../lib/api'
 import { fetchCompanyAbout } from '../../lib/company-about'
@@ -109,6 +110,7 @@ export default function LiveTradingDetailPage() {
   const symbol = rawSymbol ? decodeURIComponent(rawSymbol).toUpperCase() : ''
 
   const { isLoggedIn, openAuthModal, ready, user } = useAuth()
+  const { resolvedTheme } = useTheme()
 
   const [dailyBars, setDailyBars] = useState([])
   const [allDailyBars, setAllDailyBars] = useState([])
@@ -1339,7 +1341,7 @@ export default function LiveTradingDetailPage() {
                     <div className="text-sm font-medium text-foreground/88">交易信号</div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${signalConfig.is_enabled ? 'border-emerald-200/55 bg-emerald-400/22 text-emerald-50 shadow-[0_0_0_1px_rgba(110,231,183,0.12)]' : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted'}`}>
+                    <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${signalConfig.is_enabled ? 'border-emerald-400/60 dark:border-emerald-200/55 bg-emerald-100 dark:bg-emerald-400/22 text-emerald-700 dark:text-emerald-50 shadow-[0_0_0_1px_rgba(16,185,129,0.3)] dark:shadow-[0_0_0_1px_rgba(110,231,183,0.12)]' : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted'}`}>
                       {signalStatusSummary}
                     </div>
                     <button
@@ -1379,7 +1381,7 @@ export default function LiveTradingDetailPage() {
                         onClick={handleToggleSignal}
                         className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60 ${
                           signalConfig.is_enabled
-                            ? 'border-emerald-300/60 bg-emerald-500/18 text-emerald-50'
+                            ? 'border-emerald-500/60 dark:border-emerald-300/60 bg-emerald-100 dark:bg-emerald-500/18 text-emerald-800 dark:text-emerald-50'
                             : 'border-[var(--color-border-strong)] bg-[var(--color-bg-secondary)] text-foreground-muted hover:border-[var(--color-border-strong)]'
                         }`}
                       >
@@ -1818,7 +1820,7 @@ export default function LiveTradingDetailPage() {
                 <div className="mt-4 rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-3">
                   <div className="text-xs font-medium text-foreground-muted">结果预览</div>
                   {portfolioPreview?.errors?.length > 0 ? (
-                    <div className="mt-2 text-xs text-amber-200">{portfolioPreview.errors[0]}</div>
+                    <div className="mt-2 text-xs text-amber-700 dark:text-amber-200">{portfolioPreview.errors[0]}</div>
                   ) : (
                     <div className={`mt-2 grid gap-2 ${portfolioAction === 'adjust' ? 'sm:grid-cols-3' : 'sm:grid-cols-2 xl:grid-cols-4'}`}>
                       <div>
@@ -2179,7 +2181,7 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
             正在结合实时行情、技术面、基础面、新闻公告和你的持仓信息生成本次判断。
           </p>
         </div>
-        <div className="inline-flex items-center self-start rounded-full border border-indigo-400/25 bg-indigo-500/10 px-3 py-1 text-[11px] font-medium text-indigo-100">
+        <div className="inline-flex items-center self-start rounded-full border border-indigo-400/25 dark:border-indigo-400/25 bg-indigo-50 dark:bg-indigo-500/10 px-3 py-1 text-[11px] font-medium text-indigo-700 dark:text-indigo-100">
           分析中 · 已等待 {formatAIElapsedLong(elapsedSec)}
         </div>
       </div>
@@ -2187,10 +2189,10 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
       <div className="mt-4 rounded-2xl border border-border bg-[var(--color-bg-hover)] p-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div className="text-[11px] font-semibold tracking-wide text-indigo-200/90">{waitState.stage.kicker}</div>
-            <div className="mt-1 text-sm font-medium text-foreground-muted">{waitState.stage.title}</div>
+            <div className="text-[11px] font-semibold tracking-wide text-indigo-600 dark:text-indigo-200/90">{waitState.stage.kicker}</div>
+            <div className="mt-1 text-sm font-medium text-foreground dark:text-foreground-muted">{waitState.stage.title}</div>
           </div>
-          <div className="max-w-md text-[11px] leading-5 text-foreground/38 sm:text-right">{waitState.stage.hint}</div>
+          <div className="max-w-md text-[11px] leading-5 text-foreground-dim sm:text-right">{waitState.stage.hint}</div>
         </div>
         <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--color-bg-secondary)]">
           <div
@@ -3012,7 +3014,30 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
 
 // ── Chart Components ──
 
+// ColorType will be imported dynamically with lightweight-charts,
+// but we keep the theme data static so all chart components can share it.
+const CHART_CONFIG = {
+  dark: {
+    background: 'rgba(9, 13, 24, 0.6)',
+    textColor: '#E5E7EB',
+    gridColor: 'rgba(148,163,184,0.1)',
+    borderColor: 'rgba(148,163,184,0.35)',
+  },
+  light: {
+    background: 'rgba(255, 255, 255, 0.6)',
+    textColor: '#1e293b',
+    gridColor: 'rgba(100,116,139,0.1)',
+    borderColor: 'rgba(100,116,139,0.35)',
+  },
+}
+
+// Helper: pick theme config based on resolvedTheme
+function pickChartTheme(resolvedTheme) {
+  return resolvedTheme === 'light' ? CHART_CONFIG.light : CHART_CONFIG.dark
+}
+
 function DailyHistoryChart({ bars }) {
+  const { resolvedTheme } = useTheme()
   const containerRef = useRef(null)
   const chartRef = useRef(null)
 
@@ -3025,16 +3050,17 @@ function DailyHistoryChart({ bars }) {
         return
       }
       const { createChart, ColorType } = await import('lightweight-charts')
+      const theme = pickChartTheme(resolvedTheme)
       if (cancelled || !containerRef.current) return
       if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
 
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth || 700,
         height: 320,
-        layout: { background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' }, textColor: '#E5E7EB' },
-        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
-        timeScale: { borderColor: 'rgba(148,163,184,0.35)' },
-        grid: { vertLines: { color: 'rgba(148,163,184,0.1)' }, horzLines: { color: 'rgba(148,163,184,0.1)' } },
+        layout: { background: { type: ColorType.Solid, color: theme.background }, textColor: theme.textColor },
+        rightPriceScale: { borderColor: theme.borderColor },
+        timeScale: { borderColor: theme.borderColor },
+        grid: { vertLines: { color: theme.gridColor }, horzLines: { color: theme.gridColor } },
         crosshair: { mode: 0 },
       })
 
@@ -3088,6 +3114,7 @@ function DailyHistoryChart({ bars }) {
 }
 
 function DailyOverlayChart({ series, benchmark, symbol }) {
+  const { resolvedTheme } = useTheme()
   const containerRef = useRef(null)
   const chartRef = useRef(null)
 
@@ -3106,10 +3133,10 @@ function DailyOverlayChart({ series, benchmark, symbol }) {
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth || 700,
         height: 300,
-        layout: { background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' }, textColor: '#E5E7EB' },
-        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
-        timeScale: { borderColor: 'rgba(148,163,184,0.35)' },
-        grid: { vertLines: { color: 'rgba(148,163,184,0.1)' }, horzLines: { color: 'rgba(148,163,184,0.1)' } },
+        layout: { background: { type: ColorType.Solid, color: pickChartTheme(resolvedTheme).background }, textColor: pickChartTheme(resolvedTheme).textColor },
+        rightPriceScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
+        timeScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
+        grid: { vertLines: { color: pickChartTheme(resolvedTheme).gridColor }, horzLines: { color: pickChartTheme(resolvedTheme).gridColor } },
         crosshair: { mode: 0 },
       })
 
@@ -3182,6 +3209,7 @@ function DailyOverlayChart({ series, benchmark, symbol }) {
 }
 
 function OverlayIntradayChart({ series, benchmark, symbol }) {
+  const { resolvedTheme } = useTheme()
   const containerRef = useRef(null)
   const chartRef = useRef(null)
 
@@ -3200,10 +3228,10 @@ function OverlayIntradayChart({ series, benchmark, symbol }) {
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth || 700,
         height: 280,
-        layout: { background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' }, textColor: '#E5E7EB' },
-        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        layout: { background: { type: ColorType.Solid, color: pickChartTheme(resolvedTheme).background }, textColor: pickChartTheme(resolvedTheme).textColor },
+        rightPriceScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
         timeScale: { borderColor: 'rgba(148,163,184,0.35)', timeVisible: true, secondsVisible: false },
-        grid: { vertLines: { color: 'rgba(148,163,184,0.1)' }, horzLines: { color: 'rgba(148,163,184,0.1)' } },
+        grid: { vertLines: { color: pickChartTheme(resolvedTheme).gridColor }, horzLines: { color: pickChartTheme(resolvedTheme).gridColor } },
       })
 
       const stockLine = chart.addLineSeries({ color: '#f59e0b', lineWidth: 2, title: `${symbol}（归一化）` })
@@ -3235,6 +3263,7 @@ const ANOMALY_TYPE_META = {
 }
 
 function PriceVolumeChart({ events }) {
+  const { resolvedTheme } = useTheme()
   const containerRef = useRef(null)
   const chartRef = useRef(null)
 
@@ -3250,10 +3279,10 @@ function PriceVolumeChart({ events }) {
 
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth || 500, height: 220,
-        layout: { background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' }, textColor: '#E5E7EB' },
-        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        layout: { background: { type: ColorType.Solid, color: pickChartTheme(resolvedTheme).background }, textColor: pickChartTheme(resolvedTheme).textColor },
+        rightPriceScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
         timeScale: { borderColor: 'rgba(148,163,184,0.35)', timeVisible: true, secondsVisible: false },
-        grid: { vertLines: { color: 'rgba(148,163,184,0.1)' }, horzLines: { color: 'rgba(148,163,184,0.1)' } },
+        grid: { vertLines: { color: pickChartTheme(resolvedTheme).gridColor }, horzLines: { color: pickChartTheme(resolvedTheme).gridColor } },
       })
 
       const byType = {}
@@ -3310,6 +3339,7 @@ function PriceVolumeChart({ events }) {
 }
 
 function BlockFlowChart({ events }) {
+  const { resolvedTheme } = useTheme()
   const containerRef = useRef(null)
   const chartRef = useRef(null)
 
@@ -3325,10 +3355,10 @@ function BlockFlowChart({ events }) {
 
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth || 500, height: 220,
-        layout: { background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' }, textColor: '#E5E7EB' },
-        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        layout: { background: { type: ColorType.Solid, color: pickChartTheme(resolvedTheme).background }, textColor: pickChartTheme(resolvedTheme).textColor },
+        rightPriceScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
         timeScale: { borderColor: 'rgba(148,163,184,0.35)', timeVisible: true, secondsVisible: false },
-        grid: { vertLines: { color: 'rgba(148,163,184,0.1)' }, horzLines: { color: 'rgba(148,163,184,0.1)' } },
+        grid: { vertLines: { color: pickChartTheme(resolvedTheme).gridColor }, horzLines: { color: pickChartTheme(resolvedTheme).gridColor } },
       })
 
       const histSeries = chart.addHistogramSeries({ title: '', priceLineVisible: false, lastValueVisible: false, priceFormat: { type: 'volume' } })
@@ -3407,6 +3437,7 @@ function LevelCard({ level, index, type }) {
 }
 
 function MACDChart({ series }) {
+  const { resolvedTheme } = useTheme()
   const containerRef = useRef(null)
   const chartRef = useRef(null)
 
@@ -3425,9 +3456,9 @@ function MACDChart({ series }) {
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth || 700,
         height: 260,
-        layout: { background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' }, textColor: '#E5E7EB' },
-        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
-        timeScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        layout: { background: { type: ColorType.Solid, color: pickChartTheme(resolvedTheme).background }, textColor: pickChartTheme(resolvedTheme).textColor },
+        rightPriceScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
+        timeScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
         grid: { vertLines: { color: 'rgba(148,163,184,0.08)' }, horzLines: { color: 'rgba(148,163,184,0.08)' } },
         crosshair: { mode: 0 },
       })
@@ -3543,6 +3574,7 @@ function MACDChart({ series }) {
 }
 
 function BollingerChart({ series }) {
+  const { resolvedTheme } = useTheme()
   const containerRef = useRef(null)
   const chartRef = useRef(null)
 
@@ -3561,9 +3593,9 @@ function BollingerChart({ series }) {
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth || 700,
         height: 300,
-        layout: { background: { type: ColorType.Solid, color: 'rgba(9, 13, 24, 0.6)' }, textColor: '#E5E7EB' },
-        rightPriceScale: { borderColor: 'rgba(148,163,184,0.35)' },
-        timeScale: { borderColor: 'rgba(148,163,184,0.35)' },
+        layout: { background: { type: ColorType.Solid, color: pickChartTheme(resolvedTheme).background }, textColor: pickChartTheme(resolvedTheme).textColor },
+        rightPriceScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
+        timeScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
         grid: { vertLines: { color: 'rgba(148,163,184,0.08)' }, horzLines: { color: 'rgba(148,163,184,0.08)' } },
         crosshair: { mode: 0 },
       })

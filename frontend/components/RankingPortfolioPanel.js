@@ -499,7 +499,7 @@ function RankingPortfolioConstituentRow({ item, showSourceRank = false }) {
   const content = (
     <>
       <div className="min-w-0">
-        <div className="truncate text-sm font-medium text-foreground transition group-hover:text-amber-100">{item?.name || '--'}</div>
+        <div className="truncate text-sm font-medium text-foreground transition group-hover:text-primary dark:group-hover:text-amber-100">{item?.name || '--'}</div>
         <div className="mt-0.5 text-[11px] text-foreground-dim">#{item?.rank} · {codeLabel}</div>
         {showSourceRank ? <div className="mt-0.5 text-[11px] text-foreground-dim">{sourceMeta}</div> : null}
       </div>
@@ -520,7 +520,7 @@ function RankingPortfolioConstituentRow({ item, showSourceRank = false }) {
       target="_blank"
       rel="noreferrer"
       title={`查看 ${item?.name || formatRankingPortfolioCode(item?.code, item?.exchange)} 详情`}
-      className="group flex items-center justify-between rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-2 transition hover:border-amber-300/30 hover:bg-amber-500/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60"
+      className="group flex items-center justify-between rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-2 transition hover:border-primary/30 dark:hover:border-amber-300/30 hover:bg-primary/[0.04] dark:hover:bg-amber-500/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 dark:focus-visible:ring-amber-300/60"
     >
       {content}
     </a>

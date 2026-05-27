@@ -275,7 +275,7 @@ function AppLayout({ Component, pageProps }) {
                     <span className="inline-flex items-center">
                       {item.label}
                       {item.badgeKey === 'changelog' && unreadCount > 0 && (
-                        <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-foreground leading-none">
+                        <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white leading-none">
                           {unreadCount > 99 ? '99+' : unreadCount}
                         </span>
                       )}
@@ -383,7 +383,7 @@ function DesktopMoreMenu({ items, unreadCount, currentPath }) {
               >
                 <span>{item.label}</span>
                 {item.badgeKey === 'changelog' && unreadCount > 0 ? (
-                  <span className="ml-3 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-foreground leading-none">
+                  <span className="ml-3 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white leading-none">
                     {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 ) : null}

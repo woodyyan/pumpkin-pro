@@ -35,7 +35,7 @@ const BASE_COLUMNS = [
   { key: 'close_price', label: '昨收价', format: 'price', sortable: true, width: 82 },
 ]
 
-const ALL_COLUMNS = [...SCORE_COLUMNS, ...BASE_COLUMNS]
+const ALL_COLUMNS = [...BASE_COLUMNS, ...SCORE_COLUMNS]
 const SCORE_KEYS = new Set(SCORE_COLUMNS.map((col) => col.key))
 
 export default function FactorLabPage() {

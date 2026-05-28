@@ -69,6 +69,35 @@ func TestQuadrantRepo_BulkUpsert(t *testing.T) {
 	}
 }
 
+func TestQuadrantRepo_BulkUpsert_UpdatesExchange(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	oldRecord := makeQuadrantScoreRecord("688234")
+	oldRecord.Exchange = "SZSE"
+	if err := repo.BulkUpsert(ctx, []QuadrantScoreRecord{oldRecord}); err != nil {
+		t.Fatalf("initial BulkUpsert failed: %v", err)
+	}
+
+	newRecord := makeQuadrantScoreRecord("688234")
+	newRecord.Exchange = "SSE"
+	if err := repo.BulkUpsert(ctx, []QuadrantScoreRecord{newRecord}); err != nil {
+		t.Fatalf("second BulkUpsert failed: %v", err)
+	}
+
+	records, err := repo.FindAll(ctx)
+	if err != nil {
+		t.Fatalf("FindAll failed: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	if records[0].Exchange != "SSE" {
+		t.Fatalf("exchange = %s; want SSE", records[0].Exchange)
+	}
+}
+
 func TestQuadrantRepo_BulkUpsert_Empty(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()

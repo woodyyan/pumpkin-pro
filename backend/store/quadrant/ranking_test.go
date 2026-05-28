@@ -1101,6 +1101,37 @@ func TestSnapshot_UpsertAndRetrieve(t *testing.T) {
 	}
 }
 
+func TestSnapshot_UpsertSnapshotsUpdatesPriceTradeDate(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	initial := makeSnapshot("600519", "SSE", 1, 98.5, time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC))
+	initial.ClosePrice = 10
+	initial.PriceTradeDate = "2026-04-16"
+	if err := repo.UpsertSnapshots(ctx, []RankingSnapshot{initial}); err != nil {
+		t.Fatalf("initial UpsertSnapshots failed: %v", err)
+	}
+
+	updated := initial
+	updated.ClosePrice = 11
+	updated.PriceTradeDate = "2026-04-17"
+	if err := repo.UpsertSnapshots(ctx, []RankingSnapshot{updated}); err != nil {
+		t.Fatalf("second UpsertSnapshots failed: %v", err)
+	}
+
+	var snap RankingSnapshot
+	if err := repo.db.WithContext(ctx).Where("code = ? AND snapshot_date = ?", "600519", "2026-04-16").First(&snap).Error; err != nil {
+		t.Fatalf("query snapshot failed: %v", err)
+	}
+	if snap.ClosePrice != 11 {
+		t.Fatalf("close_price = %.2f; want 11.00", snap.ClosePrice)
+	}
+	if snap.PriceTradeDate != "2026-04-17" {
+		t.Fatalf("price_trade_date = %s; want 2026-04-17", snap.PriceTradeDate)
+	}
+}
+
 func TestSnapshot_ConsecutiveDays(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
@@ -1147,6 +1178,57 @@ func TestSnapshot_ConsecutiveDays_WithGap(t *testing.T) {
 	// Should be 1 (only the most recent day; gap breaks the chain)
 	if days != 1 {
 		t.Errorf("expected 1 consecutive day (gap breaks chain), got %d", days)
+	}
+}
+
+func TestSnapshot_ConsecutiveStartDate_WithGap(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	snaps := []RankingSnapshot{
+		makeSnapshot("688234", "SSE", 1, 99.0, time.Date(2026, 5, 28, 10, 0, 0, 0, time.UTC)),
+		// Missing May 27; older appearances must not be part of the current streak.
+		makeSnapshot("688234", "SSE", 3, 97.0, time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)),
+		makeSnapshot("688234", "SSE", 5, 96.0, time.Date(2026, 5, 19, 10, 0, 0, 0, time.UTC)),
+	}
+	for _, s := range snaps {
+		if err := repo.UpsertSnapshot(ctx, s); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	startDate, err := repo.GetConsecutiveStartDate(ctx, "688234", []string{"SSE"})
+	if err != nil {
+		t.Fatalf("GetConsecutiveStartDate failed: %v", err)
+	}
+	if startDate != "2026-05-28" {
+		t.Fatalf("streak start date = %s; want 2026-05-28", startDate)
+	}
+}
+
+func TestSnapshot_ConsecutiveStartDate_MultipleDays(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	snaps := []RankingSnapshot{
+		makeSnapshot("000001", "SZSE", 1, 95.0, time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC)),
+		makeSnapshot("000001", "SZSE", 2, 94.0, time.Date(2026, 4, 14, 2, 30, 0, 0, time.UTC)),
+		makeSnapshot("000001", "SZSE", 3, 93.0, time.Date(2026, 4, 13, 9, 15, 0, 0, time.UTC)),
+	}
+	for _, s := range snaps {
+		if err := repo.UpsertSnapshot(ctx, s); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	startDate, err := repo.GetConsecutiveStartDate(ctx, "000001", []string{"SZSE"})
+	if err != nil {
+		t.Fatalf("GetConsecutiveStartDate failed: %v", err)
+	}
+	if startDate != "2026-04-13" {
+		t.Fatalf("streak start date = %s; want 2026-04-13", startDate)
 	}
 }
 
@@ -1443,6 +1525,46 @@ func TestGetRanking_ReturnPct_UsesLatestPricedSnapshotFallback(t *testing.T) {
 	}
 }
 
+func TestGetRanking_ReturnPct_UsesCurrentConsecutiveStreakStart(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	record := makeAShareRankingRecord("688234", "STAR", "中性", 99, 99, 60, 12000)
+	record.ComputedAt = time.Date(2026, 5, 27, 19, 13, 13, 0, time.UTC)
+	record.SourceTradeDate = "2026-05-27"
+	seedOpportunityRecords(t, repo, []QuadrantScoreRecord{record})
+
+	for _, snap := range []RankingSnapshot{
+		{Code: "688234", Name: "天岳先进", Exchange: "SSE", Rank: 10, Opportunity: 98, Risk: 64, ClosePrice: 122.96, SnapshotDate: "2026-05-11", CreatedAt: time.Now().UTC()},
+		{Code: "688234", Name: "天岳先进", Exchange: "SSE", Rank: 6, Opportunity: 99, Risk: 67, ClosePrice: 155.10, SnapshotDate: "2026-05-20", CreatedAt: time.Now().UTC()},
+		// Gap from May 20 to May 28: current consecutive streak is one day.
+		{Code: "688234", Name: "天岳先进", Exchange: "SSE", Rank: 1, Opportunity: 99, Risk: 60, ClosePrice: 166.99, SnapshotDate: "2026-05-28", CreatedAt: time.Now().UTC()},
+	} {
+		if err := repo.UpsertSnapshot(ctx, snap); err != nil {
+			t.Fatalf("seed snapshot failed: %v", err)
+		}
+	}
+
+	resp, err := svc.GetRanking(ctx, "ASHARE", 20)
+	if err != nil {
+		t.Fatalf("GetRanking failed: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(resp.Items))
+	}
+	if resp.Items[0].ConsecutiveDays != 1 {
+		t.Fatalf("consecutive_days = %d; want 1", resp.Items[0].ConsecutiveDays)
+	}
+	if resp.Items[0].ReturnPct == nil {
+		t.Fatal("expected non-nil return_pct for one-day current streak with price")
+	}
+	if *resp.Items[0].ReturnPct != 0 {
+		t.Fatalf("return_pct = %.2f; want 0.00 for one-day current streak", *resp.Items[0].ReturnPct)
+	}
+}
+
 func TestGetRanking_ReturnPct_NilWhenPriceMissing(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
@@ -1512,7 +1634,7 @@ func TestGetRanking_ReturnPct_NilWhenNoValidPriceAtAll(t *testing.T) {
 	}
 }
 
-func TestGetRanking_ReturnPct_UsesEarliestPricedSnapshotAfterFirstAppearance(t *testing.T) {
+func TestGetRanking_ReturnPct_UsesEarliestPricedSnapshotAfterStreakStart(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
 	ctx := context.Background()

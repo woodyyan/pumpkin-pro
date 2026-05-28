@@ -38,7 +38,7 @@ func (r *Repository) BulkUpsert(ctx context.Context, records []QuadrantScoreReco
 			if err := tx.Clauses(clause.OnConflict{
 				Columns: []clause.Column{{Name: "code"}},
 				DoUpdates: clause.AssignmentColumns([]string{
-					"name", "opportunity", "risk", "quadrant",
+					"name", "exchange", "opportunity", "risk", "quadrant",
 					"trend", "flow", "revision", "liquidity",
 					"volatility", "drawdown", "crowding", "avg_amount5d",
 					"board", "ranking_score", "global_rank_score", "board_rank_score",
@@ -352,7 +352,7 @@ func (r *Repository) UpsertSnapshots(ctx context.Context, snaps []RankingSnapsho
 					{Name: "code"},
 				},
 				DoUpdates: clause.AssignmentColumns([]string{
-					"name", "rank", "opportunity", "risk", "close_price",
+					"name", "rank", "opportunity", "risk", "close_price", "price_trade_date",
 				}),
 			}).Create(&batch).Error; err != nil {
 				return err
@@ -366,37 +366,67 @@ func (r *Repository) UpsertSnapshots(ctx context.Context, snaps []RankingSnapsho
 // in ranking snapshots, counting backward from the most recent snapshot date.
 // Returns 0 if no snapshots exist for this stock/exchange.
 func (r *Repository) GetConsecutiveDays(ctx context.Context, code string, exchanges []string) (int, error) {
-	var snapDates []string
+	snapDates, err := r.getSnapshotDatesDesc(ctx, code, exchanges)
+	if err != nil || len(snapDates) == 0 {
+		return 0, err
+	}
 
+	return len(consecutiveSnapshotDatesDesc(snapDates)), nil
+}
+
+// GetConsecutiveStartDate returns the oldest snapshot_date in the current
+// consecutive appearance chain, counting backward from the most recent snapshot.
+func (r *Repository) GetConsecutiveStartDate(ctx context.Context, code string, exchanges []string) (string, error) {
+	snapDates, err := r.getSnapshotDatesDesc(ctx, code, exchanges)
+	if err != nil || len(snapDates) == 0 {
+		return "", err
+	}
+
+	streak := consecutiveSnapshotDatesDesc(snapDates)
+	if len(streak) == 0 {
+		return "", nil
+	}
+	return streak[len(streak)-1], nil
+}
+
+func (r *Repository) getSnapshotDatesDesc(ctx context.Context, code string, exchanges []string) ([]string, error) {
+	var snapDates []string
 	query := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
 		Select("DISTINCT snapshot_date").
 		Where("code = ?", code).
 		Order("snapshot_date DESC")
-
 	if len(exchanges) > 0 {
 		query = query.Where("exchange IN ?", exchanges)
 	}
-
-	if err := query.Find(&snapDates).Error; err != nil || len(snapDates) == 0 {
-		return 0, err
+	if err := query.Find(&snapDates).Error; err != nil {
+		return nil, err
 	}
+	return snapDates, nil
+}
 
+func consecutiveSnapshotDatesDesc(snapDates []string) []string {
+	if len(snapDates) == 0 {
+		return nil
+	}
 	// Count consecutive days starting from the most recent date
-	consecutive := 0
-	refDate, _ := time.Parse("2006-01-02", snapDates[0])
+	refDate, err := time.Parse("2006-01-02", snapDates[0])
+	if err != nil {
+		return nil
+	}
+	streak := make([]string, 0, len(snapDates))
 	for _, dStr := range snapDates {
 		d, err := time.Parse("2006-01-02", dStr)
 		if err != nil {
 			continue
 		}
 		diff := refDate.Sub(d).Hours() / 24
-		if diff <= float64(consecutive)+0.5 { // allow same-day tolerance
-			consecutive++
+		if diff <= float64(len(streak))+0.5 { // allow same-day tolerance
+			streak = append(streak, dStr)
 		} else {
 			break // gap found — stop counting
 		}
 	}
-	return consecutive, nil
+	return streak
 }
 
 // GetFirstAppearedDate returns the earliest snapshot_date for a given stock.

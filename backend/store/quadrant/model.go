@@ -177,7 +177,7 @@ type RankingItem struct {
 	BoardRankScore   float64  `json:"board_rank_score,omitempty"`
 	TradabilityScore float64  `json:"tradability_score,omitempty"`
 	ConsecutiveDays  int      `json:"consecutive_days"` // 连续上榜天数
-	ReturnPct        *float64 `json:"return_pct"`       // 首次上榜至今涨幅(%)；nil 表示暂无可用快照价格
+	ReturnPct        *float64 `json:"return_pct"`       // 当前连续上榜周期以来涨幅(%)；nil 表示暂无可用快照价格
 }
 
 // RankingSnapshot captures a daily snapshot of top opportunity-zone stocks.

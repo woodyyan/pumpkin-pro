@@ -1061,13 +1061,13 @@ func (s *Service) buildRankingResponse(ctx context.Context, exchange string, lim
 			latestComputedAt = r.ComputedAt
 		}
 
-		// Enrich with consecutive days and return since first appearance
+		// Enrich with consecutive days and return since current streak start.
 		days, _ := s.repo.GetConsecutiveDays(ctx, r.Code, exchanges)
 		item.ConsecutiveDays = days
 
-		firstDateStr, _ := s.repo.GetFirstAppearedDate(ctx, r.Code, exchanges)
-		if firstDateStr != "" {
-			startPrice, _, _ := s.repo.GetEarliestAvailableClosePrice(ctx, r.Code, exchanges, firstDateStr)
+		streakStartDate, _ := s.repo.GetConsecutiveStartDate(ctx, r.Code, exchanges)
+		if streakStartDate != "" {
+			startPrice, _, _ := s.repo.GetEarliestAvailableClosePrice(ctx, r.Code, exchanges, streakStartDate)
 			currentPrice, _, _ := s.repo.GetLatestAvailableClosePrice(ctx, r.Code, exchanges)
 			if startPrice > 0 && currentPrice > 0 {
 				pct := (currentPrice - startPrice) / startPrice * 100

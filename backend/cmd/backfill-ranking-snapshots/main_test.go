@@ -171,6 +171,7 @@ func TestQuerySnapshotCandidatesAndApplyBackfillPlans(t *testing.T) {
 		{ID: 1, Code: "600519", Exchange: "SSE", SnapshotDate: "2026-04-16", ClosePrice: 0},
 		{ID: 2, Code: "000001", Exchange: "SZSE", SnapshotDate: "2026-04-16", ClosePrice: 0},
 		{ID: 3, Code: "00700", Exchange: "HKEX", SnapshotDate: "2026-04-16", ClosePrice: 10},
+		{ID: 4, Code: "688234", Exchange: "SSE", SnapshotDate: "2026-04-16", ClosePrice: 122.96},
 	}
 	if err := db.WithContext(ctx).Create(&seed).Error; err != nil {
 		t.Fatalf("seed failed: %v", err)
@@ -182,6 +183,14 @@ func TestQuerySnapshotCandidatesAndApplyBackfillPlans(t *testing.T) {
 	}
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 A-share zero-price rows, got %d", len(rows))
+	}
+
+	refreshRows, err := querySnapshotCandidates(ctx, db, cliOptions{Exchange: "ASHARE", RefreshExisting: true})
+	if err != nil {
+		t.Fatalf("querySnapshotCandidates refresh-existing failed: %v", err)
+	}
+	if len(refreshRows) != 3 {
+		t.Fatalf("expected 3 A-share rows when refreshing existing prices, got %d", len(refreshRows))
 	}
 
 	updated, err := applyBackfillPlans(ctx, db, []backfillPlan{{SnapshotID: 1, NewPrice: 123.45}})

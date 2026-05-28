@@ -32,6 +32,7 @@ type cliOptions struct {
 	PaddingDays     int
 	MaxTradeGapDays int
 	TimeoutSeconds  int
+	RefreshExisting bool
 	Verbose         bool
 }
 
@@ -121,6 +122,7 @@ func parseOptions(args []string) (cliOptions, error) {
 	fs.IntVar(&opts.PaddingDays, "padding-days", 10, "抓取历史日线时在最早快照日期基础上额外补的天数")
 	fs.IntVar(&opts.MaxTradeGapDays, "max-trade-gap-days", 3, "快照日期无日线时，允许向前回退的最大交易日跨度")
 	fs.IntVar(&opts.TimeoutSeconds, "timeout-seconds", 15, "单个 symbol 拉取日线的超时时间（秒）")
+	fs.BoolVar(&opts.RefreshExisting, "refresh-existing", false, "同时刷新已有正 close_price 的快照；默认只补 close_price<=0 的缺失价格")
 	fs.BoolVar(&opts.Verbose, "verbose", false, "输出更多 unresolved 明细")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "用法：go run ./cmd/backfill-ranking-snapshots [options]\n\n")
@@ -284,8 +286,11 @@ func buildBackfillPlans(ctx context.Context, db *gorm.DB, fetcher dailyBarFetche
 func querySnapshotCandidates(ctx context.Context, db *gorm.DB, opts cliOptions) ([]quadrant.RankingSnapshot, error) {
 	query := db.WithContext(ctx).
 		Model(&quadrant.RankingSnapshot{}).
-		Where("close_price <= ?", 0).
 		Order("snapshot_date ASC, exchange ASC, rank ASC, id ASC")
+
+	if !opts.RefreshExisting {
+		query = query.Where("close_price <= ?", 0)
+	}
 
 	if opts.FromDate != "" {
 		query = query.Where("snapshot_date >= ?", opts.FromDate)
@@ -465,6 +470,9 @@ func printSummary(opts cliOptions, summary planSummary, plans []backfillPlan, un
 	}
 	if opts.Exchange != "" {
 		log.Printf("市场过滤: %s", opts.Exchange)
+	}
+	if opts.RefreshExisting {
+		log.Printf("价格模式: refresh-existing（刷新已有 close_price）")
 	}
 	if opts.Limit > 0 {
 		log.Printf("数量限制: %d", opts.Limit)

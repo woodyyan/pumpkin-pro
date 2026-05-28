@@ -27,6 +27,17 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+QUANT_ROOT = SCRIPT_DIR.parent
+if str(QUANT_ROOT) not in sys.path:
+    sys.path.insert(0, str(QUANT_ROOT))
+
+from data.industry_standardization import (
+    NOT_APPLICABLE,
+    build_a_share_mapping_rows,
+    standardize_a_share_industry,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB_CANDIDATES = [
     PROJECT_ROOT / "data" / "pumpkin.db",
@@ -37,6 +48,8 @@ DEFAULT_LOOKBACK_DAYS = 370    # calendar days, usually enough for ~250 trading 
 DEFAULT_ADJUST = "qfq"
 EXTERNAL_SOURCE_ORDER = ["akshare", "eastmoney", "tencent"]
 SECURITIES_SOURCE_ORDER = ["akshare", "eastmoney", "tencent", "local"]
+INDUSTRY_SOURCE_ORDER = ["akshare"]
+MIN_FULL_UNIVERSE_SECURITY_COUNT = 1000
 EASTMONEY_CLIST_URL = "https://82.push2.eastmoney.com/api/qt/clist/get"
 EASTMONEY_KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 EASTMONEY_DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
@@ -239,6 +252,61 @@ SCHEMA_SQL = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS company_profiles (
+        symbol TEXT PRIMARY KEY,
+        exchange TEXT NOT NULL DEFAULT '',
+        code TEXT NOT NULL DEFAULT '',
+        name TEXT NOT NULL DEFAULT '',
+        full_name TEXT NOT NULL DEFAULT '',
+        board_code TEXT NOT NULL DEFAULT '',
+        board_name TEXT NOT NULL DEFAULT '',
+        raw_industry_name TEXT NOT NULL DEFAULT '',
+        industry_code TEXT NOT NULL DEFAULT '',
+        industry_name TEXT NOT NULL DEFAULT '',
+        industry_level TEXT NOT NULL DEFAULT '',
+        industry_source TEXT NOT NULL DEFAULT '',
+        website TEXT NOT NULL DEFAULT '',
+        founded_date TEXT NOT NULL DEFAULT '',
+        founded_date_precision TEXT NOT NULL DEFAULT 'unknown',
+        ipo_date TEXT NOT NULL DEFAULT '',
+        listing_status TEXT NOT NULL DEFAULT 'UNKNOWN',
+        delisted_date TEXT NOT NULL DEFAULT '',
+        business_scope TEXT NOT NULL DEFAULT '',
+        business_summary TEXT NOT NULL DEFAULT '',
+        business_summary_source TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT '',
+        source_url TEXT NOT NULL DEFAULT '',
+        source_updated_at DATETIME,
+        profile_status TEXT NOT NULL DEFAULT 'PENDING',
+        quality_flags TEXT NOT NULL DEFAULT '[]',
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_company_profiles_exchange ON company_profiles(exchange)",
+    "CREATE INDEX IF NOT EXISTS idx_company_profiles_code ON company_profiles(code)",
+    "CREATE INDEX IF NOT EXISTS idx_company_profiles_board_code ON company_profiles(board_code)",
+    "CREATE INDEX IF NOT EXISTS idx_company_profiles_industry_name ON company_profiles(industry_name)",
+    "CREATE INDEX IF NOT EXISTS idx_company_profiles_listing_status ON company_profiles(listing_status)",
+    "CREATE INDEX IF NOT EXISTS idx_company_profiles_profile_status ON company_profiles(profile_status)",
+    """
+    CREATE TABLE IF NOT EXISTS industry_mapping (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT NOT NULL,
+        source_industry_name TEXT NOT NULL,
+        standard_industry_code TEXT NOT NULL DEFAULT '',
+        standard_industry_name TEXT NOT NULL DEFAULT '',
+        standard_level TEXT NOT NULL DEFAULT '',
+        exchange_scope TEXT NOT NULL DEFAULT 'ALL',
+        note TEXT NOT NULL DEFAULT '',
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL
+    )
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS uidx_industry_mapping_source_raw ON industry_mapping(source, source_industry_name)",
+    "CREATE INDEX IF NOT EXISTS idx_industry_mapping_code ON industry_mapping(standard_industry_code)",
+    "CREATE INDEX IF NOT EXISTS idx_industry_mapping_name ON industry_mapping(standard_industry_name)",
+    """
     CREATE TABLE IF NOT EXISTS factor_rank_scores (
         snapshot_date TEXT NOT NULL,
         code TEXT NOT NULL,
@@ -302,6 +370,15 @@ class SecuritiesPayload:
     source: str
 
 
+@dataclass
+class IndustryRefreshPayload:
+    profiles: list[tuple[Any, ...]]
+    mappings: list[tuple[Any, ...]]
+    total: int
+    failed: int
+    missing_sources: list[str]
+
+
 def log_step(message: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
 
@@ -327,6 +404,57 @@ def import_pandas():
 def import_requests():
     import requests  # type: ignore
     return requests
+
+
+def call_with_retry(
+    label: str,
+    func,
+    *,
+    retries: int = 3,
+    backoff_seconds: float = 1.0,
+):
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max(retries, 1) + 1):
+        try:
+            return func()
+        except Exception as exc:  # noqa: BLE001 - external source retry wrapper
+            last_error = exc
+            if attempt >= max(retries, 1):
+                break
+            sleep_seconds = backoff_seconds * (2 ** (attempt - 1))
+            log_step(f"call retry {attempt}/{retries} label={label} sleep={sleep_seconds:.1f}s error={exc}")
+            time.sleep(sleep_seconds)
+    if last_error is None:
+        raise RuntimeError(f"call failed without explicit error: {label}")
+    raise last_error
+
+
+def request_with_retry(
+    url: str,
+    *,
+    params: Optional[dict[str, Any]] = None,
+    headers: Optional[dict[str, str]] = None,
+    timeout: int = 15,
+    retries: int = 3,
+    backoff_seconds: float = 1.0,
+):
+    requests = import_requests()
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max(retries, 1) + 1):
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=timeout)
+            response.raise_for_status()
+            return response
+        except Exception as exc:  # noqa: BLE001 - network retry wrapper
+            last_error = exc
+            if attempt >= max(retries, 1):
+                break
+            sleep_seconds = backoff_seconds * (2 ** (attempt - 1))
+            log_step(f"http retry {attempt}/{retries} url={url} sleep={sleep_seconds:.1f}s error={exc}")
+            time.sleep(sleep_seconds)
+    if last_error is None:
+        raise RuntimeError(f"request failed without explicit error: {url}")
+    raise last_error
 
 
 def utc_now() -> str:
@@ -532,6 +660,344 @@ def first_industry_value(record: dict[str, Any]) -> Any:
     return ""
 
 
+def board_name_from_code(board_code: str) -> str:
+    mapping = {
+        "MAIN": "主板",
+        "CHINEXT": "创业板",
+        "STAR": "科创板",
+        "BJ": "北交所",
+        "OTHER": "其他",
+    }
+    return mapping.get(str(board_code or "").strip().upper(), "主板")
+
+
+def build_industry_mapping_rows(now: str) -> list[tuple[Any, ...]]:
+    rows: list[tuple[Any, ...]] = []
+    sources = ["eastmoney", "eastmoney:qt_clist_get"]
+    for item in build_a_share_mapping_rows():
+        for source in sources:
+            rows.append((
+                source,
+                item["source_industry_name"],
+                item["industry_code"],
+                item["industry_name"],
+                item["industry_level"],
+                "ASHARE",
+                "申万一级行业映射",
+                now,
+                now,
+            ))
+    rows.append((
+        "hkex",
+        NOT_APPLICABLE,
+        NOT_APPLICABLE,
+        NOT_APPLICABLE,
+        NOT_APPLICABLE,
+        "HKEX",
+        "港股行业口径不适用申万一级",
+        now,
+        now,
+    ))
+    return rows
+
+
+def build_industry_refresh_payload(conn: sqlite3.Connection, args: argparse.Namespace) -> IndustryRefreshPayload:
+    now = utc_now()
+    codes = load_local_code_universe(conn, args, include_all_boards=False)
+    if not codes:
+        return IndustryRefreshPayload(profiles=[], mappings=build_industry_mapping_rows(now), total=0, failed=0, missing_sources=[])
+    placeholders = ",".join("?" for _ in codes)
+    rows = conn.execute(
+        f"""
+        SELECT fs.code, fs.symbol, fs.name, fs.exchange, fs.board,
+               COALESCE(fsi.raw_industry_name, ''), COALESCE(fsi.industry_name, '')
+        FROM factor_securities fs
+        LEFT JOIN factor_security_industries fsi ON fsi.code = fs.code
+        WHERE fs.code IN ({placeholders})
+          AND fs.exchange IN ('SSE', 'SZSE')
+          AND fs.board IN ('MAIN', 'CHINEXT')
+          AND fs.is_active = 1
+        ORDER BY fs.code ASC
+        """,
+        codes,
+    ).fetchall()
+    profiles: list[tuple[Any, ...]] = []
+    missing_sources: list[str] = []
+    failed = 0
+    for code, symbol, name, exchange, board, raw_industry_name, cleaned_industry_name in rows:
+        source_industry_name = str(cleaned_industry_name or "").strip() or normalize_industry_name(raw_industry_name)
+        if not source_industry_name:
+            failed += 1
+            missing_sources.append(f"{code}:missing_source_industry")
+            continue
+        standardized = standardize_a_share_industry(source_industry_name)
+        if not standardized["industry_name"]:
+            failed += 1
+            missing_sources.append(f"{code}:{source_industry_name}")
+            continue
+        board_code = str(board or classify_board(code))
+        profiles.append((
+            str(symbol or infer_symbol(code)),
+            str(exchange or infer_exchange(code)),
+            str(code),
+            str(name or code),
+            "",
+            board_code,
+            board_name_from_code(board_code),
+            str(raw_industry_name or source_industry_name),
+            standardized["industry_code"],
+            standardized["industry_name"],
+            standardized["industry_level"],
+            standardized["industry_source"],
+            "",
+            "",
+            "unknown",
+            "",
+            "LISTED",
+            "",
+            "",
+            "",
+            "",
+            "factorlab:industry_refresh",
+            "",
+            now,
+            "PARTIAL",
+            json.dumps(["industry_only_profile"], ensure_ascii=False),
+            now,
+            now,
+        ))
+    return IndustryRefreshPayload(
+        profiles=profiles,
+        mappings=build_industry_mapping_rows(now),
+        total=len(rows),
+        failed=failed,
+        missing_sources=missing_sources,
+    )
+
+
+def active_a_share_security_count(conn: sqlite3.Connection) -> int:
+    try:
+        row = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM factor_securities
+            WHERE exchange IN ('SSE', 'SZSE')
+              AND board IN ('MAIN', 'CHINEXT')
+              AND is_active = 1
+            """
+        ).fetchone()
+    except sqlite3.Error:
+        return 0
+    return int(row[0] or 0) if row else 0
+
+
+def minimum_expected_industry_count(conn: sqlite3.Connection) -> int:
+    universe_count = active_a_share_security_count(conn)
+    if universe_count <= 0:
+        return MIN_FULL_UNIVERSE_SECURITY_COUNT
+    return min(universe_count, max(MIN_FULL_UNIVERSE_SECURITY_COUNT, int(universe_count * 0.8)))
+
+
+def validate_industry_payload_size(conn: sqlite3.Connection, rows: list[tuple[Any, ...]], args: argparse.Namespace, source: str) -> None:
+    if args.limit or args.code or args.code_list_file:
+        return
+    min_required = minimum_expected_industry_count(conn)
+    if len(rows) < min_required:
+        raise RuntimeError(
+            f"{source} 返回行业仅 {len(rows)} 条，低于最小阈值 {min_required}，疑似截断"
+        )
+
+
+def fetch_industry_rows_akshare(conn: sqlite3.Connection, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
+    log_step("industries: 尝试外部源 1/2 AkShare 行业板块成份")
+    ak = import_akshare()
+    board_df = call_with_retry("akshare.stock_board_industry_name_em", ak.stock_board_industry_name_em, retries=3, backoff_seconds=1.0)
+    if board_df is None or board_df.empty:
+        raise RuntimeError("stock_board_industry_name_em 返回空数据")
+    board_col = find_column(board_df.columns, ["板块名称", "板块", "行业名称"])
+    if not board_col:
+        raise RuntimeError("行业板块列表缺少板块名称列")
+    target_codes = set(load_local_code_universe(conn, args, include_all_boards=False))
+    rows_by_code: dict[str, tuple[Any, ...]] = {}
+    board_names: list[str] = []
+    for _, row in board_df.iterrows():
+        board_name = normalize_industry_name(row.get(board_col))
+        if board_name and board_name not in board_names:
+            board_names.append(board_name)
+    if not board_names:
+        raise RuntimeError("行业板块列表为空")
+    source = "akshare:stock_board_industry_cons_em"
+    now = utc_now()
+    for idx, board_name in enumerate(board_names, start=1):
+        log_progress("industries: 板块抓取进度", idx, len(board_names), max(args.progress_interval, 1))
+        frame = call_with_retry(
+            f"akshare.stock_board_industry_cons_em:{board_name}",
+            lambda board_name=board_name: ak.stock_board_industry_cons_em(symbol=board_name),
+            retries=3,
+            backoff_seconds=1.0,
+        )
+        if frame is None or frame.empty:
+            continue
+        code_col = find_column(frame.columns, CODE_ALIASES)
+        if not code_col:
+            raise RuntimeError(f"{board_name} 成份列表缺少代码列")
+        cleaned_industry_name = normalize_industry_name(board_name)
+        for _, item in frame.iterrows():
+            code = normalize_code(item.get(code_col))
+            if not code or code in rows_by_code:
+                continue
+            if target_codes and code not in target_codes:
+                continue
+            rows_by_code[code] = (code, board_name, cleaned_industry_name, source, now)
+        if args.sleep > 0:
+            time.sleep(args.sleep)
+    rows = [rows_by_code[code] for code in sorted(rows_by_code.keys())]
+    if args.limit > 0:
+        rows = rows[:args.limit]
+    if not rows:
+        raise RuntimeError("AkShare 行业板块成份返回空数据")
+    return rows, source
+
+
+def fetch_industry_rows(conn: sqlite3.Connection, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
+    failures: list[str] = []
+    for item in INDUSTRY_SOURCE_ORDER:
+        try:
+            if item == "akshare":
+                rows, source = fetch_industry_rows_akshare(conn, args)
+            else:
+                raise ValueError(f"未知 industries source: {item}")
+            validate_industry_payload_size(conn, rows, args, source)
+            log_step(f"industries: 数据源 {item} 成功，行业 {len(rows)} 条")
+            return rows, source
+        except Exception as exc:  # noqa: BLE001 - source fallback needs broad isolation
+            failures.append(f"{item} failed: {exc}")
+            log_step(f"industries: 数据源 {item} 失败：{exc}")
+            if args.verbose:
+                traceback.print_exc()
+    raise RuntimeError("industries 所有数据源均失败：" + " | ".join(failures))
+
+
+def ensure_industry_universe(conn: sqlite3.Connection, args: argparse.Namespace) -> tuple[int, str]:
+    universe_count = active_a_share_security_count(conn)
+    if universe_count > 0:
+        return 0, ""
+    payload = fetch_securities_payload(conn, args)
+    if not payload.rows:
+        raise RuntimeError("industries 缺少本地股票池，且 bootstrap securities 返回空数据")
+    if args.write:
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO factor_securities
+            (code, symbol, name, exchange, board, listing_date, is_st, is_active, source, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            payload.rows,
+        )
+        conn.commit()
+    return len(payload.rows), payload.source
+
+
+def upsert_company_profiles(conn: sqlite3.Connection, rows: list[tuple[Any, ...]]) -> None:
+    if not rows:
+        return
+    conn.executemany(
+        """
+        INSERT INTO company_profiles (
+            symbol, exchange, code, name, full_name, board_code, board_name,
+            raw_industry_name, industry_code, industry_name, industry_level, industry_source,
+            website, founded_date, founded_date_precision, ipo_date, listing_status, delisted_date,
+            business_scope, business_summary, business_summary_source, source, source_url, source_updated_at,
+            profile_status, quality_flags, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(symbol) DO UPDATE SET
+            exchange = excluded.exchange,
+            code = excluded.code,
+            name = CASE WHEN excluded.name <> '' THEN excluded.name ELSE company_profiles.name END,
+            board_code = excluded.board_code,
+            board_name = excluded.board_name,
+            raw_industry_name = excluded.raw_industry_name,
+            industry_code = excluded.industry_code,
+            industry_name = excluded.industry_name,
+            industry_level = excluded.industry_level,
+            industry_source = excluded.industry_source,
+            listing_status = excluded.listing_status,
+            updated_at = excluded.updated_at
+        """,
+        rows,
+    )
+
+
+def upsert_industry_mapping_rows(conn: sqlite3.Connection, rows: list[tuple[Any, ...]]) -> None:
+    if not rows:
+        return
+    conn.executemany(
+        """
+        INSERT INTO industry_mapping (
+            source, source_industry_name, standard_industry_code, standard_industry_name,
+            standard_level, exchange_scope, note, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(source, source_industry_name) DO UPDATE SET
+            standard_industry_code = excluded.standard_industry_code,
+            standard_industry_name = excluded.standard_industry_name,
+            standard_level = excluded.standard_level,
+            exchange_scope = excluded.exchange_scope,
+            note = excluded.note,
+            updated_at = excluded.updated_at
+        """,
+        rows,
+    )
+
+
+def backfill_industries(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) -> TaskStats:
+    log_step(f"industries: 开始刷新，dry_run={not args.write}")
+    bootstrap_rows, bootstrap_source = ensure_industry_universe(conn, args)
+    industry_rows, industry_source = fetch_industry_rows(conn, args)
+    if args.write and industry_rows:
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO factor_security_industries
+            (code, raw_industry_name, industry_name, industry_source, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            industry_rows,
+        )
+        conn.commit()
+    payload = build_industry_refresh_payload(conn, args)
+    stats = TaskStats(total=payload.total, success=len(payload.profiles), failed=payload.failed, skipped=0)
+    summary = {
+        "total": payload.total,
+        "success": len(payload.profiles),
+        "failed": payload.failed,
+        "mapping_rows": len(payload.mappings),
+        "bootstrap_security_rows": bootstrap_rows,
+        "bootstrap_security_source": bootstrap_source,
+        "source_industries": len(industry_rows),
+        "industry_source": industry_source,
+        "missing_sources": payload.missing_sources[:50],
+    }
+    if bootstrap_rows:
+        log_step(f"industries: bootstrap 股票池 {bootstrap_rows} 条 source={bootstrap_source}")
+    log_step(f"industries: 来源行业 {len(industry_rows)} 条 source={industry_source}")
+    log_step(f"industries: 股票 {payload.total} 条，可写入 {len(payload.profiles)} 条，缺失 {payload.failed} 条，映射 {len(payload.mappings)} 条")
+    if not args.write:
+        print(f"[dry-run] {json.dumps(summary, ensure_ascii=False)}", flush=True)
+        stats.success = 0
+        stats.skipped = payload.total
+        stats.failed = 0
+        return stats
+    upsert_industry_mapping_rows(conn, payload.mappings)
+    upsert_company_profiles(conn, payload.profiles)
+    for profile in payload.profiles:
+        upsert_task_item(conn, run_id, "industry_profile", str(profile[2]), "success")
+    for item in payload.missing_sources:
+        code, _, error = item.partition(":")
+        upsert_task_item(conn, run_id, "industry_profile", code, "failed", error)
+    conn.commit()
+    log_step(f"industries: 写入完成 company_profiles={len(payload.profiles)} industry_mapping={len(payload.mappings)}")
+    return stats
+
+
 def insert_task_run(conn: sqlite3.Connection, run_id: str, mode: str, args: argparse.Namespace) -> None:
     conn.execute(
         """
@@ -724,7 +1190,7 @@ def build_security_payload_from_quote_records(records: list[dict[str, Any]], arg
 def fetch_securities_akshare(args: argparse.Namespace) -> list[dict[str, Any]]:
     log_step("securities: 尝试外部源 1/3 AkShare stock_zh_a_spot_em")
     ak = import_akshare()
-    df = ak.stock_zh_a_spot_em()
+    df = call_with_retry("akshare.stock_zh_a_spot_em", ak.stock_zh_a_spot_em, retries=3, backoff_seconds=1.0)
     if df is None or df.empty:
         raise RuntimeError("stock_zh_a_spot_em 返回空数据")
     code_col = find_column(df.columns, CODE_ALIASES)
@@ -773,8 +1239,7 @@ def fetch_securities_eastmoney_direct(args: argparse.Namespace) -> list[dict[str
             "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
             "fields": fields,
         }
-        response = requests.get(EASTMONEY_CLIST_URL, params=params, headers=headers, timeout=15)
-        response.raise_for_status()
+        response = request_with_retry(EASTMONEY_CLIST_URL, params=params, headers=headers, timeout=15, retries=3, backoff_seconds=1.0)
         payload = response.json()
         data = payload.get("data") or {}
         diff = data.get("diff") or []
@@ -846,7 +1311,7 @@ def fetch_securities_tencent(conn: sqlite3.Connection, args: argparse.Namespace)
     batches = list(chunked(codes, 500))
     for idx, batch in enumerate(batches, start=1):
         query = ",".join(tencent_quote_code(code) for code in batch)
-        response = requests.get(TENCENT_QUOTE_URL.format(codes=query), headers=headers, timeout=15)
+        response = request_with_retry(TENCENT_QUOTE_URL.format(codes=query), headers=headers, timeout=15, retries=3, backoff_seconds=1.0)
         response.encoding = "gbk"
         for line in response.text.strip().splitlines():
             parsed = parse_tencent_quote_line(line)
@@ -941,6 +1406,7 @@ def fetch_securities_payload(conn: sqlite3.Connection, args: argparse.Namespace)
                 payload = build_security_payload_from_quote_records(records, args, "local:quadrant_scores+company_profiles")
             else:
                 raise ValueError(f"未知 securities source: {item}")
+            validate_security_payload_size(payload, args, item)
             if payload.rows:
                 log_step(f"securities: 数据源 {item} 成功，股票 {len(payload.rows)} 条，市场指标 {len(payload.metrics)} 条")
                 return payload
@@ -954,6 +1420,15 @@ def fetch_securities_payload(conn: sqlite3.Connection, args: argparse.Namespace)
             if source != "auto":
                 break
     raise RuntimeError("securities 所有数据源均失败：" + " | ".join(failures))
+
+
+def validate_security_payload_size(payload: SecuritiesPayload, args: argparse.Namespace, source: str) -> None:
+    if args.limit or args.code or args.code_list_file or source == "local":
+        return
+    if len(payload.rows) < MIN_FULL_UNIVERSE_SECURITY_COUNT:
+        raise RuntimeError(
+            f"{source} 返回股票仅 {len(payload.rows)} 条，低于全量股票池最小阈值 {MIN_FULL_UNIVERSE_SECURITY_COUNT}，疑似截断"
+        )
 
 
 def backfill_securities(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) -> TaskStats:
@@ -1062,8 +1537,7 @@ def fetch_daily_bars_eastmoney(code: str, start_date: str, end_date: str, args: 
         "fields1": "f1,f2,f3,f4,f5,f6",
         "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
     }
-    resp = requests.get(EASTMONEY_KLINE_URL, params=params, timeout=15)
-    resp.raise_for_status()
+    resp = request_with_retry(EASTMONEY_KLINE_URL, params=params, timeout=15, retries=3, backoff_seconds=1.0)
     klines = ((resp.json().get("data") or {}).get("klines") or [])
     rows = [row for raw in klines if (row := parse_eastmoney_kline_row(code, raw, "eastmoney:kline", args.adjust))]
     if not rows:
@@ -1078,8 +1552,7 @@ def fetch_daily_bars_tencent(code: str, start_date: str, end_date: str, args: ar
     end = f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}"
     fq = "qfq" if args.adjust == "qfq" else ""
     url = f"{TENCENT_KLINE_URL}?param={symbol},day,{start},{end},500,{fq}"
-    resp = requests.get(url, timeout=15)
-    resp.raise_for_status()
+    resp = request_with_retry(url, timeout=15, retries=3, backoff_seconds=1.0)
     data = (resp.json().get("data") or {}).get(symbol) or {}
     klines = data.get("qfqday") or data.get("day") or []
     rows: list[tuple[Any, ...]] = []
@@ -1348,8 +1821,7 @@ def fetch_eastmoney_datacenter(report_name: str, report_date: str, page_size: in
             "source": "WEB",
             "client": "WEB",
         }
-        resp = requests.get(EASTMONEY_DATACENTER_URL, params=params, timeout=15)
-        resp.raise_for_status()
+        resp = request_with_retry(EASTMONEY_DATACENTER_URL, params=params, timeout=15, retries=3, backoff_seconds=1.0)
         result = resp.json().get("result") or {}
         data = result.get("data") or []
         if not data:
@@ -1570,8 +2042,7 @@ def fetch_dividend_rows_eastmoney(code: str) -> list[tuple[Any, ...]]:
             "source": "WEB",
             "client": "WEB",
         }
-        resp = requests.get(EASTMONEY_DATACENTER_URL, params=params, timeout=15)
-        resp.raise_for_status()
+        resp = request_with_retry(EASTMONEY_DATACENTER_URL, params=params, timeout=15, retries=3, backoff_seconds=1.0)
         result = resp.json().get("result") or {}
         data = result.get("data") or []
         if not data:
@@ -1681,6 +2152,8 @@ def merge_stats(all_stats: list[TaskStats]) -> TaskStats:
 def run_mode(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) -> TaskStats:
     if args.mode == "securities":
         return backfill_securities(conn, args, run_id)
+    if args.mode == "industries":
+        return backfill_industries(conn, args, run_id)
     if args.mode == "daily-bars":
         return backfill_daily_bars(conn, args, run_id)
     if args.mode == "index-bars":
@@ -1690,7 +2163,7 @@ def run_mode(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) ->
     if args.mode == "dividends":
         return backfill_dividends(conn, args, run_id)
     if args.mode == "all":
-        modes = ["securities", "daily-bars", "index-bars", "financials", "dividends"]
+        modes = ["securities", "industries", "daily-bars", "index-bars", "financials", "dividends"]
         stats = []
         original = args.mode
         for mode in modes:
@@ -1705,7 +2178,7 @@ def run_mode(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) ->
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Factor Lab Phase 0 backfill")
     parser.add_argument("--db", default="", help="pumpkin.db 路径；默认自动查找 data/pumpkin.db")
-    parser.add_argument("--mode", choices=["securities", "daily-bars", "index-bars", "financials", "dividends", "all"], default="all")
+    parser.add_argument("--mode", choices=["securities", "industries", "daily-bars", "index-bars", "financials", "dividends", "all"], default="all")
     parser.add_argument("--write", action="store_true", help="实际写入数据库；默认 dry-run")
     parser.add_argument("--resume", action="store_true", help="跳过已有 success task item")
     parser.add_argument("--force", action="store_true", help="保留参数，后续用于强制覆盖策略；当前 upsert 已幂等覆盖")

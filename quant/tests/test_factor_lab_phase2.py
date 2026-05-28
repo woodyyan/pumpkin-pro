@@ -37,7 +37,7 @@ def seed_snapshots(conn: sqlite3.Connection):
         """,
         rows,
     )
-    conn.execute("INSERT INTO factor_security_industries (code, raw_industry_name, industry_name, industry_source, updated_at) VALUES ('000001','银行Ⅰ','银行','test','now')")
+    conn.execute("INSERT INTO company_profiles (symbol, exchange, code, name, raw_industry_name, industry_code, industry_name, industry_level, industry_source, listing_status, profile_status, quality_flags, created_at, updated_at) VALUES ('000001.SZ','SZSE','000001','平安银行','银行Ⅰ','banks','银行','l1','sw_l1','LISTED','COMPLETE','[]','now','now')")
     conn.commit()
 
 

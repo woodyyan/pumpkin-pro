@@ -67,3 +67,10 @@ export function normalizeWebsiteHref(website) {
   if (!isSafeWebsiteUrl(text)) return ''
   return text.startsWith('http://') || text.startsWith('https://') ? text : `https://${text}`
 }
+
+export function formatIndustryLabel(value) {
+  const text = String(value || '').trim()
+  if (!text) return '--'
+  if (text === 'not_applicable') return '不适用'
+  return text
+}

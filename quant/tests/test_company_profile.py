@@ -8,6 +8,7 @@ from data.company_profile import (
     normalize_symbol,
     normalize_website,
 )
+from data.industry_standardization import build_a_share_mapping_rows, standardize_a_share_industry, standardize_not_applicable_industry
 from scripts.sync_company_profiles import parse_symbols, sync_symbols
 
 
@@ -80,3 +81,24 @@ def test_sync_symbols_uses_fetch_profile(monkeypatch):
     monkeypatch.setattr(sync_mod, "fetch_profile", lambda symbol: {"symbol": symbol})
     assert parse_symbols("600519.SH, 00700.HK") == ["600519.SH", "00700.HK"]
     assert sync_symbols(["600519.SH", "00700.HK"], limit=1) == [{"symbol": "600519.SH"}]
+
+
+def test_industry_standardization_maps_a_share_and_hk():
+    assert standardize_a_share_industry("白酒") == {
+        "industry_code": "food_beverage",
+        "industry_name": "食品饮料",
+        "industry_level": "l1",
+        "industry_source": "sw_l1",
+    }
+    assert standardize_a_share_industry("未知行业")["industry_name"] == ""
+    assert standardize_not_applicable_industry() == {
+        "industry_code": "not_applicable",
+        "industry_name": "not_applicable",
+        "industry_level": "not_applicable",
+        "industry_source": "not_applicable",
+    }
+
+
+def test_build_a_share_mapping_rows_contains_source_industry_name():
+    rows = build_a_share_mapping_rows()
+    assert any(item["source_industry_name"] == "白酒" and item["industry_name"] == "食品饮料" for item in rows)

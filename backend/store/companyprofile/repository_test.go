@@ -249,3 +249,37 @@ func TestRepositoryIndustryMapping(t *testing.T) {
 		t.Fatalf("mapping did not update, got %q", updated.StandardIndustryName)
 	}
 }
+
+func TestRepositoryCoverageCountsApplicableIndustries(t *testing.T) {
+	db := testutil.InMemoryDB(t)
+	testutil.AutoMigrateModels(t, db, &CompanyProfileRecord{}, &IndustryMappingRecord{}, &quadrant.QuadrantScoreRecord{})
+	repo := NewRepository(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := db.Create(&[]quadrant.QuadrantScoreRecord{
+		{Code: "600519", Name: "贵州茅台", Exchange: "SSE", Board: "MAIN", ComputedAt: now},
+		{Code: "00700", Name: "腾讯控股", Exchange: "HKEX", Board: "HK_MAIN", ComputedAt: now},
+	}).Error; err != nil {
+		t.Fatalf("seed universe failed: %v", err)
+	}
+	if err := repo.BulkUpsert(ctx, []CompanyProfileRecord{
+		{Symbol: "600519.SH", Exchange: "SSE", Code: "600519", Name: "贵州茅台", IndustryName: "食品饮料", ListingStatus: ListingStatusListed, ProfileStatus: ProfileStatusComplete, QualityFlags: `[]`, CreatedAt: now, UpdatedAt: now},
+		{Symbol: "00700.HK", Exchange: "HKEX", Code: "00700", Name: "腾讯控股", IndustryName: IndustryNotApplicable, ListingStatus: ListingStatusListed, ProfileStatus: ProfileStatusPartial, QualityFlags: `[]`, CreatedAt: now, UpdatedAt: now},
+	}); err != nil {
+		t.Fatalf("seed profiles failed: %v", err)
+	}
+	coverage, err := repo.Coverage(ctx)
+	if err != nil {
+		t.Fatalf("Coverage failed: %v", err)
+	}
+	byExchange := map[string]CoverageByExchange{}
+	for _, row := range coverage {
+		byExchange[row.Exchange] = row
+	}
+	if byExchange["SSE"].ApplicableCount != 1 || byExchange["SSE"].MappedCount != 1 {
+		t.Fatalf("unexpected SSE coverage: %+v", byExchange["SSE"])
+	}
+	if byExchange["HKEX"].ApplicableCount != 0 || byExchange["HKEX"].MappedCount != 0 {
+		t.Fatalf("unexpected HKEX coverage: %+v", byExchange["HKEX"])
+	}
+}

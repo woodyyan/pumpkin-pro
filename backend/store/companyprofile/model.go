@@ -3,6 +3,10 @@ package companyprofile
 import "time"
 
 const (
+	IndustryNotApplicable = "not_applicable"
+	IndustryLevelL1       = "l1"
+	IndustrySourceSWL1    = "sw_l1"
+
 	ListingStatusListed    = "LISTED"
 	ListingStatusDelisted  = "DELISTED"
 	ListingStatusSuspended = "SUSPENDED"
@@ -128,6 +132,8 @@ type CoverageByExchange struct {
 	Exchange      string  `json:"exchange"`
 	UniverseCount int64   `json:"universe_count"`
 	ProfileCount  int64   `json:"profile_count"`
+	ApplicableCount int64 `json:"applicable_count"`
+	MappedCount   int64   `json:"mapped_count"`
 	CompleteCount int64   `json:"complete_count"`
 	PendingCount  int64   `json:"pending_count"`
 	FailedCount   int64   `json:"failed_count"`

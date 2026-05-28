@@ -34,3 +34,9 @@ A 股和港股交易日不完全一致，常见差异场景：
 - `MAIL_PROVIDER` 当前支持 `mock` 与腾讯云邮件推送实现，生产建议使用 `tencent`。
 - 使用 Docker Compose 启动时，根目录 `.env` 不能只依赖变量插值；`backend` 服务必须通过 `env_file: .env` 或显式 `environment` 映射，未声明的变量否则不会进入容器。
 - 找回密码默认参数：token 30 分钟过期、同邮箱 60 秒冷却、同 IP 每小时 10 次、同邮箱每小时 3 次。
+
+## 因子实验室行业口径
+- 因子实验室、个股静态资料等用户可见“行业”统一展示 `company_profiles.industry_name`，口径固定为“申万一级行业”。
+- `factor_security_industries` 仅作为原始来源捕获表，不直接作为用户展示主口径。
+- 港股行业统一记为 `not_applicable`，前端展示为“不适用”，不要为港股强行套用申万行业。
+- 行业刷新属于 Factor Lab Phase 0，必须在每日自动预计算链路中一起执行，默认北京时间 21:00。

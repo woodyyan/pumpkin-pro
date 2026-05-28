@@ -88,6 +88,22 @@ def test_build_financial_and_dividend_commands_use_small_report_limits(tmp_path)
         conn.close()
 
 
+def test_build_industries_command_adds_mode_without_code_list(tmp_path):
+    db_path = tmp_path / "factor.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        args = module.parse_args(["--db", str(db_path)])
+        args.db_path = db_path
+        args.temp_files = []
+        cmd = module.build_mode_command(args, "industries", conn)
+        assert "--mode" in cmd
+        assert cmd[cmd.index("--mode") + 1] == "industries"
+        assert "--code-list-file" not in cmd
+        assert "--daily-bars-source" not in cmd
+    finally:
+        conn.close()
+
+
 def test_repair_missing_dividend_yield_selects_old_dividend_records(tmp_path):
     db_path = tmp_path / "factor.db"
     conn = sqlite3.connect(db_path)

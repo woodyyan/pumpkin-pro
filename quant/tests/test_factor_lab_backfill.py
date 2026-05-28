@@ -91,15 +91,83 @@ def test_build_security_payload_from_quote_records_applies_limit_and_metrics():
     assert payload.source == "test-source"
 
 
+def test_validate_security_payload_size_rejects_truncated_full_universe():
+    args = module.parse_args(["--mode", "securities"])
+    payload = module.SecuritiesPayload(rows=[("000001",)], metrics=[], industries=[], source="test")
+    try:
+        module.validate_security_payload_size(payload, args, "eastmoney")
+    except RuntimeError as exc:
+        assert "低于全量股票池最小阈值" in str(exc)
+    else:
+        raise AssertionError("expected truncated full-universe payload to fail")
+
+
+def test_validate_security_payload_size_allows_debug_scope():
+    args = module.parse_args(["--mode", "securities", "--limit", "10"])
+    payload = module.SecuritiesPayload(rows=[("000001",)], metrics=[], industries=[], source="test")
+    module.validate_security_payload_size(payload, args, "eastmoney")
+
+
+def test_request_with_retry_retries_then_succeeds(monkeypatch):
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    attempts = {"count": 0}
+
+    class FakeRequests:
+        def get(self, url, params=None, headers=None, timeout=15):
+            attempts["count"] += 1
+            if attempts["count"] < 3:
+                raise RuntimeError("temporary network failure")
+            return FakeResponse({"ok": True})
+
+    monkeypatch.setattr(module, "import_requests", lambda: FakeRequests())
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    response = module.request_with_retry("https://example.com", retries=3, backoff_seconds=0.01)
+    assert response.json() == {"ok": True}
+    assert attempts["count"] == 3
+
+
+def test_fetch_industry_rows_only_uses_akshare(monkeypatch, tmp_path):
+    db_path = tmp_path / "factor.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        module.ensure_schema(conn)
+        conn.execute("INSERT INTO factor_securities (code, symbol, name, exchange, board, is_st, is_active, source, updated_at) VALUES ('000001','000001.SZ','平安银行','SZSE','MAIN',0,1,'test','now')")
+        conn.commit()
+        args = module.parse_args(["--mode", "industries"])
+        called = {"akshare": 0}
+
+        def fake_fetch_industry_rows_akshare(inner_conn, inner_args):
+            called["akshare"] += 1
+            return [(
+                "000001", "银行", "银行", "akshare:stock_board_industry_cons_em", "now"
+            )], "akshare:stock_board_industry_cons_em"
+
+        monkeypatch.setattr(module, "fetch_industry_rows_akshare", fake_fetch_industry_rows_akshare)
+        rows, source = module.fetch_industry_rows(conn, args)
+        assert called["akshare"] == 1
+        assert source == "akshare:stock_board_industry_cons_em"
+        assert rows[0][0] == "000001"
+    finally:
+        conn.close()
+
+
 def test_fetch_securities_local_prefers_quadrant_then_company_profiles(tmp_path):
     db_path = tmp_path / "factor.db"
     conn = sqlite3.connect(db_path)
     try:
         module.ensure_schema(conn)
         conn.execute("CREATE TABLE quadrant_scores (code TEXT, name TEXT, exchange TEXT, board TEXT)")
-        conn.execute("CREATE TABLE company_profiles (code TEXT, name TEXT, exchange TEXT, board_code TEXT)")
         conn.execute("INSERT INTO quadrant_scores VALUES ('300001', '特锐德', 'SZSE', 'CHINEXT')")
-        conn.execute("INSERT INTO company_profiles VALUES ('600519', '贵州茅台', 'SSE', 'MAIN')")
+        conn.execute("INSERT INTO company_profiles (code, name, exchange, board_code, created_at, updated_at) VALUES ('600519', '贵州茅台', 'SSE', 'MAIN', 'now', 'now')")
         conn.commit()
         args = module.parse_args(["--mode", "securities", "--securities-source", "local", "--limit", "2"])
         records = module.fetch_securities_local(conn, args)
@@ -107,6 +175,27 @@ def test_fetch_securities_local_prefers_quadrant_then_company_profiles(tmp_path)
         payload = module.fetch_securities_payload(conn, args)
         assert len(payload.rows) == 2
         assert payload.source == "local:quadrant_scores+company_profiles"
+    finally:
+        conn.close()
+
+
+def test_build_industry_refresh_payload_maps_to_company_profiles(tmp_path):
+    db_path = tmp_path / "factor.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        module.ensure_schema(conn)
+        conn.execute("INSERT INTO factor_securities (code, symbol, name, exchange, board, is_st, is_active, source, updated_at) VALUES ('000001','000001.SZ','平安银行','SZSE','MAIN',0,1,'test','now')")
+        conn.execute("INSERT INTO factor_security_industries (code, raw_industry_name, industry_name, industry_source, updated_at) VALUES ('000001','白酒Ⅱ','白酒','eastmoney:qt_clist_get','now')")
+        conn.commit()
+        args = module.parse_args(["--mode", "industries"])
+        payload = module.build_industry_refresh_payload(conn, args)
+        assert payload.total == 1
+        assert payload.failed == 0
+        assert payload.profiles[0][0] == "000001.SZ"
+        assert payload.profiles[0][8] == "food_beverage"
+        assert payload.profiles[0][9] == "食品饮料"
+        assert payload.profiles[0][11] == "sw_l1"
+        assert any(row[0] == "eastmoney" and row[1] == "白酒" and row[3] == "食品饮料" for row in payload.mappings)
     finally:
         conn.close()
 

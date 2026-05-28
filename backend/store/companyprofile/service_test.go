@@ -2,8 +2,9 @@ package companyprofile
 
 import (
 	"context"
+	"io"
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,10 +79,23 @@ func TestServiceGetAboutPendingAndInvalidSymbol(t *testing.T) {
 	if payload.Meta.ProfileStatus != ProfileStatusPending || payload.Meta.Message == "" {
 		t.Fatalf("unexpected pending meta: %#v", payload.Meta)
 	}
+	hkPayload, err := svc.GetAbout(ctx, "00700")
+	if err != nil {
+		t.Fatalf("GetAbout HK pending failed: %v", err)
+	}
+	if hkPayload.Meta.Message != "港股公司资料暂未接入完整静态资料源，行业按不适用处理。" {
+		t.Fatalf("unexpected HK pending message: %#v", hkPayload.Meta)
+	}
 
 	if _, err := svc.GetAbout(ctx, "ABC"); err == nil {
 		t.Fatal("expected invalid symbol error")
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
 
 func TestServiceManualRefreshUsesQuantAndMarksDelisted(t *testing.T) {
@@ -95,16 +109,21 @@ func TestServiceManualRefreshUsesQuantAndMarksDelisted(t *testing.T) {
 	if err := repo.Upsert(context.Background(), CompanyProfileRecord{Symbol: "000001.SZ", Exchange: "SZSE", Code: "000001", Name: "旧股票", ListingStatus: ListingStatusListed, ProfileStatus: ProfileStatusComplete, QualityFlags: `[]`, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("seed old profile failed: %v", err)
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/api/company-profiles/sync" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"items":[{"symbol":"600519.SH","exchange":"SSE","code":"600519","name":"贵州茅台","listing_status":"LISTED","profile_status":"COMPLETE","quality_flags":"[]"}]}`))
-	}))
-	defer server.Close()
+		body := `{"items":[{"symbol":"600519.SH","exchange":"SSE","code":"600519","name":"贵州茅台","listing_status":"LISTED","profile_status":"COMPLETE","quality_flags":"[]"}]}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})
+	defer func() { http.DefaultTransport = oldTransport }()
 	svc := NewService(repo)
-	svc.SetQuantServiceURL(server.URL)
+	svc.SetQuantServiceURL("http://quant.test")
 	if _, err := svc.StartManualRefresh(context.Background(), CompanyProfileRefreshRequest{}); err != nil {
 		t.Fatalf("StartManualRefresh failed: %v", err)
 	}

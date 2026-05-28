@@ -12,4 +12,10 @@ describe('admin factor lab pipeline labels', () => {
     assert.doesNotMatch(pageSource, /经营现金流率/)
     assert.doesNotMatch(pageSource, /修复经营现金流/)
   })
+
+  it('exposes industries phase0 mode and manual trigger', () => {
+    assert.match(pageSource, /<option value="industries">industries<\/option>/)
+    assert.match(pageSource, /只刷新行业/)
+    assert.match(pageSource, /phase0_mode: 'industries'/)
+  })
 })

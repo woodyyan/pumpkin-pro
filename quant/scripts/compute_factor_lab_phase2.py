@@ -160,7 +160,7 @@ def load_snapshot_rows(conn: sqlite3.Connection, snapshot_date: str) -> list[dic
 def load_industries(conn: sqlite3.Connection) -> dict[str, str]:
     industries: dict[str, str] = {}
     try:
-        rows = conn.execute("SELECT code, industry_name FROM factor_security_industries WHERE industry_name <> ''").fetchall()
+        rows = conn.execute("SELECT code, industry_name FROM company_profiles WHERE industry_name <> ''").fetchall()
         for code, industry_name in rows:
             industries[str(code)] = str(industry_name or "")
     except sqlite3.Error:
@@ -168,7 +168,7 @@ def load_industries(conn: sqlite3.Connection) -> dict[str, str]:
     if industries:
         return industries
     try:
-        rows = conn.execute("SELECT code, industry_name FROM company_profiles WHERE industry_name <> ''").fetchall()
+        rows = conn.execute("SELECT code, industry_name FROM factor_security_industries WHERE industry_name <> ''").fetchall()
         for code, industry_name in rows:
             industries[str(code)] = str(industry_name or "")
     except sqlite3.Error:

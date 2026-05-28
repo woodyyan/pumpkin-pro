@@ -237,7 +237,7 @@ func validatePipelineRunRequest(request PipelineRunRequest) error {
 	if !containsString([]string{"all", "phase0", "phase1", "phase2", "phase1_phase2"}, request.Phase) {
 		return fmt.Errorf("unsupported factor lab phase: %s", request.Phase)
 	}
-	if !containsString([]string{"all", "securities", "daily-bars", "index-bars", "financials", "dividends"}, request.Phase0Mode) {
+	if !containsString([]string{"all", "securities", "industries", "daily-bars", "index-bars", "financials", "dividends"}, request.Phase0Mode) {
 		return fmt.Errorf("unsupported phase0 mode: %s", request.Phase0Mode)
 	}
 	if !containsString([]string{"incremental", "repair_missing_dividend_yield", "repair_missing_fcfm_inputs"}, request.Scope) {

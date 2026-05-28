@@ -5,6 +5,7 @@ import {
   buildCompanyAboutPath,
   extractDisplayDomain,
   formatAboutDate,
+  formatIndustryLabel,
   formatListingStatus,
   isSafeWebsiteUrl,
   normalizeWebsiteHref,
@@ -33,5 +34,11 @@ describe('company about helpers', () => {
     assert.equal(extractDisplayDomain('https://www.moutaichina.com/about'), 'moutaichina.com')
     assert.equal(normalizeWebsiteHref('example.com'), 'https://example.com')
     assert.equal(isSafeWebsiteUrl('javascript:alert(1)'), false)
+  })
+
+  it('formats not_applicable industry label for display', () => {
+    assert.equal(formatIndustryLabel('not_applicable'), '不适用')
+    assert.equal(formatIndustryLabel('食品饮料'), '食品饮料')
+    assert.equal(formatIndustryLabel(''), '--')
   })
 })

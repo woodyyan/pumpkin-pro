@@ -32,8 +32,8 @@ DEFAULT_BUFFER_DAYS = 7
 DEFAULT_FINANCIAL_REPORT_LIMIT = 2
 DEFAULT_DIVIDEND_REPORT_LIMIT = 2
 DEFAULT_STEP_TIMEOUT_SECONDS = 1800
-DEFAULT_MODES = ("securities", "daily-bars", "index-bars", "financials", "dividends")
-DEFAULT_CRITICAL_MODES = {"securities", "daily-bars", "index-bars"}
+DEFAULT_MODES = ("securities", "industries", "daily-bars", "index-bars", "financials", "dividends")
+DEFAULT_CRITICAL_MODES = {"securities", "industries", "daily-bars", "index-bars"}
 
 
 @dataclass
@@ -266,7 +266,9 @@ def build_mode_command(args: argparse.Namespace, mode: str, conn: sqlite3.Connec
     if args.snapshot_date:
         cmd.extend(["--snapshot-date", args.snapshot_date])
 
-    if mode == "daily-bars":
+    if mode == "industries":
+        log_step("incremental: industries refresh Shenwan L1 mapping for active A-share universe")
+    elif mode == "daily-bars":
         target_date = latest_date(conn, "factor_market_metrics", "trade_date") or latest_date(conn, "factor_daily_bars", "trade_date")
         codes = codes_missing_daily_target(conn, target_date)
         cmd.extend(["--daily-bars-source", args.daily_bars_source])

@@ -189,6 +189,10 @@ func (s *Service) fetchFromQuant(ctx context.Context, symbols []string) ([]Compa
 }
 
 func pendingPayload(symbol, exchange string) *CompanyAboutPayload {
+	message := "资料整理中，暂未收录该公司的静态资料。"
+	if exchange == "HKEX" {
+		message = "港股公司资料暂未接入完整静态资料源，行业按不适用处理。"
+	}
 	return &CompanyAboutPayload{
 		Symbol:     symbol,
 		Exchange:   exchange,
@@ -197,7 +201,7 @@ func pendingPayload(symbol, exchange string) *CompanyAboutPayload {
 		Meta: CompanyAboutMeta{
 			ProfileStatus: ProfileStatusPending,
 			QualityFlags:  []string{},
-			Message:       "资料整理中，暂未收录该公司的静态资料。",
+			Message:       message,
 		},
 	}
 }

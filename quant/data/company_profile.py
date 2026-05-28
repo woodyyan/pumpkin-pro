@@ -6,6 +6,11 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlparse
 
+from data.industry_standardization import (
+    standardize_a_share_industry,
+    standardize_not_applicable_industry,
+)
+
 WEAK_INDUSTRY_VALUES = {"", "--", "-", "none", "null", "nan", "其他", "其它", "未知", "未分类"}
 GENERIC_BUSINESS_TERMS = {"服务", "咨询", "投资", "管理", "销售", "贸易", "技术服务", "技术咨询"}
 LEGAL_NOISE_PATTERNS = [
@@ -217,6 +222,11 @@ def fetch_a_share_company_profile(symbol: str) -> Dict[str, Any]:
         "board_name": _classify_a_share_board_name(code),
         "business_scope": _first_non_empty(info, ["经营范围", "主营业务", "公司简介"]),
     })
+    standardized = standardize_a_share_industry(industry)
+    if industry and not standardized["industry_name"]:
+        flags.append("sw_l1_industry_unmapped")
+    elif not industry:
+        flags.append("industry_missing")
     return {
         "symbol": normalized,
         "exchange": exchange,
@@ -226,8 +236,10 @@ def fetch_a_share_company_profile(symbol: str) -> Dict[str, Any]:
         "board_code": _classify_a_share_board_code(code),
         "board_name": _classify_a_share_board_name(code),
         "raw_industry_name": raw_industry,
-        "industry_name": industry,
-        "industry_source": "eastmoney",
+        "industry_code": standardized["industry_code"],
+        "industry_name": standardized["industry_name"],
+        "industry_level": standardized["industry_level"],
+        "industry_source": standardized["industry_source"],
         "website": normalize_website(_first_non_empty(info, ["官方网址", "网站", "官网"])),
         "founded_date": founded_date,
         "founded_date_precision": founded_precision,
@@ -236,7 +248,7 @@ def fetch_a_share_company_profile(symbol: str) -> Dict[str, Any]:
         "business_scope": _first_non_empty(info, ["经营范围", "主营业务", "公司简介"]),
         "business_summary": summary,
         "business_summary_source": summary_source,
-        "profile_status": "COMPLETE" if summary_source != "fallback" else "PARTIAL",
+        "profile_status": "COMPLETE" if summary_source != "fallback" and standardized["industry_name"] else "PARTIAL",
         "quality_flags": json.dumps(flags, ensure_ascii=False),
         "source": "eastmoney",
     }
@@ -251,6 +263,7 @@ def fetch_hk_company_profile(symbol: str) -> Dict[str, Any]:
         "industry_name": "",
         "board_name": "港股主板",
     })
+    standardized = standardize_not_applicable_industry()
     return {
         "symbol": normalized,
         "exchange": exchange,
@@ -258,11 +271,15 @@ def fetch_hk_company_profile(symbol: str) -> Dict[str, Any]:
         "name": normalized,
         "board_code": "HK_MAIN",
         "board_name": "港股主板",
+        "industry_code": standardized["industry_code"],
+        "industry_name": standardized["industry_name"],
+        "industry_level": standardized["industry_level"],
+        "industry_source": standardized["industry_source"],
         "listing_status": "LISTED",
         "business_summary": summary,
         "business_summary_source": summary_source,
         "profile_status": "PENDING",
-        "quality_flags": json.dumps(flags + ["hk_profile_source_pending"], ensure_ascii=False),
+        "quality_flags": json.dumps(flags + ["hk_profile_source_pending", "industry_not_applicable_hk"], ensure_ascii=False),
         "source": "system",
     }
 

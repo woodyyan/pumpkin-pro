@@ -181,6 +181,12 @@ func (r *Repository) Coverage(ctx context.Context) ([]CoverageByExchange, error)
 			continue
 		}
 		row.ProfileCount++
+		if profile.IndustryName != IndustryNotApplicable {
+			row.ApplicableCount++
+		}
+		if strings.TrimSpace(profile.IndustryName) != "" && profile.IndustryName != IndustryNotApplicable {
+			row.MappedCount++
+		}
 		switch normalizeProfileStatus(profile.ProfileStatus) {
 		case ProfileStatusComplete:
 			row.CompleteCount++

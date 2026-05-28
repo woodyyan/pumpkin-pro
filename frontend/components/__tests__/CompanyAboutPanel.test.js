@@ -10,6 +10,7 @@ describe('CompanyAboutPanel source contract', () => {
     assert.match(source, /一句话业务介绍/)
     assert.match(source, /profile\?\.business_summary/)
     assert.match(source, /profile\?\.industry_name/)
+    assert.match(source, /formatIndustryLabel\(profile\?\.industry_name\)/)
     assert.match(source, /target="_blank"/)
     assert.match(source, /rel="noreferrer"/)
   })

@@ -88,6 +88,10 @@ func TestBuildPhaseCommandArgs(t *testing.T) {
 	if !reflect.DeepEqual(phase0FCFM, wantPhase0FCFM) {
 		t.Fatalf("unexpected fcfm repair phase0 args\n got: %#v\nwant: %#v", phase0FCFM, wantPhase0FCFM)
 	}
+	phase0Industries := buildPhase0CommandArgs(cfg, PipelineRunRequest{Phase: "phase0", Phase0Mode: "industries", Scope: "incremental"})
+	if got := phase0Industries[5]; got != "industries" {
+		t.Fatalf("expected industries phase0 mode, got %q", got)
+	}
 	phase1 := buildPhase1CommandArgs(cfg)
 	wantPhase1 := []string{
 		"quant/scripts/compute_factor_lab_phase1.py",
@@ -122,6 +126,9 @@ func TestValidatePipelineRunRequestRejectsInvalidRepairScope(t *testing.T) {
 	}
 	if err := validatePipelineRunRequest(PipelineRunRequest{Phase: "phase0", Phase0Mode: "financials", Scope: "repair_missing_fcfm_inputs"}); err != nil {
 		t.Fatalf("expected valid fcfm repair request: %v", err)
+	}
+	if err := validatePipelineRunRequest(PipelineRunRequest{Phase: "phase0", Phase0Mode: "industries", Scope: "incremental"}); err != nil {
+		t.Fatalf("expected valid industries request: %v", err)
 	}
 }
 

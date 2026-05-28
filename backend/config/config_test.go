@@ -19,6 +19,10 @@ func TestLoadDefaults(t *testing.T) {
 		"PASSWORD_RESET_TTL_MINUTES", "PASSWORD_RESET_RATE_LIMIT_PER_IP", "PASSWORD_RESET_RATE_LIMIT_PER_EMAIL",
 		"PASSWORD_RESET_RATE_LIMIT_WINDOW_MINUTES", "PASSWORD_RESET_EMAIL_COOLDOWN_SECONDS",
 		"AI_API_KEY", "AI_BASE_URL", "AI_MODEL", "AI_CONFIG_CIPHER_KEY",
+		"FACTOR_LAB_DAILY_COMPUTE_ENABLED", "FACTOR_LAB_COMPUTE_HOUR", "FACTOR_LAB_COMPUTE_MINUTE",
+		"FACTOR_LAB_PYTHON_BIN", "FACTOR_LAB_PHASE0_SCRIPT", "FACTOR_LAB_PHASE1_SCRIPT", "FACTOR_LAB_PHASE2_SCRIPT",
+		"FACTOR_LAB_DAILY_BARS_SOURCE", "FACTOR_LAB_FINANCIALS_SOURCE", "FACTOR_LAB_DIVIDENDS_SOURCE",
+		"FACTOR_LAB_PROGRESS_INTERVAL", "FACTOR_LAB_ITEM_PROGRESS_INTERVAL", "FACTOR_LAB_TIMEOUT_MINUTES", "FACTOR_LAB_STEP_TIMEOUT_MINUTES",
 	} {
 		os.Unsetenv(key)
 	}
@@ -94,6 +98,18 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AI.CipherKey != "" {
 		t.Errorf("expected empty AI.CipherKey by default, got %q", cfg.AI.CipherKey)
 	}
+	if !cfg.FactorLab.DailyComputeEnabled {
+		t.Errorf("expected FactorLab.DailyComputeEnabled true by default")
+	}
+	if cfg.FactorLab.ComputeHour != 21 || cfg.FactorLab.ComputeMinute != 0 {
+		t.Errorf("expected FactorLab schedule 21:00, got %02d:%02d", cfg.FactorLab.ComputeHour, cfg.FactorLab.ComputeMinute)
+	}
+	if cfg.FactorLab.Phase0ScriptPath != "quant/scripts/update_factor_lab_phase0_incremental.py" {
+		t.Errorf("unexpected FactorLab phase0 script: %s", cfg.FactorLab.Phase0ScriptPath)
+	}
+	if cfg.FactorLab.ProgressInterval != 500 || cfg.FactorLab.ItemProgressInterval != 1 {
+		t.Errorf("unexpected FactorLab progress defaults: %d/%d", cfg.FactorLab.ProgressInterval, cfg.FactorLab.ItemProgressInterval)
+	}
 }
 
 func TestEnvOverride(t *testing.T) {
@@ -113,6 +129,10 @@ func TestEnvOverride(t *testing.T) {
 		{"MAIL_TENCENT_TEMPLATE_ID", "179710", func(c Config) bool { return c.Mail.TencentTemplateID == 179710 }},
 		{"PASSWORD_RESET_RATE_LIMIT_PER_IP", "12", func(c Config) bool { return c.PasswordReset.RateLimitPerIP == 12 }},
 		{"AI_CONFIG_CIPHER_KEY", "12345678901234567890123456789012", func(c Config) bool { return c.AI.CipherKey == "12345678901234567890123456789012" }},
+		{"FACTOR_LAB_COMPUTE_HOUR", "21", func(c Config) bool { return c.FactorLab.ComputeHour == 21 }},
+		{"FACTOR_LAB_COMPUTE_MINUTE", "0", func(c Config) bool { return c.FactorLab.ComputeMinute == 0 }},
+		{"FACTOR_LAB_PHASE0_SCRIPT", "/app/quant/scripts/update_factor_lab_phase0_incremental.py", func(c Config) bool { return c.FactorLab.Phase0ScriptPath == "/app/quant/scripts/update_factor_lab_phase0_incremental.py" }},
+		{"FACTOR_LAB_ITEM_PROGRESS_INTERVAL", "2", func(c Config) bool { return c.FactorLab.ItemProgressInterval == 2 }},
 	}
 
 	for _, tt := range tests {

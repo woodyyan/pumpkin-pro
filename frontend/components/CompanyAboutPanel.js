@@ -1,4 +1,4 @@
-import { extractDisplayDomain, formatAboutDate, formatListingStatus, listingStatusTone, normalizeWebsiteHref } from '../lib/company-about'
+import { extractDisplayDomain, formatAboutDate, formatIndustryLabel, formatListingStatus, listingStatusTone, normalizeWebsiteHref } from '../lib/company-about'
 
 function AboutField({ label, value, children }) {
   const content = children || value || '--'
@@ -90,7 +90,7 @@ export default function CompanyAboutPanel({ payload, loading = false, error = ''
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
             <AboutField label="板块" value={profile?.board_name} />
-            <AboutField label="行业" value={profile?.industry_name} />
+            <AboutField label="行业" value={formatIndustryLabel(profile?.industry_name)} />
             <AboutField label="官网">
               {websiteHref ? (
                 <a className="text-primary transition hover:text-primary/80" href={websiteHref} target="_blank" rel="noreferrer">
@@ -100,7 +100,7 @@ export default function CompanyAboutPanel({ payload, loading = false, error = ''
             </AboutField>
             <AboutField label="成立时间" value={formatAboutDate(profile?.founded_date, profile?.founded_date_precision)} />
             <AboutField label="IPO 日期" value={formatAboutDate(profile?.ipo_date)} />
-            <AboutField label="行业来源" value={profile?.industry_source || profile?.raw_industry_name} />
+            <AboutField label="行业来源" value={formatIndustryLabel(profile?.industry_source || profile?.raw_industry_name)} />
           </div>
         </div>
       )}

@@ -61,3 +61,21 @@
 - `RankingItem.return_pct` 表示当前连续上榜周期以来涨幅。
 - 后端应从当前连续周期起点快照价格算到最新可用快照价格。
 - 历史快照价格错误需要通过专用回填命令修正；业务 API 不应在读取时自动篡改历史快照。
+
+## 决策 6: 因子实验室行业口径统一为申万一级行业
+
+**日期**: 2026-05-28
+
+**背景**: 因子实验室列表长期显示“行业”空值。历史 `factor_security_industries` 只保存抓到的原始行业名称，未形成稳定的消费者口径；`company_profiles` 也缺少批量标准化链路，导致 Phase 2 写入 `factor_scores.industry` 时覆盖率极低。
+
+**决策**: 用户侧统一展示 `company_profiles.industry_name`，且该字段只承载“申万一级行业”。`factor_security_industries` 保留为原始来源分层表；`industry_mapping` 保存来源行业到申万一级行业的维护映射。港股统一写入 `not_applicable`。
+
+**原因**:
+1. 只保留一个用户口径字段，避免 `factor_security_industries.industry_name` 与 `company_profiles.industry_name` 双维护。
+2. 申万一级行业适合作为因子实验室筛选、列表展示和后续统计的稳定维度。
+3. 港股与申万行业体系天然不一致，强行映射会制造错误分类，显式 `not_applicable` 更可控。
+
+**影响**:
+- Phase 0 新增 `industries` 模式：先刷新原始行业，再标准化写入 `company_profiles` 和 `industry_mapping`。
+- Phase 2 读取行业时优先使用 `company_profiles.industry_name`，回退到 `factor_security_industries`。
+- 每日 21:00 的 Factor Lab 自动预计算必须包含 `industries` 步骤。

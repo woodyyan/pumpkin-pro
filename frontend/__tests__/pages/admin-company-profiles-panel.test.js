@@ -20,6 +20,8 @@ describe('admin company profiles panel integration', () => {
 
   it('shows coverage and failure items', () => {
     assert.match(pageSource, /coverage_rate/)
+    assert.match(pageSource, /mapped_count/)
+    assert.match(pageSource, /applicable_count/)
     assert.match(pageSource, /失败项 \/ 待补全/)
     assert.match(pageSource, /quality_flags/)
   })

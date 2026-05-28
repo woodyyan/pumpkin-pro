@@ -353,3 +353,28 @@ def test_normalize_capex_value_keeps_cash_outflow_non_negative():
     assert module.normalize_capex_value(123.0) == 123.0
     assert module.normalize_capex_value(-123.0) == 123.0
     assert module.normalize_capex_value("-456") == 456.0
+
+
+def test_parse_financial_frame_rows_maps_eastmoney_cashflow_fields():
+    pd = __import__("pandas")
+    yjbb = pd.DataFrame([
+        {
+            "SECURITY_CODE": "000001",
+            "REPORT_DATE": "2026-03-31 00:00:00",
+            "营业收入": "1000000",
+        }
+    ])
+    xjll = pd.DataFrame([
+        {
+            "SECURITY_CODE": "000001",
+            "NETCASH_OPERATE": "200000",
+            "CONSTRUCT_LONG_ASSET": "50000",
+        }
+    ])
+
+    rows = module.parse_financial_frame_rows(yjbb, None, xjll, "20260331", {"000001"}, "eastmoney:test")
+
+    assert len(rows) == 1
+    assert rows[0][3] == 1000000.0
+    assert rows[0][9] == 200000.0
+    assert rows[0][10] == 50000.0

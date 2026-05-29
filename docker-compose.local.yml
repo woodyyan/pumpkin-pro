@@ -58,6 +58,7 @@ services:
       - COS_SECRET_KEY=${COS_SECRET_KEY:-}
       - FACTOR_LAB_COMPUTE_HOUR=${FACTOR_LAB_COMPUTE_HOUR:-21}
       - FACTOR_LAB_COMPUTE_MINUTE=${FACTOR_LAB_COMPUTE_MINUTE:-0}
+      - FACTOR_LAB_PYTHON_BIN=${FACTOR_LAB_PYTHON_BIN:-/opt/factorlab-venv/bin/python}
       - FACTOR_LAB_PHASE0_SCRIPT=${FACTOR_LAB_PHASE0_SCRIPT:-/app/quant/scripts/update_factor_lab_phase0_incremental.py}
       - FACTOR_LAB_PHASE1_SCRIPT=${FACTOR_LAB_PHASE1_SCRIPT:-/app/quant/scripts/compute_factor_lab_phase1.py}
       - FACTOR_LAB_PHASE2_SCRIPT=${FACTOR_LAB_PHASE2_SCRIPT:-/app/quant/scripts/compute_factor_lab_phase2.py}

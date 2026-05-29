@@ -10,6 +10,9 @@
 
 ### Added
 
+- 东方财富 direct API 兼容当前可用字段与报表：
+  - 利润表优先使用旧 `RPT_LICO_FN_CPD`，为空时兜底 `RPT_DMSK_FN_INCOME`。
+  - 英文字段兼容 `SECURITY_CODE` / `SECUCODE`、`TOTAL_OPERATE_INCOME`、`PARENT_NETPROFIT`、`TOTAL_ASSETS`、`TOTAL_EQUITY`、`NETCASH_OPERATE`、`CONSTRUCT_LONG_ASSET`。
 - 新增 FCFM 计算链路：
   - `FCF = 经营活动现金流量净额 - CapEx`
   - `FCFM = FCF / 营业收入 * 100%`

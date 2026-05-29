@@ -56,16 +56,16 @@ EASTMONEY_DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get
 TENCENT_QUOTE_URL = "http://qt.gtimg.cn/q={codes}"
 TENCENT_KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 
-CODE_ALIASES = ["股票代码", "代码", "证券代码"]
+CODE_ALIASES = ["SECURITY_CODE", "SECUCODE", "股票代码", "代码", "证券代码"]
 NAME_ALIASES = ["股票简称", "名称", "股票名称"]
 INDUSTRY_ALIASES = ["所属行业", "行业", "行业板块", "板块", "申万行业", "东财行业"]
-REVENUE_ALIASES = ["营业总收入-营业总收入", "营业收入-营业收入", "营业总收入", "营业收入"]
+REVENUE_ALIASES = ["TOTAL_OPERATE_INCOME", "OPERATE_INCOME", "营业总收入-营业总收入", "营业收入-营业收入", "营业总收入", "营业收入"]
 REVENUE_YOY_ALIASES = ["营业总收入-同比增长", "营业收入-同比增长", "营业收入同比增长", "营业总收入同比增长"]
-NET_PROFIT_ALIASES = ["净利润-净利润", "归母净利润-净利润", "净利润", "归母净利润"]
+NET_PROFIT_ALIASES = ["PARENT_NETPROFIT", "NETPROFIT", "净利润-净利润", "归母净利润-净利润", "净利润", "归母净利润"]
 NET_PROFIT_YOY_ALIASES = ["净利润-同比增长", "净利润同比增长", "归母净利润-同比增长"]
-TOTAL_ASSETS_ALIASES = ["资产总计", "总资产", "资产总计-资产总计"]
-TOTAL_EQUITY_ALIASES = ["所有者权益合计", "股东权益合计", "归属于母公司股东权益合计", "所有者权益(或股东权益)合计"]
-OPERATING_CF_ALIASES = ["NETCASH_OPERATE", "经营活动产生的现金流量净额", "经营现金流量净额", "经营活动现金流量净额"]
+TOTAL_ASSETS_ALIASES = ["TOTAL_ASSETS", "资产总计", "总资产", "资产总计-资产总计"]
+TOTAL_EQUITY_ALIASES = ["TOTAL_EQUITY", "所有者权益合计", "股东权益合计", "归属于母公司股东权益合计", "所有者权益(或股东权益)合计"]
+OPERATING_CF_ALIASES = ["NETCASH_OPERATE", "经营性现金流-现金流量净额", "经营活动产生的现金流量净额", "经营现金流量净额", "经营活动现金流量净额"]
 CAPEX_ALIASES = [
     "CONSTRUCT_LONG_ASSET",
     "购建固定资产、无形资产和其他长期资产支付的现金",
@@ -1835,12 +1835,28 @@ def fetch_eastmoney_datacenter(report_name: str, report_date: str, page_size: in
     return pd.DataFrame(rows)
 
 
+def fetch_eastmoney_income_frame(report_date: str) -> Any:
+    failures: list[str] = []
+    for report_name in ("RPT_LICO_FN_CPD", "RPT_DMSK_FN_INCOME"):
+        try:
+            frame = fetch_eastmoney_datacenter(report_name, report_date)
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"{report_name}: {exc}")
+            continue
+        if frame is not None and not frame.empty:
+            if report_name != "RPT_LICO_FN_CPD":
+                log_step(f"financials/eastmoney: income {report_date} 使用兜底报表 {report_name}")
+            return frame
+        failures.append(f"{report_name}: empty")
+    raise RuntimeError("东方财富利润表为空：" + " | ".join(failures))
+
+
 def fetch_financials_eastmoney(report_dates: list[str], target_codes: set[str], args: argparse.Namespace) -> list[tuple[Any, ...]]:
     log_step("financials: 尝试数据源 东方财富 direct API")
     rows_by_key: dict[tuple[str, str], tuple[Any, ...]] = {}
     for report_idx, report_date in enumerate(report_dates, start=1):
         log_progress("financials/eastmoney: 报告期进度", report_idx, len(report_dates), 1)
-        yjbb = fetch_eastmoney_datacenter("RPT_LICO_FN_CPD", report_date)
+        yjbb = fetch_eastmoney_income_frame(report_date)
         # 直接接口字段会随上游变化；资产负债/现金流作为增强项，失败不阻断利润表导入。
         zcfz = None
         xjll = None

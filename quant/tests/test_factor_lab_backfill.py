@@ -361,7 +361,15 @@ def test_parse_financial_frame_rows_maps_eastmoney_cashflow_fields():
         {
             "SECURITY_CODE": "000001",
             "REPORT_DATE": "2026-03-31 00:00:00",
-            "营业收入": "1000000",
+            "TOTAL_OPERATE_INCOME": "1000000",
+            "PARENT_NETPROFIT": "80000",
+        }
+    ])
+    zcfz = pd.DataFrame([
+        {
+            "SECURITY_CODE": "000001",
+            "TOTAL_ASSETS": "3000000",
+            "TOTAL_EQUITY": "1200000",
         }
     ])
     xjll = pd.DataFrame([
@@ -372,9 +380,30 @@ def test_parse_financial_frame_rows_maps_eastmoney_cashflow_fields():
         }
     ])
 
-    rows = module.parse_financial_frame_rows(yjbb, None, xjll, "20260331", {"000001"}, "eastmoney:test")
+    rows = module.parse_financial_frame_rows(yjbb, zcfz, xjll, "20260331", {"000001"}, "eastmoney:test")
 
     assert len(rows) == 1
     assert rows[0][3] == 1000000.0
+    assert rows[0][5] == 80000.0
+    assert rows[0][7] == 3000000.0
+    assert rows[0][8] == 1200000.0
     assert rows[0][9] == 200000.0
     assert rows[0][10] == 50000.0
+
+
+def test_fetch_eastmoney_income_frame_falls_back_to_dmsk_income(monkeypatch):
+    pd = __import__("pandas")
+    calls = []
+
+    def fake_fetch(report_name, report_date):
+        calls.append((report_name, report_date))
+        if report_name == "RPT_LICO_FN_CPD":
+            return pd.DataFrame([])
+        return pd.DataFrame([{"SECURITY_CODE": "000001", "TOTAL_OPERATE_INCOME": 1}])
+
+    monkeypatch.setattr(module, "fetch_eastmoney_datacenter", fake_fetch)
+
+    frame = module.fetch_eastmoney_income_frame("20260331")
+
+    assert calls == [("RPT_LICO_FN_CPD", "20260331"), ("RPT_DMSK_FN_INCOME", "20260331")]
+    assert frame.iloc[0]["TOTAL_OPERATE_INCOME"] == 1

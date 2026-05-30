@@ -1480,19 +1480,22 @@ function formatDurationSeconds(value) {
 function QuadrantAdminPanel({ onUnauthorized }) {
   const [expandedLog, setExpandedLog] = useState(null)
   const [triggering, setTriggering] = useState(false)
+  const [repairing, setRepairing] = useState(false)
   const [actionError, setActionError] = useState('')
   const resource = useAdminResource({
     key: 'admin:quadrant',
     request: async () => {
-      const [overview, logsPayload, progress] = await Promise.all([
+      const [overview, logsPayload, progress, rankingPortfolioStatus] = await Promise.all([
         adminFetch('/api/admin/quadrant-overview').catch(() => null),
         adminFetch('/api/admin/quadrant-logs').catch(() => ({ items: [] })),
         adminFetch('/api/admin/compute-status').catch(() => null),
+        adminFetch('/api/admin/ranking-portfolio-status').catch(() => ({ items: [] })),
       ])
       return {
         overview,
         logs: logsPayload?.items || [],
         progress,
+        rankingPortfolioStatus: rankingPortfolioStatus?.items || [],
       }
     },
     staleMs: 5_000,
@@ -1507,6 +1510,7 @@ function QuadrantAdminPanel({ onUnauthorized }) {
   const overview = resource.data?.overview || null
   const logs = resource.data?.logs || null
   const progress = resource.data?.progress || null
+  const rankingPortfolioStatus = resource.data?.rankingPortfolioStatus || []
 
   // ── Manual trigger ──
   const handleTrigger = async (exchange) => {
@@ -1526,6 +1530,24 @@ function QuadrantAdminPanel({ onUnauthorized }) {
       }
     } finally {
       setTriggering(false)
+    }
+  }
+
+  const handleRankingPortfolioRepair = async () => {
+    setRepairing(true)
+    setActionError('')
+    try {
+      await adminFetch('/api/admin/ranking-portfolio-repair', {
+        method: 'POST',
+      })
+      await resource.refresh()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '触发模拟组合收益曲线补齐失败')
+      if (message) {
+        setActionError(message)
+      }
+    } finally {
+      setRepairing(false)
     }
   }
 
@@ -1626,6 +1648,69 @@ function QuadrantAdminPanel({ onUnauthorized }) {
           </div>
         </div>
       )}
+
+      {/* 模拟组合收益曲线状态 */}
+      <div className="mb-5 rounded-xl border border-border bg-card p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground-muted">模拟组合收益曲线状态</h3>
+            <p className="mt-1 text-xs text-foreground-dim">仅在管理后台展示每日状态、失败原因与滞后情况。</p>
+          </div>
+          <button
+            onClick={handleRankingPortfolioRepair}
+            disabled={repairing}
+            className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/30 dark:bg-amber-500/12 dark:text-amber-100 dark:hover:bg-amber-500/18 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {repairing ? '补齐中…' : '一键补齐模拟组合收益曲线'}
+          </button>
+        </div>
+        {rankingPortfolioStatus.length === 0 ? (
+          <p className="text-xs text-foreground-dim">暂无模拟组合任务状态。</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead>
+                <tr className="border-b border-border text-foreground-dim">
+                  <th className="pb-2 pr-4 font-medium">组合</th>
+                  <th className="pb-2 pr-4 font-medium">市场</th>
+                  <th className="pb-2 pr-4 font-medium">最新榜单</th>
+                  <th className="pb-2 pr-4 font-medium">最新收益曲线</th>
+                  <th className="pb-2 pr-4 font-medium">状态</th>
+                  <th className="pb-2 pr-4 font-medium">自动补偿</th>
+                  <th className="pb-2 pr-4 font-medium">失败原因</th>
+                  <th className="pb-2 font-medium">更新时间</th>
+                </tr>
+              </thead>
+              <tbody className="text-foreground-muted">
+                {rankingPortfolioStatus.map((item) => {
+                  const isLagging = Number(item.lag_days || 0) > 0
+                  const statusText = item.status === 'failed' ? '失败' : item.status === 'lagging' || isLagging ? `滞后 ${item.lag_days} 天` : '正常'
+                  const statusClass = item.status === 'failed'
+                    ? 'text-negative'
+                    : item.status === 'lagging' || isLagging
+                      ? 'text-amber-300'
+                      : 'text-positive'
+                  return (
+                    <tr key={item.definition_id} className="border-b border-border last:border-0 align-top">
+                      <td className="py-2 pr-4">
+                        <div className="font-medium text-foreground-muted">{item.definition_name}</div>
+                        <div className="text-[11px] text-foreground-disabled">{item.definition_code}</div>
+                      </td>
+                      <td className="py-2 pr-4">{item.exchange}</td>
+                      <td className="py-2 pr-4 tabular-nums">{item.latest_ranking_date || '--'}</td>
+                      <td className="py-2 pr-4 tabular-nums">{item.latest_portfolio_date || '--'}</td>
+                      <td className={`py-2 pr-4 font-medium ${statusClass}`}>{statusText}</td>
+                      <td className="py-2 pr-4">{item.auto_repair_status || item.auto_repair_message || '--'}</td>
+                      <td className="py-2 pr-4 max-w-[320px] break-words">{item.failure_reason || item.failure_stage || '--'}</td>
+                      <td className="py-2 tabular-nums">{item.updated_at ? formatAdminDateTime(item.updated_at) : '--'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Overview Cards */}
       {overview && (

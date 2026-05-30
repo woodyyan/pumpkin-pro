@@ -145,6 +145,7 @@ export function normalizeRankingPortfolioSeries(series) {
 
       return {
         date: item.__normalized_date,
+        sourceTradeDate: item.source_trade_date || '',
         portfolioReturnPct,
         benchmarkReturnPct,
         excessReturnPct: excessReturnPct !== null ? excessReturnPct : (portfolioReturnPct !== null && benchmarkReturnPct !== null ? portfolioReturnPct - benchmarkReturnPct : null),

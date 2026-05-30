@@ -378,6 +378,37 @@ func (a *appServer) handleAdminQuadrantTrigger(w http.ResponseWriter, r *http.Re
 	})
 }
 
+func (a *appServer) handleAdminRankingPortfolioStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	resp, err := a.quadrantService.GetRankingPortfolioAdminStatus(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if resp == nil {
+		resp = &quadrant.RankingPortfolioAdminStatusResponse{Items: []quadrant.RankingPortfolioAdminStatusItem{}}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *appServer) handleAdminRankingPortfolioRepair(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	if err := a.quadrantService.TriggerRankingPortfolioRepair(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "触发模拟组合收益曲线补齐失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok": true,
+		"message": "已触发模拟组合收益曲线补齐，请稍后刷新后台状态。",
+	})
+}
+
 // handleAdminDeviceAnalytics returns device/browser/OS analytics for the admin panel.
 // GET /api/admin/device-analytics?days=30
 func (a *appServer) handleAdminDeviceAnalytics(w http.ResponseWriter, r *http.Request) {

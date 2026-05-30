@@ -92,6 +92,10 @@ func buildRankingPortfolioDefinitionRecord(spec rankingPortfolioDefinitionSpec, 
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+	methodNote := strings.TrimSpace(spec.MethodNote)
+	if methodNote == "" {
+		methodNote = rankingPortfolioMethodNote
+	}
 	return RankingPortfolioDefinition{
 		ID:               spec.ID,
 		Code:             spec.Code,
@@ -105,9 +109,9 @@ func buildRankingPortfolioDefinitionRecord(spec rankingPortfolioDefinitionSpec, 
 		SelectionWindow:  spec.SelectionWindow,
 		ExcludedBoards:   mustMarshal(spec.ExcludedBoards),
 		WeightingMethod:  "equal",
-		RebalanceRule:    "t_close_generate_t1_open_rebalance",
+		RebalanceRule:    rankingPortfolioRebalanceRuleClose,
 		TradeCostRate:    defaultRankingPortfolioTradeCostRate,
-		MethodNote:       spec.MethodNote,
+		MethodNote:       methodNote,
 		IsActive:         true,
 		CreatedAt:        now,
 		UpdatedAt:        now,
@@ -232,17 +236,714 @@ func buildRankingPortfolioCurrentSourceDate(effectiveTime time.Time) string {
 	return tradeDay.Format("2006-01-02")
 }
 
-func (s *Service) saveRankingPortfolioBestEffort(ctx context.Context, records []QuadrantScoreRecord, computedAt time.Time, priceHints map[string]snapshotPriceHint) {
-	if err := s.saveRankingPortfolio(ctx, records, computedAt, priceHints); err != nil {
-		log.Printf("[quadrant] ranking portfolio save skipped: %v", err)
+type rankingPortfolioPersistError struct {
+	DefinitionID string
+	Stage        string
+	Reason       string
+	Details      map[string]any
+}
+
+type rankingPortfolioRebuildPlan struct {
+	Date            string
+	SnapshotTime    time.Time
+	Constituents    []RankingPortfolioConstituentItem
+	MarketPrices    []RankingPortfolioMarketPrice
+	Benchmark       RankingPortfolioBenchmarkPrice
+	HasShortfall    bool
+	WarningText     string
+	SourceTradeDate string
+}
+
+type rankingSnapshotSourceRow struct {
+	ID             int64
+	Code           string
+	Name           string
+	Exchange       string
+	Rank           int
+	Opportunity    float64
+	Risk           float64
+	ClosePrice     float64
+	PriceTradeDate string
+	SnapshotDate   string
+}
+
+type rankingPortfolioPriceLookup struct {
+	ClosePrice float64
+	TradeDate  string
+}
+
+func (s *Service) resolveRankingPortfolioMarketPrice(ctx context.Context, code string, exchange string, targetTradeDate string) rankingPortfolioPriceLookup {
+	targetTradeDate = strings.TrimSpace(targetTradeDate)
+	if targetTradeDate == "" {
+		return rankingPortfolioPriceLookup{}
+	}
+	if s.priceResolver != nil {
+		if closePrice := s.priceResolver(ctx, code, exchange, targetTradeDate); closePrice > 0 {
+			return rankingPortfolioPriceLookup{ClosePrice: closePrice, TradeDate: targetTradeDate}
+		}
+	}
+	if s.repo != nil {
+		if closePrice, tradeDate, err := s.repo.GetLatestRankingSnapshotClosePriceOnOrBefore(ctx, code, exchange, targetTradeDate); err == nil && closePrice > 0 && strings.TrimSpace(tradeDate) != "" {
+			return rankingPortfolioPriceLookup{ClosePrice: closePrice, TradeDate: strings.TrimSpace(tradeDate)}
+		}
+	}
+	return rankingPortfolioPriceLookup{}
+}
+
+func (e *rankingPortfolioPersistError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if strings.TrimSpace(e.DefinitionID) != "" {
+		return fmt.Sprintf("%s[%s]", e.Reason, e.DefinitionID)
+	}
+	return e.Reason
+}
+
+func newRankingPortfolioPersistError(definitionID string, stage string, reason string, details map[string]any) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "unknown ranking portfolio error"
+	}
+	return &rankingPortfolioPersistError{
+		DefinitionID: strings.TrimSpace(definitionID),
+		Stage:        strings.TrimSpace(stage),
+		Reason:       reason,
+		Details:      details,
 	}
 }
 
-func (s *Service) saveRankingPortfolio(ctx context.Context, records []QuadrantScoreRecord, computedAt time.Time, priceHints map[string]snapshotPriceHint) error {
+func rankingPortfolioAutoRepairStatus(err error) string {
+	if err == nil {
+		return "success"
+	}
+	return "failed"
+}
+
+func rankingPortfolioErrorParts(err error) (string, string, map[string]any) {
+	if err == nil {
+		return "", "", nil
+	}
+	var persistErr *rankingPortfolioPersistError
+	if errors.As(err, &persistErr) {
+		return strings.TrimSpace(persistErr.Stage), strings.TrimSpace(persistErr.Reason), persistErr.Details
+	}
+	return "", strings.TrimSpace(err.Error()), nil
+}
+
+func rankingPortfolioDetailsJSON(details map[string]any) string {
+	if len(details) == 0 {
+		return "{}"
+	}
+	payload, err := json.Marshal(details)
+	if err != nil {
+		return "{}"
+	}
+	return string(payload)
+}
+
+func rankingPortfolioLagDays(latestRankingDate string, latestPortfolioDate string) int {
+	latestRankingDate = strings.TrimSpace(latestRankingDate)
+	latestPortfolioDate = strings.TrimSpace(latestPortfolioDate)
+	if latestRankingDate == "" || latestPortfolioDate == "" {
+		return 0
+	}
+	rankingAt, err1 := time.ParseInLocation("2006-01-02", latestRankingDate, rankingSnapshotLocation)
+	portfolioAt, err2 := time.ParseInLocation("2006-01-02", latestPortfolioDate, rankingSnapshotLocation)
+	if err1 != nil || err2 != nil || rankingAt.Before(portfolioAt) {
+		return 0
+	}
+	return int(rankingAt.Sub(portfolioAt).Hours() / 24)
+}
+
+func (s *Service) persistRankingPortfolioFailureStatus(ctx context.Context, taskLogID string, err error, snapshotDate string, sourceTradeDate string, autoRepairTriggered bool, autoRepairMessage string) error {
+	if strings.TrimSpace(taskLogID) == "" || err == nil {
+		return nil
+	}
+	stage, reason, details := rankingPortfolioErrorParts(err)
+	now := time.Now().UTC()
+	for _, definition := range defaultRankingPortfolioDefinitionRecords(now) {
+		item := RankingPortfolioJobStatus{
+			TaskLogID:           strings.TrimSpace(taskLogID),
+			DefinitionID:        definition.ID,
+			DefinitionCode:      definition.Code,
+			DefinitionName:      definition.Name,
+			Exchange:            definition.Exchange,
+			SnapshotDate:        strings.TrimSpace(snapshotDate),
+			SourceTradeDate:     strings.TrimSpace(sourceTradeDate),
+			Status:              "failed",
+			FailureStage:        stage,
+			FailureReason:       reason,
+			DetailsJSON:         rankingPortfolioDetailsJSON(details),
+			AutoRepairTriggered: autoRepairTriggered,
+			AutoRepairStatus:    "",
+			AutoRepairMessage:   strings.TrimSpace(autoRepairMessage),
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		}
+		if err := s.repo.UpsertRankingPortfolioJobStatus(ctx, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) persistRankingPortfolioDefinitionStatus(ctx context.Context, taskLogID string, definition RankingPortfolioDefinition, snapshotDate string, sourceTradeDate string, persistErr error, autoRepairTriggered bool, autoRepairMessage string) error {
+	if strings.TrimSpace(taskLogID) == "" {
+		return nil
+	}
+	status := "success"
+	failureStage := ""
+	failureReason := ""
+	var details map[string]any
+	if persistErr != nil {
+		status = "failed"
+		failureStage, failureReason, details = rankingPortfolioErrorParts(persistErr)
+	}
+	now := time.Now().UTC()
+	item := RankingPortfolioJobStatus{
+		TaskLogID:           strings.TrimSpace(taskLogID),
+		DefinitionID:        definition.ID,
+		DefinitionCode:      definition.Code,
+		DefinitionName:      definition.Name,
+		Exchange:            definition.Exchange,
+		SnapshotDate:        strings.TrimSpace(snapshotDate),
+		SourceTradeDate:     strings.TrimSpace(sourceTradeDate),
+		Status:              status,
+		FailureStage:        failureStage,
+		FailureReason:       failureReason,
+		DetailsJSON:         rankingPortfolioDetailsJSON(details),
+		AutoRepairTriggered: autoRepairTriggered,
+		AutoRepairStatus:    "",
+		AutoRepairMessage:   strings.TrimSpace(autoRepairMessage),
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+	return s.repo.UpsertRankingPortfolioJobStatus(ctx, item)
+}
+
+func rankingPortfolioRepairTaskLogID(now time.Time) string {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	return fmt.Sprintf("qrp-repair-%d", now.UnixMilli())
+}
+
+func (s *Service) RebuildLaggingRankingPortfolioResults(ctx context.Context, taskLogID string, markAutoRepair bool) error {
+	definitions := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())
+	var firstErr error
+	for _, definition := range definitions {
+		if err := s.rebuildLaggingRankingPortfolioResultForDefinition(ctx, definition, taskLogID, markAutoRepair); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (s *Service) rebuildLaggingRankingPortfolioResultForDefinition(ctx context.Context, definition RankingPortfolioDefinition, taskLogID string, markAutoRepair bool) error {
+	latestRankingDate, err := s.repo.GetLatestRankingSnapshotDateByExchange(ctx, definition.Exchange)
+	if err != nil {
+		return err
+	}
+	latestRankingDate = strings.TrimSpace(latestRankingDate)
+	if latestRankingDate == "" {
+		return nil
+	}
+	latestPortfolioDate, err := s.repo.GetLatestRankingPortfolioResultDate(ctx, definition.ID)
+	if err != nil {
+		return err
+	}
+	latestPortfolioDate = strings.TrimSpace(latestPortfolioDate)
+	if latestPortfolioDate != "" && latestPortfolioDate >= latestRankingDate {
+		return nil
+	}
+	fromDate := latestPortfolioDate
+	if fromDate == "" {
+		fromDate = recentSnapshotRepairFromDate(latestRankingDate)
+	}
+	targetDates, err := s.repo.ListRankingSnapshotDatesByExchangeRange(ctx, definition.Exchange, fromDate, latestRankingDate)
+	if err != nil {
+		return err
+	}
+	if latestPortfolioDate != "" {
+		filtered := make([]string, 0, len(targetDates))
+		for _, snapshotDate := range targetDates {
+			if strings.TrimSpace(snapshotDate) > latestPortfolioDate {
+				filtered = append(filtered, strings.TrimSpace(snapshotDate))
+			}
+		}
+		targetDates = filtered
+	}
+	if len(targetDates) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	autoRepairMessage := fmt.Sprintf("rebuild portfolio results from latest_ranking_date=%s latest_portfolio_date=%s", latestRankingDate, latestPortfolioDate)
+	autoRepairStatus := ""
+	lastAutoRepairAt := (*time.Time)(nil)
+	if markAutoRepair {
+		autoRepairStatus = "running"
+		ts := now
+		lastAutoRepairAt = &ts
+	}
+	rebuiltCount := 0
+	for _, snapshotDate := range targetDates {
+		if err := s.rebuildRankingPortfolioResultForSnapshot(ctx, definition, snapshotDate); err != nil {
+			if strings.TrimSpace(taskLogID) != "" {
+				stage, reason, details := rankingPortfolioErrorParts(err)
+				failedAt := time.Now().UTC()
+				item := RankingPortfolioJobStatus{
+					TaskLogID:           strings.TrimSpace(taskLogID),
+					DefinitionID:        definition.ID,
+					DefinitionCode:      definition.Code,
+					DefinitionName:      definition.Name,
+					Exchange:            definition.Exchange,
+					SnapshotDate:        snapshotDate,
+					SourceTradeDate:     "",
+					Status:              "failed",
+					FailureStage:        stage,
+					FailureReason:       reason,
+					DetailsJSON:         rankingPortfolioDetailsJSON(details),
+					AutoRepairTriggered: markAutoRepair,
+					AutoRepairStatus:    rankingPortfolioAutoRepairStatus(err),
+					AutoRepairMessage:   autoRepairMessage,
+					LastAutoRepairAt:    &failedAt,
+					CreatedAt:           failedAt,
+					UpdatedAt:           failedAt,
+				}
+				_ = s.repo.UpsertRankingPortfolioJobStatus(ctx, item)
+			}
+			return err
+		}
+		var rebuilt RankingPortfolioResult
+		if err := s.repo.db.WithContext(ctx).
+			Where("definition_id = ? AND snapshot_date = ?", definition.ID, strings.TrimSpace(snapshotDate)).
+			Order("id DESC").
+			First(&rebuilt).Error; err == nil {
+			rebuiltCount++
+		}
+	}
+	if rebuiltCount == 0 {
+		return nil
+	}
+	if strings.TrimSpace(taskLogID) != "" && markAutoRepair {
+		runningAt := time.Now().UTC()
+		item := RankingPortfolioJobStatus{
+			TaskLogID:           strings.TrimSpace(taskLogID),
+			DefinitionID:        definition.ID,
+			DefinitionCode:      definition.Code,
+			DefinitionName:      definition.Name,
+			Exchange:            definition.Exchange,
+			SnapshotDate:        targetDates[len(targetDates)-1],
+			SourceTradeDate:     "",
+			Status:              "success",
+			FailureStage:        "",
+			FailureReason:       "",
+			DetailsJSON:         "{}",
+			AutoRepairTriggered: true,
+			AutoRepairStatus:    autoRepairStatus,
+			AutoRepairMessage:   autoRepairMessage,
+			LastAutoRepairAt:    &runningAt,
+			CreatedAt:           runningAt,
+			UpdatedAt:           runningAt,
+		}
+		if err := s.repo.UpsertRankingPortfolioJobStatus(ctx, item); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(taskLogID) != "" {
+		latestResult, err := s.repo.GetLatestRankingPortfolioResultByDefinition(ctx, definition.ID)
+		if err == nil && latestResult != nil {
+			completedAt := time.Now().UTC()
+			item := RankingPortfolioJobStatus{
+				TaskLogID:           strings.TrimSpace(taskLogID),
+				DefinitionID:        definition.ID,
+				DefinitionCode:      definition.Code,
+				DefinitionName:      definition.Name,
+				Exchange:            definition.Exchange,
+				SnapshotDate:        latestResult.SnapshotDate,
+				SourceTradeDate:     latestResult.SourceTradeDate,
+				Status:              "success",
+				FailureStage:        "",
+				FailureReason:       "",
+				DetailsJSON:         "{}",
+				AutoRepairTriggered: markAutoRepair,
+				AutoRepairStatus:    map[bool]string{true: "success", false: ""}[markAutoRepair],
+				AutoRepairMessage:   autoRepairMessage,
+				LastAutoRepairAt:    lastAutoRepairAt,
+				CreatedAt:           completedAt,
+				UpdatedAt:           completedAt,
+			}
+			if markAutoRepair {
+				item.LastAutoRepairAt = &completedAt
+			}
+			if err := s.repo.UpsertRankingPortfolioJobStatus(ctx, item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Service) rebuildRankingPortfolioFromRankingSnapshot(ctx context.Context, definition RankingPortfolioDefinition, snapshotDate string) error {
+	plan, err := s.buildRankingPortfolioRebuildPlan(ctx, definition, snapshotDate)
+	if err != nil {
+		return err
+	}
+	if plan == nil {
+		return nil
+	}
+	return s.applyRankingPortfolioRebuildPlan(ctx, definition, *plan)
+}
+
+func (s *Service) buildRankingPortfolioRebuildPlan(ctx context.Context, definition RankingPortfolioDefinition, snapshotDate string) (*rankingPortfolioRebuildPlan, error) {
+	snapshotDate = strings.TrimSpace(snapshotDate)
+	sourceRows, err := s.loadRankingSnapshotSourceRows(ctx, snapshotDate, resolveRankingExchanges(definition.Exchange))
+	if err != nil {
+		return nil, newRankingPortfolioPersistError(definition.ID, "load_ranking_snapshots", fmt.Sprintf("load ranking snapshots: %v", err), map[string]any{"snapshot_date": snapshotDate})
+	}
+	if len(sourceRows) == 0 {
+		return nil, nil
+	}
+	previousConstituents, err := s.loadLatestRankingPortfolioConstituentsBeforeDate(ctx, definition.ID, snapshotDate)
+	if err != nil {
+		return nil, newRankingPortfolioPersistError(definition.ID, "load_previous_constituents", fmt.Sprintf("load previous ranking portfolio constituents: %v", err), map[string]any{"snapshot_date": snapshotDate})
+	}
+	constituents, err := s.selectRankingPortfolioConstituentsFromSnapshotRows(ctx, definition, sourceRows)
+	if err != nil {
+		return nil, newRankingPortfolioPersistError(definition.ID, "select_constituents", err.Error(), map[string]any{"snapshot_date": snapshotDate})
+	}
+	hasShortfall := len(constituents) < definition.MaxHoldings
+	warningText := ""
+	if hasShortfall {
+		warningText = defaultRankingPortfolioWarningText
+	}
+	sourceTradeDate := s.resolveRankingPortfolioSourceTradeDateFromRows(sourceRows, snapshotDate)
+	if sourceTradeDate == "" {
+		sourceTradeDate = snapshotDate
+	}
+	marketPrices, err := s.buildRankingPortfolioMarketPricesFromSnapshotRows(ctx, definition, snapshotDate, sourceTradeDate, constituents, previousConstituents, sourceRows)
+	if err != nil {
+		return nil, err
+	}
+	benchmark, err := s.buildRankingPortfolioBenchmarkPriceFromSnapshotRows(ctx, definition, snapshotDate, sourceTradeDate)
+	if err != nil {
+		return nil, err
+	}
+	snapshotTime := time.Date(parseSnapshotDate(snapshotDate).Year(), parseSnapshotDate(snapshotDate).Month(), parseSnapshotDate(snapshotDate).Day(), 15, 0, 0, 0, rankingSnapshotLocation).UTC()
+	return &rankingPortfolioRebuildPlan{
+		Date:            snapshotDate,
+		SnapshotTime:    snapshotTime,
+		Constituents:    constituents,
+		MarketPrices:    marketPrices,
+		Benchmark:       benchmark,
+		HasShortfall:    hasShortfall,
+		WarningText:     warningText,
+		SourceTradeDate: sourceTradeDate,
+	}, nil
+}
+
+func (s *Service) applyRankingPortfolioRebuildPlan(ctx context.Context, definition RankingPortfolioDefinition, plan rankingPortfolioRebuildPlan) error {
+	now := time.Now().UTC()
+	return s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		definition.UpdatedAt = now
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"code", "name", "exchange", "portfolio_variant", "benchmark_code", "benchmark_name",
+				"max_holdings", "selection_rule", "selection_window", "excluded_boards", "weighting_method",
+				"rebalance_rule", "trade_cost_rate", "method_note", "is_active", "updated_at",
+			}),
+		}).Create(&definition).Error; err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "upsert_definition", fmt.Sprintf("upsert ranking portfolio definition: %v", err), map[string]any{"snapshot_date": plan.Date})
+		}
+		snapshotVersion := buildRankingPortfolioSnapshotVersion(plan.Date)
+		if err := deleteRankingPortfolioSnapshotVersion(tx, definition.ID, snapshotVersion); err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "cleanup_snapshot_version", err.Error(), map[string]any{"snapshot_date": plan.Date})
+		}
+		snapshot := RankingPortfolioSnapshot{
+			DefinitionID:          definition.ID,
+			SnapshotVersion:       snapshotVersion,
+			BatchID:               buildRankingPortfolioBatchID(definition.ID, snapshotVersion),
+			SnapshotDate:          plan.Date,
+			RankingTime:           plan.SnapshotTime,
+			HoldingsEffectiveTime: buildRankingPortfolioEffectiveTime(plan.SnapshotTime.In(rankingSnapshotLocation)),
+			NavAsOfTime:           plan.SnapshotTime,
+			SourceTradeDate:       plan.SourceTradeDate,
+			BenchmarkCode:         definition.BenchmarkCode,
+			BenchmarkName:         definition.BenchmarkName,
+			ConstituentsCount:     len(plan.Constituents),
+			HasShortfall:          plan.HasShortfall,
+			WarningText:           plan.WarningText,
+			MethodNote:            definition.MethodNote,
+			CreatedAt:             now,
+			UpdatedAt:             now,
+		}
+		if err := tx.Create(&snapshot).Error; err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "insert_snapshot", fmt.Sprintf("insert ranking portfolio snapshot: %v", err), map[string]any{"snapshot_date": plan.Date})
+		}
+		constituentRows := make([]RankingPortfolioSnapshotConstituent, 0, len(plan.Constituents))
+		for _, item := range plan.Constituents {
+			constituentRows = append(constituentRows, RankingPortfolioSnapshotConstituent{DefinitionID: definition.ID, SnapshotVersion: snapshotVersion, SnapshotDate: plan.Date, Rank: item.Rank, Code: item.Code, Name: item.Name, Exchange: item.Exchange, Board: item.Board, SourceRank: item.SourceRank, ConsecutiveDays: item.ConsecutiveDays, Weight: item.Weight, RankingScore: item.RankingScore, Opportunity: item.Opportunity, Risk: item.Risk, CreatedAt: now, UpdatedAt: now})
+		}
+		if len(constituentRows) > 0 {
+			if err := tx.Create(&constituentRows).Error; err != nil {
+				return newRankingPortfolioPersistError(definition.ID, "insert_constituents", fmt.Sprintf("insert ranking portfolio constituents: %v", err), map[string]any{"snapshot_date": plan.Date})
+			}
+		}
+		if len(plan.MarketPrices) > 0 {
+			if err := tx.Create(&plan.MarketPrices).Error; err != nil {
+				return newRankingPortfolioPersistError(definition.ID, "insert_market_prices", fmt.Sprintf("insert ranking portfolio market prices: %v", err), map[string]any{"snapshot_date": plan.Date})
+			}
+		}
+		if err := tx.Create(&plan.Benchmark).Error; err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "insert_benchmark_price", fmt.Sprintf("insert ranking portfolio benchmark price: %v", err), map[string]any{"snapshot_date": plan.Date})
+		}
+		result, err := buildRankingPortfolioResult(tx, definition, snapshotVersion, now)
+		if err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "build_result", err.Error(), map[string]any{"snapshot_date": plan.Date})
+		}
+		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "definition_id"}, {Name: "snapshot_version"}}, DoUpdates: clause.AssignmentColumns([]string{"batch_id", "snapshot_date", "ranking_time", "holdings_effective_time", "nav_as_of_time", "source_trade_date", "benchmark_code", "benchmark_name", "latest_nav", "latest_benchmark_nav", "latest_portfolio_return", "latest_benchmark_return", "latest_excess_return_pct", "current_constituent_count", "has_shortfall", "warning_text", "method_note", "series_json", "constituents_json", "latest_rebalance_json", "updated_at"})}).Create(result).Error; err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "upsert_result", fmt.Sprintf("upsert ranking portfolio result: %v", err), map[string]any{"snapshot_date": plan.Date})
+		}
+		return nil
+	})
+}
+
+func parseSnapshotDate(snapshotDate string) time.Time {
+	day, _ := time.ParseInLocation("2006-01-02", strings.TrimSpace(snapshotDate), rankingSnapshotLocation)
+	return day
+}
+
+func (s *Service) loadRankingSnapshotSourceRows(ctx context.Context, snapshotDate string, exchanges []string) ([]rankingSnapshotSourceRow, error) {
+	var rows []rankingSnapshotSourceRow
+	query := s.repo.db.WithContext(ctx).Model(&RankingSnapshot{}).Select("id, code, name, exchange, rank, opportunity, risk, close_price, price_trade_date, snapshot_date").Where("snapshot_date = ?", strings.TrimSpace(snapshotDate))
+	if len(exchanges) > 0 {
+		query = query.Where("exchange IN ?", exchanges)
+	}
+	if err := query.Order("rank ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *Service) loadLatestRankingPortfolioConstituentsBeforeDate(ctx context.Context, definitionID string, snapshotDate string) ([]RankingPortfolioConstituentItem, error) {
+	var previousSnapshot RankingPortfolioSnapshot
+	if err := s.repo.db.WithContext(ctx).Where("definition_id = ? AND snapshot_date < ?", definitionID, strings.TrimSpace(snapshotDate)).Order("snapshot_date DESC, id DESC").First(&previousSnapshot).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var rows []RankingPortfolioSnapshotConstituent
+	if err := s.repo.db.WithContext(ctx).Where("definition_id = ? AND snapshot_version = ?", definitionID, previousSnapshot.SnapshotVersion).Order("rank ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := make([]RankingPortfolioConstituentItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, RankingPortfolioConstituentItem{Rank: row.Rank, SourceRank: row.SourceRank, Code: row.Code, Name: row.Name, Exchange: row.Exchange, Board: row.Board, ConsecutiveDays: row.ConsecutiveDays, Weight: row.Weight, RankingScore: row.RankingScore, Opportunity: row.Opportunity, Risk: row.Risk})
+	}
+	return items, nil
+}
+
+func (s *Service) selectRankingPortfolioConstituentsFromSnapshotRows(ctx context.Context, definition RankingPortfolioDefinition, rows []rankingSnapshotSourceRow) ([]RankingPortfolioConstituentItem, error) {
+	needsStreak := definition.SelectionRule == rankingPortfolioSelectionRuleTop10ByStreak
+	rankingItems := make([]RankingItem, 0, len(rows))
+	for _, row := range rows {
+		item := RankingItem{Rank: row.Rank, Code: strings.TrimSpace(row.Code), Name: strings.TrimSpace(row.Name), Exchange: strings.ToUpper(strings.TrimSpace(row.Exchange)), Board: normalizeAShareRankingBoard(QuadrantScoreRecord{Code: strings.TrimSpace(row.Code), Board: "", Exchange: strings.ToUpper(strings.TrimSpace(row.Exchange))}), Opportunity: row.Opportunity, Risk: row.Risk}
+		if needsStreak {
+			days, err := s.repo.GetConsecutiveDays(ctx, item.Code, resolveRankingExchanges(definition.Exchange))
+			if err != nil {
+				return nil, err
+			}
+			item.ConsecutiveDays = days
+		}
+		rankingItems = append(rankingItems, item)
+	}
+	return buildRankingPortfolioConstituentItems(definition, rankingItems), nil
+}
+
+func (s *Service) resolveRankingPortfolioSourceTradeDateFromRows(rows []rankingSnapshotSourceRow, snapshotDate string) string {
+	latest := ""
+	for _, row := range rows {
+		tradeDate := strings.TrimSpace(row.PriceTradeDate)
+		if tradeDate == "" {
+			tradeDate = strings.TrimSpace(snapshotDate)
+		}
+		if tradeDate == "" {
+			continue
+		}
+		if latest == "" || tradeDate > latest {
+			latest = tradeDate
+		}
+	}
+	return latest
+}
+
+func (s *Service) buildRankingPortfolioMarketPricesFromSnapshotRows(ctx context.Context, definition RankingPortfolioDefinition, snapshotDate string, sourceTradeDate string, current []RankingPortfolioConstituentItem, previous []RankingPortfolioConstituentItem, rows []rankingSnapshotSourceRow) ([]RankingPortfolioMarketPrice, error) {
+	snapshotByKey := make(map[string]rankingSnapshotSourceRow, len(rows))
+	for _, row := range rows {
+		snapshotByKey[snapshotPriceHintKey(row.Code, row.Exchange)] = row
+	}
+	needed := map[string]RankingPortfolioConstituentItem{}
+	for _, item := range previous {
+		needed[snapshotPriceHintKey(item.Code, item.Exchange)] = item
+	}
+	for _, item := range current {
+		needed[snapshotPriceHintKey(item.Code, item.Exchange)] = item
+	}
+	prices := make([]RankingPortfolioMarketPrice, 0, len(needed))
+	now := time.Now().UTC()
+	snapshotVersion := buildRankingPortfolioSnapshotVersion(snapshotDate)
+	for key, item := range needed {
+		closePrice := 0.0
+		priceTradeDate := sourceTradeDate
+		if row, ok := snapshotByKey[key]; ok && row.ClosePrice > 0 {
+			closePrice = row.ClosePrice
+			if strings.TrimSpace(row.PriceTradeDate) != "" {
+				priceTradeDate = strings.TrimSpace(row.PriceTradeDate)
+			}
+		}
+		if closePrice <= 0 {
+			lookup := s.resolveRankingPortfolioMarketPrice(ctx, item.Code, item.Exchange, sourceTradeDate)
+			if lookup.ClosePrice > 0 {
+				closePrice = lookup.ClosePrice
+				priceTradeDate = lookup.TradeDate
+			}
+		}
+		if closePrice <= 0 {
+			return nil, newRankingPortfolioPersistError(definition.ID, "resolve_market_price", fmt.Sprintf("missing market close for %s(%s) on %s", item.Code, item.Exchange, sourceTradeDate), map[string]any{"snapshot_date": snapshotDate, "source_trade_date": sourceTradeDate, "code": item.Code, "exchange": item.Exchange})
+		}
+		prices = append(prices, RankingPortfolioMarketPrice{DefinitionID: definition.ID, SnapshotVersion: snapshotVersion, SnapshotDate: snapshotDate, Code: item.Code, Exchange: item.Exchange, ClosePrice: closePrice, PriceTradeDate: priceTradeDate, CreatedAt: now, UpdatedAt: now})
+	}
+	sort.Slice(prices, func(i, j int) bool {
+		if prices[i].Exchange == prices[j].Exchange {
+			return prices[i].Code < prices[j].Code
+		}
+		return prices[i].Exchange < prices[j].Exchange
+	})
+	return prices, nil
+}
+
+func (s *Service) buildRankingPortfolioBenchmarkPriceFromSnapshotRows(ctx context.Context, definition RankingPortfolioDefinition, snapshotDate string, sourceTradeDate string) (RankingPortfolioBenchmarkPrice, error) {
+	benchmarkClose, benchmarkTradeDate := s.resolveRankingPortfolioBenchmarkClose(ctx, definition.BenchmarkCode, sourceTradeDate)
+	if benchmarkClose <= 0 || benchmarkTradeDate == "" {
+		return RankingPortfolioBenchmarkPrice{}, newRankingPortfolioPersistError(definition.ID, "resolve_benchmark_price", fmt.Sprintf("missing benchmark close for %s on %s", definition.BenchmarkCode, sourceTradeDate), map[string]any{"snapshot_date": snapshotDate, "source_trade_date": sourceTradeDate, "benchmark_code": definition.BenchmarkCode})
+	}
+	now := time.Now().UTC()
+	return RankingPortfolioBenchmarkPrice{DefinitionID: definition.ID, SnapshotVersion: buildRankingPortfolioSnapshotVersion(snapshotDate), SnapshotDate: snapshotDate, BenchmarkCode: definition.BenchmarkCode, BenchmarkName: definition.BenchmarkName, ClosePrice: benchmarkClose, PriceTradeDate: benchmarkTradeDate, CreatedAt: now, UpdatedAt: now}, nil
+}
+
+func (s *Service) rebuildRankingPortfolioResultForSnapshot(ctx context.Context, definition RankingPortfolioDefinition, snapshotDate string) error {
+	snapshotDate = strings.TrimSpace(snapshotDate)
+	var snapshot RankingPortfolioSnapshot
+	if err := s.repo.db.WithContext(ctx).
+		Where("definition_id = ? AND snapshot_date = ?", definition.ID, snapshotDate).
+		Order("id DESC").
+		First(&snapshot).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return s.rebuildRankingPortfolioFromRankingSnapshot(ctx, definition, snapshotDate)
+		}
+		return newRankingPortfolioPersistError(definition.ID, "load_snapshot", fmt.Sprintf("load ranking portfolio snapshot: %v", err), map[string]any{"snapshot_date": snapshotDate})
+	}
+	now := time.Now().UTC()
+	return s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result, err := buildRankingPortfolioResult(tx, definition, snapshot.SnapshotVersion, now)
+		if err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "build_result", err.Error(), map[string]any{"snapshot_date": snapshotDate, "snapshot_version": snapshot.SnapshotVersion})
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "definition_id"}, {Name: "snapshot_version"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"batch_id", "snapshot_date", "ranking_time", "holdings_effective_time", "nav_as_of_time", "source_trade_date",
+				"benchmark_code", "benchmark_name", "latest_nav", "latest_benchmark_nav",
+				"latest_portfolio_return", "latest_benchmark_return", "latest_excess_return_pct",
+				"current_constituent_count", "has_shortfall", "warning_text", "method_note",
+				"series_json", "constituents_json", "latest_rebalance_json", "updated_at",
+			}),
+		}).Create(result).Error; err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "upsert_result", fmt.Sprintf("upsert ranking portfolio result: %v", err), map[string]any{"snapshot_date": snapshotDate, "snapshot_version": snapshot.SnapshotVersion})
+		}
+		return nil
+	})
+}
+
+func (s *Service) autoRepairRankingPortfolioLag(ctx context.Context, taskLogID string, snapshotDate string) (int, error) {
+	definitions := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())
+	repaired := 0
+	var firstErr error
+	for _, definition := range definitions {
+		latestRankingDate, err := s.repo.GetLatestRankingSnapshotDateByExchange(ctx, definition.Exchange)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		latestPortfolioDate, err := s.repo.GetLatestRankingPortfolioResultDate(ctx, definition.ID)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if strings.TrimSpace(latestRankingDate) == "" || latestRankingDate <= strings.TrimSpace(latestPortfolioDate) {
+			continue
+		}
+		repaired++
+		message := fmt.Sprintf("latest_ranking_date=%s latest_portfolio_date=%s", latestRankingDate, latestPortfolioDate)
+		now := time.Now().UTC()
+		item := RankingPortfolioJobStatus{
+			TaskLogID:           strings.TrimSpace(taskLogID),
+			DefinitionID:        definition.ID,
+			DefinitionCode:      definition.Code,
+			DefinitionName:      definition.Name,
+			Exchange:            definition.Exchange,
+			SnapshotDate:        strings.TrimSpace(snapshotDate),
+			SourceTradeDate:     "",
+			Status:              "success",
+			FailureStage:        "",
+			FailureReason:       "",
+			DetailsJSON:         "{}",
+			AutoRepairTriggered: true,
+			AutoRepairStatus:    "pending",
+			AutoRepairMessage:   message,
+			LastAutoRepairAt:    &now,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		}
+		if err := s.repo.UpsertRankingPortfolioJobStatus(ctx, item); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return repaired, firstErr
+}
+
+func (s *Service) saveRankingPortfolioBestEffort(ctx context.Context, records []QuadrantScoreRecord, computedAt time.Time, priceHints map[string]snapshotPriceHint, taskLogID string) {
+	snapshotDate := rankingSnapshotDate(computedAt)
+	if err := s.saveRankingPortfolio(ctx, records, computedAt, priceHints, taskLogID); err != nil {
+		log.Printf("[quadrant] ranking portfolio save skipped: %v", err)
+		if taskLogID != "" {
+			_ = s.persistRankingPortfolioFailureStatus(ctx, taskLogID, err, snapshotDate, collectLatestSourceTradeDate(records), false, "")
+		}
+		return
+	}
+	if snapshotDate == "" {
+		return
+	}
+	repaired, repairErr := s.autoRepairRankingPortfolioLag(ctx, taskLogID, snapshotDate)
+	if repairErr != nil {
+		log.Printf("[quadrant] ranking portfolio auto repair failed: %v", repairErr)
+	}
+	if repaired > 0 {
+		log.Printf("[quadrant] ranking portfolio auto repair done: repaired=%d snapshot_date=%s", repaired, snapshotDate)
+	}
+}
+
+func (s *Service) saveRankingPortfolio(ctx context.Context, records []QuadrantScoreRecord, computedAt time.Time, priceHints map[string]snapshotPriceHint, taskLogID string) error {
 	if len(records) == 0 {
 		return nil
 	}
-	sourceTradeDate := collectLatestSourceTradeDate(records)
 	snapshotDate := rankingSnapshotDate(computedAt)
 	if snapshotDate == "" {
 		return nil
@@ -252,155 +953,177 @@ func (s *Service) saveRankingPortfolio(ctx context.Context, records []QuadrantSc
 		return nil
 	}
 
-	return s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		now := time.Now().UTC()
-		for _, definition := range definitions {
-			definition.UpdatedAt = now
-			if err := tx.Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "id"}},
-				DoUpdates: clause.AssignmentColumns([]string{
-					"code", "name", "exchange", "portfolio_variant", "benchmark_code", "benchmark_name",
-					"max_holdings", "selection_rule", "selection_window", "excluded_boards", "weighting_method",
-					"rebalance_rule", "trade_cost_rate", "method_note", "is_active", "updated_at",
-				}),
-			}).Create(&definition).Error; err != nil {
-				return fmt.Errorf("upsert ranking portfolio definition: %w", err)
+	now := time.Now().UTC()
+	var firstErr error
+	for _, definition := range definitions {
+		if err := s.saveSingleRankingPortfolio(ctx, definition, records, computedAt, snapshotDate, priceHints, taskLogID, now); err != nil {
+			if firstErr == nil {
+				firstErr = err
 			}
+		}
+	}
+	return firstErr
+}
 
-			snapshotVersion := buildRankingPortfolioSnapshotVersion(snapshotDate)
-			if err := deleteRankingPortfolioSnapshotVersion(tx, definition.ID, snapshotVersion); err != nil {
-				return err
-			}
+func (s *Service) saveSingleRankingPortfolio(ctx context.Context, definition RankingPortfolioDefinition, records []QuadrantScoreRecord, computedAt time.Time, snapshotDate string, priceHints map[string]snapshotPriceHint, taskLogID string, now time.Time) error {
+	err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		definition.UpdatedAt = now
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"code", "name", "exchange", "portfolio_variant", "benchmark_code", "benchmark_name",
+				"max_holdings", "selection_rule", "selection_window", "excluded_boards", "weighting_method",
+				"rebalance_rule", "trade_cost_rate", "method_note", "is_active", "updated_at",
+			}),
+		}).Create(&definition).Error; err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "upsert_definition", fmt.Sprintf("upsert ranking portfolio definition: %v", err), nil)
+		}
 
-			currentConstituents, err := s.selectRankingPortfolioConstituents(ctx, definition, records)
-			if err != nil {
-				return err
-			}
-			hasShortfall := len(currentConstituents) < definition.MaxHoldings
-			warningText := ""
-			if hasShortfall {
-				warningText = defaultRankingPortfolioWarningText
-			}
+		snapshotVersion := buildRankingPortfolioSnapshotVersion(snapshotDate)
+		if err := deleteRankingPortfolioSnapshotVersion(tx, definition.ID, snapshotVersion); err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "cleanup_snapshot_version", err.Error(), nil)
+		}
 
-			var previousSnapshot RankingPortfolioSnapshot
-			prevFound := false
-			if err := tx.Where("definition_id = ?", definition.ID).
-				Order("snapshot_date DESC, id DESC").
-				First(&previousSnapshot).Error; err != nil {
-				if !errors.Is(err, gorm.ErrRecordNotFound) {
-					return fmt.Errorf("load previous ranking portfolio snapshot: %w", err)
-				}
-			} else {
-				prevFound = true
-			}
+		currentConstituents, err := s.selectRankingPortfolioConstituents(ctx, definition, records)
+		if err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "select_constituents", err.Error(), nil)
+		}
+		hasShortfall := len(currentConstituents) < definition.MaxHoldings
+		warningText := ""
+		if hasShortfall {
+			warningText = defaultRankingPortfolioWarningText
+		}
 
-			previousConstituents := []RankingPortfolioConstituentItem{}
-			if prevFound {
-				if err := tx.Model(&RankingPortfolioSnapshotConstituent{}).
-					Where("definition_id = ? AND snapshot_version = ?", definition.ID, previousSnapshot.SnapshotVersion).
-					Order("rank ASC, id ASC").
-					Find(&previousConstituents).Error; err != nil {
-					return fmt.Errorf("load previous ranking portfolio constituents: %w", err)
-				}
+		var previousSnapshot RankingPortfolioSnapshot
+		prevFound := false
+		if err := tx.Where("definition_id = ?", definition.ID).
+			Order("snapshot_date DESC, id DESC").
+			First(&previousSnapshot).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return newRankingPortfolioPersistError(definition.ID, "load_previous_snapshot", fmt.Sprintf("load previous ranking portfolio snapshot: %v", err), nil)
 			}
+		} else {
+			prevFound = true
+		}
 
-			batchID := buildRankingPortfolioBatchID(definition.ID, snapshotVersion)
-			effectiveTime := buildRankingPortfolioEffectiveTime(computedAt)
-			snapshot := RankingPortfolioSnapshot{
-				DefinitionID:          definition.ID,
-				SnapshotVersion:       snapshotVersion,
-				BatchID:               batchID,
-				SnapshotDate:          snapshotDate,
-				RankingTime:           computedAt,
-				HoldingsEffectiveTime: effectiveTime,
-				NavAsOfTime:           computedAt,
-				SourceTradeDate:       sourceTradeDate,
-				BenchmarkCode:         definition.BenchmarkCode,
-				BenchmarkName:         definition.BenchmarkName,
-				ConstituentsCount:     len(currentConstituents),
-				HasShortfall:          hasShortfall,
-				WarningText:           warningText,
-				MethodNote:            definition.MethodNote,
-				CreatedAt:             now,
-				UpdatedAt:             now,
-			}
-			if err := tx.Create(&snapshot).Error; err != nil {
-				return fmt.Errorf("insert ranking portfolio snapshot: %w", err)
-			}
-
-			constituentRows := make([]RankingPortfolioSnapshotConstituent, 0, len(currentConstituents))
-			for _, item := range currentConstituents {
-				constituentRows = append(constituentRows, RankingPortfolioSnapshotConstituent{
-					DefinitionID:    definition.ID,
-					SnapshotVersion: snapshotVersion,
-					SnapshotDate:    snapshotDate,
-					Rank:            item.Rank,
-					Code:            item.Code,
-					Name:            item.Name,
-					Exchange:        item.Exchange,
-					Board:           item.Board,
-					SourceRank:      item.SourceRank,
-					ConsecutiveDays: item.ConsecutiveDays,
-					Weight:          item.Weight,
-					RankingScore:    item.RankingScore,
-					Opportunity:     item.Opportunity,
-					Risk:            item.Risk,
-					CreatedAt:       now,
-					UpdatedAt:       now,
-				})
-			}
-			if len(constituentRows) > 0 {
-				if err := tx.Create(&constituentRows).Error; err != nil {
-					return fmt.Errorf("insert ranking portfolio constituents: %w", err)
-				}
-			}
-
-			marketPrices := s.buildRankingPortfolioMarketPrices(ctx, definition, snapshotVersion, snapshotDate, currentConstituents, previousConstituents, now, priceHints)
-			if len(marketPrices) > 0 {
-				if err := tx.Create(&marketPrices).Error; err != nil {
-					return fmt.Errorf("insert ranking portfolio market prices: %w", err)
-				}
-			}
-
-			benchmarkClose, benchmarkTradeDate := s.resolveRankingPortfolioBenchmarkClose(ctx, definition.BenchmarkCode, snapshotDate)
-			if benchmarkClose <= 0 {
-				return fmt.Errorf("missing benchmark close for %s on %s", definition.BenchmarkCode, snapshotDate)
-			}
-			benchmarkRow := RankingPortfolioBenchmarkPrice{
-				DefinitionID:    definition.ID,
-				SnapshotVersion: snapshotVersion,
-				SnapshotDate:    snapshotDate,
-				BenchmarkCode:   definition.BenchmarkCode,
-				BenchmarkName:   definition.BenchmarkName,
-				ClosePrice:      benchmarkClose,
-				PriceTradeDate:  benchmarkTradeDate,
-				CreatedAt:       now,
-				UpdatedAt:       now,
-			}
-			if err := tx.Create(&benchmarkRow).Error; err != nil {
-				return fmt.Errorf("insert ranking portfolio benchmark price: %w", err)
-			}
-
-			result, err := buildRankingPortfolioResult(tx, definition, snapshotVersion, now)
-			if err != nil {
-				return err
-			}
-			if err := tx.Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "definition_id"}, {Name: "snapshot_version"}},
-				DoUpdates: clause.AssignmentColumns([]string{
-					"batch_id", "snapshot_date", "ranking_time", "holdings_effective_time", "nav_as_of_time", "source_trade_date",
-					"benchmark_code", "benchmark_name", "latest_nav", "latest_benchmark_nav",
-					"latest_portfolio_return", "latest_benchmark_return", "latest_excess_return_pct",
-					"current_constituent_count", "has_shortfall", "warning_text", "method_note",
-					"series_json", "constituents_json", "latest_rebalance_json", "updated_at",
-				}),
-			}).Create(result).Error; err != nil {
-				return fmt.Errorf("upsert ranking portfolio result: %w", err)
+		previousConstituents := []RankingPortfolioConstituentItem{}
+		if prevFound {
+			if err := tx.Model(&RankingPortfolioSnapshotConstituent{}).
+				Where("definition_id = ? AND snapshot_version = ?", definition.ID, previousSnapshot.SnapshotVersion).
+				Order("rank ASC, id ASC").
+				Find(&previousConstituents).Error; err != nil {
+				return newRankingPortfolioPersistError(definition.ID, "load_previous_constituents", fmt.Sprintf("load previous ranking portfolio constituents: %v", err), nil)
 			}
 		}
 
+		definitionPriceHints := filterSnapshotPriceHintsByDefinitionExchange(priceHints, definition.Exchange)
+		sourceTradeDate := collectLatestSourceTradeDate(records)
+		if sourceTradeDate == "" {
+			sourceTradeDate = s.resolveSourceTradeDate(ctx, definition.Exchange, computedAt, definitionPriceHints)
+		}
+		batchID := buildRankingPortfolioBatchID(definition.ID, snapshotVersion)
+		effectiveTime := buildRankingPortfolioEffectiveTime(computedAt)
+		snapshot := RankingPortfolioSnapshot{
+			DefinitionID:          definition.ID,
+			SnapshotVersion:       snapshotVersion,
+			BatchID:               batchID,
+			SnapshotDate:          snapshotDate,
+			RankingTime:           computedAt,
+			HoldingsEffectiveTime: effectiveTime,
+			NavAsOfTime:           computedAt,
+			SourceTradeDate:       sourceTradeDate,
+			BenchmarkCode:         definition.BenchmarkCode,
+			BenchmarkName:         definition.BenchmarkName,
+			ConstituentsCount:     len(currentConstituents),
+			HasShortfall:          hasShortfall,
+			WarningText:           warningText,
+			MethodNote:            definition.MethodNote,
+			CreatedAt:             now,
+			UpdatedAt:             now,
+		}
+		if err := tx.Create(&snapshot).Error; err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "insert_snapshot", fmt.Sprintf("insert ranking portfolio snapshot: %v", err), nil)
+		}
+
+		constituentRows := make([]RankingPortfolioSnapshotConstituent, 0, len(currentConstituents))
+		for _, item := range currentConstituents {
+			constituentRows = append(constituentRows, RankingPortfolioSnapshotConstituent{
+				DefinitionID:    definition.ID,
+				SnapshotVersion: snapshotVersion,
+				SnapshotDate:    snapshotDate,
+				Rank:            item.Rank,
+				Code:            item.Code,
+				Name:            item.Name,
+				Exchange:        item.Exchange,
+				Board:           item.Board,
+				SourceRank:      item.SourceRank,
+				ConsecutiveDays: item.ConsecutiveDays,
+				Weight:          item.Weight,
+				RankingScore:    item.RankingScore,
+				Opportunity:     item.Opportunity,
+				Risk:            item.Risk,
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			})
+		}
+		if len(constituentRows) > 0 {
+			if err := tx.Create(&constituentRows).Error; err != nil {
+				return newRankingPortfolioPersistError(definition.ID, "insert_constituents", fmt.Sprintf("insert ranking portfolio constituents: %v", err), nil)
+			}
+		}
+
+		marketPrices, priceErr := s.buildRankingPortfolioMarketPrices(ctx, definition, snapshotVersion, sourceTradeDate, currentConstituents, previousConstituents, now, priceHints)
+		if priceErr != nil {
+			return priceErr
+		}
+		if len(marketPrices) > 0 {
+			if err := tx.Create(&marketPrices).Error; err != nil {
+				return newRankingPortfolioPersistError(definition.ID, "insert_market_prices", fmt.Sprintf("insert ranking portfolio market prices: %v", err), nil)
+			}
+		}
+
+		benchmarkClose, benchmarkTradeDate := s.resolveRankingPortfolioBenchmarkClose(ctx, definition.BenchmarkCode, sourceTradeDate)
+		if benchmarkClose <= 0 || benchmarkTradeDate == "" {
+			return newRankingPortfolioPersistError(definition.ID, "resolve_benchmark_price", fmt.Sprintf("missing benchmark close for %s on %s", definition.BenchmarkCode, sourceTradeDate), map[string]any{"benchmark_code": definition.BenchmarkCode, "source_trade_date": sourceTradeDate})
+		}
+		benchmarkRow := RankingPortfolioBenchmarkPrice{
+			DefinitionID:    definition.ID,
+			SnapshotVersion: snapshotVersion,
+			SnapshotDate:    snapshotDate,
+			BenchmarkCode:   definition.BenchmarkCode,
+			BenchmarkName:   definition.BenchmarkName,
+			ClosePrice:      benchmarkClose,
+			PriceTradeDate:  benchmarkTradeDate,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		if err := tx.Create(&benchmarkRow).Error; err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "insert_benchmark_price", fmt.Sprintf("insert ranking portfolio benchmark price: %v", err), nil)
+		}
+
+		result, err := buildRankingPortfolioResult(tx, definition, snapshotVersion, now)
+		if err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "build_result", err.Error(), nil)
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "definition_id"}, {Name: "snapshot_version"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"batch_id", "snapshot_date", "ranking_time", "holdings_effective_time", "nav_as_of_time", "source_trade_date",
+				"benchmark_code", "benchmark_name", "latest_nav", "latest_benchmark_nav",
+				"latest_portfolio_return", "latest_benchmark_return", "latest_excess_return_pct",
+				"current_constituent_count", "has_shortfall", "warning_text", "method_note",
+				"series_json", "constituents_json", "latest_rebalance_json", "updated_at",
+			}),
+		}).Create(result).Error; err != nil {
+			return newRankingPortfolioPersistError(definition.ID, "upsert_result", fmt.Sprintf("upsert ranking portfolio result: %v", err), nil)
+		}
 		return nil
 	})
+	statusErr := s.persistRankingPortfolioDefinitionStatus(ctx, taskLogID, definition, snapshotDate, collectLatestSourceTradeDate(records), err, false, "")
+	if statusErr != nil {
+		log.Printf("[quadrant] ranking portfolio status update failed: definition=%s err=%v", definition.ID, statusErr)
+	}
+	return err
 }
 
 func decodeRankingPortfolioExcludedBoards(value string) map[string]bool {
@@ -742,7 +1465,7 @@ func selectRankingPortfolioConstituents(records []QuadrantScoreRecord, limit int
 	return items
 }
 
-func (s *Service) buildRankingPortfolioMarketPrices(ctx context.Context, definition RankingPortfolioDefinition, snapshotVersion string, snapshotDate string, current []RankingPortfolioConstituentItem, previous []RankingPortfolioConstituentItem, now time.Time, priceHints map[string]snapshotPriceHint) []RankingPortfolioMarketPrice {
+func (s *Service) buildRankingPortfolioMarketPrices(ctx context.Context, definition RankingPortfolioDefinition, snapshotVersion string, sourceTradeDate string, current []RankingPortfolioConstituentItem, previous []RankingPortfolioConstituentItem, now time.Time, priceHints map[string]snapshotPriceHint) ([]RankingPortfolioMarketPrice, error) {
 	seen := map[string]RankingPortfolioConstituentItem{}
 	for _, item := range current {
 		seen[snapshotPriceHintKey(item.Code, item.Exchange)] = item
@@ -755,20 +1478,27 @@ func (s *Service) buildRankingPortfolioMarketPrices(ctx context.Context, definit
 	for key, item := range seen {
 		closePrice := 0.0
 		priceTradeDate := ""
-		if hint, ok := priceHints[key]; ok && hint.ClosePrice > 0 {
-			closePrice = hint.ClosePrice
-			priceTradeDate = validPriceTradeDate(hint.TradeDate)
-		}
-		if closePrice <= 0 && s.priceResolver != nil {
-			closePrice = s.priceResolver(ctx, item.Code, item.Exchange, snapshotDate)
-			if closePrice > 0 {
-				priceTradeDate = snapshotDate
+		if hint, ok := priceHints[key]; ok {
+			tradeDate := validPriceTradeDate(hint.TradeDate)
+			if hint.ClosePrice > 0 && tradeDate == sourceTradeDate {
+				closePrice = hint.ClosePrice
+				priceTradeDate = tradeDate
 			}
+		}
+		if closePrice <= 0 || priceTradeDate == "" {
+			lookup := s.resolveRankingPortfolioMarketPrice(ctx, item.Code, item.Exchange, sourceTradeDate)
+			if lookup.ClosePrice > 0 && lookup.TradeDate != "" {
+				closePrice = lookup.ClosePrice
+				priceTradeDate = lookup.TradeDate
+			}
+		}
+		if closePrice <= 0 || priceTradeDate == "" {
+			return nil, newRankingPortfolioPersistError(definition.ID, "resolve_market_price", fmt.Sprintf("missing market close for %s(%s) on %s", item.Code, item.Exchange, sourceTradeDate), map[string]any{"code": item.Code, "exchange": item.Exchange, "source_trade_date": sourceTradeDate})
 		}
 		prices = append(prices, RankingPortfolioMarketPrice{
 			DefinitionID:    definition.ID,
 			SnapshotVersion: snapshotVersion,
-			SnapshotDate:    snapshotDate,
+			SnapshotDate:    sourceTradeDate,
 			Code:            item.Code,
 			Exchange:        item.Exchange,
 			ClosePrice:      closePrice,
@@ -783,18 +1513,19 @@ func (s *Service) buildRankingPortfolioMarketPrices(ctx context.Context, definit
 		}
 		return prices[i].Exchange < prices[j].Exchange
 	})
-	return prices
+	return prices, nil
 }
 
-func (s *Service) resolveRankingPortfolioBenchmarkClose(ctx context.Context, benchmarkCode string, snapshotDate string) (float64, string) {
-	if s.benchmarkPriceResolver == nil {
+func (s *Service) resolveRankingPortfolioBenchmarkClose(ctx context.Context, benchmarkCode string, sourceTradeDate string) (float64, string) {
+	if s.benchmarkPriceResolver == nil || strings.TrimSpace(sourceTradeDate) == "" {
 		return 0, ""
 	}
-	closePrice, tradeDate := s.benchmarkPriceResolver(ctx, benchmarkCode, snapshotDate)
-	if closePrice <= 0 {
+	closePrice, tradeDate := s.benchmarkPriceResolver(ctx, benchmarkCode, sourceTradeDate)
+	tradeDate = validPriceTradeDate(tradeDate)
+	if closePrice <= 0 || tradeDate == "" || tradeDate != sourceTradeDate {
 		return 0, ""
 	}
-	return closePrice, validPriceTradeDate(tradeDate)
+	return closePrice, tradeDate
 }
 
 func buildRankingPortfolioLatestRebalance(
@@ -888,12 +1619,13 @@ func buildRankingPortfolioLatestRebalance(
 	})
 
 	return &RankingPortfolioLatestRebalance{
-		SnapshotDate:  currentSnapshot.SnapshotDate,
-		RankingTime:   currentSnapshot.RankingTime.UTC().Format(time.RFC3339),
-		EffectiveTime: currentSnapshot.HoldingsEffectiveTime.UTC().Format(time.RFC3339),
-		TradeCostRate: roundRankingPortfolioCostRate(definition.TradeCostRate),
-		ChangeCount:   len(items),
-		Items:         items,
+		SnapshotDate:    currentSnapshot.SnapshotDate,
+		SourceTradeDate: currentSnapshot.SourceTradeDate,
+		RankingTime:     currentSnapshot.RankingTime.UTC().Format(time.RFC3339),
+		EffectiveTime:   currentSnapshot.HoldingsEffectiveTime.UTC().Format(time.RFC3339),
+		TradeCostRate:   roundRankingPortfolioCostRate(definition.TradeCostRate),
+		ChangeCount:     len(items),
+		Items:           items,
 	}
 }
 
@@ -960,6 +1692,7 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 	firstSnapshot := snapshots[0]
 	series = append(series, RankingPortfolioSeriesPoint{
 		Date:                    firstSnapshot.SnapshotDate,
+		SourceTradeDate:         firstSnapshot.SourceTradeDate,
 		Nav:                     1,
 		BenchmarkNav:            1,
 		PortfolioReturnPct:      0,
@@ -986,6 +1719,7 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 
 		series = append(series, RankingPortfolioSeriesPoint{
 			Date:                    currentSnapshot.SnapshotDate,
+			SourceTradeDate:         currentSnapshot.SourceTradeDate,
 			Nav:                     roundRankingPortfolioFloat(nav),
 			BenchmarkNav:            roundRankingPortfolioFloat(benchmarkNav),
 			PortfolioReturnPct:      roundRankingPortfolioPct((nav - 1) * 100),
@@ -1127,11 +1861,14 @@ func buildEmptyRankingPortfolioResponse(definition RankingPortfolioDefinition) R
 			PortfolioVariant:   definition.PortfolioVariant,
 			SelectionRule:      definition.SelectionRule,
 			SelectionWindow:    definition.SelectionWindow,
+			RebalanceRule:      definition.RebalanceRule,
+			CalculationMethod:  rankingPortfolioCalculationMethodClose,
+			PriceBasis:         rankingPortfolioPriceBasisClose,
 			BenchmarkCode:      definition.BenchmarkCode,
 			BenchmarkName:      definition.BenchmarkName,
 			LatestNav:          1,
 			LatestBenchmarkNav: 1,
-			MethodNote:         definition.MethodNote,
+			MethodNote:         "",
 		},
 		Series:          []RankingPortfolioSeriesPoint{},
 		Constituents:    []RankingPortfolioConstituentItem{},
@@ -1174,6 +1911,7 @@ func (s *Service) applyCurrentRankingPortfolioSelection(ctx context.Context, def
 
 	item.Constituents = currentConstituents
 	item.Meta.CurrentConstituentCount = len(currentConstituents)
+	item.Meta.CurrentConstituentComputedAt = currentComputedAt.UTC().Format(time.RFC3339)
 	item.Meta.HasShortfall = len(currentConstituents) < definition.MaxHoldings
 	if item.Meta.HasShortfall {
 		item.Meta.WarningText = defaultRankingPortfolioWarningText
@@ -1188,8 +1926,14 @@ func (s *Service) applyCurrentRankingPortfolioSelection(ctx context.Context, def
 		if item.Meta.CurrentConstituentSourceDate == "" {
 			item.Meta.CurrentConstituentSourceDate = buildRankingPortfolioCurrentSourceDate(effectiveTime)
 		}
-		if currentComputedAt.After(resultRankingTime) {
-			item.LatestRebalance = nil
+		if item.Meta.SourceTradeDate != "" && item.Meta.CurrentConstituentSourceDate != "" {
+			item.Meta.IsSameBatchAsPerformance = item.Meta.SourceTradeDate == item.Meta.CurrentConstituentSourceDate
+		}
+		if !item.Meta.IsSameBatchAsPerformance {
+			item.Meta.BatchMismatchReason = "当前成分股已按最新收盘榜单更新，收益曲线仍展示上一已物化批次。"
+			if currentComputedAt.After(resultRankingTime) {
+				item.LatestRebalance = nil
+			}
 		}
 	}
 
@@ -1225,6 +1969,9 @@ func buildRankingPortfolioResponse(definition RankingPortfolioDefinition, result
 			PortfolioVariant:         definition.PortfolioVariant,
 			SelectionRule:            definition.SelectionRule,
 			SelectionWindow:          definition.SelectionWindow,
+			RebalanceRule:            definition.RebalanceRule,
+			CalculationMethod:        rankingPortfolioCalculationMethodClose,
+			PriceBasis:               rankingPortfolioPriceBasisClose,
 			BatchID:                  result.BatchID,
 			SnapshotVersion:          result.SnapshotVersion,
 			SnapshotDate:             result.SnapshotDate,
@@ -1243,7 +1990,7 @@ func buildRankingPortfolioResponse(definition RankingPortfolioDefinition, result
 			CurrentConstituentCount:  result.CurrentConstituentCount,
 			HasShortfall:             result.HasShortfall,
 			WarningText:              result.WarningText,
-			MethodNote:               result.MethodNote,
+			MethodNote:               "",
 		},
 		Series:          series,
 		Constituents:    constituents,

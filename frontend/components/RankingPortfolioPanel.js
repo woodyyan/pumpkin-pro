@@ -36,10 +36,8 @@ function formatChartTick(time) {
 
 function buildCurrentConstituentHint(meta) {
   const closeDateLabel = formatCloseDateLabel(meta?.current_constituent_source_date || meta?.source_trade_date, meta?.ranking_time)
-  const effectiveDate = formatChartTick(meta?.current_constituent_effective_time || meta?.holdings_effective_time)
-
-  if (!closeDateLabel || !effectiveDate || effectiveDate === '--') return ''
-  return `${closeDateLabel}，${effectiveDate} 开盘生效`
+  if (!closeDateLabel) return ''
+  return `${closeDateLabel}收盘后生成，按收盘价模拟调仓`
 }
 
 function buildTooltipPosition(point, container) {
@@ -253,7 +251,7 @@ function RankingPortfolioChart({ series = [], benchmarkLabel = '上证指数' })
             className="pointer-events-none absolute z-10 min-w-[180px] rounded-xl border border-border bg-card/94 px-3 py-2 shadow-2xl backdrop-blur"
             style={{ left: tooltip.left, top: tooltip.top }}
           >
-            <div className="text-[11px] text-foreground/42">{tooltip.point.date}</div>
+            <div className="text-[11px] text-foreground/42">{tooltip.point.sourceTradeDate ? `${tooltip.point.sourceTradeDate} 收盘` : tooltip.point.date}</div>
             <TooltipMetric label="模拟组合" value={tooltip.point.portfolioReturnPct} colorClass="bg-amber-400" />
             <TooltipMetric label={benchmarkLabel} value={tooltip.point.benchmarkReturnPct} colorClass="bg-slate-300" />
             <TooltipMetric label="超额收益" value={tooltip.point.excessReturnPct} colorClass="bg-sky-400" highlight />
@@ -435,6 +433,8 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
             <div className="rounded-2xl border border-border/70 bg-[var(--color-bg-hover)] p-3.5 xl:h-full">
               <div className="text-sm font-medium text-foreground">当前成分股</div>
               {currentConstituentHint ? <div className="mt-1 text-[11px] leading-5 text-foreground/42">{currentConstituentHint}</div> : null}
+              {meta?.source_trade_date ? <div className="mt-1 text-[11px] leading-5 text-foreground/42">收益曲线截至：{formatCloseDateLabel(meta?.source_trade_date, meta?.ranking_time)}，按收盘价模拟调仓</div> : null}
+              {meta?.is_same_batch_as_performance === false && meta?.batch_mismatch_reason ? <div className="mt-2 rounded-xl border border-sky-300/20 bg-sky-500/10 px-3 py-2 text-xs text-sky-200">{meta.batch_mismatch_reason}</div> : null}
 
               {meta?.has_shortfall ? (
                 <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
@@ -586,7 +586,7 @@ function LatestRebalanceRow({ item }) {
 
         <div className="text-right text-[11px] text-foreground/42">
           <div>仓位 {formatRankingPortfolioWeightChange(item?.from_weight, item?.to_weight, 0)}</div>
-          <div className="mt-1">参考成本价 {formatRankingPortfolioReferencePrice(item?.reference_cost_price, item?.exchange)}</div>
+          <div className="mt-1">模拟成交价 {formatRankingPortfolioReferencePrice(item?.reference_cost_price, item?.exchange)}</div>
         </div>
       </div>
     </div>

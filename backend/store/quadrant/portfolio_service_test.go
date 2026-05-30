@@ -108,6 +108,7 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	ctx := context.Background()
 
 	benchmarkPrices := map[string]float64{
+		"2026-04-14": 3000,
 		"2026-05-06": 3000,
 		"2026-05-07": 3030,
 	}
@@ -116,10 +117,18 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	})
 
 	priceMap := map[string]float64{
+		snapshotPriceHintKey("600001", "SSE") + "@2026-04-14":  10,
+		snapshotPriceHintKey("000001", "SZSE") + "@2026-04-14": 20,
+		snapshotPriceHintKey("300001", "SZSE") + "@2026-04-14": 30,
+		snapshotPriceHintKey("600002", "SSE") + "@2026-04-14":  40,
+		snapshotPriceHintKey("600003", "SSE") + "@2026-04-14":  45,
+		snapshotPriceHintKey("300002", "SZSE") + "@2026-04-14": 55,
 		snapshotPriceHintKey("600001", "SSE") + "@2026-05-06":  10,
 		snapshotPriceHintKey("000001", "SZSE") + "@2026-05-06": 20,
 		snapshotPriceHintKey("300001", "SZSE") + "@2026-05-06": 30,
 		snapshotPriceHintKey("600002", "SSE") + "@2026-05-06":  40,
+		snapshotPriceHintKey("600003", "SSE") + "@2026-05-06":  45,
+		snapshotPriceHintKey("300002", "SZSE") + "@2026-05-06": 55,
 		snapshotPriceHintKey("600001", "SSE") + "@2026-05-07":  11,
 		snapshotPriceHintKey("000001", "SZSE") + "@2026-05-07": 21,
 		snapshotPriceHintKey("300001", "SZSE") + "@2026-05-07": 33,
@@ -146,10 +155,10 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 		makeAShareRankingRecord("000001", "MAIN", "机会", 94, 83, 10, 12000),
 	}
 
-	if err := svc.saveRankingPortfolio(ctx, recordsDay1, time.Date(2026, 5, 6, 15, 0, 0, 0, rankingSnapshotLocation), nil); err != nil {
+	if err := svc.saveRankingPortfolio(ctx, recordsDay1, time.Date(2026, 5, 6, 15, 0, 0, 0, rankingSnapshotLocation), nil, ""); err != nil {
 		t.Fatalf("save day1 portfolio failed: %v", err)
 	}
-	if err := svc.saveRankingPortfolio(ctx, recordsDay2, time.Date(2026, 5, 7, 15, 0, 0, 0, rankingSnapshotLocation), nil); err != nil {
+	if err := svc.saveRankingPortfolio(ctx, recordsDay2, time.Date(2026, 5, 7, 15, 0, 0, 0, rankingSnapshotLocation), nil, ""); err != nil {
 		t.Fatalf("save day2 portfolio failed: %v", err)
 	}
 
@@ -179,11 +188,11 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	if len(aResp.Series) != 2 {
 		t.Fatalf("expected 2 series points, got %d", len(aResp.Series))
 	}
-	if aResp.Series[1].PortfolioReturnPct <= 0 {
-		t.Fatalf("expected positive portfolio return, got %+v", aResp.Series[1])
+	if aResp.Series[1].PortfolioReturnPct >= 0 {
+		t.Fatalf("expected negative portfolio return after trade cost, got %+v", aResp.Series[1])
 	}
-	if aResp.Series[1].ExcessReturnPct <= 0 {
-		t.Fatalf("expected positive excess return, got %+v", aResp.Series[1])
+	if aResp.Series[1].ExcessReturnPct >= 0 {
+		t.Fatalf("expected negative excess return after trade cost, got %+v", aResp.Series[1])
 	}
 	if len(aResp.Constituents) != 4 {
 		t.Fatalf("expected 4 latest constituents, got %d", len(aResp.Constituents))
@@ -225,16 +234,16 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	for _, item := range aResp.LatestRebalance.Items {
 		itemsByCode[item.Code] = item
 	}
-	if item := itemsByCode["600002"]; item.Action != "sell" || item.FromWeight != 0.25 || item.ToWeight != 0 || item.ReferencePrice != 44 || item.ReferenceCostPrice != 43.9912 {
+	if item := itemsByCode["600002"]; item.Action != "sell" || item.FromWeight != 0.25 || item.ToWeight != 0 || item.ReferencePrice != 40 || item.ReferenceCostPrice != 39.992 {
 		t.Fatalf("unexpected sell rebalance item: %+v", item)
 	}
-	if item := itemsByCode["300001"]; item.Action != "sell" || item.FromWeight != 0.25 || item.ToWeight != 0 || item.ReferencePrice != 33 || item.ReferenceCostPrice != 32.9934 {
+	if item := itemsByCode["300001"]; item.Action != "sell" || item.FromWeight != 0.25 || item.ToWeight != 0 || item.ReferencePrice != 30 || item.ReferenceCostPrice != 29.994 {
 		t.Fatalf("unexpected sell rebalance item: %+v", item)
 	}
-	if item := itemsByCode["600003"]; item.Action != "buy" || item.FromWeight != 0 || item.ToWeight != 0.25 || item.ReferencePrice != 50 || item.ReferenceCostPrice != 50.01 {
+	if item := itemsByCode["600003"]; item.Action != "buy" || item.FromWeight != 0 || item.ToWeight != 0.25 || item.ReferencePrice != 45 || item.ReferenceCostPrice != 45.009 {
 		t.Fatalf("unexpected buy rebalance item: %+v", item)
 	}
-	if item := itemsByCode["300002"]; item.Action != "buy" || item.FromWeight != 0 || item.ToWeight != 0.25 || item.ReferencePrice != 60 || item.ReferenceCostPrice != 60.012 {
+	if item := itemsByCode["300002"]; item.Action != "buy" || item.FromWeight != 0 || item.ToWeight != 0.25 || item.ReferencePrice != 55 || item.ReferenceCostPrice != 55.011 {
 		t.Fatalf("unexpected buy rebalance item: %+v", item)
 	}
 }
@@ -245,12 +254,16 @@ func TestSaveRankingPortfolio_RebuildsSameSnapshotVersion(t *testing.T) {
 	svc := NewService(repo)
 	ctx := context.Background()
 
-	benchmarkPrices := map[string]float64{"2026-05-06": 3000}
+	benchmarkPrices := map[string]float64{"2026-04-14": 3000, "2026-05-06": 3000}
 	svc.SetBenchmarkPriceResolver(func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
 		return benchmarkPrices[tradeDate], tradeDate
 	})
 
 	priceMap := map[string]float64{
+		snapshotPriceHintKey("600001", "SSE") + "@2026-04-14":  10,
+		snapshotPriceHintKey("000001", "SZSE") + "@2026-04-14": 20,
+		snapshotPriceHintKey("300001", "SZSE") + "@2026-04-14": 30,
+		snapshotPriceHintKey("600002", "SSE") + "@2026-04-14":  40,
 		snapshotPriceHintKey("600001", "SSE") + "@2026-05-06":  10,
 		snapshotPriceHintKey("000001", "SZSE") + "@2026-05-06": 20,
 		snapshotPriceHintKey("300001", "SZSE") + "@2026-05-06": 30,
@@ -273,10 +286,10 @@ func TestSaveRankingPortfolio_RebuildsSameSnapshotVersion(t *testing.T) {
 		makeAShareRankingRecord("600002", "MAIN", "机会", 92, 81, 10, 12000),
 	}
 
-	if err := svc.saveRankingPortfolio(ctx, badRecords, computedAt, nil); err != nil {
+	if err := svc.saveRankingPortfolio(ctx, badRecords, computedAt, nil, ""); err != nil {
 		t.Fatalf("first save failed: %v", err)
 	}
-	if err := svc.saveRankingPortfolio(ctx, goodRecords, computedAt, nil); err != nil {
+	if err := svc.saveRankingPortfolio(ctx, goodRecords, computedAt, nil, ""); err != nil {
 		t.Fatalf("second save failed: %v", err)
 	}
 
@@ -339,7 +352,7 @@ func TestGetRankingPortfolio_UsesLatestRankingForCurrentConstituents(t *testing.
 	for i := range storedRecords {
 		storedRecords[i].SourceTradeDate = "2026-05-19"
 	}
-	if err := svc.saveRankingPortfolio(ctx, storedRecords, storedComputedAt, nil); err != nil {
+	if err := svc.saveRankingPortfolio(ctx, storedRecords, storedComputedAt, nil, ""); err != nil {
 		t.Fatalf("save stored portfolio failed: %v", err)
 	}
 
@@ -401,5 +414,193 @@ func TestGetRankingPortfolio_UsesLatestRankingForCurrentConstituents(t *testing.
 	}
 	if aResp.LatestRebalance != nil {
 		t.Fatalf("expected latest rebalance to be hidden when current ranking is newer, got %+v", aResp.LatestRebalance)
+	}
+}
+
+func TestRebuildLaggingRankingPortfolioResults_RebuildsFromExistingSnapshots(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	benchmarkPrices := map[string]float64{
+		"2026-04-14": 3000,
+		"2026-05-06": 3000,
+		"2026-05-07": 3030,
+	}
+	svc.SetBenchmarkPriceResolver(func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
+		return benchmarkPrices[tradeDate], tradeDate
+	})
+	priceMap := map[string]float64{
+		snapshotPriceHintKey("600001", "SSE") + "@2026-04-14":  10,
+		snapshotPriceHintKey("000001", "SZSE") + "@2026-04-14": 20,
+		snapshotPriceHintKey("300001", "SZSE") + "@2026-04-14": 30,
+		snapshotPriceHintKey("600002", "SSE") + "@2026-04-14":  40,
+		snapshotPriceHintKey("600003", "SSE") + "@2026-04-14":  45,
+		snapshotPriceHintKey("300002", "SZSE") + "@2026-04-14": 55,
+	}
+	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
+		return priceMap[snapshotPriceHintKey(code, exchange)+"@"+tradeDate]
+	})
+
+	recordsDay1 := []QuadrantScoreRecord{
+		makeAShareRankingRecord("688001", "STAR", "机会", 99, 88, 10, 12000),
+		makeAShareRankingRecord("600001", "MAIN", "机会", 95, 84, 10, 12000),
+		makeAShareRankingRecord("000001", "MAIN", "机会", 94, 83, 10, 12000),
+		makeAShareRankingRecord("300001", "CHINEXT", "机会", 93, 82, 10, 12000),
+		makeAShareRankingRecord("600002", "MAIN", "机会", 92, 81, 10, 12000),
+	}
+	recordsDay2 := []QuadrantScoreRecord{
+		makeAShareRankingRecord("688001", "STAR", "机会", 99, 88, 10, 12000),
+		makeAShareRankingRecord("600003", "MAIN", "机会", 97, 86, 10, 12000),
+		makeAShareRankingRecord("300002", "CHINEXT", "机会", 96, 85, 10, 12000),
+		makeAShareRankingRecord("600001", "MAIN", "机会", 95, 84, 10, 12000),
+		makeAShareRankingRecord("000001", "MAIN", "机会", 94, 83, 10, 12000),
+	}
+	if err := svc.saveRankingPortfolio(ctx, recordsDay1, time.Date(2026, 5, 6, 15, 0, 0, 0, rankingSnapshotLocation), nil, ""); err != nil {
+		t.Fatalf("save day1 portfolio failed: %v", err)
+	}
+	if err := svc.saveRankingPortfolio(ctx, recordsDay2, time.Date(2026, 5, 7, 15, 0, 0, 0, rankingSnapshotLocation), nil, ""); err != nil {
+		t.Fatalf("save day2 portfolio failed: %v", err)
+	}
+
+	if err := repo.db.WithContext(ctx).Where("definition_id = ? AND snapshot_date = ?", defaultRankingPortfolioDefinitionID, "2026-05-07").Delete(&RankingPortfolioResult{}).Error; err != nil {
+		t.Fatalf("delete lagging result failed: %v", err)
+	}
+	if err := repo.db.WithContext(ctx).Create(&RankingSnapshot{Code: "600003", Name: "股票600003", Exchange: "SSE", Rank: 1, Opportunity: 97, Risk: 86, ClosePrice: 45, PriceTradeDate: "2026-04-14", SnapshotDate: "2026-05-07", CreatedAt: time.Now().UTC()}).Error; err != nil {
+		t.Fatalf("seed ranking snapshot failed: %v", err)
+	}
+
+	if err := svc.RebuildLaggingRankingPortfolioResults(ctx, "manual-repair", false); err != nil {
+		t.Fatalf("rebuild lagging results failed: %v", err)
+	}
+
+	result, err := repo.GetLatestRankingPortfolioResultByDefinition(ctx, defaultRankingPortfolioDefinitionID)
+	if err != nil {
+		t.Fatalf("load rebuilt result failed: %v", err)
+	}
+	if result == nil || result.SnapshotDate != "2026-05-07" {
+		t.Fatalf("expected rebuilt latest result on 2026-05-07, got %+v", result)
+	}
+	if result.SourceTradeDate != "2026-04-14" {
+		t.Fatalf("rebuilt source_trade_date = %s, want 2026-04-14", result.SourceTradeDate)
+	}
+	status, err := repo.ListLatestRankingPortfolioJobStatuses(ctx)
+	if err != nil {
+		t.Fatalf("list statuses failed: %v", err)
+	}
+	var found bool
+	for _, item := range status {
+		if item.TaskLogID == "manual-repair" && item.DefinitionID == defaultRankingPortfolioDefinitionID {
+			found = true
+			if item.Status != "success" || item.SnapshotDate != "2026-05-07" {
+				t.Fatalf("unexpected repair status: %+v", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected manual repair status for default definition")
+	}
+}
+
+func TestRebuildLaggingRankingPortfolioResults_RebuildsMissingPortfolioSnapshotFromRankingSnapshot(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	benchmarkPrices := map[string]float64{
+		"2026-04-14": 3000,
+		"2026-05-08": 3050,
+	}
+	svc.SetBenchmarkPriceResolver(func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
+		return benchmarkPrices[tradeDate], tradeDate
+	})
+	priceMap := map[string]float64{
+		snapshotPriceHintKey("600001", "SSE") + "@2026-04-14":  10,
+		snapshotPriceHintKey("000001", "SZSE") + "@2026-04-14": 20,
+		snapshotPriceHintKey("300001", "SZSE") + "@2026-04-14": 30,
+		snapshotPriceHintKey("600002", "SSE") + "@2026-04-14":  40,
+	}
+	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
+		return priceMap[snapshotPriceHintKey(code, exchange)+"@"+tradeDate]
+	})
+
+	now := time.Date(2026, 5, 8, 15, 0, 0, 0, rankingSnapshotLocation).UTC()
+	rows := []RankingSnapshot{
+		{Code: "600001", Name: "股票600001", Exchange: "SSE", Rank: 1, Opportunity: 95, Risk: 84, ClosePrice: 10, PriceTradeDate: "2026-04-14", SnapshotDate: "2026-05-08", CreatedAt: now},
+		{Code: "000001", Name: "股票000001", Exchange: "SZSE", Rank: 2, Opportunity: 94, Risk: 83, ClosePrice: 20, PriceTradeDate: "2026-04-14", SnapshotDate: "2026-05-08", CreatedAt: now},
+		{Code: "300001", Name: "股票300001", Exchange: "SZSE", Rank: 3, Opportunity: 93, Risk: 82, ClosePrice: 30, PriceTradeDate: "2026-04-14", SnapshotDate: "2026-05-08", CreatedAt: now},
+		{Code: "600002", Name: "股票600002", Exchange: "SSE", Rank: 4, Opportunity: 92, Risk: 81, ClosePrice: 40, PriceTradeDate: "2026-04-14", SnapshotDate: "2026-05-08", CreatedAt: now},
+	}
+	if err := repo.db.WithContext(ctx).Create(&rows).Error; err != nil {
+		t.Fatalf("seed ranking snapshots failed: %v", err)
+	}
+	if err := svc.RebuildLaggingRankingPortfolioResults(ctx, "manual-repair", false); err != nil {
+		t.Fatalf("rebuild missing portfolio snapshot failed: %v", err)
+	}
+	result, err := repo.GetLatestRankingPortfolioResultByDefinition(ctx, defaultRankingPortfolioDefinitionID)
+	if err != nil {
+		t.Fatalf("load rebuilt result failed: %v", err)
+	}
+	if result == nil || result.SnapshotDate != "2026-05-08" {
+		t.Fatalf("expected rebuilt result at 2026-05-08, got %+v", result)
+	}
+	if result.SourceTradeDate != "2026-04-14" {
+		t.Fatalf("source_trade_date = %s, want 2026-04-14", result.SourceTradeDate)
+	}
+	var snapshot RankingPortfolioSnapshot
+	if err := repo.db.WithContext(ctx).Where("definition_id = ? AND snapshot_date = ?", defaultRankingPortfolioDefinitionID, "2026-05-08").First(&snapshot).Error; err != nil {
+		t.Fatalf("expected rebuilt portfolio snapshot: %v", err)
+	}
+	var constituents []RankingPortfolioSnapshotConstituent
+	if err := repo.db.WithContext(ctx).Where("definition_id = ? AND snapshot_version = ?", defaultRankingPortfolioDefinitionID, snapshot.SnapshotVersion).Find(&constituents).Error; err != nil {
+		t.Fatalf("load rebuilt constituents failed: %v", err)
+	}
+	if len(constituents) != 4 {
+		t.Fatalf("expected 4 rebuilt constituents, got %d", len(constituents))
+	}
+}
+
+func TestRebuildLaggingRankingPortfolioResults_BackfillsMissingMarketCloseFromHistoricalSnapshot(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	svc.SetBenchmarkPriceResolver(func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
+		return 3050, tradeDate
+	})
+	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
+		return 0
+	})
+
+	seedAt := time.Date(2026, 5, 28, 15, 0, 0, 0, rankingSnapshotLocation).UTC()
+	rows := []RankingSnapshot{
+		{Code: "000725", Name: "京东方A", Exchange: "SZSE", Rank: 1, Opportunity: 95, Risk: 84, ClosePrice: 10.5, PriceTradeDate: "2026-05-27", SnapshotDate: "2026-05-27", CreatedAt: seedAt},
+		{Code: "600001", Name: "股票600001", Exchange: "SSE", Rank: 2, Opportunity: 94, Risk: 83, ClosePrice: 20, PriceTradeDate: "2026-05-28", SnapshotDate: "2026-05-28", CreatedAt: seedAt},
+		{Code: "000001", Name: "股票000001", Exchange: "SZSE", Rank: 3, Opportunity: 93, Risk: 82, ClosePrice: 30, PriceTradeDate: "2026-05-28", SnapshotDate: "2026-05-28", CreatedAt: seedAt},
+		{Code: "300001", Name: "股票300001", Exchange: "SZSE", Rank: 4, Opportunity: 92, Risk: 81, ClosePrice: 40, PriceTradeDate: "2026-05-28", SnapshotDate: "2026-05-28", CreatedAt: seedAt},
+		{Code: "000725", Name: "京东方A", Exchange: "SZSE", Rank: 5, Opportunity: 91, Risk: 80, ClosePrice: 0, PriceTradeDate: "2026-05-28", SnapshotDate: "2026-05-28", CreatedAt: seedAt},
+	}
+	if err := repo.db.WithContext(ctx).Create(&rows).Error; err != nil {
+		t.Fatalf("seed ranking snapshots failed: %v", err)
+	}
+
+	if err := svc.RebuildLaggingRankingPortfolioResults(ctx, "manual-repair", false); err != nil {
+		t.Fatalf("rebuild with historical market close failed: %v", err)
+	}
+
+	var marketPrice RankingPortfolioMarketPrice
+	if err := repo.db.WithContext(ctx).
+		Where("definition_id = ? AND snapshot_date = ? AND code = ? AND exchange = ?", defaultRankingPortfolioDefinitionID, "2026-05-28", "000725", "SZSE").
+		First(&marketPrice).Error; err != nil {
+		t.Fatalf("load rebuilt market price failed: %v", err)
+	}
+	if marketPrice.ClosePrice != 10.5 {
+		t.Fatalf("close_price = %v, want 10.5", marketPrice.ClosePrice)
+	}
+	if marketPrice.PriceTradeDate != "2026-05-27" {
+		t.Fatalf("price_trade_date = %s, want 2026-05-27", marketPrice.PriceTradeDate)
 	}
 }

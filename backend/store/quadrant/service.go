@@ -30,6 +30,8 @@ type Service struct {
 	benchmarkPriceResolver BenchmarkPriceResolver // optional, for ranking portfolio benchmark close
 	tradeDateResolver      TradeDateResolver      // optional, for source_trade_date
 	worker                 *Worker                // optional, injected for manual trigger
+	repairHook             func(context.Context) error
+	portfolioRepairHook    func(context.Context) error
 }
 
 func NewService(repo *Repository) *Service {
@@ -137,6 +139,36 @@ func inferSourceTradeDateFromHints(priceHints map[string]snapshotPriceHint) stri
 		}
 	}
 	return latest
+}
+
+func matchesRankingPortfolioExchange(exchange string, itemExchange string) bool {
+	normalizedPortfolioExchange := strings.ToUpper(strings.TrimSpace(exchange))
+	normalizedItemExchange := strings.ToUpper(strings.TrimSpace(itemExchange))
+	switch normalizedPortfolioExchange {
+	case "HKEX":
+		return normalizedItemExchange == "HKEX"
+	case "ASHARE":
+		return normalizedItemExchange == "SSE" || normalizedItemExchange == "SZSE" || normalizedItemExchange == "ASHARE"
+	default:
+		return normalizedPortfolioExchange != "" && normalizedPortfolioExchange == normalizedItemExchange
+	}
+}
+
+func filterSnapshotPriceHintsByDefinitionExchange(priceHints map[string]snapshotPriceHint, exchange string) map[string]snapshotPriceHint {
+	if len(priceHints) == 0 {
+		return nil
+	}
+	filtered := make(map[string]snapshotPriceHint)
+	for key, hint := range priceHints {
+		parts := strings.SplitN(key, "\x00", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if matchesRankingPortfolioExchange(exchange, parts[0]) {
+			filtered[key] = hint
+		}
+	}
+	return filtered
 }
 
 func inferSourceTradeDateFromItems(items []BulkSaveItem) string {
@@ -355,7 +387,7 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 
 	// Save ranking snapshots (best-effort; failure does not affect BulkSave result)
 	s.saveRankingSnapshotsBestEffortWithHints(ctx, records, computedAt, priceHints)
-	s.saveRankingPortfolioBestEffort(ctx, records, computedAt, priceHints)
+	s.saveRankingPortfolioBestEffort(ctx, records, computedAt, priceHints, taskLog.ID)
 
 	return totalCount, nil
 }
@@ -390,6 +422,26 @@ func (s *Service) TriggerComputeHK() {
 // SetWorker injects the worker reference for manual trigger support.
 func (s *Service) SetWorker(w *Worker) {
 	s.worker = w
+}
+
+// SetRepairHook injects a legacy repair callback for admin-triggered rebuilds.
+func (s *Service) SetRepairHook(hook func(context.Context) error) {
+	s.repairHook = hook
+}
+
+// SetRankingPortfolioRepairHook injects the ranking-portfolio-only repair callback.
+func (s *Service) SetRankingPortfolioRepairHook(hook func(context.Context) error) {
+	s.portfolioRepairHook = hook
+}
+
+func (s *Service) TriggerRankingPortfolioRepair(ctx context.Context) error {
+	if s.portfolioRepairHook != nil {
+		return s.portfolioRepairHook(ctx)
+	}
+	if s.repairHook != nil {
+		return s.repairHook(ctx)
+	}
+	return s.RebuildLaggingRankingPortfolioResults(ctx, "", false)
 }
 
 // allEmpty returns true if every item has an empty code.
@@ -871,6 +923,58 @@ func (s *Service) ListComputeLogs(ctx context.Context, limit int) ([]ComputeLogR
 		limit = 30
 	}
 	return s.repo.ListComputeLogs(ctx, limit)
+}
+
+func (s *Service) GetRankingPortfolioAdminStatus(ctx context.Context) (*RankingPortfolioAdminStatusResponse, error) {
+	statuses, err := s.repo.ListLatestRankingPortfolioJobStatuses(ctx)
+	if err != nil {
+		return nil, err
+	}
+	statusByDefinition := make(map[string]RankingPortfolioJobStatus, len(statuses))
+	for _, item := range statuses {
+		if existing, ok := statusByDefinition[item.DefinitionID]; ok && existing.UpdatedAt.After(item.UpdatedAt) {
+			continue
+		}
+		statusByDefinition[item.DefinitionID] = item
+	}
+	definitions := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())
+	items := make([]RankingPortfolioAdminStatusItem, 0, len(definitions))
+	for _, definition := range definitions {
+		latestRankingDate, _ := s.repo.GetLatestRankingSnapshotDateByExchange(ctx, definition.Exchange)
+		latestPortfolioDate, _ := s.repo.GetLatestRankingPortfolioResultDate(ctx, definition.ID)
+		lagDays := rankingPortfolioLagDays(latestRankingDate, latestPortfolioDate)
+		item := RankingPortfolioAdminStatusItem{
+			DefinitionID:        definition.ID,
+			DefinitionCode:      definition.Code,
+			DefinitionName:      definition.Name,
+			Exchange:            definition.Exchange,
+			LatestRankingDate:   latestRankingDate,
+			LatestPortfolioDate: latestPortfolioDate,
+			LagDays:             lagDays,
+			Status: func() string {
+				if lagDays > 0 {
+					return "lagging"
+				}
+				return "ok"
+			}(),
+		}
+		if status, ok := statusByDefinition[definition.ID]; ok {
+			item.LatestSourceTradeDate = status.SourceTradeDate
+			item.FailureStage = status.FailureStage
+			item.FailureReason = status.FailureReason
+			item.AutoRepairStatus = status.AutoRepairStatus
+			item.AutoRepairMessage = status.AutoRepairMessage
+			item.UpdatedAt = status.UpdatedAt.UTC().Format(time.RFC3339)
+			if strings.TrimSpace(status.Status) != "" {
+				item.Status = status.Status
+			}
+			if lagDays > 0 && item.Status == "success" {
+				item.Status = "lagging"
+			}
+		}
+		items = append(items, item)
+	}
+	return &RankingPortfolioAdminStatusResponse{Items: items}, nil
 }
 
 // Search searches stocks by query string (code or name).

@@ -218,6 +218,97 @@ func (r *Repository) GetLatestComputeLog(ctx context.Context) (*ComputeLogRecord
 	return &log, nil
 }
 
+func (r *Repository) UpsertRankingPortfolioJobStatus(ctx context.Context, item RankingPortfolioJobStatus) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "task_log_id"}, {Name: "definition_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"definition_code", "definition_name", "exchange", "snapshot_date", "source_trade_date",
+			"status", "failure_stage", "failure_reason", "details_json",
+			"auto_repair_triggered", "auto_repair_status", "auto_repair_message", "last_auto_repair_at", "updated_at",
+		}),
+	}).Create(&item).Error
+}
+
+func (r *Repository) ListLatestRankingPortfolioJobStatuses(ctx context.Context) ([]RankingPortfolioJobStatus, error) {
+	var items []RankingPortfolioJobStatus
+	if err := r.db.WithContext(ctx).Raw(`
+		SELECT s.*
+		FROM quadrant_ranking_portfolio_job_statuses s
+		JOIN (
+			SELECT definition_id, MAX(updated_at) AS max_updated_at
+			FROM quadrant_ranking_portfolio_job_statuses
+			GROUP BY definition_id
+		) latest
+		ON latest.definition_id = s.definition_id AND latest.max_updated_at = s.updated_at
+		ORDER BY s.exchange ASC, s.definition_code ASC, s.id DESC
+	`).Scan(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *Repository) GetLatestRankingSnapshotDateByExchange(ctx context.Context, exchange string) (string, error) {
+	var result struct{ SnapshotDate string }
+	query := r.db.WithContext(ctx).Model(&RankingSnapshot{}).Select("MAX(snapshot_date) AS snapshot_date")
+	switch strings.ToUpper(strings.TrimSpace(exchange)) {
+	case "HKEX":
+		query = query.Where("exchange = ?", "HKEX")
+	default:
+		query = query.Where("exchange IN ?", []string{"SSE", "SZSE"})
+	}
+	if err := query.Scan(&result).Error; err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result.SnapshotDate), nil
+}
+
+func (r *Repository) GetLatestRankingPortfolioResultDate(ctx context.Context, definitionID string) (string, error) {
+	var result struct{ SnapshotDate string }
+	if err := r.db.WithContext(ctx).
+		Model(&RankingPortfolioResult{}).
+		Select("MAX(snapshot_date) AS snapshot_date").
+		Where("definition_id = ?", definitionID).
+		Scan(&result).Error; err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result.SnapshotDate), nil
+}
+
+func (r *Repository) ListRankingSnapshotDatesByExchangeRange(ctx context.Context, exchange string, fromDate string, toDate string) ([]string, error) {
+	query := r.db.WithContext(ctx).Model(&RankingSnapshot{}).Distinct("snapshot_date")
+	switch strings.ToUpper(strings.TrimSpace(exchange)) {
+	case "HKEX":
+		query = query.Where("exchange = ?", "HKEX")
+	default:
+		query = query.Where("exchange IN ?", []string{"SSE", "SZSE"})
+	}
+	if strings.TrimSpace(fromDate) != "" {
+		query = query.Where("snapshot_date >= ?", strings.TrimSpace(fromDate))
+	}
+	if strings.TrimSpace(toDate) != "" {
+		query = query.Where("snapshot_date <= ?", strings.TrimSpace(toDate))
+	}
+	var dates []string
+	if err := query.Order("snapshot_date ASC").Pluck("snapshot_date", &dates).Error; err != nil {
+		return nil, err
+	}
+	return dates, nil
+}
+
+func (r *Repository) GetLatestRankingPortfolioResultByDefinition(ctx context.Context, definitionID string) (*RankingPortfolioResult, error) {
+	var item RankingPortfolioResult
+	if err := r.db.WithContext(ctx).
+		Where("definition_id = ?", definitionID).
+		Order("snapshot_date DESC, id DESC").
+		First(&item).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
 // FindOpportunityZone returns records in the "机会" (opportunity) zone,
 // ordered by opportunity DESC, risk ASC, limited to `limit`.
 // minAmount is a liquidity hard-filter: only stocks with avg_amount_5d >= threshold are returned.
@@ -544,4 +635,27 @@ func (r *Repository) GetLatestAvailableClosePrice(ctx context.Context, code stri
 		return 0, "", err
 	}
 	return snap.ClosePrice, snap.SnapshotDate, nil
+}
+
+func (r *Repository) GetLatestRankingSnapshotClosePriceOnOrBefore(ctx context.Context, code string, exchange string, targetDate string) (float64, string, error) {
+	targetDate = strings.TrimSpace(targetDate)
+	if code == "" || targetDate == "" {
+		return 0, "", nil
+	}
+	var snap RankingSnapshot
+	query := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
+		Select("snapshot_date", "close_price").
+		Where("code = ? AND close_price > ? AND snapshot_date <= ?", code, 0, targetDate).
+		Order("snapshot_date DESC, id DESC")
+	normalizedExchange := strings.ToUpper(strings.TrimSpace(exchange))
+	if normalizedExchange != "" {
+		query = query.Where("exchange = ?", normalizedExchange)
+	}
+	if err := query.First(&snap).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, "", nil
+		}
+		return 0, "", err
+	}
+	return snap.ClosePrice, strings.TrimSpace(snap.SnapshotDate), nil
 }

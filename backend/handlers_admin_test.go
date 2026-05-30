@@ -11,6 +11,7 @@ import (
 
 	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backup"
+	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 	"github.com/woodyyan/pumpkin-pro/backend/tests/testutil"
 )
 
@@ -178,4 +179,52 @@ func TestWithSuperAdminAuthAcceptsCookie(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.Code)
 	}
+}
+
+func TestHandleAdminRankingPortfolioRepairTriggersExecution(t *testing.T) {
+	repo, cleanup := quadrantSetupForAdminTest(t)
+	defer cleanup()
+	svc := quadrant.NewService(repo)
+	triggered := false
+	svc.SetRankingPortfolioRepairHook(func(ctx context.Context) error {
+		triggered = true
+		return nil
+	})
+	server := &appServer{quadrantService: svc}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/ranking-portfolio-repair", nil)
+	resp := httptest.NewRecorder()
+	server.handleAdminRankingPortfolioRepair(resp, req)
+
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", resp.Code)
+	}
+	if !triggered {
+		t.Fatal("expected ranking portfolio repair to be triggered")
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["ok"] != true {
+		t.Fatalf("expected ok=true, got %+v", body)
+	}
+}
+
+func quadrantSetupForAdminTest(t *testing.T) (*quadrant.Repository, func()) {
+	t.Helper()
+	db := testutil.InMemoryDB(t)
+	testutil.AutoMigrateModels(t, db,
+		&quadrant.QuadrantScoreRecord{},
+		&quadrant.ComputeLogRecord{},
+		&quadrant.RankingSnapshot{},
+		&quadrant.RankingPortfolioDefinition{},
+		&quadrant.RankingPortfolioSnapshot{},
+		&quadrant.RankingPortfolioSnapshotConstituent{},
+		&quadrant.RankingPortfolioMarketPrice{},
+		&quadrant.RankingPortfolioBenchmarkPrice{},
+		&quadrant.RankingPortfolioResult{},
+		&quadrant.RankingPortfolioJobStatus{},
+	)
+	return quadrant.NewRepository(db), func() {}
 }

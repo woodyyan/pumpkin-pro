@@ -143,13 +143,18 @@ export function normalizeRankingPortfolioSeries(series) {
       const benchmarkReturnPct = resolveRankingPortfolioReturnPct(item, 'benchmark_return_pct', 'benchmark_nav')
       const excessReturnPct = parseRankingPortfolioNumber(item?.excess_return_pct)
 
-      return {
+      const normalizedPoint = {
         date: item.__normalized_date,
-        sourceTradeDate: item.source_trade_date || '',
         portfolioReturnPct,
         benchmarkReturnPct,
         excessReturnPct: excessReturnPct !== null ? excessReturnPct : (portfolioReturnPct !== null && benchmarkReturnPct !== null ? portfolioReturnPct - benchmarkReturnPct : null),
       }
+
+      if (item.source_trade_date) {
+        normalizedPoint.sourceTradeDate = item.source_trade_date
+      }
+
+      return normalizedPoint
     })
     .filter((item) => item.portfolioReturnPct !== null || item.benchmarkReturnPct !== null)
 }

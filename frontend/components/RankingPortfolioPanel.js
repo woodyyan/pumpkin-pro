@@ -36,8 +36,9 @@ function formatChartTick(time) {
 
 function buildCurrentConstituentHint(meta) {
   const closeDateLabel = formatCloseDateLabel(meta?.current_constituent_source_date || meta?.source_trade_date, meta?.ranking_time)
-  if (!closeDateLabel) return ''
-  return `${closeDateLabel}收盘后生成，按收盘价模拟调仓`
+  const effectiveDate = formatRankingPortfolioDate(meta?.ranking_time)
+  if (!closeDateLabel || effectiveDate === '--') return ''
+  return `${closeDateLabel}，${effectiveDate} 开盘生效`
 }
 
 function buildTooltipPosition(point, container) {
@@ -586,7 +587,7 @@ function LatestRebalanceRow({ item }) {
 
         <div className="text-right text-[11px] text-foreground/42">
           <div>仓位 {formatRankingPortfolioWeightChange(item?.from_weight, item?.to_weight, 0)}</div>
-          <div className="mt-1">模拟成交价 {formatRankingPortfolioReferencePrice(item?.reference_cost_price, item?.exchange)}</div>
+          <div className="mt-1">参考成本价 {formatRankingPortfolioReferencePrice(item?.reference_cost_price, item?.exchange)}</div>
         </div>
       </div>
     </div>

@@ -167,6 +167,8 @@ def codes_missing_fcfm_inputs(conn: sqlite3.Connection) -> list[str]:
               AND (
                 f.code IS NULL
                 OR f.revenue IS NULL
+                OR f.revenue_yoy IS NULL
+                OR f.net_profit_yoy IS NULL
                 OR f.operating_cash_flow IS NULL
                 OR f.capex IS NULL
               )

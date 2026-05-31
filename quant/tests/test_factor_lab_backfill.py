@@ -219,6 +219,55 @@ def test_parse_tencent_quote_line_extracts_market_metrics():
     assert parsed["pb"] == 0.8
 
 
+def test_parse_financial_frame_rows_supports_eastmoney_current_yoy_fields(monkeypatch):
+    class FakeFrame:
+        def __init__(self, rows):
+            self._rows = rows
+            self.columns = list(rows[0].keys()) if rows else []
+            self.empty = not rows
+
+        def iterrows(self):
+            for idx, row in enumerate(self._rows):
+                yield idx, row
+
+    yjbb = FakeFrame([
+        {
+            "SECURITY_CODE": "000001",
+            "REPORT_DATE": "2026-03-31",
+            "TOTAL_OPERATE_INCOME": 1000,
+            "TOTAL_OPERATE_INCOME_YOY": 12.5,
+            "PARENT_NETPROFIT": 100,
+            "PARENT_NETPROFIT_YOY": 23.4,
+        }
+    ])
+    zcfz = FakeFrame([
+        {
+            "SECURITY_CODE": "000001",
+            "TOTAL_ASSETS": 5000,
+            "TOTAL_EQUITY": 2000,
+        }
+    ])
+    xjll = FakeFrame([
+        {
+            "SECURITY_CODE": "000001",
+            "NETCASH_OPERATE": 300,
+            "CONSTRUCT_LONG_ASSET": -80,
+        }
+    ])
+
+    rows = module.parse_financial_frame_rows(yjbb, zcfz, xjll, "2026-03-31", {"000001"}, "eastmoney:datacenter")
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row[0] == "000001"
+    assert row[3] == 1000.0
+    assert row[4] == 12.5
+    assert row[5] == 100.0
+    assert row[6] == 23.4
+    assert row[9] == 300.0
+    assert row[10] == 80.0
+
+
 def test_parse_dividend_helpers_extract_yield_and_cash_per_share():
     assert module.normalize_dividend_yield_value("2.5%") == 0.025
     assert module.normalize_dividend_yield_value("0.018") == 0.018

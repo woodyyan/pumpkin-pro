@@ -127,14 +127,40 @@ def test_repair_missing_fcfm_inputs_selects_missing_capex_rows(tmp_path):
     conn = sqlite3.connect(db_path)
     try:
         conn.execute("CREATE TABLE factor_securities (code TEXT, is_active INTEGER, is_st INTEGER, board TEXT)")
-        conn.execute("CREATE TABLE factor_financial_metrics (code TEXT, report_period TEXT, revenue REAL, operating_cash_flow REAL, capex REAL)")
+        conn.execute(
+            "CREATE TABLE factor_financial_metrics (code TEXT, report_period TEXT, revenue REAL, revenue_yoy REAL, net_profit_yoy REAL, operating_cash_flow REAL, capex REAL)"
+        )
         conn.execute("INSERT INTO factor_securities VALUES ('000001',1,0,'MAIN'),('000002',1,0,'MAIN')")
-        conn.execute("INSERT INTO factor_financial_metrics VALUES ('000001','2026-03-31',100,50,NULL),('000002','2026-03-31',100,50,20)")
+        conn.execute(
+            "INSERT INTO factor_financial_metrics VALUES ('000001','2026-03-31',100,12,15,50,NULL),('000002','2026-03-31',100,12,15,50,20)"
+        )
         args = module.parse_args(["--db", str(db_path), "--scope", "repair_missing_fcfm_inputs"])
         args.db_path = db_path
         args.temp_files = []
         cmd = module.build_mode_command(args, "financials", conn)
         assert "--require-fcfm-inputs" in cmd
+        code_list = cmd[cmd.index("--code-list-file") + 1]
+        assert Path(code_list).read_text().strip() == "000001"
+    finally:
+        conn.close()
+
+
+def test_repair_missing_fcfm_inputs_selects_missing_growth_yoy_rows(tmp_path):
+    db_path = tmp_path / "factor.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("CREATE TABLE factor_securities (code TEXT, is_active INTEGER, is_st INTEGER, board TEXT)")
+        conn.execute(
+            "CREATE TABLE factor_financial_metrics (code TEXT, report_period TEXT, revenue REAL, revenue_yoy REAL, net_profit_yoy REAL, operating_cash_flow REAL, capex REAL)"
+        )
+        conn.execute("INSERT INTO factor_securities VALUES ('000001',1,0,'MAIN'),('000002',1,0,'MAIN')")
+        conn.execute(
+            "INSERT INTO factor_financial_metrics VALUES ('000001','2026-03-31',100,NULL,15,50,20),('000002','2026-03-31',100,12,15,50,20)"
+        )
+        args = module.parse_args(["--db", str(db_path), "--scope", "repair_missing_fcfm_inputs"])
+        args.db_path = db_path
+        args.temp_files = []
+        cmd = module.build_mode_command(args, "financials", conn)
         code_list = cmd[cmd.index("--code-list-file") + 1]
         assert Path(code_list).read_text().strip() == "000001"
     finally:

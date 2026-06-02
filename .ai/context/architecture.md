@@ -70,3 +70,11 @@ frontend/
   - 历史日线 `GetDailyBars(...)`
 - `user_portfolio_daily_snapshots` 保存市场级聚合结果，`user_portfolio_position_daily_snapshots` 保存持仓级结果；两者都由同一重建引擎生成，避免市场级与持仓级口径分叉。
 - `persistDailySnapshots(...)` 仍存在，但职责被限制为 dashboard / equity curve 的“当天轻量刷新”，不能再承担任何历史日期补写职责。
+- `backend/store/portfolio/worker.go` 提供调度适配层：
+  - A 股调度：北京时间 16:00。
+  - 港股调度：北京时间 17:00。
+  - 两条调度链路最终都调用 `Service.RunDailyMarketSnapshot(...)`，由服务层负责任务日志、用户遍历、单用户重建与汇总状态。
+- `backend/cmd/rebuild-portfolio-daily-snapshots/main.go` 提供人工入口：
+  - 市场级模式：调用 `RunDailyMarketSnapshot(...)` 执行整市场历史单日重建。
+  - 用户级模式：调用 `RebuildDailySnapshotForUser(...)` 执行指定 `user + scope + date` 重建。
+- 配置层新增 `PortfolioSnapshotConfig`，把开关、A 股/港股触发时间与超时统一放在 `backend/config/config.go` 管理，避免调度参数散落在 `main.go` 或 worker 常量中。

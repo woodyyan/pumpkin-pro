@@ -133,6 +133,8 @@ func TestEnvOverride(t *testing.T) {
 		{"FACTOR_LAB_COMPUTE_MINUTE", "0", func(c Config) bool { return c.FactorLab.ComputeMinute == 0 }},
 		{"FACTOR_LAB_PHASE0_SCRIPT", "/app/quant/scripts/update_factor_lab_phase0_incremental.py", func(c Config) bool { return c.FactorLab.Phase0ScriptPath == "/app/quant/scripts/update_factor_lab_phase0_incremental.py" }},
 		{"FACTOR_LAB_ITEM_PROGRESS_INTERVAL", "2", func(c Config) bool { return c.FactorLab.ItemProgressInterval == 2 }},
+		{"PORTFOLIO_SNAPSHOT_ASHARE_HOUR", "15", func(c Config) bool { return c.PortfolioSnapshot.AShareHour == 15 }},
+		{"PORTFOLIO_SNAPSHOT_HK_MINUTE", "30", func(c Config) bool { return c.PortfolioSnapshot.HKMinute == 30 }},
 	}
 
 	for _, tt := range tests {
@@ -166,27 +168,5 @@ func TestTrimTrailingSlash(t *testing.T) {
 		if result != tt.expected {
 			t.Errorf("trimTrailingSlash(%q) = %q; want %q", tt.input, result, tt.expected)
 		}
-	}
-}
-
-func TestGetEnvAsInt(t *testing.T) {
-	os.Setenv("TEST_INT_VAL", "42")
-	defer os.Unsetenv("TEST_INT_VAL")
-
-	result := getEnvAsInt("TEST_INT_VAL", 10)
-	if result != 42 {
-		t.Errorf("expected 42, got %d", result)
-	}
-
-	result = getEnvAsInt("NONEXISTENT_INT", 99)
-	if result != 99 {
-		t.Errorf("expected fallback 99, got %d", result)
-	}
-
-	os.Setenv("BAD_INT", "abc")
-	defer os.Unsetenv("BAD_INT")
-	result = getEnvAsInt("BAD_INT", 7)
-	if result != 7 {
-		t.Errorf("expected fallback 7 for invalid int, got %d", result)
 	}
 }

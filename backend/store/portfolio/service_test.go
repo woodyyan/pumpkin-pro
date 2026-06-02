@@ -17,6 +17,8 @@ func setupPortfolioService(t *testing.T) (*Service, context.Context) {
 		PortfolioEventRecord{},
 		PortfolioDailySnapshotRecord{},
 		PortfolioPositionDailySnapshotRecord{},
+		PortfolioSnapshotJobRunRecord{},
+		PortfolioSnapshotJobRunItemRecord{},
 		SecurityProfileRecord{},
 		InvestmentProfileRecord{},
 	)

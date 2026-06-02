@@ -21,6 +21,7 @@ type Config struct {
 	AI                 AIConfig
 	Backup             BackupConfig
 	FactorLab          FactorLabConfig
+	PortfolioSnapshot  PortfolioSnapshotConfig
 }
 
 type PasswordResetConfig struct {
@@ -64,6 +65,15 @@ type FactorLabConfig struct {
 	ItemProgressInterval int
 	TimeoutMinutes       int
 	StepTimeoutMinutes   int
+}
+
+type PortfolioSnapshotConfig struct {
+	DailyComputeEnabled bool
+	AShareHour          int
+	AShareMinute        int
+	HKHour              int
+	HKMinute            int
+	TimeoutMinutes      int
 }
 
 // BackupConfig holds database backup settings.
@@ -194,6 +204,14 @@ func Load() Config {
 			ItemProgressInterval: getEnvAsInt("FACTOR_LAB_ITEM_PROGRESS_INTERVAL", 1),
 			TimeoutMinutes:       getEnvAsInt("FACTOR_LAB_TIMEOUT_MINUTES", 180),
 			StepTimeoutMinutes:   getEnvAsInt("FACTOR_LAB_STEP_TIMEOUT_MINUTES", 30),
+		},
+		PortfolioSnapshot: PortfolioSnapshotConfig{
+			DailyComputeEnabled: getEnvAsBool("PORTFOLIO_SNAPSHOT_DAILY_COMPUTE_ENABLED", true),
+			AShareHour:          getEnvAsInt("PORTFOLIO_SNAPSHOT_ASHARE_HOUR", 16),
+			AShareMinute:        getEnvAsInt("PORTFOLIO_SNAPSHOT_ASHARE_MINUTE", 0),
+			HKHour:              getEnvAsInt("PORTFOLIO_SNAPSHOT_HK_HOUR", 17),
+			HKMinute:            getEnvAsInt("PORTFOLIO_SNAPSHOT_HK_MINUTE", 0),
+			TimeoutMinutes:      getEnvAsInt("PORTFOLIO_SNAPSHOT_TIMEOUT_MINUTES", 120),
 		},
 	}
 }

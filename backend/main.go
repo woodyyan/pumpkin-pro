@@ -171,6 +171,7 @@ type appServer struct {
 	liveService           *live.Service
 	signalService         *signal.Service
 	portfolioService      *portfolio.Service
+	portfolioWorker       *portfolio.Worker
 	companyProfileService *companyprofile.Service
 	quadrantService       *quadrant.Service
 	adminService          *admin.Service

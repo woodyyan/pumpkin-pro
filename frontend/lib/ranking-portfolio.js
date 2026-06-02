@@ -10,13 +10,20 @@ function parseRankingPortfolioNumber(value) {
   return Number.isFinite(num) ? num : null
 }
 
-function resolveRankingPortfolioReturnPct(item, returnKey, navKey) {
-  const directValue = parseRankingPortfolioNumber(item?.[returnKey])
+function resolveRankingPortfolioReturnPct(item) {
+  const directValue = parseRankingPortfolioNumber(item?.portfolio_return_pct)
   if (directValue !== null) return directValue
 
-  const nav = parseRankingPortfolioNumber(item?.[navKey])
+  const nav = parseRankingPortfolioNumber(item?.nav)
   if (nav === null) return null
   return (nav - 1) * 100
+}
+
+function resolveRankingPortfolioDrawdownPct(item, returnPct, peakReturnPct) {
+  const directValue = parseRankingPortfolioNumber(item?.drawdown_pct)
+  if (directValue !== null) return directValue
+  if (returnPct === null || peakReturnPct === null) return null
+  return returnPct - peakReturnPct
 }
 
 export function getRankingPortfolioPerformanceClass(value) {
@@ -101,11 +108,10 @@ export function buildRankingPortfolioDetailHref(code, exchange) {
 }
 
 export function buildRankingPortfolioChartPoints(series, width, height, padding) {
-  if (!Array.isArray(series) || series.length === 0) return { portfolio: '', benchmark: '', baselineY: height / 2 }
+  if (!Array.isArray(series) || series.length === 0) return { portfolio: '', baselineY: height / 2 }
   const values = []
   for (const item of series) {
     if (Number.isFinite(Number(item.nav))) values.push(Number(item.nav))
-    if (Number.isFinite(Number(item.benchmark_nav))) values.push(Number(item.benchmark_nav))
   }
   const minValue = Math.min(...values, 1)
   const maxValue = Math.max(...values, 1)
@@ -113,24 +119,21 @@ export function buildRankingPortfolioChartPoints(series, width, height, padding)
   const innerWidth = Math.max(width - padding * 2, 1)
   const innerHeight = Math.max(height - padding * 2, 1)
 
-  const buildPath = (key) => series.map((item, index) => {
+  const portfolio = series.map((item, index) => {
     const x = padding + (innerWidth * index) / Math.max(series.length - 1, 1)
-    const value = Number(item[key] || 0)
+    const value = Number(item.nav || 0)
     const y = padding + innerHeight - ((value - minValue) / range) * innerHeight
     return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`
   }).join(' ')
 
   const baselineY = padding + innerHeight - ((1 - minValue) / range) * innerHeight
-  return {
-    portfolio: buildPath('nav'),
-    benchmark: buildPath('benchmark_nav'),
-    baselineY,
-  }
+  return { portfolio, baselineY }
 }
 
 export function normalizeRankingPortfolioSeries(series) {
   if (!Array.isArray(series) || series.length === 0) return []
 
+  let peakReturnPct = 0
   return [...series]
     .filter((item) => item?.date)
     .map((item) => ({
@@ -139,15 +142,18 @@ export function normalizeRankingPortfolioSeries(series) {
     }))
     .sort((left, right) => String(left.__normalized_date).localeCompare(String(right.__normalized_date)))
     .map((item) => {
-      const portfolioReturnPct = resolveRankingPortfolioReturnPct(item, 'portfolio_return_pct', 'nav')
-      const benchmarkReturnPct = resolveRankingPortfolioReturnPct(item, 'benchmark_return_pct', 'benchmark_nav')
-      const excessReturnPct = parseRankingPortfolioNumber(item?.excess_return_pct)
+      const portfolioReturnPct = resolveRankingPortfolioReturnPct(item)
+      if (portfolioReturnPct !== null && portfolioReturnPct > peakReturnPct) {
+        peakReturnPct = portfolioReturnPct
+      }
+      const dailyReturnPct = parseRankingPortfolioNumber(item?.daily_portfolio_return_pct)
+      const drawdownPct = resolveRankingPortfolioDrawdownPct(item, portfolioReturnPct, peakReturnPct)
 
       const normalizedPoint = {
         date: item.__normalized_date,
         portfolioReturnPct,
-        benchmarkReturnPct,
-        excessReturnPct: excessReturnPct !== null ? excessReturnPct : (portfolioReturnPct !== null && benchmarkReturnPct !== null ? portfolioReturnPct - benchmarkReturnPct : null),
+        dailyPortfolioReturnPct: dailyReturnPct,
+        drawdownPct,
       }
 
       if (item.source_trade_date) {
@@ -156,7 +162,7 @@ export function normalizeRankingPortfolioSeries(series) {
 
       return normalizedPoint
     })
-    .filter((item) => item.portfolioReturnPct !== null || item.benchmarkReturnPct !== null)
+    .filter((item) => item.portfolioReturnPct !== null)
 }
 
 export function buildRankingPortfolioChartSeriesData(series) {
@@ -165,7 +171,6 @@ export function buildRankingPortfolioChartSeriesData(series) {
     return {
       points: [],
       portfolio: [],
-      benchmark: [],
       baseline: [],
       latest: null,
     }
@@ -173,12 +178,7 @@ export function buildRankingPortfolioChartSeriesData(series) {
 
   return {
     points,
-    portfolio: points
-      .filter((item) => item.portfolioReturnPct !== null)
-      .map((item) => ({ time: item.date, value: item.portfolioReturnPct })),
-    benchmark: points
-      .filter((item) => item.benchmarkReturnPct !== null)
-      .map((item) => ({ time: item.date, value: item.benchmarkReturnPct })),
+    portfolio: points.map((item) => ({ time: item.date, value: item.portfolioReturnPct })),
     baseline: points.map((item) => ({ time: item.date, value: 0 })),
     latest: points[points.length - 1],
   }

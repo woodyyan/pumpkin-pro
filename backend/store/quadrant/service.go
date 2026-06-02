@@ -16,22 +16,17 @@ import (
 // Implemented by the live-store module; returns 0 if unavailable.
 type PriceResolver func(ctx context.Context, code string, exchange string, tradeDate string) float64
 
-// BenchmarkPriceResolver resolves the benchmark closing price for the given trade date.
-// Returns close price and the actual trade date used.
-type BenchmarkPriceResolver func(ctx context.Context, benchmark string, tradeDate string) (float64, string)
-
 // TradeDateResolver resolves the effective source trade date for a market batch.
 type TradeDateResolver func(ctx context.Context, exchange string, computedAt time.Time) string
 
 // Service provides business logic for quadrant scores.
 type Service struct {
-	repo                   *Repository
-	priceResolver          PriceResolver          // optional, for snapshot close_price
-	benchmarkPriceResolver BenchmarkPriceResolver // optional, for ranking portfolio benchmark close
-	tradeDateResolver      TradeDateResolver      // optional, for source_trade_date
-	worker                 *Worker                // optional, injected for manual trigger
-	repairHook             func(context.Context) error
-	portfolioRepairHook    func(context.Context) error
+	repo                *Repository
+	priceResolver       PriceResolver     // optional, for snapshot close_price
+	tradeDateResolver   TradeDateResolver // optional, for source_trade_date
+	worker              *Worker           // optional, injected for manual trigger
+	repairHook          func(context.Context) error
+	portfolioRepairHook func(context.Context) error
 }
 
 func NewService(repo *Repository) *Service {
@@ -41,11 +36,6 @@ func NewService(repo *Repository) *Service {
 // SetPriceResolver injects the price resolution callback (called during init).
 func (s *Service) SetPriceResolver(r PriceResolver) {
 	s.priceResolver = r
-}
-
-// SetBenchmarkPriceResolver injects the benchmark price resolution callback.
-func (s *Service) SetBenchmarkPriceResolver(r BenchmarkPriceResolver) {
-	s.benchmarkPriceResolver = r
 }
 
 // SetTradeDateResolver injects the source-trade-date resolution callback.

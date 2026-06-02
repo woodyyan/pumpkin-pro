@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+const rankingPortfolioAnnualTradingDays = 252
 
 const rankingPortfolioTradeCostDisplayDigits = 6
 
@@ -248,7 +251,6 @@ type rankingPortfolioRebuildPlan struct {
 	SnapshotTime    time.Time
 	Constituents    []RankingPortfolioConstituentItem
 	MarketPrices    []RankingPortfolioMarketPrice
-	Benchmark       RankingPortfolioBenchmarkPrice
 	HasShortfall    bool
 	WarningText     string
 	SourceTradeDate string
@@ -626,17 +628,12 @@ func (s *Service) buildRankingPortfolioRebuildPlan(ctx context.Context, definiti
 	if err != nil {
 		return nil, err
 	}
-	benchmark, err := s.buildRankingPortfolioBenchmarkPriceFromSnapshotRows(ctx, definition, snapshotDate, sourceTradeDate)
-	if err != nil {
-		return nil, err
-	}
 	snapshotTime := time.Date(parseSnapshotDate(snapshotDate).Year(), parseSnapshotDate(snapshotDate).Month(), parseSnapshotDate(snapshotDate).Day(), 15, 0, 0, 0, rankingSnapshotLocation).UTC()
 	return &rankingPortfolioRebuildPlan{
 		Date:            snapshotDate,
 		SnapshotTime:    snapshotTime,
 		Constituents:    constituents,
 		MarketPrices:    marketPrices,
-		Benchmark:       benchmark,
 		HasShortfall:    hasShortfall,
 		WarningText:     warningText,
 		SourceTradeDate: sourceTradeDate,
@@ -696,14 +693,11 @@ func (s *Service) applyRankingPortfolioRebuildPlan(ctx context.Context, definiti
 				return newRankingPortfolioPersistError(definition.ID, "insert_market_prices", fmt.Sprintf("insert ranking portfolio market prices: %v", err), map[string]any{"snapshot_date": plan.Date})
 			}
 		}
-		if err := tx.Create(&plan.Benchmark).Error; err != nil {
-			return newRankingPortfolioPersistError(definition.ID, "insert_benchmark_price", fmt.Sprintf("insert ranking portfolio benchmark price: %v", err), map[string]any{"snapshot_date": plan.Date})
-		}
 		result, err := buildRankingPortfolioResult(tx, definition, snapshotVersion, now)
 		if err != nil {
 			return newRankingPortfolioPersistError(definition.ID, "build_result", err.Error(), map[string]any{"snapshot_date": plan.Date})
 		}
-		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "definition_id"}, {Name: "snapshot_version"}}, DoUpdates: clause.AssignmentColumns([]string{"batch_id", "snapshot_date", "ranking_time", "holdings_effective_time", "nav_as_of_time", "source_trade_date", "benchmark_code", "benchmark_name", "latest_nav", "latest_benchmark_nav", "latest_portfolio_return", "latest_benchmark_return", "latest_excess_return_pct", "current_constituent_count", "has_shortfall", "warning_text", "method_note", "series_json", "constituents_json", "latest_rebalance_json", "updated_at"})}).Create(result).Error; err != nil {
+		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "definition_id"}, {Name: "snapshot_version"}}, DoUpdates: clause.AssignmentColumns([]string{"batch_id", "snapshot_date", "ranking_time", "holdings_effective_time", "nav_as_of_time", "source_trade_date", "benchmark_code", "benchmark_name", "latest_nav", "latest_portfolio_return", "current_constituent_count", "has_shortfall", "warning_text", "method_note", "series_json", "constituents_json", "latest_rebalance_json", "updated_at"})}).Create(result).Error; err != nil {
 			return newRankingPortfolioPersistError(definition.ID, "upsert_result", fmt.Sprintf("upsert ranking portfolio result: %v", err), map[string]any{"snapshot_date": plan.Date})
 		}
 		return nil
@@ -825,15 +819,6 @@ func (s *Service) buildRankingPortfolioMarketPricesFromSnapshotRows(ctx context.
 	return prices, nil
 }
 
-func (s *Service) buildRankingPortfolioBenchmarkPriceFromSnapshotRows(ctx context.Context, definition RankingPortfolioDefinition, snapshotDate string, sourceTradeDate string) (RankingPortfolioBenchmarkPrice, error) {
-	benchmarkClose, benchmarkTradeDate := s.resolveRankingPortfolioBenchmarkClose(ctx, definition.BenchmarkCode, sourceTradeDate)
-	if benchmarkClose <= 0 || benchmarkTradeDate == "" {
-		return RankingPortfolioBenchmarkPrice{}, newRankingPortfolioPersistError(definition.ID, "resolve_benchmark_price", fmt.Sprintf("missing benchmark close for %s on %s", definition.BenchmarkCode, sourceTradeDate), map[string]any{"snapshot_date": snapshotDate, "source_trade_date": sourceTradeDate, "benchmark_code": definition.BenchmarkCode})
-	}
-	now := time.Now().UTC()
-	return RankingPortfolioBenchmarkPrice{DefinitionID: definition.ID, SnapshotVersion: buildRankingPortfolioSnapshotVersion(snapshotDate), SnapshotDate: snapshotDate, BenchmarkCode: definition.BenchmarkCode, BenchmarkName: definition.BenchmarkName, ClosePrice: benchmarkClose, PriceTradeDate: benchmarkTradeDate, CreatedAt: now, UpdatedAt: now}, nil
-}
-
 func (s *Service) rebuildRankingPortfolioResultForSnapshot(ctx context.Context, definition RankingPortfolioDefinition, snapshotDate string) error {
 	snapshotDate = strings.TrimSpace(snapshotDate)
 	var snapshot RankingPortfolioSnapshot
@@ -856,8 +841,8 @@ func (s *Service) rebuildRankingPortfolioResultForSnapshot(ctx context.Context, 
 			Columns: []clause.Column{{Name: "definition_id"}, {Name: "snapshot_version"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"batch_id", "snapshot_date", "ranking_time", "holdings_effective_time", "nav_as_of_time", "source_trade_date",
-				"benchmark_code", "benchmark_name", "latest_nav", "latest_benchmark_nav",
-				"latest_portfolio_return", "latest_benchmark_return", "latest_excess_return_pct",
+				"benchmark_code", "benchmark_name", "latest_nav",
+				"latest_portfolio_return",
 				"current_constituent_count", "has_shortfall", "warning_text", "method_note",
 				"series_json", "constituents_json", "latest_rebalance_json", "updated_at",
 			}),
@@ -1082,25 +1067,6 @@ func (s *Service) saveSingleRankingPortfolio(ctx context.Context, definition Ran
 			}
 		}
 
-		benchmarkClose, benchmarkTradeDate := s.resolveRankingPortfolioBenchmarkClose(ctx, definition.BenchmarkCode, sourceTradeDate)
-		if benchmarkClose <= 0 || benchmarkTradeDate == "" {
-			return newRankingPortfolioPersistError(definition.ID, "resolve_benchmark_price", fmt.Sprintf("missing benchmark close for %s on %s", definition.BenchmarkCode, sourceTradeDate), map[string]any{"benchmark_code": definition.BenchmarkCode, "source_trade_date": sourceTradeDate})
-		}
-		benchmarkRow := RankingPortfolioBenchmarkPrice{
-			DefinitionID:    definition.ID,
-			SnapshotVersion: snapshotVersion,
-			SnapshotDate:    snapshotDate,
-			BenchmarkCode:   definition.BenchmarkCode,
-			BenchmarkName:   definition.BenchmarkName,
-			ClosePrice:      benchmarkClose,
-			PriceTradeDate:  benchmarkTradeDate,
-			CreatedAt:       now,
-			UpdatedAt:       now,
-		}
-		if err := tx.Create(&benchmarkRow).Error; err != nil {
-			return newRankingPortfolioPersistError(definition.ID, "insert_benchmark_price", fmt.Sprintf("insert ranking portfolio benchmark price: %v", err), nil)
-		}
-
 		result, err := buildRankingPortfolioResult(tx, definition, snapshotVersion, now)
 		if err != nil {
 			return newRankingPortfolioPersistError(definition.ID, "build_result", err.Error(), nil)
@@ -1109,8 +1075,8 @@ func (s *Service) saveSingleRankingPortfolio(ctx context.Context, definition Ran
 			Columns: []clause.Column{{Name: "definition_id"}, {Name: "snapshot_version"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"batch_id", "snapshot_date", "ranking_time", "holdings_effective_time", "nav_as_of_time", "source_trade_date",
-				"benchmark_code", "benchmark_name", "latest_nav", "latest_benchmark_nav",
-				"latest_portfolio_return", "latest_benchmark_return", "latest_excess_return_pct",
+				"benchmark_code", "benchmark_name", "latest_nav",
+				"latest_portfolio_return",
 				"current_constituent_count", "has_shortfall", "warning_text", "method_note",
 				"series_json", "constituents_json", "latest_rebalance_json", "updated_at",
 			}),
@@ -1363,10 +1329,6 @@ func deleteRankingPortfolioSnapshotVersion(tx *gorm.DB, definitionID string, sna
 		return fmt.Errorf("delete ranking portfolio result: %w", err)
 	}
 	if err := tx.Where("definition_id = ? AND snapshot_version = ?", definitionID, snapshotVersion).
-		Delete(&RankingPortfolioBenchmarkPrice{}).Error; err != nil {
-		return fmt.Errorf("delete ranking portfolio benchmark price: %w", err)
-	}
-	if err := tx.Where("definition_id = ? AND snapshot_version = ?", definitionID, snapshotVersion).
 		Delete(&RankingPortfolioMarketPrice{}).Error; err != nil {
 		return fmt.Errorf("delete ranking portfolio market prices: %w", err)
 	}
@@ -1516,18 +1478,6 @@ func (s *Service) buildRankingPortfolioMarketPrices(ctx context.Context, definit
 	return prices, nil
 }
 
-func (s *Service) resolveRankingPortfolioBenchmarkClose(ctx context.Context, benchmarkCode string, sourceTradeDate string) (float64, string) {
-	if s.benchmarkPriceResolver == nil || strings.TrimSpace(sourceTradeDate) == "" {
-		return 0, ""
-	}
-	closePrice, tradeDate := s.benchmarkPriceResolver(ctx, benchmarkCode, sourceTradeDate)
-	tradeDate = validPriceTradeDate(tradeDate)
-	if closePrice <= 0 || tradeDate == "" || tradeDate != sourceTradeDate {
-		return 0, ""
-	}
-	return closePrice, tradeDate
-}
-
 func buildRankingPortfolioLatestRebalance(
 	definition RankingPortfolioDefinition,
 	currentSnapshot RankingPortfolioSnapshot,
@@ -1663,7 +1613,7 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 		})
 	}
 
-	priceByDate := map[string]map[string]float64{}
+	priceByVersion := map[string]map[string]float64{}
 	var priceRows []RankingPortfolioMarketPrice
 	if err := tx.Where("definition_id = ?", definition.ID).
 		Order("snapshot_date ASC, exchange ASC, code ASC, id ASC").
@@ -1671,21 +1621,10 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 		return nil, fmt.Errorf("list ranking portfolio market prices: %w", err)
 	}
 	for _, row := range priceRows {
-		if _, ok := priceByDate[row.SnapshotDate]; !ok {
-			priceByDate[row.SnapshotDate] = map[string]float64{}
+		if _, ok := priceByVersion[row.SnapshotVersion]; !ok {
+			priceByVersion[row.SnapshotVersion] = map[string]float64{}
 		}
-		priceByDate[row.SnapshotDate][snapshotPriceHintKey(row.Code, row.Exchange)] = row.ClosePrice
-	}
-
-	benchmarkByDate := map[string]float64{}
-	var benchmarkRows []RankingPortfolioBenchmarkPrice
-	if err := tx.Where("definition_id = ?", definition.ID).
-		Order("snapshot_date ASC, id ASC").
-		Find(&benchmarkRows).Error; err != nil {
-		return nil, fmt.Errorf("list ranking portfolio benchmark prices: %w", err)
-	}
-	for _, row := range benchmarkRows {
-		benchmarkByDate[row.SnapshotDate] = row.ClosePrice
+		priceByVersion[row.SnapshotVersion][snapshotPriceHintKey(row.Code, row.Exchange)] = row.ClosePrice
 	}
 
 	series := make([]RankingPortfolioSeriesPoint, 0, len(snapshots))
@@ -1694,39 +1633,40 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 		Date:                    firstSnapshot.SnapshotDate,
 		SourceTradeDate:         firstSnapshot.SourceTradeDate,
 		Nav:                     1,
-		BenchmarkNav:            1,
 		PortfolioReturnPct:      0,
-		BenchmarkReturnPct:      0,
-		ExcessReturnPct:         0,
 		DailyPortfolioReturnPct: 0,
-		DailyBenchmarkReturnPct: 0,
+		DrawdownPct:             0,
 		HoldingCount:            0,
 	})
 
 	activeHoldings := []RankingPortfolioConstituentItem{}
+	peakNav := 1.0
 	for i := 1; i < len(snapshots); i++ {
 		prevSnapshot := snapshots[i-1]
 		currentSnapshot := snapshots[i]
 		nextHoldings := constituentsByVersion[prevSnapshot.SnapshotVersion]
-		portfolioReturn := calculateRankingPortfolioPeriodReturn(nextHoldings, priceByDate[prevSnapshot.SnapshotDate], priceByDate[currentSnapshot.SnapshotDate])
+		portfolioReturn := calculateRankingPortfolioPeriodReturn(nextHoldings, priceByVersion[prevSnapshot.SnapshotVersion], priceByVersion[currentSnapshot.SnapshotVersion])
 		tradeRatio := calculateRankingPortfolioTradeRatio(activeHoldings, nextHoldings)
 		costRatio := definition.TradeCostRate * tradeRatio
+		netDailyReturn := (1-costRatio)*(1+portfolioReturn) - 1
 
 		prevPoint := series[len(series)-1]
-		nav := prevPoint.Nav * (1 - costRatio) * (1 + portfolioReturn)
-		benchmarkReturn := calculateRankingPortfolioBenchmarkReturn(benchmarkByDate[prevSnapshot.SnapshotDate], benchmarkByDate[currentSnapshot.SnapshotDate])
-		benchmarkNav := prevPoint.BenchmarkNav * (1 + benchmarkReturn)
+		nav := prevPoint.Nav * (1 + netDailyReturn)
+		if nav > peakNav {
+			peakNav = nav
+		}
+		drawdownPct := 0.0
+		if peakNav > 0 {
+			drawdownPct = roundRankingPortfolioPct((nav/peakNav - 1) * 100)
+		}
 
 		series = append(series, RankingPortfolioSeriesPoint{
 			Date:                    currentSnapshot.SnapshotDate,
 			SourceTradeDate:         currentSnapshot.SourceTradeDate,
 			Nav:                     roundRankingPortfolioFloat(nav),
-			BenchmarkNav:            roundRankingPortfolioFloat(benchmarkNav),
 			PortfolioReturnPct:      roundRankingPortfolioPct((nav - 1) * 100),
-			BenchmarkReturnPct:      roundRankingPortfolioPct((benchmarkNav - 1) * 100),
-			ExcessReturnPct:         roundRankingPortfolioPct((nav - benchmarkNav) * 100),
-			DailyPortfolioReturnPct: roundRankingPortfolioPct(portfolioReturn * 100),
-			DailyBenchmarkReturnPct: roundRankingPortfolioPct(benchmarkReturn * 100),
+			DailyPortfolioReturnPct: roundRankingPortfolioPct(netDailyReturn * 100),
+			DrawdownPct:             drawdownPct,
 			HoldingCount:            len(nextHoldings),
 		})
 		activeHoldings = append([]RankingPortfolioConstituentItem(nil), nextHoldings...)
@@ -1762,10 +1702,7 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 		BenchmarkCode:           latestSnapshot.BenchmarkCode,
 		BenchmarkName:           latestSnapshot.BenchmarkName,
 		LatestNav:               latestPoint.Nav,
-		LatestBenchmarkNav:      latestPoint.BenchmarkNav,
 		LatestPortfolioReturn:   latestPoint.PortfolioReturnPct,
-		LatestBenchmarkReturn:   latestPoint.BenchmarkReturnPct,
-		LatestExcessReturnPct:   latestPoint.ExcessReturnPct,
 		CurrentConstituentCount: len(latestConstituents),
 		HasShortfall:            latestSnapshot.HasShortfall,
 		WarningText:             latestSnapshot.WarningText,
@@ -1776,6 +1713,136 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}, nil
+}
+
+type rankingPortfolioSummaryMetrics struct {
+	InceptionTradeDate    string
+	InceptionDays         int
+	LatestDailyReturnPct  *float64
+	CurrentMonthReturnPct *float64
+	MaxDrawdownPct        *float64
+	VolatilityPct         *float64
+	DailyWinRatePct       *float64
+}
+
+func buildRankingPortfolioSummaryMetrics(series []RankingPortfolioSeriesPoint) rankingPortfolioSummaryMetrics {
+	if len(series) == 0 {
+		return rankingPortfolioSummaryMetrics{}
+	}
+	firstTradeDate := rankingPortfolioSeriesTradeDate(series[0])
+	latestTradeDate := rankingPortfolioSeriesTradeDate(series[len(series)-1])
+	metrics := rankingPortfolioSummaryMetrics{InceptionTradeDate: firstTradeDate}
+	if firstTradeDate != "" && latestTradeDate != "" {
+		metrics.InceptionDays = rankingPortfolioInclusiveDays(firstTradeDate, latestTradeDate)
+	}
+	if len(series) > 1 {
+		latestDaily := roundRankingPortfolioPct(series[len(series)-1].DailyPortfolioReturnPct)
+		metrics.LatestDailyReturnPct = &latestDaily
+	}
+
+	maxDrawdown := 0.0
+	dailyReturns := make([]float64, 0, max(len(series)-1, 0))
+	winDays := 0
+	for i := 1; i < len(series); i++ {
+		dailyReturn := series[i].DailyPortfolioReturnPct / 100
+		dailyReturns = append(dailyReturns, dailyReturn)
+		if series[i].DailyPortfolioReturnPct > 0 {
+			winDays++
+		}
+		if series[i].DrawdownPct < maxDrawdown {
+			maxDrawdown = series[i].DrawdownPct
+		}
+	}
+	maxDrawdown = roundRankingPortfolioPct(maxDrawdown)
+	metrics.MaxDrawdownPct = &maxDrawdown
+	if len(dailyReturns) > 0 {
+		winRate := roundRankingPortfolioPct(float64(winDays) / float64(len(dailyReturns)) * 100)
+		metrics.DailyWinRatePct = &winRate
+	}
+	if len(dailyReturns) >= 2 {
+		volatility := roundRankingPortfolioPct(calculateRankingPortfolioAnnualizedVolatility(dailyReturns) * 100)
+		metrics.VolatilityPct = &volatility
+	}
+	if monthReturn, ok := calculateRankingPortfolioCurrentMonthReturn(series); ok {
+		monthReturn = roundRankingPortfolioPct(monthReturn)
+		metrics.CurrentMonthReturnPct = &monthReturn
+	}
+	return metrics
+}
+
+func rankingPortfolioSeriesTradeDate(point RankingPortfolioSeriesPoint) string {
+	if normalized := normalizeSourceTradeDate(point.SourceTradeDate); normalized != "" {
+		return normalized
+	}
+	return normalizeSourceTradeDate(point.Date)
+}
+
+func rankingPortfolioInclusiveDays(startDate string, endDate string) int {
+	startAt, err1 := time.ParseInLocation("2006-01-02", strings.TrimSpace(startDate), rankingSnapshotLocation)
+	endAt, err2 := time.ParseInLocation("2006-01-02", strings.TrimSpace(endDate), rankingSnapshotLocation)
+	if err1 != nil || err2 != nil || endAt.Before(startAt) {
+		return 0
+	}
+	return int(endAt.Sub(startAt).Hours()/24) + 1
+}
+
+func calculateRankingPortfolioCurrentMonthReturn(series []RankingPortfolioSeriesPoint) (float64, bool) {
+	if len(series) == 0 {
+		return 0, false
+	}
+	latestTradeDate := rankingPortfolioSeriesTradeDate(series[len(series)-1])
+	latestAt, err := time.ParseInLocation("2006-01-02", latestTradeDate, rankingSnapshotLocation)
+	if err != nil {
+		return 0, false
+	}
+	firstIndexOfMonth := -1
+	for i, point := range series {
+		tradeDate := rankingPortfolioSeriesTradeDate(point)
+		tradeAt, parseErr := time.ParseInLocation("2006-01-02", tradeDate, rankingSnapshotLocation)
+		if parseErr != nil {
+			continue
+		}
+		if tradeAt.Year() == latestAt.Year() && tradeAt.Month() == latestAt.Month() {
+			firstIndexOfMonth = i
+			break
+		}
+	}
+	if firstIndexOfMonth < 0 {
+		return 0, false
+	}
+	latestNav := series[len(series)-1].Nav
+	if latestNav <= 0 {
+		return 0, false
+	}
+	if firstIndexOfMonth == 0 {
+		return (latestNav - 1) * 100, true
+	}
+	baseNav := series[firstIndexOfMonth-1].Nav
+	if baseNav <= 0 {
+		return 0, false
+	}
+	return (latestNav/baseNav - 1) * 100, true
+}
+
+func calculateRankingPortfolioAnnualizedVolatility(dailyReturns []float64) float64 {
+	if len(dailyReturns) < 2 {
+		return 0
+	}
+	mean := 0.0
+	for _, item := range dailyReturns {
+		mean += item
+	}
+	mean /= float64(len(dailyReturns))
+	variance := 0.0
+	for _, item := range dailyReturns {
+		diff := item - mean
+		variance += diff * diff
+	}
+	variance /= float64(len(dailyReturns) - 1)
+	if variance < 0 {
+		variance = 0
+	}
+	return math.Sqrt(variance) * math.Sqrt(rankingPortfolioAnnualTradingDays)
 }
 
 func calculateRankingPortfolioPeriodReturn(holdings []RankingPortfolioConstituentItem, prevPrices map[string]float64, currentPrices map[string]float64) float64 {
@@ -1798,13 +1865,6 @@ func calculateRankingPortfolioPeriodReturn(holdings []RankingPortfolioConstituen
 		return 0
 	}
 	return weightedSum / weightSum
-}
-
-func calculateRankingPortfolioBenchmarkReturn(prevClose, currentClose float64) float64 {
-	if prevClose <= 0 || currentClose <= 0 {
-		return 0
-	}
-	return currentClose/prevClose - 1
 }
 
 func calculateRankingPortfolioTradeRatio(previous []RankingPortfolioConstituentItem, current []RankingPortfolioConstituentItem) float64 {
@@ -1854,21 +1914,18 @@ func mathRound(value float64, digits int) float64 {
 func buildEmptyRankingPortfolioResponse(definition RankingPortfolioDefinition) RankingPortfolioResponse {
 	return RankingPortfolioResponse{
 		Meta: RankingPortfolioMeta{
-			DefinitionID:       definition.ID,
-			DefinitionCode:     definition.Code,
-			Name:               definition.Name,
-			Exchange:           definition.Exchange,
-			PortfolioVariant:   definition.PortfolioVariant,
-			SelectionRule:      definition.SelectionRule,
-			SelectionWindow:    definition.SelectionWindow,
-			RebalanceRule:      definition.RebalanceRule,
-			CalculationMethod:  rankingPortfolioCalculationMethodClose,
-			PriceBasis:         rankingPortfolioPriceBasisClose,
-			BenchmarkCode:      definition.BenchmarkCode,
-			BenchmarkName:      definition.BenchmarkName,
-			LatestNav:          1,
-			LatestBenchmarkNav: 1,
-			MethodNote:         "",
+			DefinitionID:      definition.ID,
+			DefinitionCode:    definition.Code,
+			Name:              definition.Name,
+			Exchange:          definition.Exchange,
+			PortfolioVariant:  definition.PortfolioVariant,
+			SelectionRule:     definition.SelectionRule,
+			SelectionWindow:   definition.SelectionWindow,
+			RebalanceRule:     definition.RebalanceRule,
+			CalculationMethod: rankingPortfolioCalculationMethodClose,
+			PriceBasis:        rankingPortfolioPriceBasisClose,
+			LatestNav:         1,
+			MethodNote:        "",
 		},
 		Series:          []RankingPortfolioSeriesPoint{},
 		Constituents:    []RankingPortfolioConstituentItem{},
@@ -1937,6 +1994,91 @@ func (s *Service) applyCurrentRankingPortfolioSelection(ctx context.Context, def
 		}
 	}
 
+	enrichSourceTradeDate := item.Meta.CurrentConstituentSourceDate
+	if enrichSourceTradeDate == "" {
+		enrichSourceTradeDate = item.Meta.SourceTradeDate
+	}
+	if err := s.enrichRankingPortfolioCurrentConstituents(ctx, definition, item.Constituents, enrichSourceTradeDate); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Service) enrichRankingPortfolioCurrentConstituents(ctx context.Context, definition RankingPortfolioDefinition, items []RankingPortfolioConstituentItem, latestSourceTradeDate string) error {
+	latestSourceTradeDate = normalizeSourceTradeDate(latestSourceTradeDate)
+	if len(items) == 0 || latestSourceTradeDate == "" || s.repo == nil {
+		return nil
+	}
+
+	var snapshots []RankingPortfolioSnapshot
+	if err := s.repo.db.WithContext(ctx).
+		Where("definition_id = ?", definition.ID).
+		Order("snapshot_date ASC, id ASC").
+		Find(&snapshots).Error; err != nil {
+		return fmt.Errorf("list ranking portfolio snapshots for constituent enrichment: %w", err)
+	}
+
+	membershipByVersion := map[string]map[string]struct{}{}
+	if len(snapshots) > 0 {
+		var rows []RankingPortfolioSnapshotConstituent
+		if err := s.repo.db.WithContext(ctx).
+			Where("definition_id = ?", definition.ID).
+			Find(&rows).Error; err != nil {
+			return fmt.Errorf("list ranking portfolio constituents for enrichment: %w", err)
+		}
+		for _, row := range rows {
+			if _, ok := membershipByVersion[row.SnapshotVersion]; !ok {
+				membershipByVersion[row.SnapshotVersion] = map[string]struct{}{}
+			}
+			membershipByVersion[row.SnapshotVersion][snapshotPriceHintKey(row.Code, row.Exchange)] = struct{}{}
+		}
+	}
+
+	for index := range items {
+		entryTradeDate := latestSourceTradeDate
+		key := snapshotPriceHintKey(items[index].Code, items[index].Exchange)
+		for i := len(snapshots) - 1; i >= 0; i-- {
+			membership := membershipByVersion[snapshots[i].SnapshotVersion]
+			if _, ok := membership[key]; !ok {
+				continue
+			}
+			entryTradeDate = normalizeSourceTradeDate(snapshots[i].SourceTradeDate)
+			if entryTradeDate == "" {
+				entryTradeDate = normalizeSourceTradeDate(snapshots[i].SnapshotDate)
+			}
+			for j := i - 1; j >= 0; j-- {
+				previousMembership := membershipByVersion[snapshots[j].SnapshotVersion]
+				if _, ok := previousMembership[key]; !ok {
+					break
+				}
+				entryTradeDate = normalizeSourceTradeDate(snapshots[j].SourceTradeDate)
+				if entryTradeDate == "" {
+					entryTradeDate = normalizeSourceTradeDate(snapshots[j].SnapshotDate)
+				}
+			}
+			break
+		}
+
+		entryPrice, resolvedEntryTradeDate, err := s.repo.GetLatestRankingSnapshotClosePriceByTradeDateOnOrBefore(ctx, items[index].Code, items[index].Exchange, entryTradeDate)
+		if err != nil {
+			return fmt.Errorf("resolve constituent entry price for %s(%s): %w", items[index].Code, items[index].Exchange, err)
+		}
+		latestClosePrice, resolvedLatestTradeDate, err := s.repo.GetLatestRankingSnapshotClosePriceByTradeDateOnOrBefore(ctx, items[index].Code, items[index].Exchange, latestSourceTradeDate)
+		if err != nil {
+			return fmt.Errorf("resolve constituent latest price for %s(%s): %w", items[index].Code, items[index].Exchange, err)
+		}
+
+		items[index].EntryTradeDate = normalizeSourceTradeDate(resolvedEntryTradeDate)
+		items[index].EntryPrice = roundRankingPortfolioFloat(entryPrice)
+		items[index].LatestTradeDate = normalizeSourceTradeDate(resolvedLatestTradeDate)
+		items[index].LatestClosePrice = roundRankingPortfolioFloat(latestClosePrice)
+		if entryPrice > 0 && latestClosePrice > 0 {
+			latestReturnPct := roundRankingPortfolioPct((latestClosePrice/entryPrice - 1) * 100)
+			items[index].LatestReturnPct = &latestReturnPct
+		}
+	}
+
 	return nil
 }
 
@@ -1959,6 +2101,7 @@ func buildRankingPortfolioResponse(definition RankingPortfolioDefinition, result
 			return nil, fmt.Errorf("decode ranking portfolio latest rebalance: %w", err)
 		}
 	}
+	summaryMetrics := buildRankingPortfolioSummaryMetrics(series)
 
 	return &RankingPortfolioResponse{
 		Meta: RankingPortfolioMeta{
@@ -1976,17 +2119,19 @@ func buildRankingPortfolioResponse(definition RankingPortfolioDefinition, result
 			SnapshotVersion:          result.SnapshotVersion,
 			SnapshotDate:             result.SnapshotDate,
 			SourceTradeDate:          result.SourceTradeDate,
-			BenchmarkCode:            result.BenchmarkCode,
-			BenchmarkName:            result.BenchmarkName,
 			RankingTime:              result.RankingTime.UTC().Format(time.RFC3339),
 			HoldingsEffectiveTime:    result.HoldingsEffectiveTime.UTC().Format(time.RFC3339),
 			NavAsOfTime:              result.NavAsOfTime.UTC().Format(time.RFC3339),
 			UpdatedAt:                result.UpdatedAt.UTC().Format(time.RFC3339),
 			LatestNav:                result.LatestNav,
-			LatestBenchmarkNav:       result.LatestBenchmarkNav,
 			LatestPortfolioReturnPct: result.LatestPortfolioReturn,
-			LatestBenchmarkReturnPct: result.LatestBenchmarkReturn,
-			LatestExcessReturnPct:    result.LatestExcessReturnPct,
+			InceptionTradeDate:       summaryMetrics.InceptionTradeDate,
+			InceptionDays:            summaryMetrics.InceptionDays,
+			LatestDailyReturnPct:     summaryMetrics.LatestDailyReturnPct,
+			CurrentMonthReturnPct:    summaryMetrics.CurrentMonthReturnPct,
+			MaxDrawdownPct:           summaryMetrics.MaxDrawdownPct,
+			VolatilityPct:            summaryMetrics.VolatilityPct,
+			DailyWinRatePct:          summaryMetrics.DailyWinRatePct,
 			CurrentConstituentCount:  result.CurrentConstituentCount,
 			HasShortfall:             result.HasShortfall,
 			WarningText:              result.WarningText,

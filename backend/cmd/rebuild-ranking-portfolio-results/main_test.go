@@ -23,25 +23,6 @@ func setupRebuildTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func seedBenchmarkPrice(t *testing.T, db *gorm.DB, definition quadrant.RankingPortfolioDefinition, snapshotDate string, closePrice float64) {
-	t.Helper()
-	now := time.Now().UTC()
-	row := quadrant.RankingPortfolioBenchmarkPrice{
-		DefinitionID:    definition.ID,
-		SnapshotVersion: snapshotDate,
-		SnapshotDate:    snapshotDate,
-		BenchmarkCode:   definition.BenchmarkCode,
-		BenchmarkName:   definition.BenchmarkName,
-		ClosePrice:      closePrice,
-		PriceTradeDate:  snapshotDate,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if err := db.Create(&row).Error; err != nil {
-		t.Fatalf("seed benchmark price failed: %v", err)
-	}
-}
-
 func TestBuildPlanForDate_HKEXUsesHongKongSnapshots(t *testing.T) {
 	db := setupRebuildTestDB(t)
 	ctx := context.Background()
@@ -72,9 +53,8 @@ func TestBuildPlanForDate_HKEXUsesHongKongSnapshots(t *testing.T) {
 	if err := db.WithContext(ctx).Create(&snapshots).Error; err != nil {
 		t.Fatalf("seed snapshots failed: %v", err)
 	}
-	seedBenchmarkPrice(t, db, definition, snapshotDate, 20000)
 
-	plan, constituents, err := buildPlanForDate(ctx, db, definition, snapshotDate, nil, nil, nil)
+	plan, constituents, err := buildPlanForDate(ctx, db, definition, snapshotDate, nil, nil)
 	if err != nil {
 		t.Fatalf("buildPlanForDate failed: %v", err)
 	}

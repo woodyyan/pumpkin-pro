@@ -30,8 +30,6 @@ const (
 	defaultDefinitionID              = "wolong_ai_top4_ex_star_equal_v1"
 	defaultDefinitionCode            = "wolong-ai-top4-ex-star-equal"
 	defaultPortfolioName             = "模拟组合A"
-	defaultBenchmarkCode             = "SHCI"
-	defaultBenchmarkName             = "上证指数"
 	defaultMethodNote                = ""
 	defaultWarningText               = "当日有效成分股不足 4 只"
 	defaultMaxHoldings               = 4
@@ -78,7 +76,6 @@ type rebuildPlan struct {
 	SnapshotTime time.Time
 	Constituents []quadrant.RankingPortfolioConstituentItem
 	MarketPrices []marketPricePlan
-	Benchmark    benchmarkPricePlan
 	HasShortfall bool
 	WarningText  string
 	Progress     progressStatus
@@ -91,21 +88,12 @@ type progressStatus struct {
 	NeededPriceCount int
 	SnapshotPriceHit int
 	FetchedPriceHit  int
-	BenchmarkDate    string
-	BenchmarkClose   float64
 	MissingSymbols   []string
 }
 
 type marketPricePlan struct {
 	Code           string
 	Exchange       string
-	ClosePrice     float64
-	PriceTradeDate string
-}
-
-type benchmarkPricePlan struct {
-	BenchmarkCode  string
-	BenchmarkName  string
 	ClosePrice     float64
 	PriceTradeDate string
 }
@@ -129,11 +117,6 @@ type priceLookupResult struct {
 }
 
 type stockPriceResolver struct {
-	client *live.MarketClient
-	cache  map[string][]live.DailyBar
-}
-
-type benchmarkResolver struct {
 	client *live.MarketClient
 	cache  map[string][]live.DailyBar
 }
@@ -168,11 +151,10 @@ func main() {
 
 	marketClient := live.NewMarketClient()
 	stockResolver := &stockPriceResolver{client: marketClient, cache: map[string][]live.DailyBar{}}
-	benchResolver := &benchmarkResolver{client: marketClient, cache: map[string][]live.DailyBar{}}
 
 	log.Printf("开始生成重建计划，definition_id=%s，候选日期=%d，模式=%s", definition.ID, len(targetDates), runModeLabel(opts.Write))
 
-	plans, stats, err := buildPlans(ctx, db, definition, targetDates, stockResolver, benchResolver, opts)
+	plans, stats, err := buildPlans(ctx, db, definition, targetDates, stockResolver, opts)
 	if err != nil {
 		log.Fatalf("生成重建计划失败: %v", err)
 	}
@@ -323,7 +305,7 @@ func fallbackDefinitions(now time.Time) []quadrant.RankingPortfolioDefinition {
 		now = time.Now().UTC()
 	}
 	return []quadrant.RankingPortfolioDefinition{
-		buildFallbackDefinition(defaultDefinitionID, defaultDefinitionCode, defaultPortfolioName, "ASHARE", "A", defaultBenchmarkCode, defaultBenchmarkName, selectionRuleTop4, 0, []string{"STAR"}, now),
+		buildFallbackDefinition(defaultDefinitionID, defaultDefinitionCode, defaultPortfolioName, "ASHARE", "A", "SHCI", "上证指数", selectionRuleTop4, 0, []string{"STAR"}, now),
 		buildFallbackDefinition(definitionIDAShareB, definitionCodeAShareB, "模拟组合B", "ASHARE", "B", "SHCI", "上证指数", selectionRuleTop10ByStreak, 10, []string{"STAR"}, now),
 		buildFallbackDefinition(definitionIDHKA, definitionCodeHKA, "模拟组合A", "HKEX", "A", "HSI", "恒生指数", selectionRuleTop4, 0, nil, now),
 		buildFallbackDefinition(definitionIDHKB, definitionCodeHKB, "模拟组合B", "HKEX", "B", "HSI", "恒生指数", selectionRuleTop10ByStreak, 10, nil, now),
@@ -394,7 +376,7 @@ func loadTargetDates(ctx context.Context, db *gorm.DB, exchanges []string, opts 
 	return dates, nil
 }
 
-func buildPlans(ctx context.Context, db *gorm.DB, definition quadrant.RankingPortfolioDefinition, targetDates []string, stockResolver *stockPriceResolver, benchResolver *benchmarkResolver, opts cliOptions) ([]rebuildPlan, runStats, error) {
+func buildPlans(ctx context.Context, db *gorm.DB, definition quadrant.RankingPortfolioDefinition, targetDates []string, stockResolver *stockPriceResolver, opts cliOptions) ([]rebuildPlan, runStats, error) {
 	stats := runStats{Candidates: len(targetDates)}
 	plans := make([]rebuildPlan, 0, len(targetDates))
 
@@ -404,7 +386,7 @@ func buildPlans(ctx context.Context, db *gorm.DB, definition quadrant.RankingPor
 	}
 
 	for i, snapshotDate := range targetDates {
-		plan, currentConstituents, planErr := buildPlanForDate(ctx, db, definition, snapshotDate, previousConstituents, stockResolver, benchResolver)
+		plan, currentConstituents, planErr := buildPlanForDate(ctx, db, definition, snapshotDate, previousConstituents, stockResolver)
 		if planErr != nil {
 			stats.Failed++
 			log.Printf("[plan %d/%d] %s FAILED: %v", i+1, len(targetDates), snapshotDate, planErr)
@@ -413,7 +395,7 @@ func buildPlans(ctx context.Context, db *gorm.DB, definition quadrant.RankingPor
 		plans = append(plans, plan)
 		previousConstituents = cloneConstituents(currentConstituents)
 		log.Printf(
-			"[plan %d/%d] %s OK: source=%d selected=%d prices=%d/%d(snapshot=%d,fetched=%d) benchmark=%s warning=%s",
+			"[plan %d/%d] %s OK: source=%d selected=%d prices=%d/%d(snapshot=%d,fetched=%d) warning=%s",
 			i+1,
 			len(targetDates),
 			snapshotDate,
@@ -423,7 +405,6 @@ func buildPlans(ctx context.Context, db *gorm.DB, definition quadrant.RankingPor
 			plan.Progress.NeededPriceCount,
 			plan.Progress.SnapshotPriceHit,
 			plan.Progress.FetchedPriceHit,
-			benchmarkLabel(plan.Progress.BenchmarkClose, plan.Progress.BenchmarkDate),
 			warningLabel(plan.WarningText),
 		)
 		if opts.Verbose && len(plan.Progress.MissingSymbols) > 0 {
@@ -434,7 +415,7 @@ func buildPlans(ctx context.Context, db *gorm.DB, definition quadrant.RankingPor
 	return plans, stats, nil
 }
 
-func buildPlanForDate(ctx context.Context, db *gorm.DB, definition quadrant.RankingPortfolioDefinition, snapshotDate string, previousConstituents []quadrant.RankingPortfolioConstituentItem, stockResolver *stockPriceResolver, benchResolver *benchmarkResolver) (rebuildPlan, []quadrant.RankingPortfolioConstituentItem, error) {
+func buildPlanForDate(ctx context.Context, db *gorm.DB, definition quadrant.RankingPortfolioDefinition, snapshotDate string, previousConstituents []quadrant.RankingPortfolioConstituentItem, stockResolver *stockPriceResolver) (rebuildPlan, []quadrant.RankingPortfolioConstituentItem, error) {
 	repo := quadrant.NewRepository(db)
 	sourceRows, err := loadSourceSnapshotRows(ctx, db, snapshotDate, resolveDefinitionExchanges(definition.Exchange))
 	if err != nil {
@@ -462,11 +443,6 @@ func buildPlanForDate(ctx context.Context, db *gorm.DB, definition quadrant.Rank
 		return rebuildPlan{}, constituents, fmt.Errorf("%s 缺少股票收盘价: %s", snapshotDate, strings.Join(missingSymbols, ", "))
 	}
 
-	benchmark, err := loadBenchmarkPlan(ctx, db, definition.ID, snapshotDate, benchResolver, definition.BenchmarkCode, definition.BenchmarkName)
-	if err != nil {
-		return rebuildPlan{}, constituents, err
-	}
-
 	snapshotTime, err := rebuildSnapshotTime(snapshotDate)
 	if err != nil {
 		return rebuildPlan{}, constituents, err
@@ -477,7 +453,6 @@ func buildPlanForDate(ctx context.Context, db *gorm.DB, definition quadrant.Rank
 		SnapshotTime: snapshotTime,
 		Constituents: constituents,
 		MarketPrices: marketPrices,
-		Benchmark:    benchmark,
 		HasShortfall: hasShortfall,
 		WarningText:  warningText,
 		Progress: progressStatus{
@@ -487,8 +462,6 @@ func buildPlanForDate(ctx context.Context, db *gorm.DB, definition quadrant.Rank
 			NeededPriceCount: len(marketPrices),
 			SnapshotPriceHit: snapshotHits,
 			FetchedPriceHit:  fetchedHits,
-			BenchmarkDate:    benchmark.PriceTradeDate,
-			BenchmarkClose:   benchmark.ClosePrice,
 			MissingSymbols:   missingSymbols,
 		},
 	}, constituents, nil
@@ -762,64 +735,6 @@ func (r *stockPriceResolver) cachedBars(ctx context.Context, symbol string, look
 	return bars, nil
 }
 
-func loadBenchmarkPlan(ctx context.Context, db *gorm.DB, definitionID string, snapshotDate string, resolver *benchmarkResolver, benchmarkCode string, benchmarkName string) (benchmarkPricePlan, error) {
-	var existing quadrant.RankingPortfolioBenchmarkPrice
-	err := db.WithContext(ctx).
-		Where("definition_id = ? AND snapshot_date = ?", definitionID, snapshotDate).
-		Order("id DESC").
-		First(&existing).Error
-	if err == nil && existing.ClosePrice > 0 && tradeDateUsableForSnapshot(existing.PriceTradeDate, snapshotDate) {
-		return benchmarkPricePlan{
-			BenchmarkCode:  existing.BenchmarkCode,
-			BenchmarkName:  existing.BenchmarkName,
-			ClosePrice:     existing.ClosePrice,
-			PriceTradeDate: existing.PriceTradeDate,
-		}, nil
-	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return benchmarkPricePlan{}, fmt.Errorf("查询 benchmark 价格失败: %w", err)
-	}
-
-	resolved, err := resolver.Resolve(ctx, benchmarkCode, snapshotDate)
-	if err != nil {
-		return benchmarkPricePlan{}, fmt.Errorf("%s benchmark 价格获取失败: %w", snapshotDate, err)
-	}
-	if resolved.ClosePrice <= 0 || resolved.TradeDate == "" {
-		return benchmarkPricePlan{}, fmt.Errorf("%s 缺少 benchmark 收盘价", snapshotDate)
-	}
-	return benchmarkPricePlan{
-		BenchmarkCode:  benchmarkCode,
-		BenchmarkName:  benchmarkName,
-		ClosePrice:     resolved.ClosePrice,
-		PriceTradeDate: resolved.TradeDate,
-	}, nil
-}
-
-func (r *benchmarkResolver) Resolve(ctx context.Context, benchmarkCode string, snapshotDate string) (priceLookupResult, error) {
-	if r == nil || r.client == nil {
-		return priceLookupResult{}, nil
-	}
-	lookbackDays := calcLookbackDays(snapshotDate)
-	bars, err := r.cachedBars(ctx, benchmarkCode, lookbackDays)
-	if err != nil {
-		return priceLookupResult{}, err
-	}
-	return lookupCloseOnOrBefore(bars, snapshotDate), nil
-}
-
-func (r *benchmarkResolver) cachedBars(ctx context.Context, benchmarkCode string, lookbackDays int) ([]live.DailyBar, error) {
-	cacheKey := fmt.Sprintf("%s|%d", benchmarkCode, lookbackDays)
-	if bars, ok := r.cache[cacheKey]; ok {
-		return bars, nil
-	}
-	bars, err := r.client.FetchBenchmarkDailyBars(ctx, benchmarkCode, lookbackDays)
-	if err != nil {
-		return nil, err
-	}
-	r.cache[cacheKey] = bars
-	return bars, nil
-}
-
 func calcLookbackDays(snapshotDate string) int {
 	target, err := time.ParseInLocation("2006-01-02", snapshotDate, shanghaiLocation)
 	if err != nil {
@@ -958,15 +873,13 @@ func applyPlans(ctx context.Context, db *gorm.DB, definition quadrant.RankingPor
 				return fmt.Errorf("%s 写入失败: %w", plan.Date, err)
 			}
 			log.Printf(
-				"[%s %d/%d] %s %s: portfolio=%0.2f%% benchmark=%0.2f%% excess=%0.2f%% constituents=%d series=%d",
+				"[%s %d/%d] %s %s: portfolio=%0.2f%% constituents=%d series=%d",
 				stageLabel(opts.Write),
 				i+1,
 				len(plans),
 				plan.Date,
 				strings.ToUpper(resultModeLabel(opts.Write)),
 				result.LatestPortfolioReturn,
-				result.LatestBenchmarkReturn,
-				result.LatestExcessReturnPct,
 				result.CurrentConstituentCount,
 				decodeSeriesLength(result.SeriesJSON),
 			)
@@ -1019,9 +932,6 @@ func applySinglePlanTx(ctx context.Context, tx *gorm.DB, definition quadrant.Ran
 	if err := replaceMarketPricesTx(ctx, tx, definition.ID, snapshotVersion, plan.Date, plan.MarketPrices, now); err != nil {
 		return nil, err
 	}
-	if err := replaceBenchmarkPriceTx(ctx, tx, definition.ID, snapshotVersion, plan.Date, plan.Benchmark, now); err != nil {
-		return nil, err
-	}
 
 	result, err := buildResultForDateTx(ctx, tx, definition, plan.Date, now)
 	if err != nil {
@@ -1031,8 +941,8 @@ func applySinglePlanTx(ctx context.Context, tx *gorm.DB, definition quadrant.Ran
 		Columns: []clause.Column{{Name: "definition_id"}, {Name: "snapshot_version"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"batch_id", "snapshot_date", "ranking_time", "holdings_effective_time", "nav_as_of_time",
-			"benchmark_code", "benchmark_name", "latest_nav", "latest_benchmark_nav",
-			"latest_portfolio_return", "latest_benchmark_return", "latest_excess_return_pct",
+			"benchmark_code", "benchmark_name", "latest_nav",
+			"latest_portfolio_return",
 			"current_constituent_count", "has_shortfall", "warning_text", "method_note",
 			"series_json", "constituents_json", "latest_rebalance_json", "updated_at",
 		}),
@@ -1125,30 +1035,6 @@ func replaceMarketPricesTx(ctx context.Context, tx *gorm.DB, definitionID string
 	return nil
 }
 
-func replaceBenchmarkPriceTx(ctx context.Context, tx *gorm.DB, definitionID string, snapshotVersion string, snapshotDate string, benchmark benchmarkPricePlan, now time.Time) error {
-	if err := tx.WithContext(ctx).
-		Where("definition_id = ? AND snapshot_version = ?", definitionID, snapshotVersion).
-		Delete(&quadrant.RankingPortfolioBenchmarkPrice{}).Error; err != nil {
-		return fmt.Errorf("delete old benchmark prices: %w", err)
-	}
-
-	row := quadrant.RankingPortfolioBenchmarkPrice{
-		DefinitionID:    definitionID,
-		SnapshotVersion: snapshotVersion,
-		SnapshotDate:    snapshotDate,
-		BenchmarkCode:   benchmark.BenchmarkCode,
-		BenchmarkName:   benchmark.BenchmarkName,
-		ClosePrice:      benchmark.ClosePrice,
-		PriceTradeDate:  benchmark.PriceTradeDate,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
-		return fmt.Errorf("insert benchmark price: %w", err)
-	}
-	return nil
-}
-
 func buildResultForDateTx(ctx context.Context, tx *gorm.DB, definition quadrant.RankingPortfolioDefinition, snapshotDate string, now time.Time) (*quadrant.RankingPortfolioResult, error) {
 	var snapshots []quadrant.RankingPortfolioSnapshot
 	if err := tx.WithContext(ctx).
@@ -1185,7 +1071,7 @@ func buildResultForDateTx(ctx context.Context, tx *gorm.DB, definition quadrant.
 		})
 	}
 
-	priceByDate := map[string]map[string]float64{}
+	priceByVersion := map[string]map[string]float64{}
 	var priceRows []quadrant.RankingPortfolioMarketPrice
 	if err := tx.WithContext(ctx).
 		Where("definition_id = ? AND snapshot_date <= ?", definition.ID, snapshotDate).
@@ -1194,61 +1080,52 @@ func buildResultForDateTx(ctx context.Context, tx *gorm.DB, definition quadrant.
 		return nil, fmt.Errorf("list portfolio market prices: %w", err)
 	}
 	for _, row := range priceRows {
-		if _, ok := priceByDate[row.SnapshotDate]; !ok {
-			priceByDate[row.SnapshotDate] = map[string]float64{}
+		if _, ok := priceByVersion[row.SnapshotVersion]; !ok {
+			priceByVersion[row.SnapshotVersion] = map[string]float64{}
 		}
-		priceByDate[row.SnapshotDate][snapshotPriceKey(row.Code, row.Exchange)] = row.ClosePrice
-	}
-
-	benchmarkByDate := map[string]float64{}
-	var benchmarkRows []quadrant.RankingPortfolioBenchmarkPrice
-	if err := tx.WithContext(ctx).
-		Where("definition_id = ? AND snapshot_date <= ?", definition.ID, snapshotDate).
-		Order("snapshot_date ASC, id ASC").
-		Find(&benchmarkRows).Error; err != nil {
-		return nil, fmt.Errorf("list portfolio benchmark prices: %w", err)
-	}
-	for _, row := range benchmarkRows {
-		benchmarkByDate[row.SnapshotDate] = row.ClosePrice
+		priceByVersion[row.SnapshotVersion][snapshotPriceKey(row.Code, row.Exchange)] = row.ClosePrice
 	}
 
 	series := make([]quadrant.RankingPortfolioSeriesPoint, 0, len(snapshots))
 	firstSnapshot := snapshots[0]
 	series = append(series, quadrant.RankingPortfolioSeriesPoint{
 		Date:                    firstSnapshot.SnapshotDate,
+		SourceTradeDate:         firstSnapshot.SourceTradeDate,
 		Nav:                     1,
-		BenchmarkNav:            1,
 		PortfolioReturnPct:      0,
-		BenchmarkReturnPct:      0,
-		ExcessReturnPct:         0,
 		DailyPortfolioReturnPct: 0,
-		DailyBenchmarkReturnPct: 0,
+		DrawdownPct:             0,
 		HoldingCount:            0,
 	})
 
 	activeHoldings := []quadrant.RankingPortfolioConstituentItem{}
+	peakNav := 1.0
 	for i := 1; i < len(snapshots); i++ {
 		prevSnapshot := snapshots[i-1]
 		currentSnapshot := snapshots[i]
 		nextHoldings := constituentsByVersion[prevSnapshot.SnapshotVersion]
-		portfolioReturn := calculatePeriodReturn(nextHoldings, priceByDate[prevSnapshot.SnapshotDate], priceByDate[currentSnapshot.SnapshotDate])
+		portfolioReturn := calculatePeriodReturn(nextHoldings, priceByVersion[prevSnapshot.SnapshotVersion], priceByVersion[currentSnapshot.SnapshotVersion])
 		tradeRatio := calculateTradeRatio(activeHoldings, nextHoldings)
 		costRatio := definition.TradeCostRate * tradeRatio
+		netDailyReturn := (1-costRatio)*(1+portfolioReturn) - 1
 
 		prevPoint := series[len(series)-1]
-		nav := prevPoint.Nav * (1 - costRatio) * (1 + portfolioReturn)
-		benchmarkReturn := calculateBenchmarkReturn(benchmarkByDate[prevSnapshot.SnapshotDate], benchmarkByDate[currentSnapshot.SnapshotDate])
-		benchmarkNav := prevPoint.BenchmarkNav * (1 + benchmarkReturn)
+		nav := prevPoint.Nav * (1 + netDailyReturn)
+		if nav > peakNav {
+			peakNav = nav
+		}
+		drawdownPct := 0.0
+		if peakNav > 0 {
+			drawdownPct = roundPct((nav/peakNav - 1) * 100)
+		}
 
 		series = append(series, quadrant.RankingPortfolioSeriesPoint{
 			Date:                    currentSnapshot.SnapshotDate,
+			SourceTradeDate:         currentSnapshot.SourceTradeDate,
 			Nav:                     roundFloat(nav),
-			BenchmarkNav:            roundFloat(benchmarkNav),
 			PortfolioReturnPct:      roundPct((nav - 1) * 100),
-			BenchmarkReturnPct:      roundPct((benchmarkNav - 1) * 100),
-			ExcessReturnPct:         roundPct((nav - benchmarkNav) * 100),
-			DailyPortfolioReturnPct: roundPct(portfolioReturn * 100),
-			DailyBenchmarkReturnPct: roundPct(benchmarkReturn * 100),
+			DailyPortfolioReturnPct: roundPct(netDailyReturn * 100),
+			DrawdownPct:             drawdownPct,
 			HoldingCount:            len(nextHoldings),
 		})
 		activeHoldings = cloneConstituents(nextHoldings)
@@ -1281,10 +1158,7 @@ func buildResultForDateTx(ctx context.Context, tx *gorm.DB, definition quadrant.
 		BenchmarkCode:           latestSnapshot.BenchmarkCode,
 		BenchmarkName:           latestSnapshot.BenchmarkName,
 		LatestNav:               latestPoint.Nav,
-		LatestBenchmarkNav:      latestPoint.BenchmarkNav,
 		LatestPortfolioReturn:   latestPoint.PortfolioReturnPct,
-		LatestBenchmarkReturn:   latestPoint.BenchmarkReturnPct,
-		LatestExcessReturnPct:   latestPoint.ExcessReturnPct,
 		CurrentConstituentCount: len(latestConstituents),
 		HasShortfall:            latestSnapshot.HasShortfall,
 		WarningText:             latestSnapshot.WarningText,
@@ -1419,13 +1293,6 @@ func calculatePeriodReturn(holdings []quadrant.RankingPortfolioConstituentItem, 
 	return weightedSum / weightSum
 }
 
-func calculateBenchmarkReturn(prevClose float64, currentClose float64) float64 {
-	if prevClose <= 0 || currentClose <= 0 {
-		return 0
-	}
-	return currentClose/prevClose - 1
-}
-
 func calculateTradeRatio(previous []quadrant.RankingPortfolioConstituentItem, current []quadrant.RankingPortfolioConstituentItem) float64 {
 	weights := map[string]float64{}
 	for _, item := range previous {
@@ -1486,13 +1353,6 @@ func decodeSeriesLength(raw string) int {
 	var series []quadrant.RankingPortfolioSeriesPoint
 	_ = json.Unmarshal([]byte(raw), &series)
 	return len(series)
-}
-
-func benchmarkLabel(closePrice float64, tradeDate string) string {
-	if closePrice <= 0 || strings.TrimSpace(tradeDate) == "" {
-		return "missing"
-	}
-	return fmt.Sprintf("%s@%.2f", tradeDate, closePrice)
 }
 
 func warningLabel(warningText string) string {

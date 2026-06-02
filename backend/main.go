@@ -87,30 +87,6 @@ func newQuadrantPriceResolver(liveRepo *live.Repository) quadrant.PriceResolver 
 	}
 }
 
-func newQuadrantBenchmarkPriceResolver(marketClient *live.MarketClient) quadrant.BenchmarkPriceResolver {
-	return func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
-		if marketClient == nil || strings.TrimSpace(tradeDate) == "" {
-			return 0, ""
-		}
-		bars, err := marketClient.FetchBenchmarkDailyBars(ctx, benchmark, 10)
-		if err != nil || len(bars) == 0 {
-			return 0, ""
-		}
-		candidateDates := quadrantSnapshotTradeDates(tradeDate, "SSE")
-		for _, candidateDate := range candidateDates {
-			for i := len(bars) - 1; i >= 0; i-- {
-				if strings.TrimSpace(bars[i].Date) != candidateDate {
-					continue
-				}
-				if bars[i].Close > 0 {
-					return bars[i].Close, candidateDate
-				}
-			}
-		}
-		return 0, ""
-	}
-}
-
 func newQuadrantTradeDateResolver(liveRepo *live.Repository, marketClient *live.MarketClient) quadrant.TradeDateResolver {
 	return func(ctx context.Context, exchange string, computedAt time.Time) string {
 		tradeDate := strings.TrimSpace(computedAt.In(time.FixedZone("CST", 8*60*60)).Format("2006-01-02"))
@@ -3683,7 +3659,6 @@ func main() {
 	quadrantRepo := quadrant.NewRepository(storeInstance.DB)
 	quadrantService := quadrant.NewService(quadrantRepo)
 	quadrantService.SetPriceResolver(newQuadrantPriceResolver(liveRepo))
-	quadrantService.SetBenchmarkPriceResolver(newQuadrantBenchmarkPriceResolver(liveMarketClient))
 	quadrantService.SetTradeDateResolver(newQuadrantTradeDateResolver(liveRepo, liveMarketClient))
 	quadrantWorker := quadrant.NewWorker(quadrantService, quadrant.WorkerConfig{
 		QuantServiceURL: cfg.QuantServiceURL,

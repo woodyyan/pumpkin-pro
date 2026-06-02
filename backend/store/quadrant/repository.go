@@ -659,3 +659,26 @@ func (r *Repository) GetLatestRankingSnapshotClosePriceOnOrBefore(ctx context.Co
 	}
 	return snap.ClosePrice, strings.TrimSpace(snap.SnapshotDate), nil
 }
+
+func (r *Repository) GetLatestRankingSnapshotClosePriceByTradeDateOnOrBefore(ctx context.Context, code string, exchange string, targetTradeDate string) (float64, string, error) {
+	targetTradeDate = strings.TrimSpace(targetTradeDate)
+	if code == "" || targetTradeDate == "" {
+		return 0, "", nil
+	}
+	var snap RankingSnapshot
+	query := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
+		Select("price_trade_date, close_price").
+		Where("code = ? AND close_price > ? AND price_trade_date != '' AND price_trade_date <= ?", code, 0, targetTradeDate).
+		Order("price_trade_date DESC, snapshot_date DESC, id DESC")
+	normalizedExchange := strings.ToUpper(strings.TrimSpace(exchange))
+	if normalizedExchange != "" {
+		query = query.Where("exchange = ?", normalizedExchange)
+	}
+	if err := query.First(&snap).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, "", nil
+		}
+		return 0, "", err
+	}
+	return snap.ClosePrice, strings.TrimSpace(snap.PriceTradeDate), nil
+}

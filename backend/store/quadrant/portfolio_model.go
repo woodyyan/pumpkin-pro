@@ -19,7 +19,7 @@ const (
 	rankingPortfolioRebalanceRuleClose         = "t_close_rebalance_at_close"
 	rankingPortfolioCalculationMethodClose     = "close_price_rebalance"
 	rankingPortfolioPriceBasisClose            = "close"
-	rankingPortfolioMethodNote                 = "收盘后生成排行榜，并按该收盘日收盘价模拟调仓；累计收益、基准收益与超额收益均按收盘价口径计算。"
+	rankingPortfolioMethodNote                 = "收盘后生成排行榜，并按该收盘日收盘价模拟调仓；收益曲线、区间收益与个股收益均按收盘价口径计算。"
 )
 
 // RankingPortfolioDefinition stores the portfolio rule definition separately
@@ -116,23 +116,6 @@ func (RankingPortfolioMarketPrice) TableName() string {
 	return "quadrant_ranking_portfolio_market_prices"
 }
 
-type RankingPortfolioBenchmarkPrice struct {
-	ID              int64     `gorm:"primaryKey;autoIncrement"`
-	DefinitionID    string    `gorm:"size:64;not null;uniqueIndex:uidx_qrpbp_def_ver,priority:1;index:idx_qrpbp_def_date,priority:1"`
-	SnapshotVersion string    `gorm:"size:64;not null;uniqueIndex:uidx_qrpbp_def_ver,priority:2"`
-	SnapshotDate    string    `gorm:"size:10;not null;index:idx_qrpbp_def_date,priority:2"`
-	BenchmarkCode   string    `gorm:"size:16;not null;default:'SHCI'"`
-	BenchmarkName   string    `gorm:"size:64;not null;default:'上证指数'"`
-	ClosePrice      float64   `gorm:"not null;default:0"`
-	PriceTradeDate  string    `gorm:"size:10;not null;default:''"`
-	CreatedAt       time.Time `gorm:"not null"`
-	UpdatedAt       time.Time `gorm:"not null"`
-}
-
-func (RankingPortfolioBenchmarkPrice) TableName() string {
-	return "quadrant_ranking_portfolio_benchmark_prices"
-}
-
 // RankingPortfolioResult stores one fully materialized, batch-consistent view
 // for frontend queries.
 type RankingPortfolioResult struct {
@@ -148,10 +131,7 @@ type RankingPortfolioResult struct {
 	BenchmarkCode           string    `gorm:"size:16;not null;default:'SHCI'"`
 	BenchmarkName           string    `gorm:"size:64;not null;default:'上证指数'"`
 	LatestNav               float64   `gorm:"not null;default:1"`
-	LatestBenchmarkNav      float64   `gorm:"not null;default:1"`
 	LatestPortfolioReturn   float64   `gorm:"not null;default:0"`
-	LatestBenchmarkReturn   float64   `gorm:"not null;default:0"`
-	LatestExcessReturnPct   float64   `gorm:"not null;default:0"`
 	CurrentConstituentCount int       `gorm:"not null;default:0"`
 	HasShortfall            bool      `gorm:"not null;default:false"`
 	WarningText             string    `gorm:"size:128;not null;default:''"`
@@ -164,24 +144,24 @@ type RankingPortfolioResult struct {
 }
 
 type RankingPortfolioJobStatus struct {
-	ID                    int64     `gorm:"primaryKey;autoIncrement"`
-	TaskLogID             string    `gorm:"size:64;not null;uniqueIndex:idx_qrpjs_task,priority:1"`
-	DefinitionID          string    `gorm:"size:64;not null;uniqueIndex:idx_qrpjs_task,priority:2;index:idx_qrpjs_def_snapshot,priority:1"`
-	DefinitionCode        string    `gorm:"size:64;not null;default:''"`
-	DefinitionName        string    `gorm:"size:128;not null;default:''"`
-	Exchange              string    `gorm:"size:16;not null;default:'';index:idx_qrpjs_exchange_snapshot,priority:1"`
-	SnapshotDate          string    `gorm:"size:10;not null;default:'';index:idx_qrpjs_def_snapshot,priority:2;index:idx_qrpjs_exchange_snapshot,priority:2"`
-	SourceTradeDate       string    `gorm:"size:10;not null;default:''"`
-	Status                string    `gorm:"size:24;not null;default:'pending';index:idx_qrpjs_status_created,priority:1"`
-	FailureStage          string    `gorm:"size:64;not null;default:''"`
-	FailureReason         string    `gorm:"type:text;not null;default:''"`
-	DetailsJSON           string    `gorm:"type:text;not null;default:'{}'"`
-	AutoRepairTriggered   bool      `gorm:"not null;default:false"`
-	AutoRepairStatus      string    `gorm:"size:24;not null;default:''"`
-	AutoRepairMessage     string    `gorm:"type:text;not null;default:''"`
-	LastAutoRepairAt      *time.Time
-	CreatedAt             time.Time `gorm:"not null;index:idx_qrpjs_status_created,priority:2"`
-	UpdatedAt             time.Time `gorm:"not null"`
+	ID                  int64  `gorm:"primaryKey;autoIncrement"`
+	TaskLogID           string `gorm:"size:64;not null;uniqueIndex:idx_qrpjs_task,priority:1"`
+	DefinitionID        string `gorm:"size:64;not null;uniqueIndex:idx_qrpjs_task,priority:2;index:idx_qrpjs_def_snapshot,priority:1"`
+	DefinitionCode      string `gorm:"size:64;not null;default:''"`
+	DefinitionName      string `gorm:"size:128;not null;default:''"`
+	Exchange            string `gorm:"size:16;not null;default:'';index:idx_qrpjs_exchange_snapshot,priority:1"`
+	SnapshotDate        string `gorm:"size:10;not null;default:'';index:idx_qrpjs_def_snapshot,priority:2;index:idx_qrpjs_exchange_snapshot,priority:2"`
+	SourceTradeDate     string `gorm:"size:10;not null;default:''"`
+	Status              string `gorm:"size:24;not null;default:'pending';index:idx_qrpjs_status_created,priority:1"`
+	FailureStage        string `gorm:"size:64;not null;default:''"`
+	FailureReason       string `gorm:"type:text;not null;default:''"`
+	DetailsJSON         string `gorm:"type:text;not null;default:'{}'"`
+	AutoRepairTriggered bool   `gorm:"not null;default:false"`
+	AutoRepairStatus    string `gorm:"size:24;not null;default:''"`
+	AutoRepairMessage   string `gorm:"type:text;not null;default:''"`
+	LastAutoRepairAt    *time.Time
+	CreatedAt           time.Time `gorm:"not null;index:idx_qrpjs_status_created,priority:2"`
+	UpdatedAt           time.Time `gorm:"not null"`
 }
 
 func (RankingPortfolioJobStatus) TableName() string {
@@ -189,20 +169,20 @@ func (RankingPortfolioJobStatus) TableName() string {
 }
 
 type RankingPortfolioAdminStatusItem struct {
-	DefinitionID         string `json:"definition_id"`
-	DefinitionCode       string `json:"definition_code"`
-	DefinitionName       string `json:"definition_name"`
-	Exchange             string `json:"exchange"`
-	LatestRankingDate    string `json:"latest_ranking_date,omitempty"`
-	LatestPortfolioDate  string `json:"latest_portfolio_date,omitempty"`
+	DefinitionID          string `json:"definition_id"`
+	DefinitionCode        string `json:"definition_code"`
+	DefinitionName        string `json:"definition_name"`
+	Exchange              string `json:"exchange"`
+	LatestRankingDate     string `json:"latest_ranking_date,omitempty"`
+	LatestPortfolioDate   string `json:"latest_portfolio_date,omitempty"`
 	LatestSourceTradeDate string `json:"latest_source_trade_date,omitempty"`
-	LagDays              int    `json:"lag_days"`
-	Status               string `json:"status"`
-	FailureStage         string `json:"failure_stage,omitempty"`
-	FailureReason        string `json:"failure_reason,omitempty"`
-	AutoRepairStatus     string `json:"auto_repair_status,omitempty"`
-	AutoRepairMessage    string `json:"auto_repair_message,omitempty"`
-	UpdatedAt            string `json:"updated_at,omitempty"`
+	LagDays               int    `json:"lag_days"`
+	Status                string `json:"status"`
+	FailureStage          string `json:"failure_stage,omitempty"`
+	FailureReason         string `json:"failure_reason,omitempty"`
+	AutoRepairStatus      string `json:"auto_repair_status,omitempty"`
+	AutoRepairMessage     string `json:"auto_repair_message,omitempty"`
+	UpdatedAt             string `json:"updated_at,omitempty"`
 }
 
 type RankingPortfolioAdminStatusResponse struct {
@@ -217,27 +197,29 @@ type RankingPortfolioSeriesPoint struct {
 	Date                    string  `json:"date"`
 	SourceTradeDate         string  `json:"source_trade_date,omitempty"`
 	Nav                     float64 `json:"nav"`
-	BenchmarkNav            float64 `json:"benchmark_nav"`
 	PortfolioReturnPct      float64 `json:"portfolio_return_pct"`
-	BenchmarkReturnPct      float64 `json:"benchmark_return_pct"`
-	ExcessReturnPct         float64 `json:"excess_return_pct"`
 	DailyPortfolioReturnPct float64 `json:"daily_portfolio_return_pct"`
-	DailyBenchmarkReturnPct float64 `json:"daily_benchmark_return_pct"`
+	DrawdownPct             float64 `json:"drawdown_pct"`
 	HoldingCount            int     `json:"holding_count"`
 }
 
 type RankingPortfolioConstituentItem struct {
-	Rank            int     `json:"rank"`
-	SourceRank      int     `json:"source_rank,omitempty"`
-	Code            string  `json:"code"`
-	Name            string  `json:"name"`
-	Exchange        string  `json:"exchange"`
-	Board           string  `json:"board,omitempty"`
-	ConsecutiveDays int     `json:"consecutive_days,omitempty"`
-	Weight          float64 `json:"weight"`
-	RankingScore    float64 `json:"ranking_score,omitempty"`
-	Opportunity     float64 `json:"opportunity,omitempty"`
-	Risk            float64 `json:"risk,omitempty"`
+	Rank             int      `json:"rank"`
+	SourceRank       int      `json:"source_rank,omitempty"`
+	Code             string   `json:"code"`
+	Name             string   `json:"name"`
+	Exchange         string   `json:"exchange"`
+	Board            string   `json:"board,omitempty"`
+	ConsecutiveDays  int      `json:"consecutive_days,omitempty"`
+	Weight           float64  `json:"weight"`
+	RankingScore     float64  `json:"ranking_score,omitempty"`
+	Opportunity      float64  `json:"opportunity,omitempty"`
+	Risk             float64  `json:"risk,omitempty"`
+	EntryTradeDate   string   `json:"entry_trade_date,omitempty" gorm:"-"`
+	EntryPrice       float64  `json:"entry_price,omitempty" gorm:"-"`
+	LatestTradeDate  string   `json:"latest_trade_date,omitempty" gorm:"-"`
+	LatestClosePrice float64  `json:"latest_close_price,omitempty" gorm:"-"`
+	LatestReturnPct  *float64 `json:"latest_return_pct,omitempty" gorm:"-"`
 }
 
 type RankingPortfolioRebalanceItem struct {
@@ -264,40 +246,42 @@ type RankingPortfolioLatestRebalance struct {
 }
 
 type RankingPortfolioMeta struct {
-	DefinitionID                    string  `json:"definition_id"`
-	DefinitionCode                  string  `json:"definition_code"`
-	Name                            string  `json:"name"`
-	Exchange                        string  `json:"exchange"`
-	PortfolioVariant                string  `json:"portfolio_variant"`
-	SelectionRule                   string  `json:"selection_rule"`
-	SelectionWindow                 int     `json:"selection_window,omitempty"`
-	RebalanceRule                   string  `json:"rebalance_rule"`
-	CalculationMethod               string  `json:"calculation_method"`
-	PriceBasis                      string  `json:"price_basis"`
-	BatchID                         string  `json:"batch_id"`
-	SnapshotVersion                 string  `json:"snapshot_version"`
-	SnapshotDate                    string  `json:"snapshot_date"`
-	SourceTradeDate                 string  `json:"source_trade_date,omitempty"`
-	BenchmarkCode                   string  `json:"benchmark_code"`
-	BenchmarkName                   string  `json:"benchmark_name"`
-	RankingTime                     string  `json:"ranking_time"`
-	HoldingsEffectiveTime           string  `json:"holdings_effective_time"`
-	NavAsOfTime                     string  `json:"nav_as_of_time"`
-	UpdatedAt                       string  `json:"updated_at"`
-	LatestNav                       float64 `json:"latest_nav"`
-	LatestBenchmarkNav              float64 `json:"latest_benchmark_nav"`
-	LatestPortfolioReturnPct        float64 `json:"latest_portfolio_return_pct"`
-	LatestBenchmarkReturnPct        float64 `json:"latest_benchmark_return_pct"`
-	LatestExcessReturnPct           float64 `json:"latest_excess_return_pct"`
-	CurrentConstituentCount         int     `json:"current_constituent_count"`
-	CurrentConstituentSourceDate    string  `json:"current_constituent_source_date,omitempty"`
-	CurrentConstituentEffectiveTime string  `json:"current_constituent_effective_time,omitempty"`
-	CurrentConstituentComputedAt    string  `json:"current_constituent_computed_at,omitempty"`
-	IsSameBatchAsPerformance        bool    `json:"is_same_batch_as_performance"`
-	BatchMismatchReason             string  `json:"batch_mismatch_reason,omitempty"`
-	HasShortfall                    bool    `json:"has_shortfall"`
-	WarningText                     string  `json:"warning_text,omitempty"`
-	MethodNote                      string  `json:"method_note"`
+	DefinitionID                    string   `json:"definition_id"`
+	DefinitionCode                  string   `json:"definition_code"`
+	Name                            string   `json:"name"`
+	Exchange                        string   `json:"exchange"`
+	PortfolioVariant                string   `json:"portfolio_variant"`
+	SelectionRule                   string   `json:"selection_rule"`
+	SelectionWindow                 int      `json:"selection_window,omitempty"`
+	RebalanceRule                   string   `json:"rebalance_rule"`
+	CalculationMethod               string   `json:"calculation_method"`
+	PriceBasis                      string   `json:"price_basis"`
+	BatchID                         string   `json:"batch_id"`
+	SnapshotVersion                 string   `json:"snapshot_version"`
+	SnapshotDate                    string   `json:"snapshot_date"`
+	SourceTradeDate                 string   `json:"source_trade_date,omitempty"`
+	RankingTime                     string   `json:"ranking_time"`
+	HoldingsEffectiveTime           string   `json:"holdings_effective_time"`
+	NavAsOfTime                     string   `json:"nav_as_of_time"`
+	UpdatedAt                       string   `json:"updated_at"`
+	LatestNav                       float64  `json:"latest_nav"`
+	LatestPortfolioReturnPct        float64  `json:"latest_portfolio_return_pct"`
+	InceptionTradeDate              string   `json:"inception_trade_date,omitempty"`
+	InceptionDays                   int      `json:"inception_days,omitempty"`
+	LatestDailyReturnPct            *float64 `json:"latest_daily_return_pct,omitempty"`
+	CurrentMonthReturnPct           *float64 `json:"current_month_return_pct,omitempty"`
+	MaxDrawdownPct                  *float64 `json:"max_drawdown_pct,omitempty"`
+	VolatilityPct                   *float64 `json:"volatility_pct,omitempty"`
+	DailyWinRatePct                 *float64 `json:"daily_win_rate_pct,omitempty"`
+	CurrentConstituentCount         int      `json:"current_constituent_count"`
+	CurrentConstituentSourceDate    string   `json:"current_constituent_source_date,omitempty"`
+	CurrentConstituentEffectiveTime string   `json:"current_constituent_effective_time,omitempty"`
+	CurrentConstituentComputedAt    string   `json:"current_constituent_computed_at,omitempty"`
+	IsSameBatchAsPerformance        bool     `json:"is_same_batch_as_performance"`
+	BatchMismatchReason             string   `json:"batch_mismatch_reason,omitempty"`
+	HasShortfall                    bool     `json:"has_shortfall"`
+	WarningText                     string   `json:"warning_text,omitempty"`
+	MethodNote                      string   `json:"method_note"`
 }
 
 type RankingPortfolioResponse struct {

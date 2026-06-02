@@ -107,15 +107,6 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	svc := NewService(repo)
 	ctx := context.Background()
 
-	benchmarkPrices := map[string]float64{
-		"2026-04-14": 3000,
-		"2026-05-06": 3000,
-		"2026-05-07": 3030,
-	}
-	svc.SetBenchmarkPriceResolver(func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
-		return benchmarkPrices[tradeDate], tradeDate
-	})
-
 	priceMap := map[string]float64{
 		snapshotPriceHintKey("600001", "SSE") + "@2026-04-14":  10,
 		snapshotPriceHintKey("000001", "SZSE") + "@2026-04-14": 20,
@@ -191,9 +182,6 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	if aResp.Series[1].PortfolioReturnPct >= 0 {
 		t.Fatalf("expected negative portfolio return after trade cost, got %+v", aResp.Series[1])
 	}
-	if aResp.Series[1].ExcessReturnPct >= 0 {
-		t.Fatalf("expected negative excess return after trade cost, got %+v", aResp.Series[1])
-	}
 	if len(aResp.Constituents) != 4 {
 		t.Fatalf("expected 4 latest constituents, got %d", len(aResp.Constituents))
 	}
@@ -248,189 +236,99 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	}
 }
 
+func TestBuildRankingPortfolioSummaryMetrics(t *testing.T) {
+	series := []RankingPortfolioSeriesPoint{
+		{Date: "2026-05-29", SourceTradeDate: "2026-05-29", Nav: 1, PortfolioReturnPct: 0, DailyPortfolioReturnPct: 0, DrawdownPct: 0},
+		{Date: "2026-06-02", SourceTradeDate: "2026-06-02", Nav: 1.03, PortfolioReturnPct: 3, DailyPortfolioReturnPct: 3, DrawdownPct: 0},
+		{Date: "2026-06-03", SourceTradeDate: "2026-06-03", Nav: 1.01, PortfolioReturnPct: 1, DailyPortfolioReturnPct: -1.9417, DrawdownPct: -1.9417},
+		{Date: "2026-06-04", SourceTradeDate: "2026-06-04", Nav: 1.06, PortfolioReturnPct: 6, DailyPortfolioReturnPct: 4.9505, DrawdownPct: 0},
+	}
+
+	metrics := buildRankingPortfolioSummaryMetrics(series)
+	if metrics.InceptionTradeDate != "2026-05-29" {
+		t.Fatalf("inception_trade_date = %s, want 2026-05-29", metrics.InceptionTradeDate)
+	}
+	if metrics.InceptionDays != 7 {
+		t.Fatalf("inception_days = %d, want 7", metrics.InceptionDays)
+	}
+	if metrics.LatestDailyReturnPct == nil || *metrics.LatestDailyReturnPct != 4.9505 {
+		t.Fatalf("latest_daily_return_pct = %v, want 4.9505", metrics.LatestDailyReturnPct)
+	}
+	if metrics.CurrentMonthReturnPct == nil || *metrics.CurrentMonthReturnPct != 6 {
+		t.Fatalf("current_month_return_pct = %v, want 6", metrics.CurrentMonthReturnPct)
+	}
+	if metrics.MaxDrawdownPct == nil || *metrics.MaxDrawdownPct != -1.9417 {
+		t.Fatalf("max_drawdown_pct = %v, want -1.9417", metrics.MaxDrawdownPct)
+	}
+	if metrics.DailyWinRatePct == nil || *metrics.DailyWinRatePct != 66.6667 {
+		t.Fatalf("daily_win_rate_pct = %v, want 66.6667", metrics.DailyWinRatePct)
+	}
+	if metrics.VolatilityPct == nil || *metrics.VolatilityPct <= 0 {
+		t.Fatalf("volatility_pct should be positive, got %v", metrics.VolatilityPct)
+	}
+}
+
+func TestEnrichRankingPortfolioCurrentConstituents_UsesConsecutiveEntryTradeDate(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	snapshots := []RankingPortfolioSnapshot{
+		{DefinitionID: defaultRankingPortfolioDefinitionID, SnapshotVersion: "2026-05-06", SnapshotDate: "2026-05-06", SourceTradeDate: "2026-05-06", CreatedAt: now, UpdatedAt: now},
+		{DefinitionID: defaultRankingPortfolioDefinitionID, SnapshotVersion: "2026-05-07", SnapshotDate: "2026-05-07", SourceTradeDate: "2026-05-07", CreatedAt: now, UpdatedAt: now},
+		{DefinitionID: defaultRankingPortfolioDefinitionID, SnapshotVersion: "2026-05-08", SnapshotDate: "2026-05-08", SourceTradeDate: "2026-05-08", CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.db.WithContext(ctx).Create(&snapshots).Error; err != nil {
+		t.Fatalf("seed snapshots failed: %v", err)
+	}
+
+	rows := []RankingPortfolioSnapshotConstituent{
+		{DefinitionID: defaultRankingPortfolioDefinitionID, SnapshotVersion: "2026-05-06", SnapshotDate: "2026-05-06", Code: "600001", Exchange: "SSE", Rank: 1, Weight: 0.25, CreatedAt: now, UpdatedAt: now},
+		{DefinitionID: defaultRankingPortfolioDefinitionID, SnapshotVersion: "2026-05-07", SnapshotDate: "2026-05-07", Code: "600001", Exchange: "SSE", Rank: 1, Weight: 0.25, CreatedAt: now, UpdatedAt: now},
+		{DefinitionID: defaultRankingPortfolioDefinitionID, SnapshotVersion: "2026-05-08", SnapshotDate: "2026-05-08", Code: "600001", Exchange: "SSE", Rank: 1, Weight: 0.25, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.db.WithContext(ctx).Create(&rows).Error; err != nil {
+		t.Fatalf("seed constituents failed: %v", err)
+	}
+
+	rankingRows := []RankingSnapshot{
+		{Code: "600001", Name: "股票600001", Exchange: "SSE", ClosePrice: 10, PriceTradeDate: "2026-05-06", SnapshotDate: "2026-05-06", CreatedAt: now},
+		{Code: "600001", Name: "股票600001", Exchange: "SSE", ClosePrice: 12, PriceTradeDate: "2026-05-08", SnapshotDate: "2026-05-08", CreatedAt: now},
+	}
+	if err := repo.db.WithContext(ctx).Create(&rankingRows).Error; err != nil {
+		t.Fatalf("seed ranking snapshots failed: %v", err)
+	}
+
+	items := []RankingPortfolioConstituentItem{{Code: "600001", Exchange: "SSE"}}
+	definition := RankingPortfolioDefinition{ID: defaultRankingPortfolioDefinitionID}
+	if err := svc.enrichRankingPortfolioCurrentConstituents(ctx, definition, items, "2026-05-08"); err != nil {
+		t.Fatalf("enrich constituents failed: %v", err)
+	}
+	if items[0].EntryTradeDate != "2026-05-06" {
+		t.Fatalf("entry_trade_date = %s, want 2026-05-06", items[0].EntryTradeDate)
+	}
+	if items[0].EntryPrice != 10 {
+		t.Fatalf("entry_price = %v, want 10", items[0].EntryPrice)
+	}
+	if items[0].LatestTradeDate != "2026-05-08" {
+		t.Fatalf("latest_trade_date = %s, want 2026-05-08", items[0].LatestTradeDate)
+	}
+	if items[0].LatestClosePrice != 12 {
+		t.Fatalf("latest_close_price = %v, want 12", items[0].LatestClosePrice)
+	}
+	if items[0].LatestReturnPct == nil || *items[0].LatestReturnPct != 20 {
+		t.Fatalf("latest_return_pct = %v, want 20", items[0].LatestReturnPct)
+	}
+}
+
 func TestSaveRankingPortfolio_RebuildsSameSnapshotVersion(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
 	svc := NewService(repo)
 	ctx := context.Background()
 
-	benchmarkPrices := map[string]float64{"2026-04-14": 3000, "2026-05-06": 3000}
-	svc.SetBenchmarkPriceResolver(func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
-		return benchmarkPrices[tradeDate], tradeDate
-	})
-
-	priceMap := map[string]float64{
-		snapshotPriceHintKey("600001", "SSE") + "@2026-04-14":  10,
-		snapshotPriceHintKey("000001", "SZSE") + "@2026-04-14": 20,
-		snapshotPriceHintKey("300001", "SZSE") + "@2026-04-14": 30,
-		snapshotPriceHintKey("600002", "SSE") + "@2026-04-14":  40,
-		snapshotPriceHintKey("600001", "SSE") + "@2026-05-06":  10,
-		snapshotPriceHintKey("000001", "SZSE") + "@2026-05-06": 20,
-		snapshotPriceHintKey("300001", "SZSE") + "@2026-05-06": 30,
-		snapshotPriceHintKey("600002", "SSE") + "@2026-05-06":  40,
-	}
-	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
-		return priceMap[snapshotPriceHintKey(code, exchange)+"@"+tradeDate]
-	})
-
-	computedAt := time.Date(2026, 5, 6, 15, 0, 0, 0, rankingSnapshotLocation)
-	badRecords := []QuadrantScoreRecord{
-		makeAShareRankingRecord("688001", "STAR", "机会", 99, 88, 10, 12000),
-		makeAShareRankingRecord("688002", "STAR", "机会", 98, 87, 10, 12000),
-	}
-	goodRecords := []QuadrantScoreRecord{
-		makeAShareRankingRecord("688001", "STAR", "机会", 99, 88, 10, 12000),
-		makeAShareRankingRecord("600001", "MAIN", "机会", 95, 84, 10, 12000),
-		makeAShareRankingRecord("000001", "MAIN", "机会", 94, 83, 10, 12000),
-		makeAShareRankingRecord("300001", "CHINEXT", "机会", 93, 82, 10, 12000),
-		makeAShareRankingRecord("600002", "MAIN", "机会", 92, 81, 10, 12000),
-	}
-
-	if err := svc.saveRankingPortfolio(ctx, badRecords, computedAt, nil, ""); err != nil {
-		t.Fatalf("first save failed: %v", err)
-	}
-	if err := svc.saveRankingPortfolio(ctx, goodRecords, computedAt, nil, ""); err != nil {
-		t.Fatalf("second save failed: %v", err)
-	}
-
-	var snapshots []RankingPortfolioSnapshot
-	if err := repo.db.WithContext(ctx).
-		Where("definition_id = ?", defaultRankingPortfolioDefinitionID).
-		Order("id ASC").
-		Find(&snapshots).Error; err != nil {
-		t.Fatalf("load snapshots failed: %v", err)
-	}
-	if len(snapshots) != 1 {
-		t.Fatalf("expected 1 rebuilt snapshot, got %d", len(snapshots))
-	}
-	if snapshots[0].ConstituentsCount != 4 || snapshots[0].HasShortfall {
-		t.Fatalf("expected rebuilt snapshot with 4 constituents, got %+v", snapshots[0])
-	}
-
-	var constituents []RankingPortfolioSnapshotConstituent
-	if err := repo.db.WithContext(ctx).
-		Where("definition_id = ? AND snapshot_version = ?", defaultRankingPortfolioDefinitionID, "2026-05-06").
-		Order("rank ASC").
-		Find(&constituents).Error; err != nil {
-		t.Fatalf("load constituents failed: %v", err)
-	}
-	if len(constituents) != 4 {
-		t.Fatalf("expected 4 rebuilt constituents, got %d", len(constituents))
-	}
-
-	var result RankingPortfolioResult
-	if err := repo.db.WithContext(ctx).
-		Where("definition_id = ? AND snapshot_version = ?", defaultRankingPortfolioDefinitionID, "2026-05-06").
-		First(&result).Error; err != nil {
-		t.Fatalf("load result failed: %v", err)
-	}
-	if result.CurrentConstituentCount != 4 || result.HasShortfall {
-		t.Fatalf("expected rebuilt result to expose 4 constituents, got %+v", result)
-	}
-}
-
-func TestGetRankingPortfolio_UsesLatestRankingForCurrentConstituents(t *testing.T) {
-	repo, cleanup := setupQuadrantTest(t)
-	defer cleanup()
-	svc := NewService(repo)
-	ctx := context.Background()
-
-	svc.SetBenchmarkPriceResolver(func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
-		return 3000, tradeDate
-	})
-	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
-		return 10
-	})
-
-	storedRecords := []QuadrantScoreRecord{
-		makeAShareRankingRecord("000988", "MAIN", "机会", 97, 90, 15, 12000),
-		makeAShareRankingRecord("601991", "MAIN", "机会", 96, 89, 16, 12000),
-		makeAShareRankingRecord("001309", "MAIN", "机会", 95, 88, 17, 12000),
-		makeAShareRankingRecord("002384", "MAIN", "机会", 94, 87, 18, 12000),
-	}
-	storedComputedAt := time.Date(2026, 5, 20, 15, 0, 0, 0, rankingSnapshotLocation)
-	for i := range storedRecords {
-		storedRecords[i].SourceTradeDate = "2026-05-19"
-	}
-	if err := svc.saveRankingPortfolio(ctx, storedRecords, storedComputedAt, nil, ""); err != nil {
-		t.Fatalf("save stored portfolio failed: %v", err)
-	}
-
-	latestComputedAt := time.Date(2026, 5, 22, 2, 0, 0, 0, rankingSnapshotLocation).UTC()
-	latestRecords := []QuadrantScoreRecord{
-		makeAShareRankingRecord("688802", "STAR", "机会", 99, 98, 10, 15000),
-		makeAShareRankingRecord("000988", "MAIN", "机会", 98, 97, 20, 15000),
-		makeAShareRankingRecord("600522", "MAIN", "机会", 97, 96, 21, 15000),
-		makeAShareRankingRecord("600584", "MAIN", "机会", 96, 95, 22, 15000),
-		makeAShareRankingRecord("600487", "MAIN", "机会", 95, 94, 23, 15000),
-	}
-	for i := range latestRecords {
-		latestRecords[i].ComputedAt = latestComputedAt
-		latestRecords[i].SourceTradeDate = "2026-05-21"
-	}
-	seedOpportunityRecords(t, repo, latestRecords)
-
-	resp, err := svc.GetRankingPortfolio(ctx)
-	if err != nil {
-		t.Fatalf("GetRankingPortfolio failed: %v", err)
-	}
-
-	var aResp *RankingPortfolioResponse
-	for i := range resp.Items {
-		if resp.Items[i].Meta.DefinitionID == defaultRankingPortfolioDefinitionID {
-			aResp = &resp.Items[i]
-			break
-		}
-	}
-	if aResp == nil {
-		t.Fatalf("missing A-share portfolio response: %+v", resp.Items)
-	}
-
-	if aResp.Meta.SnapshotVersion != "2026-05-20" {
-		t.Fatalf("snapshot_version = %s, want 2026-05-20", aResp.Meta.SnapshotVersion)
-	}
-	if aResp.Meta.SourceTradeDate != "2026-05-19" {
-		t.Fatalf("source_trade_date = %s, want 2026-05-19", aResp.Meta.SourceTradeDate)
-	}
-	if len(aResp.Constituents) != 4 {
-		t.Fatalf("expected 4 current constituents, got %d", len(aResp.Constituents))
-	}
-	gotCodes := []string{aResp.Constituents[0].Code, aResp.Constituents[1].Code, aResp.Constituents[2].Code, aResp.Constituents[3].Code}
-	wantCodes := []string{"000988", "600522", "600584", "600487"}
-	for i := range wantCodes {
-		if gotCodes[i] != wantCodes[i] {
-			t.Fatalf("current constituents = %v, want %v", gotCodes, wantCodes)
-		}
-	}
-	if aResp.Meta.CurrentConstituentCount != 4 {
-		t.Fatalf("current_constituent_count = %d, want 4", aResp.Meta.CurrentConstituentCount)
-	}
-	if aResp.Meta.CurrentConstituentSourceDate != "2026-05-21" {
-		t.Fatalf("current_constituent_source_date = %s, want 2026-05-21", aResp.Meta.CurrentConstituentSourceDate)
-	}
-	wantEffectiveTime := time.Date(2026, 5, 22, 9, 30, 0, 0, rankingSnapshotLocation).UTC().Format(time.RFC3339)
-	if aResp.Meta.CurrentConstituentEffectiveTime != wantEffectiveTime {
-		t.Fatalf("current_constituent_effective_time = %s, want %s", aResp.Meta.CurrentConstituentEffectiveTime, wantEffectiveTime)
-	}
-	if aResp.LatestRebalance != nil {
-		t.Fatalf("expected latest rebalance to be hidden when current ranking is newer, got %+v", aResp.LatestRebalance)
-	}
-}
-
-func TestRebuildLaggingRankingPortfolioResults_RebuildsFromExistingSnapshots(t *testing.T) {
-	repo, cleanup := setupQuadrantTest(t)
-	defer cleanup()
-	svc := NewService(repo)
-	ctx := context.Background()
-
-	benchmarkPrices := map[string]float64{
-		"2026-04-14": 3000,
-		"2026-05-06": 3000,
-		"2026-05-07": 3030,
-	}
-	svc.SetBenchmarkPriceResolver(func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
-		return benchmarkPrices[tradeDate], tradeDate
-	})
 	priceMap := map[string]float64{
 		snapshotPriceHintKey("600001", "SSE") + "@2026-04-14":  10,
 		snapshotPriceHintKey("000001", "SZSE") + "@2026-04-14": 20,
@@ -509,13 +407,6 @@ func TestRebuildLaggingRankingPortfolioResults_RebuildsMissingPortfolioSnapshotF
 	svc := NewService(repo)
 	ctx := context.Background()
 
-	benchmarkPrices := map[string]float64{
-		"2026-04-14": 3000,
-		"2026-05-08": 3050,
-	}
-	svc.SetBenchmarkPriceResolver(func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
-		return benchmarkPrices[tradeDate], tradeDate
-	})
 	priceMap := map[string]float64{
 		snapshotPriceHintKey("600001", "SSE") + "@2026-04-14":  10,
 		snapshotPriceHintKey("000001", "SZSE") + "@2026-04-14": 20,
@@ -568,9 +459,6 @@ func TestRebuildLaggingRankingPortfolioResults_BackfillsMissingMarketCloseFromHi
 	svc := NewService(repo)
 	ctx := context.Background()
 
-	svc.SetBenchmarkPriceResolver(func(ctx context.Context, benchmark string, tradeDate string) (float64, string) {
-		return 3050, tradeDate
-	})
 	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
 		return 0
 	})

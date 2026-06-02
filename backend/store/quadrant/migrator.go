@@ -18,7 +18,6 @@ func (Migrator) AutoMigrate(db *gorm.DB) error {
 		&RankingPortfolioSnapshot{},
 		&RankingPortfolioSnapshotConstituent{},
 		&RankingPortfolioMarketPrice{},
-		&RankingPortfolioBenchmarkPrice{},
 		&RankingPortfolioResult{},
 		&RankingPortfolioJobStatus{},
 	)

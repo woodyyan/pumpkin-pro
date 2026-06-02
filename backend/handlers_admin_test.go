@@ -222,7 +222,6 @@ func quadrantSetupForAdminTest(t *testing.T) (*quadrant.Repository, func()) {
 		&quadrant.RankingPortfolioSnapshot{},
 		&quadrant.RankingPortfolioSnapshotConstituent{},
 		&quadrant.RankingPortfolioMarketPrice{},
-		&quadrant.RankingPortfolioBenchmarkPrice{},
 		&quadrant.RankingPortfolioResult{},
 		&quadrant.RankingPortfolioJobStatus{},
 	)

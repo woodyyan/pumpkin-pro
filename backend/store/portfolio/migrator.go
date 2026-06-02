@@ -17,6 +17,8 @@ func (Migrator) AutoMigrate(db *gorm.DB) error {
 		&PortfolioRecord{},
 		&PortfolioEventRecord{},
 		&PortfolioDailySnapshotRecord{},
+		&PortfolioSnapshotJobRunRecord{},
+		&PortfolioSnapshotJobRunItemRecord{},
 		&PortfolioPositionDailySnapshotRecord{},
 		&SecurityProfileRecord{},
 		&InvestmentProfileRecord{},

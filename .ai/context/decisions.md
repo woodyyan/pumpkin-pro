@@ -79,3 +79,25 @@
 - Phase 0 新增 `industries` 模式：先刷新原始行业，再标准化写入 `company_profiles` 和 `industry_mapping`。
 - Phase 2 读取行业时优先使用 `company_profiles.industry_name`，回退到 `factor_security_industries`。
 - 每日 21:00 的 Factor Lab 自动预计算必须包含 `industries` 步骤。
+
+## 决策 7: 组合日快照历史补写必须统一走事件重建链路
+
+**日期**: 2026-06-02
+
+**背景**: 第一阶段新增了分市场定时快照、`pnl-calendar` 缺失补写和后续 CLI 历史重建需求。实施中发现原有 `persistDailySnapshots(...)` 依赖实时持仓与实时报价，只能正确生成“今天”的视图；若继续用于历史日期，会把历史某日错误地按当前持仓写入快照。
+
+**决策**: 历史日期的组合日快照与持仓日快照，统一通过“交易事件 + 历史行情”重建；`persistDailySnapshots(...)` 仅保留给 dashboard / equity curve 的当天轻量刷新。
+
+**原因**:
+1. 历史快照要求按 `user + scope + snapshotDate` 精确复原当日持仓状态，实时持仓路径天然不满足。
+2. 定时任务、查询补写、CLI 三条链路若各自实现，会导致口径漂移和重复逻辑。
+3. 统一重建引擎后，可以把幂等、元信息、任务日志和测试覆盖集中在单一路径维护。
+
+**替代方案**:
+- 继续复用 `persistDailySnapshots(...)` 并附加日期参数：否决，数据源仍是当前持仓，历史结果必然失真。
+- 分别为 scheduler / query / CLI 写三套逻辑：否决，维护成本高且容易出现口径不一致。
+
+**影响**:
+- `RebuildDailySnapshotForUser(...)` 必须调用历史重建引擎。
+- `GetPnlCalendar(...)` 的当前月缺失补写写入结果也必须采用历史口径。
+- 后续分市场 worker 与 CLI 必须继续复用同一套历史重建服务，而非重新拼装实时持仓快照。

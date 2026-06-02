@@ -58,3 +58,15 @@ frontend/
 - `RankingPanel.js` / `RankingPortfolioPanel.js`: 排行榜
 - `PortfolioAttributionSection.js`: 持仓归因分析
 - `AIAnalysisReportContent.js`: AI分析报告内容
+
+## 后端持仓快照架构补充（2026-06-02）
+
+- `backend/store/portfolio/service.go` 中的历史快照能力已拆分为“历史快照重建引擎 + 单日/区间输出”两层：
+  - 区间重建：用于全量历史回灌与删除后缓存重建。
+  - 单日重建：用于分市场定时任务、`pnl-calendar` 当前月缺失补写、后续 CLI 历史补写。
+- 历史重建的数据源固定为：
+  - `user_portfolio_events`
+  - `security_profiles`
+  - 历史日线 `GetDailyBars(...)`
+- `user_portfolio_daily_snapshots` 保存市场级聚合结果，`user_portfolio_position_daily_snapshots` 保存持仓级结果；两者都由同一重建引擎生成，避免市场级与持仓级口径分叉。
+- `persistDailySnapshots(...)` 仍存在，但职责被限制为 dashboard / equity curve 的“当天轻量刷新”，不能再承担任何历史日期补写职责。

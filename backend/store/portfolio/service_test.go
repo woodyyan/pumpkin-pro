@@ -519,6 +519,109 @@ func TestServiceGetPnlCalendarCalculatesRateFromBaseAmount(t *testing.T) {
 	}
 }
 
+func TestServiceGetPnlCalendarBackfillsMissingHistoricalSnapshot(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	seedPortfolioProfile(t, svc, "600519.SH", "SSE", "贵州茅台")
+	svc.historyReader = &stubHistoryReader{bars: map[string][]DailyBarRecord{
+		"600519": buildStubBars("600519", map[string]float64{
+			"2026-05-05": 10,
+			"2026-05-06": 11,
+		}),
+	}}
+	if _, _, err := svc.CreateEvent(ctx, "calendar-backfill-user", "600519.SH", CreatePortfolioEventInput{
+		EventType: EventTypeBuy,
+		TradeDate: "2026-05-05",
+		Quantity:  100,
+		Price:     10,
+	}); err != nil {
+		t.Fatalf("CreateEvent failed: %v", err)
+	}
+	payload, err := svc.GetPnlCalendar(ctx, "calendar-backfill-user", PortfolioPnlCalendarQuery{Scope: PortfolioScopeAShare, Year: 2026, Month: 5})
+	if err != nil {
+		t.Fatalf("GetPnlCalendar failed: %v", err)
+	}
+	day := payload.Days[5]
+	if day.Date != "2026-05-06" {
+		t.Fatalf("expected May 6 at index 5, got %s", day.Date)
+	}
+	if !day.HasData || day.HoldingPnlAmount != 100 || day.PositionCount != 1 {
+		t.Fatalf("expected backfilled historical calendar day, got %+v", day)
+	}
+	records, err := svc.repo.ListDailySnapshotsInRange(ctx, "calendar-backfill-user", []string{PortfolioScopeAShare}, "2026-05-06", "2026-05-06")
+	if err != nil {
+		t.Fatalf("ListDailySnapshotsInRange failed: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected one backfilled snapshot, got %d", len(records))
+	}
+	if records[0].SourceType != PortfolioSnapshotSourceQueryBackfill {
+		t.Fatalf("expected query backfill source type, got %+v", records[0])
+	}
+}
+
+func TestServiceRebuildDailySnapshotForUserUsesHistoricalEvents(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	seedPortfolioProfile(t, svc, "600519.SH", "SSE", "贵州茅台")
+	svc.historyReader = &stubHistoryReader{bars: map[string][]DailyBarRecord{
+		"600519": buildStubBars("600519", map[string]float64{
+			"2026-04-20": 10,
+			"2026-04-21": 11,
+			"2026-04-22": 12,
+			"2026-04-23": 13,
+		}),
+	}}
+	if _, _, err := svc.CreateEvent(ctx, "rebuild-user", "600519.SH", CreatePortfolioEventInput{
+		EventType: EventTypeBuy,
+		TradeDate: "2026-04-20",
+		Quantity:  100,
+		Price:     10,
+	}); err != nil {
+		t.Fatalf("buy failed: %v", err)
+	}
+	if _, _, err := svc.CreateEvent(ctx, "rebuild-user", "600519.SH", CreatePortfolioEventInput{
+		EventType: EventTypeSell,
+		TradeDate: "2026-04-22",
+		Quantity:  40,
+		Price:     12,
+	}); err != nil {
+		t.Fatalf("sell failed: %v", err)
+	}
+	ok, err := svc.RebuildDailySnapshotForUser(ctx, "rebuild-user", PortfolioScopeAShare, "2026-04-21", PortfolioSnapshotSourceManualRebuild, "job-manual")
+	if err != nil {
+		t.Fatalf("RebuildDailySnapshotForUser failed: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected historical snapshot to be written")
+	}
+	records, err := svc.repo.ListDailySnapshotsInRange(ctx, "rebuild-user", []string{PortfolioScopeAShare}, "2026-04-21", "2026-04-21")
+	if err != nil {
+		t.Fatalf("ListDailySnapshotsInRange failed: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(records))
+	}
+	record := records[0]
+	if record.TotalCostAmount != 1000 || record.MarketValueAmount != 1100 {
+		t.Fatalf("expected historical date snapshot based on pre-sell holdings, got %+v", record)
+	}
+	if record.TodayPnlAmount != 100 || record.RealizedPnlAmount != 0 {
+		t.Fatalf("expected no realized pnl before sell date, got %+v", record)
+	}
+	if record.SourceType != PortfolioSnapshotSourceManualRebuild || record.JobRunID != "job-manual" {
+		t.Fatalf("expected snapshot metadata set, got %+v", record)
+	}
+	positions, err := svc.repo.ListPositionDailySnapshots(ctx, "rebuild-user", []string{PortfolioScopeAShare}, "2026-04-21", "2026-04-21")
+	if err != nil {
+		t.Fatalf("ListPositionDailySnapshots failed: %v", err)
+	}
+	if len(positions) != 1 {
+		t.Fatalf("expected 1 position snapshot, got %d", len(positions))
+	}
+	if positions[0].Shares != 100 || positions[0].RealizedPnlCum != 0 {
+		t.Fatalf("expected full pre-sell position on 2026-04-21, got %+v", positions[0])
+	}
+}
+
 func TestServiceGetPnlCalendarRejectsAllScope(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
 	if _, err := svc.GetPnlCalendar(ctx, "calendar-invalid", PortfolioPnlCalendarQuery{Scope: PortfolioScopeAll, Year: 2026, Month: 5}); err == nil {

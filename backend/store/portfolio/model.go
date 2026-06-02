@@ -3,6 +3,36 @@ package portfolio
 import "time"
 
 const (
+	PortfolioSnapshotSourceScheduled     = "scheduled"
+	PortfolioSnapshotSourceQueryBackfill = "query_backfill"
+	PortfolioSnapshotSourceManualRebuild = "manual_rebuild"
+)
+
+const (
+	PortfolioSnapshotJobTypeDailyMarket = "daily_market_snapshot"
+	PortfolioSnapshotJobTypeManual      = "manual_rebuild"
+)
+
+const (
+	PortfolioSnapshotJobTriggerScheduler = "scheduler"
+	PortfolioSnapshotJobTriggerManual    = "manual"
+)
+
+const (
+	PortfolioSnapshotJobStatusRunning       = "running"
+	PortfolioSnapshotJobStatusSuccess       = "success"
+	PortfolioSnapshotJobStatusPartialFailed = "partial_failed"
+	PortfolioSnapshotJobStatusFailed        = "failed"
+	PortfolioSnapshotJobStatusSkipped       = "skipped"
+)
+
+const (
+	PortfolioSnapshotJobItemStatusSuccess = "success"
+	PortfolioSnapshotJobItemStatusFailed  = "failed"
+	PortfolioSnapshotJobItemStatusSkipped = "skipped"
+)
+
+const (
 	EventTypeInit          = "init"
 	EventTypeBuy           = "buy"
 	EventTypeSell          = "sell"
@@ -97,12 +127,57 @@ type PortfolioDailySnapshotRecord struct {
 	TotalPnlAmount      float64   `gorm:"not null;default:0"`
 	TodayPnlAmount      float64   `gorm:"not null;default:0"`
 	PositionCount       int       `gorm:"not null;default:0"`
+	SourceType          string    `gorm:"size:32;not null;default:'scheduled'"`
+	DataVersion         int       `gorm:"not null;default:1"`
+	ComputedAt          time.Time `gorm:"not null"`
+	JobRunID            string    `gorm:"size:36;not null;default:'';index"`
 	CreatedAt           time.Time `gorm:"not null"`
 	UpdatedAt           time.Time `gorm:"not null"`
 }
 
 func (PortfolioDailySnapshotRecord) TableName() string {
 	return "user_portfolio_daily_snapshots"
+}
+
+type PortfolioSnapshotJobRunRecord struct {
+	ID                   string    `gorm:"primaryKey;size:36"`
+	JobType              string    `gorm:"size:32;not null;index"`
+	Scope                string    `gorm:"size:16;not null;index"`
+	TargetDate           string    `gorm:"size:10;not null;index"`
+	ScheduledTime        time.Time `gorm:"not null"`
+	StartedAt            time.Time `gorm:"not null"`
+	FinishedAt           *time.Time
+	Status               string    `gorm:"size:24;not null;index"`
+	TriggerSource        string    `gorm:"size:24;not null;default:'scheduler'"`
+	UserCountTotal       int       `gorm:"not null;default:0"`
+	UserCountSuccess     int       `gorm:"not null;default:0"`
+	UserCountFailed      int       `gorm:"not null;default:0"`
+	SnapshotCountWritten int       `gorm:"not null;default:0"`
+	Message              string    `gorm:"type:text;not null;default:''"`
+	CreatedAt            time.Time `gorm:"not null"`
+	UpdatedAt            time.Time `gorm:"not null"`
+}
+
+func (PortfolioSnapshotJobRunRecord) TableName() string {
+	return "portfolio_snapshot_job_runs"
+}
+
+type PortfolioSnapshotJobRunItemRecord struct {
+	ID              string    `gorm:"primaryKey;size:36"`
+	JobRunID        string    `gorm:"size:36;not null;index"`
+	UserID          string    `gorm:"size:36;not null;index"`
+	Scope           string    `gorm:"size:16;not null;index"`
+	TargetDate      string    `gorm:"size:10;not null;index"`
+	Status          string    `gorm:"size:24;not null;index"`
+	SnapshotWritten bool      `gorm:"not null;default:false"`
+	ErrorCode       string    `gorm:"size:64;not null;default:''"`
+	ErrorMessage    string    `gorm:"type:text;not null;default:''"`
+	CreatedAt       time.Time `gorm:"not null"`
+	UpdatedAt       time.Time `gorm:"not null"`
+}
+
+func (PortfolioSnapshotJobRunItemRecord) TableName() string {
+	return "portfolio_snapshot_job_run_items"
 }
 
 // ── API Output ──

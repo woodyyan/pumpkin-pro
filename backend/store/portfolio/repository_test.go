@@ -15,6 +15,8 @@ func setupPortfolioDB(t *testing.T) (*Repository, context.Context) {
 		PortfolioRecord{},
 		PortfolioEventRecord{},
 		PortfolioDailySnapshotRecord{},
+		PortfolioSnapshotJobRunRecord{},
+		PortfolioSnapshotJobRunItemRecord{},
 		PortfolioPositionDailySnapshotRecord{},
 		InvestmentProfileRecord{},
 	)
@@ -251,6 +253,87 @@ func TestRepositorySumRealizedPnlByTradeDateFiltersVoidedAndScope(t *testing.T) 
 	}
 	if _, ok := result["2026-05-11"]; ok {
 		t.Fatalf("expected voided event to be ignored, got %+v", result)
+	}
+}
+
+func TestRepositorySnapshotJobRunLifecycle(t *testing.T) {
+	repo, ctx := setupPortfolioDB(t)
+	now := time.Now().UTC()
+	job := &PortfolioSnapshotJobRunRecord{
+		ID:            "job-1",
+		JobType:       PortfolioSnapshotJobTypeDailyMarket,
+		Scope:         PortfolioScopeAShare,
+		TargetDate:    "2026-06-02",
+		ScheduledTime: now,
+		StartedAt:     now,
+		Status:        PortfolioSnapshotJobStatusRunning,
+		TriggerSource: PortfolioSnapshotJobTriggerScheduler,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := repo.CreateSnapshotJobRun(ctx, job); err != nil {
+		t.Fatalf("CreateSnapshotJobRun failed: %v", err)
+	}
+	finishedAt := now.Add(time.Minute)
+	if err := repo.UpdateSnapshotJobRun(ctx, "job-1", map[string]any{
+		"status":                 PortfolioSnapshotJobStatusSuccess,
+		"finished_at":            finishedAt,
+		"user_count_total":       2,
+		"user_count_success":     2,
+		"snapshot_count_written": 2,
+		"updated_at":             finishedAt,
+	}); err != nil {
+		t.Fatalf("UpdateSnapshotJobRun failed: %v", err)
+	}
+	items := []PortfolioSnapshotJobRunItemRecord{
+		{ID: "job-item-1", JobRunID: "job-1", UserID: "u1", Scope: PortfolioScopeAShare, TargetDate: "2026-06-02", Status: PortfolioSnapshotJobItemStatusSuccess, SnapshotWritten: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "job-item-2", JobRunID: "job-1", UserID: "u2", Scope: PortfolioScopeAShare, TargetDate: "2026-06-02", Status: PortfolioSnapshotJobItemStatusSkipped, SnapshotWritten: false, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.CreateSnapshotJobRunItems(ctx, items); err != nil {
+		t.Fatalf("CreateSnapshotJobRunItems failed: %v", err)
+	}
+	var stored PortfolioSnapshotJobRunRecord
+	if err := repo.db.WithContext(ctx).Where("id = ?", "job-1").First(&stored).Error; err != nil {
+		t.Fatalf("query job run failed: %v", err)
+	}
+	if stored.Status != PortfolioSnapshotJobStatusSuccess || stored.UserCountTotal != 2 || stored.SnapshotCountWritten != 2 {
+		t.Fatalf("unexpected job run: %+v", stored)
+	}
+	var count int64
+	if err := repo.db.WithContext(ctx).Model(&PortfolioSnapshotJobRunItemRecord{}).Where("job_run_id = ?", "job-1").Count(&count).Error; err != nil {
+		t.Fatalf("count job run items failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 job items, got %d", count)
+	}
+}
+
+func TestRepositoryListUsersByScopeWithPositions(t *testing.T) {
+	repo, ctx := setupPortfolioDB(t)
+	now := time.Now().UTC()
+	for _, record := range []*PortfolioRecord{
+		{ID: "ashare-1", UserID: "user-a", Symbol: "600519.SH", Shares: 100, AvgCostPrice: 10, TotalCostAmount: 1000, CreatedAt: now, UpdatedAt: now},
+		{ID: "hk-1", UserID: "user-b", Symbol: "00700.HK", Shares: 200, AvgCostPrice: 10, TotalCostAmount: 2000, CreatedAt: now, UpdatedAt: now},
+		{ID: "zero-1", UserID: "user-c", Symbol: "600036.SH", Shares: 0, AvgCostPrice: 10, TotalCostAmount: 0, CreatedAt: now, UpdatedAt: now},
+		{ID: "ashare-2", UserID: "user-a", Symbol: "000001.SZ", Shares: 50, AvgCostPrice: 10, TotalCostAmount: 500, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := repo.Upsert(ctx, record); err != nil {
+			t.Fatalf("Upsert failed: %v", err)
+		}
+	}
+	ashareUsers, err := repo.ListUsersByScopeWithPositions(ctx, PortfolioScopeAShare)
+	if err != nil {
+		t.Fatalf("ListUsersByScopeWithPositions ashare failed: %v", err)
+	}
+	if len(ashareUsers) != 1 || ashareUsers[0] != "user-a" {
+		t.Fatalf("unexpected ashare users: %+v", ashareUsers)
+	}
+	hkUsers, err := repo.ListUsersByScopeWithPositions(ctx, PortfolioScopeHK)
+	if err != nil {
+		t.Fatalf("ListUsersByScopeWithPositions hk failed: %v", err)
+	}
+	if len(hkUsers) != 1 || hkUsers[0] != "user-b" {
+		t.Fatalf("unexpected hk users: %+v", hkUsers)
 	}
 }
 

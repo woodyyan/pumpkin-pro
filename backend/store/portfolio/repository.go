@@ -249,6 +249,10 @@ func (r *Repository) UpsertDailySnapshot(ctx context.Context, record *PortfolioD
 			"total_pnl_amount":      record.TotalPnlAmount,
 			"today_pnl_amount":      record.TodayPnlAmount,
 			"position_count":        record.PositionCount,
+			"source_type":           record.SourceType,
+			"data_version":          record.DataVersion,
+			"computed_at":           record.ComputedAt,
+			"job_run_id":            record.JobRunID,
 			"updated_at":            record.UpdatedAt,
 		}).Error
 }
@@ -275,6 +279,52 @@ func (r *Repository) DeletePositionDailySnapshotsByUser(ctx context.Context, use
 	return r.db.WithContext(ctx).
 		Where("user_id = ?", userID).
 		Delete(&PortfolioPositionDailySnapshotRecord{}).Error
+}
+
+func (r *Repository) CreateSnapshotJobRun(ctx context.Context, record *PortfolioSnapshotJobRunRecord) error {
+	return r.db.WithContext(ctx).Create(record).Error
+}
+
+func (r *Repository) UpdateSnapshotJobRun(ctx context.Context, jobRunID string, updates map[string]any) error {
+	return r.db.WithContext(ctx).
+		Model(&PortfolioSnapshotJobRunRecord{}).
+		Where("id = ?", jobRunID).
+		Updates(updates).Error
+}
+
+func (r *Repository) CreateSnapshotJobRunItems(ctx context.Context, records []PortfolioSnapshotJobRunItemRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Create(&records).Error
+}
+
+func (r *Repository) ListUsersByScopeWithPositions(ctx context.Context, scope string) ([]string, error) {
+	query := r.db.WithContext(ctx).
+		Model(&PortfolioRecord{}).
+		Distinct("user_id").
+		Where("shares > 0")
+	if scope == PortfolioScopeAShare {
+		query = query.Where("symbol LIKE ? OR symbol LIKE ?", "%.SH", "%.SZ")
+	} else if scope == PortfolioScopeHK {
+		query = query.Where("symbol LIKE ?", "%.HK")
+	}
+	var userIDs []string
+	if err := query.Order("user_id ASC").Pluck("user_id", &userIDs).Error; err != nil {
+		return nil, err
+	}
+	return userIDs, nil
+}
+
+func (r *Repository) HasDailySnapshot(ctx context.Context, userID, scope, snapshotDate string) (bool, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Model(&PortfolioDailySnapshotRecord{}).
+		Where("user_id = ? AND scope = ? AND snapshot_date = ?", userID, scope, snapshotDate).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (r *Repository) ListDailySnapshots(ctx context.Context, userID string, scopes []string, fromDate string) ([]PortfolioDailySnapshotRecord, error) {

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -57,13 +59,21 @@ func (p *liveSnapshotProvider) FetchDetailedSnapshots(ctx context.Context, symbo
 }
 
 type Service struct {
-	repo             *Repository
-	snapshotProvider portfolioSnapshotProvider
-	historyReader    attributionHistoryReader
+	repo                  *Repository
+	snapshotProvider      portfolioSnapshotProvider
+	historyReader         attributionHistoryReader
+	nowFunc               func() time.Time
+	calendarBackfillLocks sync.Map
 }
 
+const (
+	portfolioSnapshotDataVersion           = 1
+	portfolioCalendarBackfillTimeout       = 1500 * time.Millisecond
+	portfolioCalendarBackfillMaxDaysPerHit = 8
+)
+
 func NewService(repo *Repository) *Service {
-	return &Service{repo: repo, snapshotProvider: newLiveSnapshotProvider()}
+	return &Service{repo: repo, snapshotProvider: newLiveSnapshotProvider(), nowFunc: time.Now}
 }
 
 func (s *Service) ListByUser(ctx context.Context, userID string) ([]PortfolioItem, error) {
@@ -453,6 +463,92 @@ func (s *Service) buildHistoricalPortfolioSnapshots(ctx context.Context, userID 
 	if len(events) == 0 {
 		return &historicalPortfolioSnapshots{}, nil
 	}
+	startDate := events[0].TradeDate
+	endDate := time.Now().In(shanghaiLocation()).Format("2006-01-02")
+	return s.buildHistoricalPortfolioSnapshotsInRange(ctx, userID, events, startDate, endDate, historyReader)
+}
+
+func (s *Service) buildHistoricalPortfolioSnapshotsInRange(ctx context.Context, userID string, events []PortfolioEventRecord, startDate, endDate string, historyReader attributionHistoryReader) (*historicalPortfolioSnapshots, error) {
+	engine, err := s.prepareHistoricalSnapshotEngine(ctx, events, startDate, endDate, historyReader)
+	if err != nil {
+		return nil, err
+	}
+	if engine == nil {
+		return &historicalPortfolioSnapshots{}, nil
+	}
+	return engine.buildRange(userID), nil
+}
+
+func (s *Service) rebuildHistoricalSnapshotForUserScopeDate(ctx context.Context, userID, scope, snapshotDate, sourceType, jobRunID string) (*PortfolioDailySnapshotRecord, []PortfolioPositionDailySnapshotRecord, bool, error) {
+	scope = strings.ToUpper(strings.TrimSpace(scope))
+	if scope != PortfolioScopeAShare && scope != PortfolioScopeHK {
+		return nil, nil, false, fmt.Errorf("invalid snapshot scope: %s", scope)
+	}
+	snapshotDate = strings.TrimSpace(snapshotDate)
+	if snapshotDate == "" {
+		return nil, nil, false, fmt.Errorf("snapshot date is required")
+	}
+	if _, err := time.ParseInLocation("2006-01-02", snapshotDate, shanghaiLocation()); err != nil {
+		return nil, nil, false, fmt.Errorf("invalid snapshot date: %s", snapshotDate)
+	}
+	events, err := s.repo.ListActiveEventsByUserAsc(ctx, userID)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if len(events) == 0 {
+		return nil, nil, false, nil
+	}
+	engine, err := s.prepareHistoricalSnapshotEngine(ctx, events, events[0].TradeDate, snapshotDate, nil)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if engine == nil {
+		return nil, nil, false, nil
+	}
+	scopeRecord, positions, ok := engine.buildSingleDay(userID, snapshotDate, scope, s.nowFunc().UTC())
+	if !ok {
+		return nil, nil, false, nil
+	}
+	scopeRecord.SourceType = defaultSnapshotSourceType(sourceType)
+	scopeRecord.DataVersion = portfolioSnapshotDataVersion
+	scopeRecord.ComputedAt = s.nowFunc().UTC()
+	scopeRecord.JobRunID = strings.TrimSpace(jobRunID)
+	if err := s.repo.UpsertDailySnapshot(ctx, scopeRecord); err != nil {
+		return nil, nil, false, err
+	}
+	if len(positions) > 0 {
+		if err := s.repo.UpsertPositionDailySnapshots(ctx, positions); err != nil {
+			return nil, nil, false, err
+		}
+	}
+	return scopeRecord, positions, true, nil
+}
+
+type historicalSnapshotEngine struct {
+	eventsByDate    map[string][]PortfolioEventRecord
+	dates           []string
+	symbols         []string
+	orderedScopes   []string
+	profileBySymbol map[string]SecurityProfileRecord
+	barsBySymbol    map[string][]DailyBarRecord
+	initialStates   map[string]*attributionPositionState
+}
+
+func (s *Service) prepareHistoricalSnapshotEngine(ctx context.Context, events []PortfolioEventRecord, startDate, endDate string, historyReader attributionHistoryReader) (*historicalSnapshotEngine, error) {
+	if len(events) == 0 {
+		return nil, nil
+	}
+	startDate = strings.TrimSpace(startDate)
+	endDate = strings.TrimSpace(endDate)
+	if startDate == "" {
+		startDate = events[0].TradeDate
+	}
+	if endDate == "" {
+		endDate = time.Now().In(shanghaiLocation()).Format("2006-01-02")
+	}
+	if startDate > endDate {
+		return nil, nil
+	}
 	if historyReader == nil {
 		historyReader = s.historyReader
 	}
@@ -471,13 +567,18 @@ func (s *Service) buildHistoricalPortfolioSnapshots(ctx context.Context, userID 
 	for _, item := range profiles {
 		profileBySymbol[item.Symbol] = item
 	}
-
-	eventsByDate := map[string][]PortfolioEventRecord{}
+	engine := &historicalSnapshotEngine{
+		eventsByDate:    map[string][]PortfolioEventRecord{},
+		profileBySymbol: profileBySymbol,
+		barsBySymbol:    map[string][]DailyBarRecord{},
+		initialStates:   map[string]*attributionPositionState{},
+	}
 	dateSet := map[string]struct{}{}
-	stateBySymbol := map[string]*attributionPositionState{}
 	symbolSet := map[string]struct{}{}
-
 	for _, event := range events {
+		if event.TradeDate == "" || event.TradeDate > endDate {
+			continue
+		}
 		normalizedSymbol, exchange := normalizeAttributionSymbol(event.Symbol)
 		if normalizedSymbol == "" {
 			continue
@@ -492,34 +593,20 @@ func (s *Service) buildHistoricalPortfolioSnapshots(ctx context.Context, userID 
 		if exchangeToScope(exchange) == "" {
 			continue
 		}
-		if stateBySymbol[normalizedSymbol] == nil {
-			currencyCode, currencySymbol := resolveCurrency(exchange)
-			stateBySymbol[normalizedSymbol] = &attributionPositionState{
-				OriginalSymbol:   event.Symbol,
-				NormalizedSymbol: normalizedSymbol,
-				Name:             coalesceString(profile.Name, normalizedSymbol),
-				Exchange:         exchange,
-				CurrencyCode:     currencyCode,
-				CurrencySymbol:   currencySymbol,
-				CostSource:       CostSourceSystem,
-				SectorCode:       profile.SectorCode,
-				SectorName:       normalizeSectorName(profile.SectorName),
-				BenchmarkCode:    resolveBenchmarkCode(exchange, profile.BenchmarkCode),
-			}
+		if engine.initialStates[normalizedSymbol] == nil {
+			engine.initialStates[normalizedSymbol] = buildHistoricalSnapshotState(event.Symbol, normalizedSymbol, exchange, profile)
 		}
-		eventsByDate[event.TradeDate] = append(eventsByDate[event.TradeDate], event)
-		dateSet[event.TradeDate] = struct{}{}
+		engine.eventsByDate[event.TradeDate] = append(engine.eventsByDate[event.TradeDate], event)
 		symbolSet[normalizedSymbol] = struct{}{}
 	}
-	result := &historicalPortfolioSnapshots{}
 	if len(symbolSet) == 0 {
-		return result, nil
+		return nil, nil
 	}
-
-	symbols := sortedStringKeys(symbolSet)
-	barCodeToSymbol := make(map[string]string, len(symbols))
-	barCodes := make([]string, 0, len(symbols))
-	for _, symbol := range symbols {
+	engine.symbols = sortedStringKeys(symbolSet)
+	engine.orderedScopes = scopeListForAttribution(PortfolioScopeAll, engine.symbols)
+	barCodeToSymbol := make(map[string]string, len(engine.symbols))
+	barCodes := make([]string, 0, len(engine.symbols))
+	for _, symbol := range engine.symbols {
 		code := historyCodeFromSymbol(symbol)
 		if code == "" {
 			continue
@@ -527,64 +614,105 @@ func (s *Service) buildHistoricalPortfolioSnapshots(ctx context.Context, userID 
 		barCodeToSymbol[code] = symbol
 		barCodes = append(barCodes, code)
 	}
-	startDate := events[0].TradeDate
-	endDate := time.Now().In(shanghaiLocation()).Format("2006-01-02")
 	barsByCode, err := historyReader.GetDailyBars(ctx, barCodes, shiftDateString(startDate, -7), endDate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to rebuild portfolio history: %w", err)
 	}
-	barsBySymbol := map[string][]DailyBarRecord{}
 	for code, bars := range barsByCode {
 		symbol := barCodeToSymbol[code]
 		if symbol == "" {
 			continue
 		}
-		barsBySymbol[symbol] = bars
+		engine.barsBySymbol[symbol] = bars
 		for _, bar := range bars {
 			if bar.Date >= startDate && bar.Date <= endDate {
 				dateSet[bar.Date] = struct{}{}
 			}
 		}
 	}
-	dates := sortedStringKeys(dateSet)
-	if len(dates) == 0 {
-		return result, nil
+	for date := range engine.eventsByDate {
+		if date >= startDate && date <= endDate {
+			dateSet[date] = struct{}{}
+		}
 	}
+	engine.dates = sortedStringKeys(dateSet)
+	if len(engine.dates) == 0 {
+		return nil, nil
+	}
+	return engine, nil
+}
 
-	rangeStates := cloneAttributionStates(stateBySymbol)
+func buildHistoricalSnapshotState(originalSymbol, normalizedSymbol, exchange string, profile SecurityProfileRecord) *attributionPositionState {
+	currencyCode, currencySymbol := resolveCurrency(exchange)
+	return &attributionPositionState{
+		OriginalSymbol:   originalSymbol,
+		NormalizedSymbol: normalizedSymbol,
+		Name:             coalesceString(profile.Name, normalizedSymbol),
+		Exchange:         exchange,
+		CurrencyCode:     currencyCode,
+		CurrencySymbol:   currencySymbol,
+		CostSource:       CostSourceSystem,
+		SectorCode:       profile.SectorCode,
+		SectorName:       normalizeSectorName(profile.SectorName),
+		BenchmarkCode:    resolveBenchmarkCode(exchange, profile.BenchmarkCode),
+	}
+}
+
+func (e *historicalSnapshotEngine) buildRange(userID string) *historicalPortfolioSnapshots {
+	result := &historicalPortfolioSnapshots{}
+	now := time.Now().UTC()
+	for _, date := range e.dates {
+		records, positions := e.computeDay(userID, date, now)
+		for _, scope := range e.orderedScopes {
+			record := records[scope]
+			if record == nil {
+				continue
+			}
+			result.DailyScopeSnapshots = append(result.DailyScopeSnapshots, *record)
+		}
+		result.DailyPositionSnapshots = append(result.DailyPositionSnapshots, positions...)
+	}
+	return result
+}
+
+func (e *historicalSnapshotEngine) buildSingleDay(userID, snapshotDate, scope string, now time.Time) (*PortfolioDailySnapshotRecord, []PortfolioPositionDailySnapshotRecord, bool) {
+	records, positions := e.computeDay(userID, snapshotDate, now)
+	record := records[scope]
+	if record == nil {
+		return nil, nil, false
+	}
+	filtered := make([]PortfolioPositionDailySnapshotRecord, 0, len(positions))
+	for _, item := range positions {
+		if exchangeToScope(item.Exchange) == scope {
+			filtered = append(filtered, item)
+		}
+	}
+	return record, filtered, true
+}
+
+func (e *historicalSnapshotEngine) computeDay(userID, targetDate string, now time.Time) (map[string]*PortfolioDailySnapshotRecord, []PortfolioPositionDailySnapshotRecord) {
+	rangeStates := cloneAttributionStates(e.initialStates)
 	realizedByScope := map[string]float64{PortfolioScopeAShare: 0, PortfolioScopeHK: 0}
 	realizedBySymbol := map[string]float64{}
-	orderedScopes := scopeListForAttribution(PortfolioScopeAll, symbols)
-	now := time.Now().UTC()
-
-	for _, date := range dates {
-		for _, event := range eventsByDate[date] {
+	for _, date := range e.dates {
+		if date > targetDate {
+			break
+		}
+		for _, event := range e.eventsByDate[date] {
 			normalizedSymbol, exchange := normalizeAttributionSymbol(event.Symbol)
 			if normalizedSymbol == "" {
 				continue
 			}
 			state := rangeStates[normalizedSymbol]
 			if state == nil {
-				profile := profileBySymbol[normalizedSymbol]
+				profile := e.profileBySymbol[normalizedSymbol]
 				if strings.TrimSpace(exchange) == "" {
 					exchange = profile.Exchange
 				}
 				if strings.TrimSpace(exchange) == "" {
 					exchange = live.ExchangeFromSymbol(normalizedSymbol)
 				}
-				currencyCode, currencySymbol := resolveCurrency(exchange)
-				state = &attributionPositionState{
-					OriginalSymbol:   event.Symbol,
-					NormalizedSymbol: normalizedSymbol,
-					Name:             coalesceString(profile.Name, normalizedSymbol),
-					Exchange:         exchange,
-					CurrencyCode:     currencyCode,
-					CurrencySymbol:   currencySymbol,
-					CostSource:       CostSourceSystem,
-					SectorCode:       profile.SectorCode,
-					SectorName:       normalizeSectorName(profile.SectorName),
-					BenchmarkCode:    resolveBenchmarkCode(exchange, profile.BenchmarkCode),
-				}
+				state = buildHistoricalSnapshotState(event.Symbol, normalizedSymbol, exchange, profile)
 				rangeStates[normalizedSymbol] = state
 			}
 			applyAttributionEventToState(state, event)
@@ -592,94 +720,83 @@ func (s *Service) buildHistoricalPortfolioSnapshots(ctx context.Context, userID 
 			realizedByScope[scope] += event.RealizedPnlAmount
 			realizedBySymbol[normalizedSymbol] += event.RealizedPnlAmount
 		}
-
-		dayPositions := make([]*PortfolioPositionDailySnapshotRecord, 0, len(symbols))
-		totalByScope := map[string]float64{}
-		scopeRecords := map[string]*PortfolioDailySnapshotRecord{}
-
-		for _, symbol := range symbols {
-			state := rangeStates[symbol]
-			if state == nil || state.Shares <= 0 {
-				continue
-			}
-			closePrice, prevClose, ok := lookupBarCloseForDate(barsBySymbol[symbol], date)
-			if !ok || closePrice <= 0 {
-				continue
-			}
-			scope := exchangeToScope(state.Exchange)
-			if scope == "" {
-				continue
-			}
-			marketValue := state.Shares * closePrice
-			unrealized := marketValue - state.TotalCostAmount
-			todayPnl := 0.0
-			if prevClose > 0 {
-				todayPnl = state.Shares * (closePrice - prevClose)
-			}
-			snapshot := &PortfolioPositionDailySnapshotRecord{
-				ID:                  uuid.New().String(),
-				UserID:              userID,
-				SnapshotDate:        date,
-				Symbol:              state.NormalizedSymbol,
-				Exchange:            state.Exchange,
-				CurrencyCode:        state.CurrencyCode,
-				CurrencySymbol:      state.CurrencySymbol,
-				Name:                state.Name,
-				Shares:              state.Shares,
-				AvgCostPrice:        state.AvgCostPrice,
-				TotalCostAmount:     state.TotalCostAmount,
-				ClosePrice:          closePrice,
-				PrevClosePrice:      prevClose,
-				MarketValueAmount:   marketValue,
-				UnrealizedPnlAmount: unrealized,
-				RealizedPnlCum:      realizedBySymbol[symbol],
-				SectorCode:          state.SectorCode,
-				SectorName:          coalesceString(state.SectorName, "未分类"),
-				BenchmarkCode:       state.BenchmarkCode,
-				CreatedAt:           now,
-				UpdatedAt:           now,
-			}
-			dayPositions = append(dayPositions, snapshot)
-			totalByScope[scope] += marketValue
-
-			record := scopeRecords[scope]
-			if record == nil {
-				record = &PortfolioDailySnapshotRecord{
-					ID:           uuid.New().String(),
-					UserID:       userID,
-					Scope:        scope,
-					SnapshotDate: date,
-					CurrencyCode: state.CurrencyCode,
-					CreatedAt:    now,
-					UpdatedAt:    now,
-				}
-				scopeRecords[scope] = record
-			}
-			record.MarketValueAmount += marketValue
-			record.TotalCostAmount += state.TotalCostAmount
-			record.UnrealizedPnlAmount += unrealized
-			record.RealizedPnlAmount = realizedByScope[scope]
-			record.TodayPnlAmount += todayPnl
-			record.PositionCount++
+	}
+	dayPositions := make([]PortfolioPositionDailySnapshotRecord, 0, len(e.symbols))
+	totalByScope := map[string]float64{}
+	scopeRecords := map[string]*PortfolioDailySnapshotRecord{}
+	for _, symbol := range e.symbols {
+		state := rangeStates[symbol]
+		if state == nil || state.Shares <= 0 {
+			continue
 		}
-
-		for _, snapshot := range dayPositions {
-			scope := exchangeToScope(snapshot.Exchange)
-			if totalByScope[scope] > 0 {
-				snapshot.PositionWeightRatio = snapshot.MarketValueAmount / totalByScope[scope]
-			}
-			result.DailyPositionSnapshots = append(result.DailyPositionSnapshots, *snapshot)
+		closePrice, prevClose, ok := lookupBarCloseForDate(e.barsBySymbol[symbol], targetDate)
+		if !ok || closePrice <= 0 {
+			continue
 		}
-		for _, scope := range orderedScopes {
-			record := scopeRecords[scope]
-			if record == nil {
-				continue
+		scope := exchangeToScope(state.Exchange)
+		if scope == "" {
+			continue
+		}
+		marketValue := state.Shares * closePrice
+		unrealized := marketValue - state.TotalCostAmount
+		todayPnl := 0.0
+		if prevClose > 0 {
+			todayPnl = state.Shares * (closePrice - prevClose)
+		}
+		dayPositions = append(dayPositions, PortfolioPositionDailySnapshotRecord{
+			ID:                  uuid.New().String(),
+			UserID:              userID,
+			SnapshotDate:        targetDate,
+			Symbol:              state.NormalizedSymbol,
+			Exchange:            state.Exchange,
+			CurrencyCode:        state.CurrencyCode,
+			CurrencySymbol:      state.CurrencySymbol,
+			Name:                state.Name,
+			Shares:              state.Shares,
+			AvgCostPrice:        state.AvgCostPrice,
+			TotalCostAmount:     state.TotalCostAmount,
+			ClosePrice:          closePrice,
+			PrevClosePrice:      prevClose,
+			MarketValueAmount:   marketValue,
+			UnrealizedPnlAmount: unrealized,
+			RealizedPnlCum:      realizedBySymbol[symbol],
+			SectorCode:          state.SectorCode,
+			SectorName:          coalesceString(state.SectorName, "未分类"),
+			BenchmarkCode:       state.BenchmarkCode,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		})
+		totalByScope[scope] += marketValue
+		record := scopeRecords[scope]
+		if record == nil {
+			record = &PortfolioDailySnapshotRecord{
+				ID:           uuid.New().String(),
+				UserID:       userID,
+				Scope:        scope,
+				SnapshotDate: targetDate,
+				CurrencyCode: state.CurrencyCode,
+				CreatedAt:    now,
+				UpdatedAt:    now,
 			}
-			record.TotalPnlAmount = record.RealizedPnlAmount + record.UnrealizedPnlAmount
-			result.DailyScopeSnapshots = append(result.DailyScopeSnapshots, *record)
+			scopeRecords[scope] = record
+		}
+		record.MarketValueAmount += marketValue
+		record.TotalCostAmount += state.TotalCostAmount
+		record.UnrealizedPnlAmount += unrealized
+		record.RealizedPnlAmount = realizedByScope[scope]
+		record.TodayPnlAmount += todayPnl
+		record.PositionCount++
+	}
+	for i := range dayPositions {
+		scope := exchangeToScope(dayPositions[i].Exchange)
+		if totalByScope[scope] > 0 {
+			dayPositions[i].PositionWeightRatio = dayPositions[i].MarketValueAmount / totalByScope[scope]
 		}
 	}
-	return result, nil
+	for _, record := range scopeRecords {
+		record.TotalPnlAmount = record.RealizedPnlAmount + record.UnrealizedPnlAmount
+	}
+	return scopeRecords, dayPositions
 }
 
 func (s *Service) EnsureInitEventFromSnapshot(ctx context.Context, userID, symbol string) error {
@@ -898,6 +1015,9 @@ func (s *Service) GetPnlCalendar(ctx context.Context, userID string, query Portf
 	}
 	startDate, endDate, dayCount := monthDateRange(query.Year, query.Month)
 	scopes := []string{query.Scope}
+	if err := s.ensurePnlCalendarSnapshots(ctx, userID, query.Scope, startDate, endDate); err != nil {
+		log.Printf("portfolio pnl calendar backfill skipped for user=%s scope=%s month=%04d-%02d: %v", userID, query.Scope, query.Year, query.Month, err)
+	}
 	snapshots, err := s.repo.ListDailySnapshotsInRange(ctx, userID, scopes, startDate, endDate)
 	if err != nil {
 		return nil, err
@@ -1060,7 +1180,12 @@ func (s *Service) loadPortfolioBaseData(ctx context.Context, userID string) (*po
 }
 
 func (s *Service) persistDailySnapshots(ctx context.Context, userID string, positions []PortfolioPositionItem) error {
-	today := time.Now().In(shanghaiLocation()).Format("2006-01-02")
+	today := s.nowFunc().In(shanghaiLocation()).Format("2006-01-02")
+	return s.persistDailySnapshotsForDate(ctx, userID, positions, today, PortfolioSnapshotSourceScheduled, "")
+}
+
+func (s *Service) persistDailySnapshotsForDate(ctx context.Context, userID string, positions []PortfolioPositionItem, snapshotDate, sourceType, jobRunID string) error {
+	now := s.nowFunc().UTC()
 	blocks := map[string]*PortfolioMarketAmountBlock{}
 	for _, item := range positions {
 		scope := exchangeToScope(item.Exchange)
@@ -1096,7 +1221,7 @@ func (s *Service) persistDailySnapshots(ctx context.Context, userID string, posi
 			ID:                  uuid.New().String(),
 			UserID:              userID,
 			Scope:               block.Scope,
-			SnapshotDate:        today,
+			SnapshotDate:        snapshotDate,
 			CurrencyCode:        block.CurrencyCode,
 			MarketValueAmount:   block.MarketValueAmount,
 			TotalCostAmount:     block.TotalCostAmount,
@@ -1105,8 +1230,12 @@ func (s *Service) persistDailySnapshots(ctx context.Context, userID string, posi
 			TotalPnlAmount:      block.TotalPnlAmount,
 			TodayPnlAmount:      block.TodayPnlAmount,
 			PositionCount:       block.PositionCount,
-			CreatedAt:           time.Now().UTC(),
-			UpdatedAt:           time.Now().UTC(),
+			SourceType:          defaultSnapshotSourceType(sourceType),
+			DataVersion:         portfolioSnapshotDataVersion,
+			ComputedAt:          now,
+			JobRunID:            strings.TrimSpace(jobRunID),
+			CreatedAt:           now,
+			UpdatedAt:           now,
 		}
 		if err := s.repo.UpsertDailySnapshot(ctx, record); err != nil {
 			return err
@@ -1325,6 +1454,183 @@ func computeDailyPnlRate(pnlAmount, marketValueAmount, holdingPnlAmount, totalCo
 	}
 	value := pnlAmount / base
 	return &value
+}
+
+func defaultSnapshotSourceType(sourceType string) string {
+	sourceType = strings.TrimSpace(sourceType)
+	if sourceType == "" {
+		return PortfolioSnapshotSourceScheduled
+	}
+	return sourceType
+}
+
+func (s *Service) ensurePnlCalendarSnapshots(ctx context.Context, userID, scope, startDate, endDate string) error {
+	lockKey := strings.Join([]string{userID, scope, startDate, endDate}, ":")
+	lockValue, _ := s.calendarBackfillLocks.LoadOrStore(lockKey, &sync.Mutex{})
+	mutex := lockValue.(*sync.Mutex)
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	limitedCtx, cancel := context.WithTimeout(ctx, portfolioCalendarBackfillTimeout)
+	defer cancel()
+	tradingDates, err := s.resolvePnlCalendarTradingDates(limitedCtx, userID, scope, startDate, endDate)
+	if err != nil {
+		return err
+	}
+	if len(tradingDates) == 0 {
+		return nil
+	}
+	snapshots, err := s.repo.ListDailySnapshotsInRange(limitedCtx, userID, []string{scope}, startDate, endDate)
+	if err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(snapshots))
+	for _, snapshot := range snapshots {
+		existing[snapshot.SnapshotDate] = struct{}{}
+	}
+	missing := make([]string, 0)
+	for date := range tradingDates {
+		if _, ok := existing[date]; ok {
+			continue
+		}
+		missing = append(missing, date)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	if len(missing) > portfolioCalendarBackfillMaxDaysPerHit {
+		missing = missing[:portfolioCalendarBackfillMaxDaysPerHit]
+	}
+	for _, date := range missing {
+		if limitedCtx.Err() != nil {
+			return limitedCtx.Err()
+		}
+		hasSnapshot, err := s.repo.HasDailySnapshot(limitedCtx, userID, scope, date)
+		if err != nil {
+			return err
+		}
+		if hasSnapshot {
+			continue
+		}
+		if _, err := s.RebuildDailySnapshotForUser(limitedCtx, userID, scope, date, PortfolioSnapshotSourceQueryBackfill, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) RebuildDailySnapshotForUser(ctx context.Context, userID, scope, snapshotDate, sourceType, jobRunID string) (bool, error) {
+	_, _, ok, err := s.rebuildHistoricalSnapshotForUserScopeDate(ctx, userID, scope, snapshotDate, sourceType, jobRunID)
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
+func (s *Service) RunDailyMarketSnapshot(ctx context.Context, scope, targetDate string, scheduledTime time.Time, triggerSource string) (*PortfolioSnapshotJobRunRecord, error) {
+	scope = strings.ToUpper(strings.TrimSpace(scope))
+	if scope != PortfolioScopeAShare && scope != PortfolioScopeHK {
+		return nil, fmt.Errorf("invalid snapshot scope: %s", scope)
+	}
+	targetDate = strings.TrimSpace(targetDate)
+	if targetDate == "" {
+		targetDate = s.nowFunc().In(shanghaiLocation()).Format("2006-01-02")
+	}
+	now := s.nowFunc().UTC()
+	if scheduledTime.IsZero() {
+		scheduledTime = now
+	}
+	jobRun := &PortfolioSnapshotJobRunRecord{
+		ID:            uuid.New().String(),
+		JobType:       PortfolioSnapshotJobTypeDailyMarket,
+		Scope:         scope,
+		TargetDate:    targetDate,
+		ScheduledTime: scheduledTime.UTC(),
+		StartedAt:     now,
+		Status:        PortfolioSnapshotJobStatusRunning,
+		TriggerSource: strings.TrimSpace(triggerSource),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if jobRun.TriggerSource == "" {
+		jobRun.TriggerSource = PortfolioSnapshotJobTriggerScheduler
+	}
+	if err := s.repo.CreateSnapshotJobRun(ctx, jobRun); err != nil {
+		return nil, err
+	}
+	userIDs, err := s.repo.ListUsersByScopeWithPositions(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]PortfolioSnapshotJobRunItemRecord, 0, len(userIDs))
+	written := 0
+	failed := 0
+	for _, userID := range userIDs {
+		status := PortfolioSnapshotJobItemStatusSuccess
+		snapshotWritten := false
+		errorMessage := ""
+		if ok, runErr := s.RebuildDailySnapshotForUser(ctx, userID, scope, targetDate, PortfolioSnapshotSourceScheduled, jobRun.ID); runErr != nil {
+			status = PortfolioSnapshotJobItemStatusFailed
+			errorMessage = runErr.Error()
+			failed++
+		} else if !ok {
+			status = PortfolioSnapshotJobItemStatusSkipped
+		} else {
+			snapshotWritten = true
+			written++
+		}
+		items = append(items, PortfolioSnapshotJobRunItemRecord{
+			ID:              uuid.New().String(),
+			JobRunID:        jobRun.ID,
+			UserID:          userID,
+			Scope:           scope,
+			TargetDate:      targetDate,
+			Status:          status,
+			SnapshotWritten: snapshotWritten,
+			ErrorMessage:    errorMessage,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		})
+	}
+	if err := s.repo.CreateSnapshotJobRunItems(ctx, items); err != nil {
+		return nil, err
+	}
+	finishedAt := s.nowFunc().UTC()
+	jobRun.FinishedAt = &finishedAt
+	jobRun.UserCountTotal = len(userIDs)
+	jobRun.UserCountSuccess = len(userIDs) - failed
+	jobRun.UserCountFailed = failed
+	jobRun.SnapshotCountWritten = written
+	jobRun.UpdatedAt = finishedAt
+	jobRun.Status = PortfolioSnapshotJobStatusSuccess
+	if len(userIDs) == 0 {
+		jobRun.Status = PortfolioSnapshotJobStatusSkipped
+		jobRun.Message = "no users with positions"
+	} else if failed > 0 && failed < len(userIDs) {
+		jobRun.Status = PortfolioSnapshotJobStatusPartialFailed
+		jobRun.Message = "partial failures occurred"
+	} else if failed == len(userIDs) {
+		jobRun.Status = PortfolioSnapshotJobStatusFailed
+		jobRun.Message = "all user snapshot rebuilds failed"
+		jobRun.UserCountSuccess = 0
+	}
+	if err := s.repo.UpdateSnapshotJobRun(ctx, jobRun.ID, map[string]any{
+		"finished_at":            finishedAt,
+		"status":                 jobRun.Status,
+		"user_count_total":       jobRun.UserCountTotal,
+		"user_count_success":     jobRun.UserCountSuccess,
+		"user_count_failed":      jobRun.UserCountFailed,
+		"snapshot_count_written": jobRun.SnapshotCountWritten,
+		"message":                jobRun.Message,
+		"updated_at":             finishedAt,
+	}); err != nil {
+		return nil, err
+	}
+	return jobRun, nil
 }
 
 func defaultCurrencyCodeForScope(scope string) string {

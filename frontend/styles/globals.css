@@ -113,6 +113,22 @@ html.theme-transition *::after {
   transition: background-color 0.3s ease, border-color 0.3s ease, color 0.15s ease !important;
 }
 
+.portfolio-month-input {
+  color-scheme: light;
+}
+
+.dark .portfolio-month-input {
+  color-scheme: dark;
+}
+
+.dark .portfolio-month-input::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(1.5);
+}
+
+.dark .portfolio-month-input {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
 /* ================================================================
    AI 按钮呼吸光晕动画
    ================================================================ */

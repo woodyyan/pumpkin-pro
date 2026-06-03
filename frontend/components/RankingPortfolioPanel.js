@@ -461,9 +461,9 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
 
             <div className="rounded-2xl border border-border/70 bg-[var(--color-bg-hover)] p-3.5 xl:h-full">
               <div className="text-sm font-medium text-foreground">当前成分股</div>
-              {currentConstituentHint ? <div className="mt-1 text-[11px] leading-5 text-foreground/42">{currentConstituentHint}</div> : null}
-              {meta?.source_trade_date ? <div className="mt-1 text-[11px] leading-5 text-foreground/42">收益曲线截至：{formatCloseDateLabel(meta?.source_trade_date, meta?.ranking_time)}，按收盘价模拟调仓</div> : null}
-              {meta?.is_same_batch_as_performance === false && meta?.batch_mismatch_reason ? <div className="mt-2 rounded-xl border border-sky-300/20 bg-sky-500/10 px-3 py-2 text-xs text-sky-200">{meta.batch_mismatch_reason}</div> : null}
+              {currentConstituentHint ? <div className="mt-1 text-[11px] leading-5 text-foreground/56 dark:text-foreground/42">{currentConstituentHint}</div> : null}
+              {meta?.source_trade_date ? <div className="mt-1 text-[11px] leading-5 text-foreground/56 dark:text-foreground/42">收益曲线截至：{formatCloseDateLabel(meta?.source_trade_date, meta?.ranking_time)}，按收盘价模拟调仓</div> : null}
+              {meta?.is_same_batch_as_performance === false && meta?.batch_mismatch_reason ? <div className="mt-2 rounded-xl border border-sky-400/35 bg-sky-100 text-sky-700 dark:border-sky-300/20 dark:bg-sky-500/10 px-3 py-2 text-xs dark:text-sky-200">{meta.batch_mismatch_reason}</div> : null}
 
               {meta?.has_shortfall ? (
                 <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
@@ -612,8 +612,8 @@ function LatestRebalanceDisclosure({ rebalance }) {
 function LatestRebalanceRow({ item }) {
   const isSell = String(item?.action || '').toLowerCase() === 'sell'
   const badgeClass = isSell
-    ? 'border-positive/20 bg-positive/10 text-positive'
-    : 'border-amber-300/20 bg-amber-500/10 text-amber-200'
+    ? 'border-emerald-400/35 bg-emerald-100 text-emerald-700 dark:border-positive/20 dark:bg-positive/10 dark:text-positive'
+    : 'border-amber-400/40 bg-amber-100 text-amber-700 dark:border-amber-300/20 dark:bg-amber-500/10 dark:text-amber-200'
 
   return (
     <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-2.5">

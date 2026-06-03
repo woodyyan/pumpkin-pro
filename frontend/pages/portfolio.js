@@ -397,20 +397,20 @@ function MarketOverviewCard({ block }) {
         />
         <SummaryRow
           label={
-            <span className="relative inline-flex items-center rounded-lg border border-primary/35 bg-primary/[0.10] shadow-[0_0_0_1px_rgba(255,255,255,0.04)] transition hover:border-primary/60 hover:bg-primary/[0.16] focus-within:border-primary/70 focus-within:ring-2 focus-within:ring-primary/20">
+            <span className="relative inline-flex items-center rounded-lg border border-border bg-white px-0.5 transition hover:border-[var(--color-border-strong)] focus-within:border-[var(--color-border-strong)] focus-within:ring-2 focus-within:ring-black/5 dark:border-white/14 dark:bg-[#2a2f38] dark:hover:border-white/22 dark:focus-within:border-white/22 dark:focus-within:ring-white/10">
               <select
                 value={selectedPnl}
                 onChange={(e) => setSelectedPnl(e.target.value)}
-                className="appearance-none bg-transparent py-1 pl-2 pr-6 text-[11px] font-semibold text-foreground-muted cursor-pointer focus:outline-none"
+                className="appearance-none bg-transparent py-1 pl-2 pr-6 text-[11px] font-semibold text-slate-900 dark:text-slate-200 cursor-pointer focus:outline-none"
                 aria-label="选择盈亏指标"
               >
                 {MARKET_PNL_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value} className="bg-[#1a1a1e] text-foreground-muted text-[11px]">
+                  <option key={opt.value} value={opt.value} className="bg-white text-slate-900 dark:bg-[#2a2f38] dark:text-slate-200 text-[11px]">
                     {opt.label}
                   </option>
                 ))}
               </select>
-              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-primary" aria-hidden="true">▾</span>
+              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 dark:text-slate-300" aria-hidden="true">▾</span>
             </span>
           }
           tooltip={FIELD_TIPS[pnlOption.tipKey]}

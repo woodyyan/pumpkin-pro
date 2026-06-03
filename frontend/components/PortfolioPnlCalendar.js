@@ -170,7 +170,7 @@ export default function PortfolioPnlCalendar({
               type="month"
               value={monthInputValue}
               onChange={handleMonthInput}
-              className="rounded-lg border border-border bg-[var(--color-bg-secondary)] px-2 py-1 text-xs text-foreground-muted outline-none transition focus:border-primary/40"
+              className="portfolio-month-input rounded-lg border border-border bg-[var(--color-bg-secondary)] dark:border-white/12 dark:bg-[#2a2f38] px-2 py-1 text-xs text-foreground-muted dark:text-foreground outline-none transition focus:border-primary/40"
             />
             <button type="button" onClick={handleNextMonth} className="rounded-lg px-2 py-1 text-xs text-foreground-dim transition hover:bg-[var(--color-bg-hover)] hover:text-foreground-muted">下一月</button>
           </div>

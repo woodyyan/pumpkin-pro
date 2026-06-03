@@ -1341,7 +1341,7 @@ export default function LiveTradingDetailPage() {
                     <div className="text-sm font-medium text-foreground/88">交易信号</div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${signalConfig.is_enabled ? 'border-emerald-400/60 dark:border-emerald-200/55 bg-emerald-100 dark:bg-emerald-400/22 text-emerald-700 dark:text-emerald-50 shadow-[0_0_0_1px_rgba(16,185,129,0.3)] dark:shadow-[0_0_0_1px_rgba(110,231,183,0.12)]' : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted'}`}>
+                    <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${signalConfig.is_enabled ? 'border-emerald-400/60 dark:border-primary/70 bg-emerald-100 dark:bg-white text-emerald-700 dark:text-primary shadow-[0_0_0_1px_rgba(16,185,129,0.3)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.18)]' : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted'}`}>
                       {signalStatusSummary}
                     </div>
                     <button

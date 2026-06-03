@@ -2966,7 +2966,7 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                         {/* 交易建议 */}
                         {analysis.trading_suggestions?.action_suggestion && (
                           <div className="rounded-lg border border-sky-400/15 bg-sky-500/[0.03] px-3.5 py-2.5">
-                            <span className="text-[11px] font-semibold text-sky-200/80">📋 交易建议</span>
+                            <span className="text-[11px] font-semibold text-sky-800 dark:text-sky-200/80">📋 交易建议</span>
                             <p className="text-[12px] leading-relaxed text-foreground-muted mt-1">{analysis.trading_suggestions.action_suggestion}</p>
                             <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 md:grid-cols-4">
                               {[
@@ -3000,9 +3000,9 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
                         {/* 催化因素 */}
                         {Array.isArray(analysis.key_catalysts) && analysis.key_catalysts.length > 0 && (
                           <div className="rounded-lg border border-sky-400/15 bg-sky-500/[0.02] px-3.5 py-2.5">
-                            <span className="text-[11px] font-semibold text-sky-200/70">✨ 潜在催化因素</span>
+                            <span className="text-[11px] font-semibold text-sky-800 dark:text-sky-200/70">✨ 潜在催化因素</span>
                             {analysis.key_catalysts.map((c, i) => (
-                              <p key={i} className="text-[11px] leading-relaxed text-sky-200/50 mt-1 first:mt-0">💡 {c}</p>
+                              <p key={i} className="mt-1 text-[11px] leading-relaxed text-sky-800 dark:text-sky-200/50 first:mt-0">💡 {c}</p>
                             ))}
                           </div>
                         )}

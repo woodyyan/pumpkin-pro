@@ -197,7 +197,7 @@ export default function AIAnalysisReportContent({
 
       {ts.action_suggestion && (
         <div className="mt-4 rounded-xl border border-sky-400/20 bg-sky-500/5 px-4 py-3">
-          <div className="mb-2 text-xs font-semibold text-sky-700 dark:text-sky-200/90">📋 交易建议</div>
+          <div className="mb-2 text-xs font-semibold text-sky-800 dark:text-sky-200/90">📋 交易建议</div>
           <p className="text-[13px] leading-relaxed text-foreground-muted">{ts.action_suggestion}</p>
           <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 md:grid-cols-4">
             <MetricMini label="建议买价" value={`${entryZone.low ?? '--'} ~ ${entryZone.high ?? '--'}`} emphasis tooltip="建议的买入价格区间" />
@@ -235,9 +235,9 @@ export default function AIAnalysisReportContent({
 
       {Array.isArray(analysis.key_catalysts) && analysis.key_catalysts.length > 0 && (
         <div className="mt-4 rounded-xl border border-sky-400/15 bg-sky-500/[0.04] px-4 py-3">
-          <div className="mb-2 text-xs font-semibold text-sky-700 dark:text-sky-200/90">✨ 潜在催化因素</div>
+          <div className="mb-2 text-xs font-semibold text-sky-800 dark:text-sky-200/90">✨ 潜在催化因素</div>
           {analysis.key_catalysts.map((item, index) => (
-            <p key={index} className="mt-1.5 text-[12px] leading-relaxed text-sky-700 dark:text-sky-200/65 first:mt-0">💡 {item}</p>
+            <p key={index} className="mt-1.5 text-[12px] leading-relaxed text-sky-800 dark:text-sky-200/65 first:mt-0">💡 {item}</p>
           ))}
         </div>
       )}

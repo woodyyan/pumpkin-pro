@@ -151,4 +151,20 @@ describe('live-trading AI entry copy and history labeling', () => {
     assert.match(symbolPageSource, /AI_HISTORY_SUBTITLE = '最近一次观点 \+ 5日验证'/)
     assert.match(symbolPageSource, /结果生成后会自动进入「AI分析历史」/)
   })
+
+  it('uses darker light-mode text colors for AI suggestion and catalysts in history cards', () => {
+    assert.match(symbolPageSource, /text-sky-800 dark:text-sky-200\/80">📋 交易建议/)
+    assert.match(symbolPageSource, /text-sky-800 dark:text-sky-200\/70">✨ 潜在催化因素/)
+    assert.match(symbolPageSource, /text-sky-800 dark:text-sky-200\/50 first:mt-0">💡 \{c\}/)
+  })
+})
+
+describe('AIAnalysisReportContent light mode contrast', () => {
+  const reportContentSource = readFileSync(new URL('../../components/AIAnalysisReportContent.js', import.meta.url), 'utf8')
+
+  it('uses darker light-mode text colors for trade suggestion and catalyst blocks', () => {
+    assert.match(reportContentSource, /text-sky-800 dark:text-sky-200\/90">📋 交易建议/)
+    assert.match(reportContentSource, /text-sky-800 dark:text-sky-200\/90">✨ 潜在催化因素/)
+    assert.match(reportContentSource, /text-sky-800 dark:text-sky-200\/65 first:mt-0">💡 \{item\}/)
+  })
 })

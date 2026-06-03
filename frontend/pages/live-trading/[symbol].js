@@ -69,6 +69,9 @@ const MA_LOOKBACK_DAYS = 240
 const SIGNAL_MAX_ATTEMPTS = 4
 const SIGNAL_BACKOFF_STEPS = ['1 分钟', '5 分钟', '15 分钟']
 const SHOW_COMPANY_ABOUT_ENTRY = false
+const AI_ENTRY_COPY_DESKTOP = 'AI 会给出看多/看空判断、交易建议、执行条件和风险提示'
+const AI_ENTRY_COPY_MOBILE = '看方向、给建议、提条件、控风险'
+const AI_HISTORY_SUBTITLE = '最近一次观点 + 5日验证'
 
 export function createPortfolioDangerMenuState() {
   return { open: false }
@@ -1283,26 +1286,33 @@ export default function LiveTradingDetailPage() {
               </div>
             </div>
             {privateAccessReady && (
-              <button
-                type="button"
-                disabled={aiAnalyzing || !snapshotPayload?.snapshot}
-                onClick={handleAIAnalysis}
-                className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold transition-all duration-300 ${
-                  aiAnalyzing
-                    ? 'cursor-wait bg-gradient-to-r from-indigo-500 to-violet-500 text-white opacity-80'
-                    : snapshotPayload?.snapshot
-                      ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-[0_0_16px_rgba(99,102,241,0.35)] hover:scale-[1.03] hover:shadow-[0_0_24px_rgba(99,102,241,0.5)] active:scale-[0.98] animate-ai-glow'
-                      : 'cursor-not-allowed border border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] text-foreground-dim opacity-50'
-                }`}
-                title={!snapshotPayload?.snapshot ? '等待行情数据加载' : 'AI 综合分析该股票'}
-              >
-                {aiAnalyzing ? (
-                  <>
-                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--color-border-strong)] border-t-white" />
-                    分析中 · {formatAIElapsedCompact(aiWaitElapsedSec)}
-                  </>
-                ) : '✨ AI 分析'}
-              </button>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:max-w-[340px] sm:items-end">
+                <button
+                  type="button"
+                  disabled={aiAnalyzing || !snapshotPayload?.snapshot}
+                  onClick={handleAIAnalysis}
+                  className={`inline-flex items-center gap-1.5 self-start rounded-xl px-4 py-2 text-xs font-semibold transition-all duration-300 sm:self-auto ${
+                    aiAnalyzing
+                      ? 'cursor-wait bg-gradient-to-r from-indigo-500 to-violet-500 text-white opacity-80'
+                      : snapshotPayload?.snapshot
+                        ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-[0_0_16px_rgba(99,102,241,0.35)] hover:scale-[1.03] hover:shadow-[0_0_24px_rgba(99,102,241,0.5)] active:scale-[0.98] animate-ai-glow'
+                        : 'cursor-not-allowed border border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] text-foreground-dim opacity-50'
+                  }`}
+                  title={!snapshotPayload?.snapshot ? '等待行情数据加载' : 'AI 综合分析该股票'}
+                >
+                  {aiAnalyzing ? (
+                    <>
+                      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--color-border-strong)] border-t-white" />
+                      分析中 · {formatAIElapsedCompact(aiWaitElapsedSec)}
+                    </>
+                  ) : '✨ AI 分析'}
+                </button>
+                <div className="w-full rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-2 text-left sm:max-w-[340px]">
+                  <div className="text-[11px] font-medium text-foreground-dim">AI分析能看什么</div>
+                  <p className="mt-1 hidden text-[12px] leading-5 text-foreground-muted md:block">{AI_ENTRY_COPY_DESKTOP}</p>
+                  <p className="mt-1 text-[12px] leading-5 text-foreground-muted md:hidden">{AI_ENTRY_COPY_MOBILE}</p>
+                </div>
+              </div>
             )}
           </div>
 
@@ -2287,7 +2297,7 @@ function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, ref
             </>
           ) : (
             <div className="mt-3 rounded-xl border border-dashed border-border bg-[var(--color-bg-hover)] px-3.5 py-3 text-[12px] leading-6 text-foreground-dim">
-              这是你近期的首次 AI 分析。结果生成后会自动进入「AI 分析历史」，之后这里会优先展示最近一次观点与 5 日验证结果。
+              这是你近期的首次 AI 分析。结果生成后会自动进入「AI分析历史」，之后这里会优先展示最近一次观点与 5日验证结果。
             </div>
           )}
         </div>
@@ -2614,10 +2624,15 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
         onClick={onToggleExpand}
         className="flex w-full items-center justify-between text-left"
       >
-        <div className="flex items-center gap-2">
-          <span className="text-sm">📋</span>
-          <span className="text-[13px] font-medium text-foreground-muted">分析历史</span>
-          <span className="rounded-full bg-[var(--color-bg-hover)] px-2 py-0.5 text-[10px] text-foreground-dim">{items.length} 条</span>
+        <div className="flex items-start gap-2">
+          <span className="mt-0.5 text-sm">📋</span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[13px] font-medium text-foreground-muted">AI分析历史</span>
+              <span className="rounded-full bg-[var(--color-bg-hover)] px-2 py-0.5 text-[10px] text-foreground-dim">{items.length} 条</span>
+            </div>
+            <p className="mt-1 text-[11px] text-foreground-dim">{AI_HISTORY_SUBTITLE}</p>
+          </div>
         </div>
         <span className={`text-foreground-dim transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>▼</span>
       </button>

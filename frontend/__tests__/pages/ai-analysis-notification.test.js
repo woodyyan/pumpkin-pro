@@ -136,3 +136,19 @@ describe('settings page webhook channel support', () => {
     assert.match(settingsPageSource, /JSON\.stringify\(webhookChannelMeta\.payloadPreview, null, 2\)/)
   })
 })
+
+describe('live-trading AI entry copy and history labeling', () => {
+  it('renders separate desktop and mobile copy for the AI entry', () => {
+    assert.match(symbolPageSource, /AI_ENTRY_COPY_DESKTOP = 'AI 会给出看多\/看空判断、交易建议、执行条件和风险提示'/)
+    assert.match(symbolPageSource, /AI_ENTRY_COPY_MOBILE = '看方向、给建议、提条件、控风险'/)
+    assert.match(symbolPageSource, /AI分析能看什么/)
+    assert.match(symbolPageSource, /hidden text-\[12px\] leading-5 text-foreground-muted md:block/)
+    assert.match(symbolPageSource, /text-\[12px\] leading-5 text-foreground-muted md:hidden/)
+  })
+
+  it('renames the history section to AI analysis history with the approved subtitle', () => {
+    assert.match(symbolPageSource, /AI分析历史/)
+    assert.match(symbolPageSource, /AI_HISTORY_SUBTITLE = '最近一次观点 \+ 5日验证'/)
+    assert.match(symbolPageSource, /结果生成后会自动进入「AI分析历史」/)
+  })
+})

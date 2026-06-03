@@ -13,7 +13,7 @@ describe('live trading signal summary section', () => {
     const foldedSegment = pageSource.slice(foldedStart, expandedStart)
 
     assert.match(foldedSegment, /signalStatusSummary/)
-    assert.match(foldedSegment, /shadow-\[0_0_0_1px_rgba\(110,231,183,0\.12\)\]/)
+    assert.match(foldedSegment, /dark:bg-white text-emerald-700 dark:text-primary/)
     assert.match(foldedSegment, /配置/)
     assert.doesNotMatch(foldedSegment, /role="switch"/)
     assert.doesNotMatch(foldedSegment, /signalConfigMeta.map/)

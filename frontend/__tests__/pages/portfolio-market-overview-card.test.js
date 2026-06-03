@@ -53,8 +53,8 @@ describe('portfolio market overview card structure', () => {
     assert.match(pageSource, /未实现盈亏/)
     assert.match(pageSource, /已实现盈亏/)
     assert.match(pageSource, /累计盈亏/)
-    assert.match(pageSource, /border-primary\/35 bg-primary\/\[0\.10\]/)
-    assert.match(pageSource, /focus-within:ring-2 focus-within:ring-primary\/20/)
+    assert.match(pageSource, /dark:bg-\[#2a2f38\]/)
+    assert.match(pageSource, /text-slate-900 dark:text-slate-200/)
     assert.match(pageSource, /aria-hidden="true">▾<\/span>/)
   })
 

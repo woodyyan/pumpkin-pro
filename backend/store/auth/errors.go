@@ -4,6 +4,10 @@ import "errors"
 
 var (
 	ErrInvalidInput       = errors.New("invalid auth input")
+	ErrEmailRequired      = errors.New("email required")
+	ErrInvalidEmail       = errors.New("invalid email")
+	ErrPasswordRequired   = errors.New("password required")
+	ErrPasswordTooShort   = errors.New("password too short")
 	ErrInvalidCredential  = errors.New("invalid credential")
 	ErrEmailAlreadyExists = errors.New("email already exists")
 	ErrRateLimited        = errors.New("rate limited")

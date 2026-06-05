@@ -547,6 +547,14 @@ func (a *appServer) handleUserChangePassword(w http.ResponseWriter, r *http.Requ
 
 func (a *appServer) writeAuthError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, auth.ErrEmailRequired):
+		writeJSON(w, http.StatusBadRequest, map[string]any{"code": "EMAIL_REQUIRED", "detail": "请输入注册邮箱"})
+	case errors.Is(err, auth.ErrInvalidEmail):
+		writeJSON(w, http.StatusBadRequest, map[string]any{"code": "INVALID_EMAIL", "detail": "请输入正确的邮箱地址"})
+	case errors.Is(err, auth.ErrPasswordRequired):
+		writeJSON(w, http.StatusBadRequest, map[string]any{"code": "PASSWORD_REQUIRED", "detail": "请先设置登录密码"})
+	case errors.Is(err, auth.ErrPasswordTooShort):
+		writeJSON(w, http.StatusBadRequest, map[string]any{"code": "PASSWORD_TOO_SHORT", "detail": "密码至少需要 8 位"})
 	case errors.Is(err, auth.ErrInvalidInput):
 		writeJSON(w, http.StatusBadRequest, map[string]any{"code": "INVALID_INPUT", "detail": err.Error()})
 	case errors.Is(err, auth.ErrInvalidCredential):

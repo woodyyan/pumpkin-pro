@@ -67,31 +67,38 @@ func TestServiceRegister(t *testing.T) {
 func TestServiceRegisterInvalidInput(t *testing.T) {
 	svc, ctx := setupAuthService(t)
 
-	// Too short password
-	_, err := svc.Register(ctx, RegisterInput{
-		Email:    "short@test.com",
-		Password: "1234567",
-	}, "", "")
-	if err != ErrInvalidInput {
-		t.Errorf("expected ErrInvalidInput for short password, got %v", err)
+	tests := []struct {
+		name     string
+		input    RegisterInput
+		expected error
+	}{
+		{
+			name:     "empty email",
+			input:    RegisterInput{Email: "", Password: "validpassword123"},
+			expected: ErrEmailRequired,
+		},
+		{
+			name:     "invalid email",
+			input:    RegisterInput{Email: "notanemail", Password: "validpassword123"},
+			expected: ErrInvalidEmail,
+		},
+		{
+			name:     "empty password",
+			input:    RegisterInput{Email: "empty-password@test.com", Password: "   "},
+			expected: ErrPasswordRequired,
+		},
+		{
+			name:     "short password",
+			input:    RegisterInput{Email: "short@test.com", Password: "1234567"},
+			expected: ErrPasswordTooShort,
+		},
 	}
 
-	// Invalid email
-	_, err = svc.Register(ctx, RegisterInput{
-		Email:    "notanemail",
-		Password: "validpassword123",
-	}, "", "")
-	if err != ErrInvalidInput {
-		t.Errorf("expected ErrInvalidInput for invalid email, got %v", err)
-	}
-
-	// Empty fields
-	_, err = svc.Register(ctx, RegisterInput{
-		Email:    "",
-		Password: "",
-	}, "", "")
-	if err != ErrInvalidInput {
-		t.Errorf("expected ErrInvalidInput for empty input, got %v", err)
+	for _, tc := range tests {
+		_, err := svc.Register(ctx, tc.input, "", "")
+		if err != tc.expected {
+			t.Errorf("%s: expected %v, got %v", tc.name, tc.expected, err)
+		}
 	}
 }
 

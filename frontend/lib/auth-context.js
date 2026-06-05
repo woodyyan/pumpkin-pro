@@ -2,6 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 import { requestJson, isNetworkError } from './api'
 import {
+  createAuthDialogError,
+  getRegisterPasswordGuide,
+  mapAuthDialogError,
+  validateAuthDialogInput,
+} from './auth-dialog-helpers'
+import {
   AUTH_SESSION_CLEARED_EVENT,
   broadcastAuthSessionCleared,
   clearAuthSession,
@@ -208,7 +214,7 @@ function AuthDialog({
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
+  const [errorState, setErrorState] = useState(() => createAuthDialogError())
 
   useEffect(() => {
     if (!open) {
@@ -216,22 +222,34 @@ function AuthDialog({
       setPassword('')
       setConfirmPassword('')
       setSubmitting(false)
-      setError('')
+      setErrorState(createAuthDialogError())
     }
   }, [open])
 
   if (!open) return null
 
+  const theme = AUTH_DIALOG_THEME
+  const passwordGuide = getRegisterPasswordGuide(password)
+  const showRegisterActions = mode === 'register' && errorState.code === 'EMAIL_EXISTS'
+
+  const clearErrorState = () => {
+    if (errorState.message) {
+      setErrorState(createAuthDialogError())
+    }
+  }
+
+  const handleModeSwitch = (nextMode) => {
+    setErrorState(createAuthDialogError())
+    onSwitchMode(nextMode)
+  }
+
   const submit = async (event) => {
     event.preventDefault()
-    setError('')
+    setErrorState(createAuthDialogError())
 
-    if (!email.trim() || !password) {
-      setError('请输入邮箱和密码')
-      return
-    }
-    if (mode === 'register' && password !== confirmPassword) {
-      setError('两次密码输入不一致')
+    const validationError = validateAuthDialogInput({ mode, email, password, confirmPassword })
+    if (validationError.message) {
+      setErrorState(validationError)
       return
     }
 
@@ -244,13 +262,11 @@ function AuthDialog({
       }
       onClose()
     } catch (err) {
-      setError(err.message || (mode === 'register' ? '注册失败' : '登录失败'))
+      setErrorState(mapAuthDialogError(err, mode))
     } finally {
       setSubmitting(false)
     }
   }
-
-  const theme = AUTH_DIALOG_THEME
 
   return (
     <div className={`fixed inset-0 z-[80] flex items-center justify-center px-4 py-8 ${theme.overlay}`}>
@@ -277,14 +293,14 @@ function AuthDialog({
         <div className={theme.modeWrap}>
           <button
             type="button"
-            onClick={() => onSwitchMode('login')}
+            onClick={() => handleModeSwitch('login')}
             className={`rounded-xl px-3 py-2 text-sm transition ${mode === 'login' ? theme.modeActive : theme.modeIdle}`}
           >
             登录
           </button>
           <button
             type="button"
-            onClick={() => onSwitchMode('register')}
+            onClick={() => handleModeSwitch('register')}
             className={`rounded-xl px-3 py-2 text-sm transition ${mode === 'register' ? theme.modeActive : theme.modeIdle}`}
           >
             注册
@@ -295,7 +311,10 @@ function AuthDialog({
           <div className="space-y-3">
             <input
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) => {
+                clearErrorState()
+                setEmail(event.target.value)
+              }}
               type="email"
               autoComplete="email"
               placeholder="邮箱"
@@ -303,7 +322,10 @@ function AuthDialog({
             />
             <input
               value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              onChange={(event) => {
+                clearErrorState()
+                setPassword(event.target.value)
+              }}
               type="password"
               autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
               placeholder="密码"
@@ -325,18 +347,71 @@ function AuthDialog({
               </div>
             ) : null}
             {mode === 'register' ? (
-              <input
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                type="password"
-                autoComplete="new-password"
-                placeholder="确认密码"
-                className={theme.input}
-              />
+              <>
+                <input
+                  value={confirmPassword}
+                  onChange={(event) => {
+                    clearErrorState()
+                    setConfirmPassword(event.target.value)
+                  }}
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder="确认密码"
+                  className={theme.input}
+                />
+                <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${passwordGuide.minLengthMet ? 'bg-positive/15 text-positive' : 'bg-primary/12 text-primary'}`}>
+                      {passwordGuide.minLengthMet ? '✓' : '1'}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">密码至少 8 位</p>
+                      <p className="mt-1 text-xs leading-5 text-foreground-muted">
+                        {password.trim()
+                          ? passwordGuide.minLengthMet
+                            ? '长度已满足，可以继续确认密码。'
+                            : `还差 ${passwordGuide.remainingLength} 位，补足后就能继续注册。`
+                          : '先设置一个至少 8 位的登录密码。'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-start gap-3">
+                    <div className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${passwordGuide.recommendedMixMet ? 'bg-positive/15 text-positive' : 'border border-border bg-card text-foreground-muted'}`}>
+                      {passwordGuide.recommendedMixMet ? '✓' : '+'}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">推荐同时包含字母和数字</p>
+                      <p className="mt-1 text-xs leading-5 text-foreground-muted">这不是硬性要求，但会更安全，也更方便你区分不同账号的密码。</p>
+                    </div>
+                  </div>
+                </div>
+              </>
             ) : null}
           </div>
 
-          {error ? <div className="rounded-xl bg-negative/10 px-3 py-2 text-sm text-negative">{error}</div> : null}
+          {errorState.message ? (
+            <div className="rounded-xl border border-rose-400/20 bg-negative/10 px-3 py-3 text-sm text-negative">
+              <p>{errorState.message}</p>
+              {showRegisterActions ? (
+                <div className="mt-3 flex items-center gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => handleModeSwitch('login')}
+                    className="rounded-full border border-border px-3 py-1.5 text-foreground transition hover:border-[var(--color-border-strong)] hover:text-foreground-muted"
+                  >
+                    直接登录
+                  </button>
+                  <a
+                    href="/forgot-password"
+                    onClick={onClose}
+                    className="rounded-full border border-primary/25 px-3 py-1.5 text-primary transition hover:bg-primary/10"
+                  >
+                    找回密码
+                  </a>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="pt-2">
             <button

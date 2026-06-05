@@ -958,6 +958,41 @@ func TestWriteAuthErrorRateLimitedIncludesRetryAfter(t *testing.T) {
 	}
 }
 
+func TestWriteAuthErrorRegisterValidationCodes(t *testing.T) {
+	a := &appServer{}
+	cases := []struct {
+		err    error
+		status int
+		code   string
+		detail string
+	}{
+		{auth.ErrEmailRequired, http.StatusBadRequest, "EMAIL_REQUIRED", "请输入注册邮箱"},
+		{auth.ErrInvalidEmail, http.StatusBadRequest, "INVALID_EMAIL", "请输入正确的邮箱地址"},
+		{auth.ErrPasswordRequired, http.StatusBadRequest, "PASSWORD_REQUIRED", "请先设置登录密码"},
+		{auth.ErrPasswordTooShort, http.StatusBadRequest, "PASSWORD_TOO_SHORT", "密码至少需要 8 位"},
+		{auth.ErrEmailAlreadyExists, http.StatusConflict, "EMAIL_EXISTS", "邮箱已被注册"},
+	}
+
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		a.writeAuthError(w, tc.err)
+		if w.Code != tc.status {
+			t.Fatalf("status = %d; want %d for %v", w.Code, tc.status, tc.err)
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body failed: %v", err)
+		}
+		if body["code"] != tc.code {
+			t.Fatalf("code = %v; want %s", body["code"], tc.code)
+		}
+		if body["detail"] != tc.detail {
+			t.Fatalf("detail = %v; want %s", body["detail"], tc.detail)
+		}
+	}
+}
+
 func TestWriteAuthErrorResetTokenCodes(t *testing.T) {
 	a := &appServer{}
 	cases := []struct {

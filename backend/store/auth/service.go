@@ -49,9 +49,9 @@ func (s *Service) SetMailer(mailer Mailer) {
 func (s *Service) Register(ctx context.Context, input RegisterInput, ip string, userAgent string) (*AuthSessionResult, error) {
 	email := normalizeEmail(input.Email)
 	password := strings.TrimSpace(input.Password)
-	if email == "" || !strings.Contains(email, "@") || len(password) < 8 {
-		s.writeAudit(ctx, "register", "", email, ip, userAgent, false, "invalid input")
-		return nil, ErrInvalidInput
+	if err := validateRegisterInput(email, password); err != nil {
+		s.writeAudit(ctx, "register", "", email, ip, userAgent, false, err.Error())
+		return nil, err
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -515,6 +515,22 @@ func (s *Service) writeAudit(ctx context.Context, action, userID, email, ip, use
 
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func validateRegisterInput(email string, password string) error {
+	if email == "" {
+		return ErrEmailRequired
+	}
+	if !strings.Contains(email, "@") {
+		return ErrInvalidEmail
+	}
+	if password == "" {
+		return ErrPasswordRequired
+	}
+	if len(password) < 8 {
+		return ErrPasswordTooShort
+	}
+	return nil
 }
 
 func defaultNickname(email string) string {

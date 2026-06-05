@@ -19,6 +19,10 @@ import {
   handleAdminActionError,
   useAdminResource,
 } from '../lib/admin-data'
+import {
+  resolveAdminPaymentPollingState,
+  resolveAdminSelectedPaymentId,
+} from '../lib/admin-payments'
 
 // ── Simple Doughnut Chart (SVG) ──
 
@@ -266,6 +270,52 @@ function formatAdminDateTime(value) {
     })
   } catch {
     return '--'
+  }
+}
+
+const PAYMENT_STATUS_META = {
+  initiated: { label: '已创建', className: 'border-slate-400/20 bg-slate-500/10 text-slate-200' },
+  checkout_open: { label: '待支付', className: 'border-sky-400/20 bg-sky-500/10 text-sky-100' },
+  processing: { label: '处理中', className: 'border-amber-400/25 bg-amber-500/12 text-amber-100' },
+  succeeded: { label: '已成功', className: 'border-emerald-400/25 bg-positive/10 text-positive' },
+  failed: { label: '已失败', className: 'border-rose-400/25 bg-negative/10 text-negative' },
+  expired: { label: '已过期', className: 'border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] text-foreground-dim' },
+  refunded: { label: '已退款', className: 'border-fuchsia-400/25 bg-fuchsia-500/10 text-fuchsia-100' },
+  partially_refunded: { label: '部分退款', className: 'border-fuchsia-400/25 bg-fuchsia-500/10 text-fuchsia-100' },
+}
+
+const PAYMENT_METHOD_LABELS = {
+  card: '银行卡',
+  alipay: '支付宝',
+  wechat_pay: '微信支付',
+}
+
+function getPaymentStatusMeta(status) {
+  return PAYMENT_STATUS_META[status] || { label: status || '--', className: 'border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] text-foreground-dim' }
+}
+
+function formatPaymentMethodList(value) {
+  if (!value) return '--'
+  const items = Array.isArray(value)
+    ? value
+    : String(value).split(',').map((item) => item.trim()).filter(Boolean)
+  if (!items.length) return '--'
+  return items.map((item) => PAYMENT_METHOD_LABELS[item] || item).join(' / ')
+}
+
+function formatMinorAmount(amountMinor, currency = 'cny') {
+  if (amountMinor == null || Number.isNaN(Number(amountMinor))) return '--'
+  const normalizedCurrency = String(currency || 'cny').toUpperCase()
+  const value = Number(amountMinor) / 100
+  try {
+    return new Intl.NumberFormat('zh-CN', {
+      style: 'currency',
+      currency: normalizedCurrency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)
+  } catch {
+    return `${value.toFixed(2)} ${normalizedCurrency}`
   }
 }
 
@@ -927,6 +977,9 @@ function AdminDashboard({ session, onLogout }) {
 
             {/* Panel 14: 数据备份 */}
             <BackupPanel onUnauthorized={onLogout} />
+
+            {/* Panel 15: 支付测试 */}
+            <AdminPaymentsPanel onUnauthorized={onLogout} />
 
             {/* Panel 11: AI 模型配置 */}
             <AIProviderConfigPanel onUnauthorized={onLogout} />
@@ -2258,6 +2311,369 @@ function UserFunnelPanel({ onUnauthorized }) {
 }
 
 // ── Backup Panel (数据备份) ──
+
+function AdminPaymentsPanel({ onUnauthorized }) {
+  const [createDraft, setCreateDraft] = useState({
+    amount_minor: 100,
+    currency: 'cny',
+    payment_method_types: ['card'],
+    title: 'Stripe Admin Test Payment',
+  })
+  const [selectedPaymentId, setSelectedPaymentId] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [expiring, setExpiring] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const [actionSuccess, setActionSuccess] = useState('')
+  const [autoPollPaymentId, setAutoPollPaymentId] = useState('')
+
+  const paymentsResource = useAdminResource({
+    key: 'admin:payments:list',
+    request: async () => {
+      const [config, listPayload] = await Promise.all([
+        adminFetch('/api/admin/payments/config').catch(() => null),
+        adminFetch('/api/admin/payments?purpose=admin_test&limit=20').catch(() => ({ items: [], total: 0 })),
+      ])
+      return {
+        config,
+        payments: listPayload || { items: [], total: 0 },
+      }
+    },
+    staleMs: 5_000,
+    minIntervalMs: 2_000,
+    shouldPoll: (payload) => resolveAdminPaymentPollingState(payload, autoPollPaymentId) === 'poll',
+    pollMs: 4_000,
+    onUnauthorized,
+    errorMessage: '加载支付测试数据失败',
+  })
+
+  const detailResource = useAdminResource({
+    key: `admin:payments:detail:${selectedPaymentId || 'none'}`,
+    enabled: Boolean(selectedPaymentId),
+    request: async () => adminFetch(`/api/admin/payments/${selectedPaymentId}`).catch(() => null),
+    staleMs: 5_000,
+    minIntervalMs: 2_000,
+    shouldPoll: () => selectedPaymentId === autoPollPaymentId && resolveAdminPaymentPollingState(paymentsResource.data, autoPollPaymentId) === 'poll',
+    pollMs: 4_000,
+    onUnauthorized,
+    errorMessage: '加载支付详情失败',
+  })
+
+  const config = paymentsResource.data?.config || null
+  const payments = paymentsResource.data?.payments?.items || []
+  const detail = detailResource.data || null
+  const selectedPayment = detail?.payment || payments.find((item) => item.id === selectedPaymentId) || null
+  const selectedEvents = detail?.events || []
+  const configReady = Boolean(config?.ready)
+  const resourceError = paymentsResource.error || detailResource.error
+
+  useEffect(() => {
+    const nextPaymentId = resolveAdminSelectedPaymentId(payments, selectedPaymentId)
+    if (nextPaymentId !== selectedPaymentId) {
+      setSelectedPaymentId(nextPaymentId)
+    }
+  }, [payments, selectedPaymentId])
+
+  useEffect(() => {
+    if (!autoPollPaymentId) return
+    if (resolveAdminPaymentPollingState(paymentsResource.data, autoPollPaymentId) === 'stop') {
+      setAutoPollPaymentId('')
+    }
+  }, [autoPollPaymentId, paymentsResource.data])
+
+  const refreshPaymentsPanel = useCallback(async () => {
+    await paymentsResource.refresh()
+    if (selectedPaymentId) {
+      await detailResource.refresh()
+    }
+  }, [detailResource, paymentsResource, selectedPaymentId])
+
+  const updateDraft = (key, value) => {
+    setCreateDraft((current) => ({ ...current, [key]: value }))
+  }
+
+  const handleCreate = async () => {
+    setCreating(true)
+    setActionError('')
+    setActionSuccess('')
+    try {
+      const result = await adminFetch('/api/admin/payments/checkout-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(createDraft),
+      })
+      setSelectedPaymentId(result.payment_id || '')
+      setAutoPollPaymentId(result.payment_id || '')
+      setActionSuccess('测试支付已创建，可直接打开 Stripe Hosted Checkout 继续验证。')
+      await paymentsResource.refresh()
+      if (result.checkout_url) {
+        window.open(result.checkout_url, '_blank', 'noopener,noreferrer')
+      }
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '创建测试支付失败')
+      if (message) setActionError(message)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleOpenCheckout = () => {
+    const url = selectedPayment?.checkout_url
+    if (!url) return
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const handleExpire = async () => {
+    if (!selectedPaymentId || !window.confirm('确定要将当前 Checkout Session 手动过期吗？')) return
+    setExpiring(true)
+    setActionError('')
+    setActionSuccess('')
+    try {
+      setAutoPollPaymentId(selectedPaymentId)
+      await adminFetch(`/api/admin/payments/${selectedPaymentId}/expire`, {
+        method: 'POST',
+      })
+      setActionSuccess('当前测试支付已手动过期。')
+      await refreshPaymentsPanel()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '手动过期失败')
+      if (message) setActionError(message)
+    } finally {
+      setExpiring(false)
+    }
+  }
+
+  if (!config && !payments.length && !paymentsResource.loading) return null
+
+  const selectedStatusMeta = getPaymentStatusMeta(selectedPayment?.status)
+
+  return (
+    <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-foreground-muted">💳 支付测试</h2>
+          <p className="mt-1 text-xs leading-6 text-foreground-dim">
+            一期仅用于 admin 验证 Stripe Hosted Checkout 一次性支付链路，不改公开站点。当前默认只先跑通银行卡支付测试，默认币种为人民币（CNY）。
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => refreshPaymentsPanel()}
+          className="rounded-lg border border-[var(--color-border-strong)] px-3 py-1.5 text-xs text-foreground-dim transition hover:text-foreground"
+        >
+          刷新支付状态
+        </button>
+      </div>
+
+      {resourceError ? (
+        <div className="mt-3 rounded-xl border border-rose-400/20 bg-negative/10 px-4 py-2 text-xs text-negative">
+          {resourceError}
+        </div>
+      ) : null}
+      {actionError ? (
+        <div className="mt-3 rounded-xl border border-rose-400/20 bg-negative/10 px-4 py-2 text-xs text-negative">
+          {actionError}
+        </div>
+      ) : null}
+      {actionSuccess ? (
+        <div className="mt-3 rounded-xl border border-emerald-400/20 bg-positive/10 px-4 py-2 text-xs text-positive">
+          {actionSuccess}
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <StatCard label="当前模式" value={(config?.mode || '--').toUpperCase()} sub={config?.mode === 'test' ? '一期限制为测试模式' : '非测试模式不可创建'} />
+        <StatCard label="Secret Key" value={config?.secret_key_configured ? '已配置' : '未配置'} sub="服务端 Stripe 凭据" />
+        <StatCard label="Webhook Secret" value={config?.webhook_secret_configured ? '已配置' : '未配置'} sub="Webhook 验签必需" />
+        <StatCard label="默认币种" value={(config?.default_currency || 'cny').toUpperCase()} sub="人民币（CNY）" />
+        <StatCard label="允许支付方式" value={formatPaymentMethodList(config?.allowed_payment_methods)} sub="首期建议仅 card" />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <div className="rounded-2xl border border-border bg-background-alt/40 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-foreground-muted">创建测试支付</h3>
+            <span className="rounded-full border border-sky-400/20 bg-sky-500/10 px-2 py-1 text-[11px] text-sky-100">Stripe Hosted Checkout</span>
+          </div>
+          <div className="mt-3 space-y-3">
+            <div>
+              <label className="mb-1.5 block text-xs text-foreground-dim">测试金额（分）</label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={createDraft.amount_minor}
+                onChange={(event) => updateDraft('amount_minor', Number(event.target.value || 0))}
+                className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
+              />
+              <p className="mt-1 text-[11px] text-foreground-disabled">例如 100 表示 ¥1.00</p>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs text-foreground-dim">币种</label>
+              <select
+                value={createDraft.currency}
+                onChange={(event) => updateDraft('currency', event.target.value)}
+                className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
+              >
+                <option value="cny">CNY</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs text-foreground-dim">支付方式</label>
+              <select
+                value={createDraft.payment_method_types[0] || 'card'}
+                onChange={(event) => updateDraft('payment_method_types', [event.target.value])}
+                className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
+              >
+                <option value="card">银行卡（借记卡 / 信用卡）</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs text-foreground-dim">测试标题</label>
+              <input
+                type="text"
+                value={createDraft.title}
+                onChange={(event) => updateDraft('title', event.target.value)}
+                className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
+              />
+            </div>
+            <button
+              type="button"
+              disabled={creating || !configReady}
+              onClick={handleCreate}
+              className={`w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                creating || !configReady
+                  ? 'cursor-not-allowed bg-[var(--color-bg-hover)] text-foreground-disabled'
+                  : 'bg-amber-500 text-black hover:bg-amber-400'
+              }`}
+            >
+              {creating ? '创建中…' : '创建并打开测试支付'}
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-border bg-background-alt/40 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-foreground-muted">最近支付记录</h3>
+              <span className="text-xs text-foreground-dim">共 {paymentsResource.data?.payments?.total || 0} 笔</span>
+            </div>
+            {!payments.length ? (
+              <p className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-center text-xs text-foreground-dim">
+                暂无测试支付记录。创建第一笔后，系统会在这里持续轮询状态与 webhook 回写结果。
+              </p>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {payments.map((item) => {
+                  const meta = getPaymentStatusMeta(item.status)
+                  const active = selectedPaymentId === item.id
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setSelectedPaymentId(item.id)}
+                      className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                        active ? 'border-amber-400/40 bg-amber-500/10' : 'border-border bg-card hover:bg-[var(--color-bg-hover)]'
+                      }`}
+                    >
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <div className="text-sm font-medium text-foreground">{item.title || 'Stripe Admin Test Payment'}</div>
+                          <div className="mt-1 text-xs text-foreground-dim">{formatMinorAmount(item.amount_minor, item.currency)} · {formatPaymentMethodList(item.payment_method_selected || item.payment_method_request)}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`rounded-full border px-2 py-1 text-[11px] ${meta.className}`}>{meta.label}</span>
+                          <span className="text-[11px] text-foreground-disabled">{formatAdminDateTime(item.updated_at || item.created_at)}</span>
+                          <span className="text-[11px] text-amber-200">查看详情</span>
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {selectedPayment ? (
+            <div className="rounded-2xl border border-border bg-background-alt/40 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-foreground-muted">支付详情</h3>
+                    <span className={`rounded-full border px-2 py-1 text-[11px] ${selectedStatusMeta.className}`}>{selectedStatusMeta.label}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-foreground-dim">Payment ID：{selectedPayment.id}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={!selectedPayment.checkout_url}
+                    onClick={handleOpenCheckout}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                      selectedPayment.checkout_url ? 'bg-sky-500/15 text-sky-100 hover:bg-sky-500/25' : 'bg-[var(--color-bg-hover)] text-foreground-disabled'
+                    }`}
+                  >
+                    打开 Checkout
+                  </button>
+                  <button
+                    type="button"
+                    disabled={expiring || selectedPayment.status !== 'checkout_open'}
+                    onClick={handleExpire}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                      expiring || selectedPayment.status !== 'checkout_open'
+                        ? 'bg-[var(--color-bg-hover)] text-foreground-disabled'
+                        : 'bg-amber-500/12 text-amber-100 hover:bg-amber-500/20'
+                    }`}
+                  >
+                    {expiring ? '处理中…' : '手动过期'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <AIConfigMetric label="金额" value={formatMinorAmount(selectedPayment.amount_minor, selectedPayment.currency)} sub="一次性支付测试" />
+                <AIConfigMetric label="支付方式" value={formatPaymentMethodList(selectedPayment.payment_method_selected || selectedPayment.payment_method_request)} sub="首期默认 card" />
+                <AIConfigMetric label="Session ID" value={selectedPayment.checkout_session_id || '--'} sub="Stripe Checkout Session" />
+                <AIConfigMetric label="PaymentIntent ID" value={selectedPayment.payment_intent_id || '--'} sub="便于定位 webhook" />
+              </div>
+
+              {(selectedPayment.last_error_message || selectedPayment.last_error_code) ? (
+                <div className="mt-3 rounded-xl border border-rose-400/20 bg-negative/10 px-4 py-3 text-xs text-negative">
+                  最近错误：{selectedPayment.last_error_code ? `${selectedPayment.last_error_code} · ` : ''}{selectedPayment.last_error_message || '--'}
+                </div>
+              ) : null}
+
+              <div className="mt-4">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-foreground-dim">事件时间线</h4>
+                {!selectedEvents.length ? (
+                  <p className="mt-2 text-xs text-foreground-dim">暂无事件。创建支付后，这里会展示 admin API 与 webhook 的状态迁移。</p>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {selectedEvents.map((event) => (
+                      <div key={event.id} className="rounded-xl border border-border bg-card px-3 py-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <div className="text-sm font-medium text-foreground">{event.event_type}</div>
+                            <div className="mt-1 text-[11px] text-foreground-dim">
+                              {event.status_before || '--'} → {event.status_after || '--'} · {event.source || '--'}
+                            </div>
+                          </div>
+                          <div className="text-[11px] text-foreground-disabled">{formatAdminDateTime(event.received_at || event.occurred_at)}</div>
+                        </div>
+                        {event.error_message ? (
+                          <div className="mt-2 text-[11px] text-negative">{event.error_message}</div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  )
+}
 
 function BackupPanel({ onUnauthorized }) {
   const [triggering, setTriggering] = useState(false)

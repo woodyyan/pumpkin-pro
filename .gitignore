@@ -8,6 +8,7 @@
 *.db-shm
 quant/data/cache/
 .workbuddy/
+.codebuddy/
 .env
 # AI knowledge base
 # Note: we track specs/context docs for long-term project memory.
@@ -23,3 +24,7 @@ quant/data/cache/
 backend/.cache/
 output/
 .session_tmps/
+.trae/
+.agent/memory/
+.agent/logs/
+.agent/cache/

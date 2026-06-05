@@ -19,6 +19,7 @@ type Config struct {
 	PasswordReset      PasswordResetConfig
 	AdminSeed          AdminSeedConfig
 	AI                 AIConfig
+	Stripe             StripeConfig
 	Backup             BackupConfig
 	FactorLab          FactorLabConfig
 	PortfolioSnapshot  PortfolioSnapshotConfig
@@ -96,6 +97,17 @@ type AIConfig struct {
 	BaseURL   string
 	Model     string
 	CipherKey string
+}
+
+type StripeConfig struct {
+	Mode                  string
+	SecretKey             string
+	WebhookSecret         string
+	DefaultCurrency       string
+	AllowedPaymentMethods []string
+	SuccessPath           string
+	CancelPath            string
+	CheckoutExpireMinutes int
 }
 
 type AdminSeedConfig struct {
@@ -176,6 +188,16 @@ func Load() Config {
 			Model:     getEnv("AI_MODEL", "gpt-4o-mini"),
 			CipherKey: getEnv("AI_CONFIG_CIPHER_KEY", ""),
 		},
+		Stripe: StripeConfig{
+			Mode:                  strings.ToLower(getEnv("STRIPE_MODE", "test")),
+			SecretKey:             getEnv("STRIPE_SECRET_KEY", ""),
+			WebhookSecret:         getEnv("STRIPE_WEBHOOK_SECRET", ""),
+			DefaultCurrency:       strings.ToLower(getEnv("STRIPE_DEFAULT_CURRENCY", "cny")),
+			AllowedPaymentMethods: parseCommaSeparated(getEnv("STRIPE_ALLOWED_PAYMENT_METHODS", "card")),
+			SuccessPath:           getEnv("STRIPE_CHECKOUT_SUCCESS_PATH", "/admin?tab=payments&checkout=success"),
+			CancelPath:            getEnv("STRIPE_CHECKOUT_CANCEL_PATH", "/admin?tab=payments&checkout=cancel"),
+			CheckoutExpireMinutes: getEnvAsInt("STRIPE_CHECKOUT_EXPIRE_MINUTES", 60),
+		},
 		Backup: BackupConfig{
 			DBPath:          getEnv("DB_PATH", "data/pumpkin.db"),
 			BackupDir:       getEnv("BACKUP_DIR", "data/backups"),
@@ -253,4 +275,19 @@ func getEnvAsBool(key string, defaultValue bool) bool {
 
 func trimTrailingSlash(raw string) string {
 	return strings.TrimRight(raw, "/")
+}
+
+func parseCommaSeparated(raw string) []string {
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	seen := make(map[string]bool)
+	for _, part := range parts {
+		value := strings.ToLower(strings.TrimSpace(part))
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
 }

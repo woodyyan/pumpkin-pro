@@ -15,6 +15,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
 	"github.com/woodyyan/pumpkin-pro/backend/store/fundcache"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
+	"github.com/woodyyan/pumpkin-pro/backend/store/payment"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 	"github.com/woodyyan/pumpkin-pro/backend/store/screener"
@@ -52,6 +53,7 @@ func New(cfg config.DBConfig) (*Store, error) {
 		analytics.NewMigrator(),
 		feedback.NewMigrator(),
 		factorlab.NewMigrator(),
+		payment.NewMigrator(),
 		fundcache.NewMigrator(),
 		analysis_history.NewMigrator(),
 		backup.NewMigrator(),

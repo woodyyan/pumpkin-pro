@@ -8,21 +8,22 @@ import (
 )
 
 type Config struct {
-	Port               string
-	AppPublicBaseURL   string
-	QuantServiceURL    string
-	BackendCallbackURL string
-	DB                 DBConfig
-	StrategySeedPath   string
-	Auth               AuthConfig
-	Mail               MailConfig
-	PasswordReset      PasswordResetConfig
-	AdminSeed          AdminSeedConfig
-	AI                 AIConfig
-	Stripe             StripeConfig
-	Backup             BackupConfig
-	FactorLab          FactorLabConfig
-	PortfolioSnapshot  PortfolioSnapshotConfig
+	Port                     string
+	AppPublicBaseURL         string
+	QuantServiceURL          string
+	BackendCallbackURL       string
+	DB                       DBConfig
+	StrategySeedPath         string
+	Auth                     AuthConfig
+	Mail                     MailConfig
+	PasswordReset            PasswordResetConfig
+	AdminSeed                AdminSeedConfig
+	AI                       AIConfig
+	Stripe                   StripeConfig
+	Backup                   BackupConfig
+	FactorLab                FactorLabConfig
+	PortfolioSnapshot        PortfolioSnapshotConfig
+	RankingPortfolioRealtime RankingPortfolioRealtimeConfig
 }
 
 type PasswordResetConfig struct {
@@ -75,6 +76,18 @@ type PortfolioSnapshotConfig struct {
 	HKHour              int
 	HKMinute            int
 	TimeoutMinutes      int
+}
+
+// RankingPortfolioRealtimeConfig configures the intraday realtime-price refresh
+// for the ranking simulated portfolio. All time points are Beijing time.
+type RankingPortfolioRealtimeConfig struct {
+	Enabled      bool
+	ASharePoints []string // "HH:MM" Beijing time
+	HKPoints     []string // "HH:MM" Beijing time
+	// CutoverDate is the go-live date (Beijing time, "YYYY-MM-DD") of the
+	// open-entry pricing change. The admin repair job will never backfill
+	// dates strictly before this date. Defaults to "2026-06-10" (first live day).
+	CutoverDate string
 }
 
 // BackupConfig holds database backup settings.
@@ -234,6 +247,13 @@ func Load() Config {
 			HKHour:              getEnvAsInt("PORTFOLIO_SNAPSHOT_HK_HOUR", 17),
 			HKMinute:            getEnvAsInt("PORTFOLIO_SNAPSHOT_HK_MINUTE", 0),
 			TimeoutMinutes:      getEnvAsInt("PORTFOLIO_SNAPSHOT_TIMEOUT_MINUTES", 120),
+		},
+		RankingPortfolioRealtime: RankingPortfolioRealtimeConfig{
+			Enabled: getEnvAsBool("RANKING_PORTFOLIO_REALTIME_ENABLED", true),
+			// Empty point slices fall back to built-in A-share/HK defaults.
+			ASharePoints: nil,
+			HKPoints:     nil,
+			CutoverDate:  getEnv("RANKING_PORTFOLIO_CUTOVER_DATE", "2026-06-10"),
 		},
 	}
 }

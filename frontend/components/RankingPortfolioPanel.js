@@ -270,6 +270,7 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
   const panelRef = useRef(null)
   const [selectedExchange, setSelectedExchange] = useState('ASHARE')
   const [selectedVariant, setSelectedVariant] = useState('A')
+  const [bannerDismissed, setBannerDismissed] = useState(false)
   const portfolios = Array.isArray(data?.items) ? data.items : []
   const exchangeTabs = [
     { key: 'ASHARE', label: 'A股' },
@@ -340,13 +341,31 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
 
   return (
     <section ref={panelRef} className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+      {!bannerDismissed && (
+        <div className="mb-4 flex items-start gap-3 rounded-xl border border-amber-300/40 dark:border-amber-300/20 bg-amber-100 dark:bg-amber-500/10 px-4 py-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-amber-900 dark:text-amber-100">📣 模拟组合口径更新</p>
+            <p className="mt-1 text-xs leading-5 text-amber-800/80 dark:text-amber-200/70">即日起，模拟买入价从"当日收盘价"切换为"次一交易日 9:25 集合竞价开盘价"，更贴近真实交易。收益曲线和成分股涨幅已按新口径重新计算，历史数据同步更新。</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setBannerDismissed(true)}
+            className="shrink-0 rounded-lg p-1 text-amber-600 hover:bg-amber-200/50 dark:text-amber-300 dark:hover:bg-amber-500/20"
+            aria-label="关闭公告"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
+          </button>
+        </div>
+      )}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-base font-semibold text-foreground">卧龙AI精选模拟组合</h3>
             <span className="rounded-full border border-amber-300/40 dark:border-amber-300/20 bg-amber-100 dark:bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-200">A / B 双组合</span>
           </div>
-          <p className="mt-1 text-xs leading-5 text-foreground-dim">跟踪卧龙AI精选 A、B 两套组合的收盘价模拟表现，核心看累计收益、回撤、波动与日胜率。</p>
+          <p className="mt-1 text-xs leading-5 text-foreground-dim">跟踪卧龙AI精选 A、B 两套组合的开盘价模拟表现：收盘后选股，次一交易日开盘价买入、当日收盘价结算，核心看累计收益、回撤、波动与日胜率。</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 lg:justify-end">
@@ -462,7 +481,7 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
             <div className="rounded-2xl border border-border/70 bg-[var(--color-bg-hover)] p-3.5 xl:h-full">
               <div className="text-sm font-medium text-foreground">当前成分股</div>
               {currentConstituentHint ? <div className="mt-1 text-[11px] leading-5 text-foreground/56 dark:text-foreground/42">{currentConstituentHint}</div> : null}
-              {meta?.source_trade_date ? <div className="mt-1 text-[11px] leading-5 text-foreground/56 dark:text-foreground/42">收益曲线截至：{formatCloseDateLabel(meta?.source_trade_date, meta?.ranking_time)}，按收盘价模拟调仓</div> : null}
+              {meta?.source_trade_date ? <div className="mt-1 text-[11px] leading-5 text-foreground/56 dark:text-foreground/42">收益曲线截至：{formatCloseDateLabel(meta?.source_trade_date, meta?.ranking_time)}，按开盘价模拟买入、收盘价模拟调仓</div> : null}
               {meta?.is_same_batch_as_performance === false && meta?.batch_mismatch_reason ? <div className="mt-2 rounded-xl border border-sky-400/35 bg-sky-100 text-sky-700 dark:border-sky-300/20 dark:bg-sky-500/10 px-3 py-2 text-xs dark:text-sky-200">{meta.batch_mismatch_reason}</div> : null}
 
               {meta?.has_shortfall ? (
@@ -529,14 +548,18 @@ function RankingPortfolioConstituentRow({ item, showSourceRank = false }) {
   const sourceMeta = showSourceRank
     ? `榜单第${item?.source_rank || '--'}名 · 连续${item?.consecutive_days || '--'}日`
     : ''
-  const returnValue = formatRankingPortfolioPercent(item?.latest_return_pct)
-  const returnClass = getRankingPortfolioPerformanceClass(item?.latest_return_pct)
+  const isEntryPending = Boolean(item?.entry_price_pending)
+  const returnValue = isEntryPending ? '待开盘' : formatRankingPortfolioPercent(item?.latest_return_pct)
+  const returnClass = isEntryPending ? 'text-foreground-dim' : getRankingPortfolioPerformanceClass(item?.latest_return_pct)
+  const latestDisplayPrice = item?.latest_price || item?.latest_close_price
   const priceSummaryParts = []
-  if (item?.entry_price) {
+  if (isEntryPending) {
+    priceSummaryParts.push('买入价待开盘')
+  } else if (item?.entry_price) {
     priceSummaryParts.push(`买入价 ${formatRankingPortfolioReferencePrice(item?.entry_price, item?.exchange)}`)
   }
-  if (item?.latest_close_price) {
-    priceSummaryParts.push(`最新 ${formatRankingPortfolioReferencePrice(item?.latest_close_price, item?.exchange)}`)
+  if (latestDisplayPrice) {
+    priceSummaryParts.push(`最新 ${formatRankingPortfolioReferencePrice(latestDisplayPrice, item?.exchange)}`)
   }
   const priceSummary = priceSummaryParts.join(' · ')
   const content = (

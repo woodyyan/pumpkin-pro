@@ -682,3 +682,203 @@ func (r *Repository) GetLatestRankingSnapshotClosePriceByTradeDateOnOrBefore(ctx
 	}
 	return snap.ClosePrice, strings.TrimSpace(snap.PriceTradeDate), nil
 }
+
+// GetRankingPortfolioEntryOpenPrice returns the T+1 open (entry) price recorded
+// for the given symbol on or after the supplied entry trade date. It is used as
+// the simulated buy price of a current constituent. Returns (0, "", nil) when no
+// open price has been filled yet (e.g. before T+1 09:25 call auction).
+func (r *Repository) GetRankingPortfolioEntryOpenPrice(ctx context.Context, definitionID, code, exchange, entryTradeDate string) (float64, string, error) {
+	code = strings.TrimSpace(code)
+	entryTradeDate = strings.TrimSpace(entryTradeDate)
+	if code == "" || entryTradeDate == "" {
+		return 0, "", nil
+	}
+	var row RankingPortfolioMarketPrice
+	query := r.db.WithContext(ctx).Model(&RankingPortfolioMarketPrice{}).
+		Select("open_price, entry_trade_date").
+		Where("definition_id = ? AND code = ? AND open_price > ? AND entry_trade_date != '' AND entry_trade_date >= ?", definitionID, code, 0, entryTradeDate).
+		Order("entry_trade_date ASC, id ASC")
+	normalizedExchange := strings.ToUpper(strings.TrimSpace(exchange))
+	if normalizedExchange != "" {
+		query = query.Where("exchange = ?", normalizedExchange)
+	}
+	if err := query.First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, "", nil
+		}
+		return 0, "", err
+	}
+	return row.OpenPrice, strings.TrimSpace(row.EntryTradeDate), nil
+}
+
+// UpsertRankingPortfolioRealtimePrice stores the latest intraday quote for a symbol.
+func (r *Repository) UpsertRankingPortfolioRealtimePrice(ctx context.Context, price RankingPortfolioRealtimePrice) error {
+	price.Code = strings.TrimSpace(price.Code)
+	price.Exchange = strings.ToUpper(strings.TrimSpace(price.Exchange))
+	if price.Code == "" || price.LastPrice <= 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	if price.CreatedAt.IsZero() {
+		price.CreatedAt = now
+	}
+	price.UpdatedAt = now
+	if price.QuoteTime.IsZero() {
+		price.QuoteTime = now
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "code"}, {Name: "exchange"}},
+		DoUpdates: clause.AssignmentColumns([]string{"last_price", "quote_time", "updated_at"}),
+	}).Create(&price).Error
+}
+
+// GetRankingPortfolioRealtimePrice returns the cached intraday quote for a symbol.
+// Returns (0, time.Time{}, nil) when no quote is cached.
+func (r *Repository) GetRankingPortfolioRealtimePrice(ctx context.Context, code, exchange string) (float64, time.Time, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return 0, time.Time{}, nil
+	}
+	var row RankingPortfolioRealtimePrice
+	query := r.db.WithContext(ctx).Model(&RankingPortfolioRealtimePrice{}).
+		Select("last_price, quote_time").
+		Where("code = ?", code)
+	normalizedExchange := strings.ToUpper(strings.TrimSpace(exchange))
+	if normalizedExchange != "" {
+		query = query.Where("exchange = ?", normalizedExchange)
+	}
+	if err := query.First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, time.Time{}, nil
+		}
+		return 0, time.Time{}, err
+	}
+	return row.LastPrice, row.QuoteTime, nil
+}
+
+// CountMissingOpenPricesByDefinition returns the number of market-price rows
+// with open_price <= 0 for each definition, restricted to snapshot_date >= fromDate.
+// The result map is keyed by definition_id.
+func (r *Repository) CountMissingOpenPricesByDefinition(ctx context.Context, fromDate string) (map[string]int, error) {
+	type row struct {
+		DefinitionID string
+		Count        int
+	}
+	var rows []row
+	query := r.db.WithContext(ctx).
+		Model(&RankingPortfolioMarketPrice{}).
+		Select("definition_id, count(*) as count").
+		Where("open_price <= 0")
+	if strings.TrimSpace(fromDate) != "" {
+		query = query.Where("snapshot_date >= ?", strings.TrimSpace(fromDate))
+	}
+	if err := query.Group("definition_id").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]int, len(rows))
+	for _, r := range rows {
+		out[r.DefinitionID] = r.Count
+	}
+	return out, nil
+}
+
+// MissingOpenPriceRow is a lightweight projection used by the admin open-price
+// backfill job to identify market-price rows whose entry open has not been set.
+type MissingOpenPriceRow struct {
+	DefinitionID    string
+	SnapshotVersion string
+	SnapshotDate    string
+	Code            string
+	Exchange        string
+}
+
+// ListMarketPricesMissingOpenByDateRange returns all market_price rows that
+// belong to snapshots on or after fromDate (inclusive) and whose open_price is
+// still 0. Results are ordered by snapshot_date ASC so the caller can process
+// them chronologically.
+func (r *Repository) ListMarketPricesMissingOpenByDateRange(ctx context.Context, fromDate string) ([]MissingOpenPriceRow, error) {
+	fromDate = strings.TrimSpace(fromDate)
+	var rows []MissingOpenPriceRow
+	query := r.db.WithContext(ctx).
+		Model(&RankingPortfolioMarketPrice{}).
+		Select("definition_id, snapshot_version, snapshot_date, code, exchange").
+		Where("open_price <= 0")
+	if fromDate != "" {
+		query = query.Where("snapshot_date >= ?", fromDate)
+	}
+	if err := query.Order("snapshot_date ASC, definition_id ASC, code ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// SetRankingPortfolioMarketPriceOpen writes the open_price and entry_trade_date
+// for a specific market-price row identified by (definition_id, snapshot_version,
+// code, exchange). It is idempotent: rows whose open_price is already > 0 are
+// not overwritten.
+func (r *Repository) SetRankingPortfolioMarketPriceOpen(ctx context.Context, definitionID, snapshotVersion, code, exchange string, openPrice float64, entryTradeDate string) error {
+	code = strings.TrimSpace(code)
+	exchange = strings.ToUpper(strings.TrimSpace(exchange))
+	entryTradeDate = strings.TrimSpace(entryTradeDate)
+	if code == "" || openPrice <= 0 || entryTradeDate == "" {
+		return nil
+	}
+	now := time.Now().UTC()
+	return r.db.WithContext(ctx).
+		Model(&RankingPortfolioMarketPrice{}).
+		Where("definition_id = ? AND snapshot_version = ? AND code = ? AND exchange = ? AND open_price <= ?",
+			definitionID, snapshotVersion, code, exchange, 0).
+		Updates(map[string]any{
+			"open_price":       openPrice,
+			"entry_trade_date": entryTradeDate,
+			"updated_at":       now,
+		}).Error
+}
+
+// FillRankingPortfolioEntryOpenPrice fills the simulated entry (T+1 open) price
+// across all definitions of the given market scope. Only rows whose open price
+// has not been filled yet are updated (idempotent for the trading day).
+func (r *Repository) FillRankingPortfolioEntryOpenPrice(ctx context.Context, scope, code, exchange string, openPrice float64, entryTradeDate string) error {
+	code = strings.TrimSpace(code)
+	scope = strings.ToUpper(strings.TrimSpace(scope))
+	entryTradeDate = strings.TrimSpace(entryTradeDate)
+	if code == "" || openPrice <= 0 || entryTradeDate == "" {
+		return nil
+	}
+	normalizedExchange := strings.ToUpper(strings.TrimSpace(exchange))
+	now := time.Now().UTC()
+
+	// Resolve the latest snapshot version per definition of the scope.
+	var defs []RankingPortfolioDefinition
+	if err := r.db.WithContext(ctx).
+		Where("exchange = ?", scope).
+		Find(&defs).Error; err != nil {
+		return err
+	}
+	for _, def := range defs {
+		var latest RankingPortfolioSnapshot
+		if err := r.db.WithContext(ctx).
+			Where("definition_id = ?", def.ID).
+			Order("snapshot_date DESC, id DESC").
+			First(&latest).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return err
+		}
+		query := r.db.WithContext(ctx).Model(&RankingPortfolioMarketPrice{}).
+			Where("definition_id = ? AND snapshot_version = ? AND code = ? AND open_price <= ?", def.ID, latest.SnapshotVersion, code, 0)
+		if normalizedExchange != "" {
+			query = query.Where("exchange = ?", normalizedExchange)
+		}
+		if err := query.Updates(map[string]any{
+			"open_price":       openPrice,
+			"entry_trade_date": entryTradeDate,
+			"updated_at":       now,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}

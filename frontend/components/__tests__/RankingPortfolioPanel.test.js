@@ -185,7 +185,7 @@ describe('RankingPortfolioPanel source contract', () => {
 
   it('renders compact exchange and variant toggles with B-combo metadata', () => {
     assert.match(panelSource, /A \/ B 双组合/)
-    assert.match(panelSource, /跟踪卧龙AI精选 A、B 两套组合的收盘价模拟表现，核心看累计收益、回撤、波动与日胜率。/)
+    assert.match(panelSource, /跟踪卧龙AI精选 A、B 两套组合的开盘价模拟表现：收盘后选股，次一交易日开盘价买入、当日收盘价结算，核心看累计收益、回撤、波动与日胜率。/)
     assert.match(panelSource, /selectedExchange/)
     assert.match(panelSource, /selectedVariant/)
     assert.match(panelSource, /模拟组合A/)
@@ -198,6 +198,15 @@ describe('RankingPortfolioPanel source contract', () => {
     assert.match(panelSource, /较买入价/)
     assert.doesNotMatch(panelSource, /每日收盘后取卧龙AI精选排行榜A、B两种规则 4 只股票/)
     assert.doesNotMatch(panelSource, /数据日期：/)
+  })
+
+  it('shows open-price buy basis, realtime latest price and pending-before-open state', () => {
+    // 买入价改为 T+1 开盘价；开盘前进入待开盘 pending 态，不用收盘价兜底。
+    assert.match(panelSource, /entry_price_pending/)
+    assert.match(panelSource, /买入价待开盘/)
+    assert.match(panelSource, /待开盘/)
+    // 最新价优先使用实时价 latest_price，回退 latest_close_price。
+    assert.match(panelSource, /item\?\.latest_price \|\| item\?\.latest_close_price/)
   })
 
   it('imports every React hook it uses', () => {

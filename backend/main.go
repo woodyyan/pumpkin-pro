@@ -62,6 +62,45 @@ func buildQuadrantSnapshotSymbol(code, exchange string) string {
 	}
 }
 
+func newQuadrantRealtimeQuoteFetcher(marketClient *live.MarketClient) quadrant.RealtimeQuoteFetcher {
+	return func(ctx context.Context, symbols []quadrant.RealtimeSymbol) ([]quadrant.RealtimeQuote, error) {
+		if marketClient == nil || len(symbols) == 0 {
+			return nil, nil
+		}
+		liveSymbols := make([]string, 0, len(symbols))
+		// Map live symbol string back to (code, exchange) for the result.
+		backRef := make(map[string]quadrant.RealtimeSymbol, len(symbols))
+		for _, sym := range symbols {
+			liveSym := buildQuadrantSnapshotSymbol(sym.Code, sym.Exchange)
+			if liveSym == "" {
+				continue
+			}
+			liveSymbols = append(liveSymbols, liveSym)
+			backRef[liveSym] = sym
+		}
+		snapshots, err := marketClient.FetchDetailedSymbolSnapshots(ctx, liveSymbols)
+		if err != nil {
+			return nil, err
+		}
+		quotes := make([]quadrant.RealtimeQuote, 0, len(snapshots))
+		for _, snap := range snapshots {
+			ref, ok := backRef[strings.ToUpper(strings.TrimSpace(snap.Symbol))]
+			if !ok {
+				ref = quadrant.RealtimeSymbol{Code: stripSymbolSuffix(snap.Symbol), Exchange: snap.Exchange}
+			}
+			if snap.LastPrice <= 0 {
+				continue
+			}
+			quotes = append(quotes, quadrant.RealtimeQuote{
+				Code:      ref.Code,
+				Exchange:  ref.Exchange,
+				LastPrice: snap.LastPrice,
+			})
+		}
+		return quotes, nil
+	}
+}
+
 func newQuadrantPriceResolver(liveRepo *live.Repository) quadrant.PriceResolver {
 	return func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
 		if liveRepo == nil || strings.TrimSpace(tradeDate) == "" {
@@ -82,6 +121,35 @@ func newQuadrantPriceResolver(liveRepo *live.Repository) quadrant.PriceResolver 
 			}
 			if snapshot.LastPrice > 0 {
 				return snapshot.LastPrice
+			}
+		}
+		return 0
+	}
+}
+
+// newQuadrantOpenPriceResolver builds an OpenPriceResolver that looks up the
+// day-line Open price for a given symbol on an exact trade date. It is used by
+// the admin repair job to backfill missing T+1 entry open prices post-cutover.
+// Unlike the close-price resolver it does NOT fall back to adjacent dates:
+// using the wrong day's open would produce incorrect constituent returns.
+func newQuadrantOpenPriceResolver(marketClient *live.MarketClient) quadrant.OpenPriceResolver {
+	return func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
+		if marketClient == nil || strings.TrimSpace(tradeDate) == "" {
+			return 0
+		}
+		symbol := buildQuadrantSnapshotSymbol(code, exchange)
+		if symbol == "" {
+			return 0
+		}
+		// Fetch enough bars to cover recent dates (including the target date).
+		bars, err := marketClient.FetchSymbolDailyBars(ctx, symbol, 30)
+		if err != nil || len(bars) == 0 {
+			return 0
+		}
+		target := strings.TrimSpace(tradeDate)
+		for i := len(bars) - 1; i >= 0; i-- {
+			if strings.TrimSpace(bars[i].Date) == target && bars[i].Open > 0 {
+				return bars[i].Open
 			}
 		}
 		return 0
@@ -3683,6 +3751,7 @@ func main() {
 	quadrantRepo := quadrant.NewRepository(storeInstance.DB)
 	quadrantService := quadrant.NewService(quadrantRepo)
 	quadrantService.SetPriceResolver(newQuadrantPriceResolver(liveRepo))
+	quadrantService.SetOpenPriceResolver(newQuadrantOpenPriceResolver(liveMarketClient))
 	quadrantService.SetTradeDateResolver(newQuadrantTradeDateResolver(liveRepo, liveMarketClient))
 	quadrantWorker := quadrant.NewWorker(quadrantService, quadrant.WorkerConfig{
 		QuantServiceURL: cfg.QuantServiceURL,
@@ -3690,6 +3759,20 @@ func main() {
 	}, nil)
 	quadrantService.SetWorker(quadrantWorker)
 	quadrantWorker.Start(context.Background())
+
+	// Intraday realtime-price refresh for the ranking simulated portfolio.
+	// Refreshes current-constituent latest prices on fixed Beijing-time points
+	// per market, and fills the T+1 09:25 call-auction open (buy) price.
+	quadrantRealtimeWorker := quadrant.NewRealtimeWorker(
+		quadrantService,
+		newQuadrantRealtimeQuoteFetcher(liveMarketClient),
+		quadrant.RealtimeWorkerConfig{
+			Enabled:      cfg.RankingPortfolioRealtime.Enabled,
+			ASharePoints: cfg.RankingPortfolioRealtime.ASharePoints,
+			HKPoints:     cfg.RankingPortfolioRealtime.HKPoints,
+		},
+	)
+	quadrantRealtimeWorker.Start(context.Background())
 
 	// ── Backup Worker (dual-trigger) ──
 	backupRepo := backup.NewRepository(storeInstance.DB)

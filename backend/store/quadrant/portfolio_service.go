@@ -432,10 +432,16 @@ func rankingPortfolioRepairTaskLogID(now time.Time) string {
 }
 
 func (s *Service) RebuildLaggingRankingPortfolioResults(ctx context.Context, taskLogID string, markAutoRepair bool) error {
+	return s.RebuildLaggingRankingPortfolioResultsFromDate(ctx, taskLogID, markAutoRepair, "")
+}
+
+// RebuildLaggingRankingPortfolioResultsFromDate rebuilds lagging portfolio results
+// starting from cutoverDate (inclusive). Pass "" to use the default lookback window.
+func (s *Service) RebuildLaggingRankingPortfolioResultsFromDate(ctx context.Context, taskLogID string, markAutoRepair bool, cutoverDate string) error {
 	definitions := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())
 	var firstErr error
 	for _, definition := range definitions {
-		if err := s.rebuildLaggingRankingPortfolioResultForDefinition(ctx, definition, taskLogID, markAutoRepair); err != nil && firstErr == nil {
+		if err := s.rebuildLaggingRankingPortfolioResultForDefinitionFromDate(ctx, definition, taskLogID, markAutoRepair, cutoverDate); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -443,6 +449,10 @@ func (s *Service) RebuildLaggingRankingPortfolioResults(ctx context.Context, tas
 }
 
 func (s *Service) rebuildLaggingRankingPortfolioResultForDefinition(ctx context.Context, definition RankingPortfolioDefinition, taskLogID string, markAutoRepair bool) error {
+	return s.rebuildLaggingRankingPortfolioResultForDefinitionFromDate(ctx, definition, taskLogID, markAutoRepair, "")
+}
+
+func (s *Service) rebuildLaggingRankingPortfolioResultForDefinitionFromDate(ctx context.Context, definition RankingPortfolioDefinition, taskLogID string, markAutoRepair bool, cutoverDate string) error {
 	latestRankingDate, err := s.repo.GetLatestRankingSnapshotDateByExchange(ctx, definition.Exchange)
 	if err != nil {
 		return err
@@ -462,6 +472,11 @@ func (s *Service) rebuildLaggingRankingPortfolioResultForDefinition(ctx context.
 	fromDate := latestPortfolioDate
 	if fromDate == "" {
 		fromDate = recentSnapshotRepairFromDate(latestRankingDate)
+	}
+	// D0 守卫：如果调用方传入了 cutoverDate，则 fromDate 不得早于 cutoverDate，
+	// 防止补齐路径回溯到上线日之前的旧口径数据。
+	if cutoverDate != "" && (fromDate == "" || fromDate < cutoverDate) {
+		fromDate = cutoverDate
 	}
 	targetDates, err := s.repo.ListRankingSnapshotDatesByExchangeRange(ctx, definition.Exchange, fromDate, latestRankingDate)
 	if err != nil {
@@ -1539,7 +1554,12 @@ func buildRankingPortfolioLatestRebalance(
 		}
 
 		priceRow := priceByKey[key]
-		referencePrice := roundRankingPortfolioFloat(priceRow.ClosePrice)
+		// 模拟买入/换仓参考价使用 T+1 开盘价（集合竞价），含成本价按单边 0.02% 计。
+		referencePrice := roundRankingPortfolioFloat(priceRow.OpenPrice)
+		referenceTradeDate := priceRow.EntryTradeDate
+		if referenceTradeDate == "" {
+			referenceTradeDate = priceRow.PriceTradeDate
+		}
 		referenceCostPrice := 0.0
 		if referencePrice > 0 {
 			referenceCostPrice = roundRankingPortfolioFloat(referencePrice * costMultiplier)
@@ -1555,7 +1575,7 @@ func buildRankingPortfolioLatestRebalance(
 			ToWeight:           roundRankingPortfolioFloat(toWeight),
 			ReferencePrice:     referencePrice,
 			ReferenceCostPrice: referenceCostPrice,
-			PriceTradeDate:     priceRow.PriceTradeDate,
+			PriceTradeDate:     referenceTradeDate,
 		})
 	}
 	sort.SliceStable(items, func(i, j int) bool {
@@ -1577,6 +1597,13 @@ func buildRankingPortfolioLatestRebalance(
 		ChangeCount:     len(items),
 		Items:           items,
 	}
+}
+
+// rankingPortfolioDayPrice carries both the T+1 open (entry) price and the
+// valuation-day close price for a single symbol within one snapshot version.
+type rankingPortfolioDayPrice struct {
+	Open  float64
+	Close float64
 }
 
 func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinition, latestSnapshotVersion string, now time.Time) (*RankingPortfolioResult, error) {
@@ -1613,7 +1640,7 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 		})
 	}
 
-	priceByVersion := map[string]map[string]float64{}
+	priceByVersion := map[string]map[string]rankingPortfolioDayPrice{}
 	var priceRows []RankingPortfolioMarketPrice
 	if err := tx.Where("definition_id = ?", definition.ID).
 		Order("snapshot_date ASC, exchange ASC, code ASC, id ASC").
@@ -1622,9 +1649,12 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 	}
 	for _, row := range priceRows {
 		if _, ok := priceByVersion[row.SnapshotVersion]; !ok {
-			priceByVersion[row.SnapshotVersion] = map[string]float64{}
+			priceByVersion[row.SnapshotVersion] = map[string]rankingPortfolioDayPrice{}
 		}
-		priceByVersion[row.SnapshotVersion][snapshotPriceHintKey(row.Code, row.Exchange)] = row.ClosePrice
+		priceByVersion[row.SnapshotVersion][snapshotPriceHintKey(row.Code, row.Exchange)] = rankingPortfolioDayPrice{
+			Open:  row.OpenPrice,
+			Close: row.ClosePrice,
+		}
 	}
 
 	series := make([]RankingPortfolioSeriesPoint, 0, len(snapshots))
@@ -1644,10 +1674,15 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 	for i := 1; i < len(snapshots); i++ {
 		prevSnapshot := snapshots[i-1]
 		currentSnapshot := snapshots[i]
+		// nextHoldings 是在 prevSnapshot（信号日 T）收盘后选出的成分股，
+		// 它们在 currentSnapshot（建仓/估值日 T+1）当天开盘买入、收盘估值。
 		nextHoldings := constituentsByVersion[prevSnapshot.SnapshotVersion]
-		portfolioReturn := calculateRankingPortfolioPeriodReturn(nextHoldings, priceByVersion[prevSnapshot.SnapshotVersion], priceByVersion[currentSnapshot.SnapshotVersion])
-		tradeRatio := calculateRankingPortfolioTradeRatio(activeHoldings, nextHoldings)
-		costRatio := definition.TradeCostRate * tradeRatio
+		// 当日收益按 open→close 计算（开盘买入价 → 当日收盘价），等权。
+		portfolioReturn := calculateRankingPortfolioPeriodReturn(nextHoldings, priceByVersion[currentSnapshot.SnapshotVersion])
+		// 交易成本只在买入腿与卖出腿发生：新建仓买入 + 被淘汰卖出；
+		// 连续在仓的股票权重差为 0，不重复扣成本。
+		turnover := calculateRankingPortfolioTradeRatio(activeHoldings, nextHoldings)
+		costRatio := definition.TradeCostRate * turnover
 		netDailyReturn := (1-costRatio)*(1+portfolioReturn) - 1
 
 		prevPoint := series[len(series)-1]
@@ -1735,9 +1770,13 @@ func buildRankingPortfolioSummaryMetrics(series []RankingPortfolioSeriesPoint) r
 	if firstTradeDate != "" && latestTradeDate != "" {
 		metrics.InceptionDays = rankingPortfolioInclusiveDays(firstTradeDate, latestTradeDate)
 	}
-	if len(series) > 1 {
-		latestDaily := roundRankingPortfolioPct(series[len(series)-1].DailyPortfolioReturnPct)
-		metrics.LatestDailyReturnPct = &latestDaily
+	if len(series) > 2 {
+		// 「昨日收益率」固定取「最新结算交易日的前一天」(T-1)。
+		// series[0] 为建仓起点（NAV=1，日收益恒为 0，不是真实交易日收益），
+		// 因此至少需要 3 个点（起点 + T-1 + T）才有真实的 T-1 日收益。
+		// series[len-1] 为最新结算日 T，series[len-2] 即 T-1 的日收益。
+		yesterdayDaily := roundRankingPortfolioPct(series[len(series)-2].DailyPortfolioReturnPct)
+		metrics.LatestDailyReturnPct = &yesterdayDaily
 	}
 
 	maxDrawdown := 0.0
@@ -1845,20 +1884,23 @@ func calculateRankingPortfolioAnnualizedVolatility(dailyReturns []float64) float
 	return math.Sqrt(variance) * math.Sqrt(rankingPortfolioAnnualTradingDays)
 }
 
-func calculateRankingPortfolioPeriodReturn(holdings []RankingPortfolioConstituentItem, prevPrices map[string]float64, currentPrices map[string]float64) float64 {
-	if len(holdings) == 0 || len(prevPrices) == 0 || len(currentPrices) == 0 {
+// calculateRankingPortfolioPeriodReturn computes the equal-weighted single-day
+// portfolio return using the open→close move of each holding on its valuation day.
+// open = T+1 集合竞价买入价，close = T+1 收盘估值价。缺价的成分股被跳过并对剩余
+// 成分股重新归一权重。
+func calculateRankingPortfolioPeriodReturn(holdings []RankingPortfolioConstituentItem, dayPrices map[string]rankingPortfolioDayPrice) float64 {
+	if len(holdings) == 0 || len(dayPrices) == 0 {
 		return 0
 	}
 	weightedSum := 0.0
 	weightSum := 0.0
 	for _, holding := range holdings {
 		key := snapshotPriceHintKey(holding.Code, holding.Exchange)
-		prevClose := prevPrices[key]
-		currentClose := currentPrices[key]
-		if prevClose <= 0 || currentClose <= 0 {
+		price, ok := dayPrices[key]
+		if !ok || price.Open <= 0 || price.Close <= 0 {
 			continue
 		}
-		weightedSum += holding.Weight * (currentClose/prevClose - 1)
+		weightedSum += holding.Weight * (price.Close/price.Open - 1)
 		weightSum += holding.Weight
 	}
 	if weightSum <= 0 {
@@ -1922,8 +1964,8 @@ func buildEmptyRankingPortfolioResponse(definition RankingPortfolioDefinition) R
 			SelectionRule:     definition.SelectionRule,
 			SelectionWindow:   definition.SelectionWindow,
 			RebalanceRule:     definition.RebalanceRule,
-			CalculationMethod: rankingPortfolioCalculationMethodClose,
-			PriceBasis:        rankingPortfolioPriceBasisClose,
+			CalculationMethod: rankingPortfolioCalculationMethodOpen,
+			PriceBasis:        rankingPortfolioPriceBasisOpen,
 			LatestNav:         1,
 			MethodNote:        "",
 		},
@@ -2002,6 +2044,20 @@ func (s *Service) applyCurrentRankingPortfolioSelection(ctx context.Context, def
 		return err
 	}
 
+	// 汇总当前成分股的建仓日(entry_date)与最近实时刷新时间(realtime_as_of)。
+	latestEntryDate := ""
+	latestRealtime := ""
+	for _, c := range item.Constituents {
+		if c.EntryTradeDate != "" && c.EntryTradeDate > latestEntryDate {
+			latestEntryDate = c.EntryTradeDate
+		}
+		if c.LatestQuoteTime != "" && c.LatestQuoteTime > latestRealtime {
+			latestRealtime = c.LatestQuoteTime
+		}
+	}
+	item.Meta.EntryDate = latestEntryDate
+	item.Meta.RealtimeAsOf = latestRealtime
+
 	return nil
 }
 
@@ -2060,21 +2116,50 @@ func (s *Service) enrichRankingPortfolioCurrentConstituents(ctx context.Context,
 			break
 		}
 
-		entryPrice, resolvedEntryTradeDate, err := s.repo.GetLatestRankingSnapshotClosePriceByTradeDateOnOrBefore(ctx, items[index].Code, items[index].Exchange, entryTradeDate)
+		// 买入价 = 当前连续在仓周期对应 entry_date(T+1) 的 9:25 集合竞价开盘价。
+		// entryTradeDate 此处为该周期建仓信号日(T)；开盘价按 entry_trade_date >= T 取首个已回填值。
+		entryPrice, resolvedEntryTradeDate, err := s.repo.GetRankingPortfolioEntryOpenPrice(ctx, definition.ID, items[index].Code, items[index].Exchange, entryTradeDate)
 		if err != nil {
-			return fmt.Errorf("resolve constituent entry price for %s(%s): %w", items[index].Code, items[index].Exchange, err)
+			return fmt.Errorf("resolve constituent entry open price for %s(%s): %w", items[index].Code, items[index].Exchange, err)
+		}
+
+		// 最新价 = 每半小时刷新的实时价；非交易时段沿用最近一次。
+		// 实时价缺失（如盘前尚未刷新）时，回退到最新收盘价用于展示。
+		latestPrice := 0.0
+		latestQuoteTime := ""
+		realtimePrice, quoteAt, rtErr := s.repo.GetRankingPortfolioRealtimePrice(ctx, items[index].Code, items[index].Exchange)
+		if rtErr != nil {
+			return fmt.Errorf("resolve constituent realtime price for %s(%s): %w", items[index].Code, items[index].Exchange, rtErr)
 		}
 		latestClosePrice, resolvedLatestTradeDate, err := s.repo.GetLatestRankingSnapshotClosePriceByTradeDateOnOrBefore(ctx, items[index].Code, items[index].Exchange, latestSourceTradeDate)
 		if err != nil {
-			return fmt.Errorf("resolve constituent latest price for %s(%s): %w", items[index].Code, items[index].Exchange, err)
+			return fmt.Errorf("resolve constituent latest close price for %s(%s): %w", items[index].Code, items[index].Exchange, err)
+		}
+		if realtimePrice > 0 {
+			latestPrice = realtimePrice
+			if !quoteAt.IsZero() {
+				latestQuoteTime = quoteAt.UTC().Format(time.RFC3339)
+			}
+		} else if latestClosePrice > 0 {
+			latestPrice = latestClosePrice
 		}
 
 		items[index].EntryTradeDate = normalizeSourceTradeDate(resolvedEntryTradeDate)
 		items[index].EntryPrice = roundRankingPortfolioFloat(entryPrice)
 		items[index].LatestTradeDate = normalizeSourceTradeDate(resolvedLatestTradeDate)
 		items[index].LatestClosePrice = roundRankingPortfolioFloat(latestClosePrice)
-		if entryPrice > 0 && latestClosePrice > 0 {
-			latestReturnPct := roundRankingPortfolioPct((latestClosePrice/entryPrice - 1) * 100)
+		items[index].LatestPrice = roundRankingPortfolioFloat(latestPrice)
+		items[index].LatestQuoteTime = latestQuoteTime
+
+		// 开盘价未到（T+1 9:25 前）→ 买入价未知，涨幅置空、标记 pending，
+		// 绝不用收盘价兜底买入价。
+		if entryPrice <= 0 {
+			items[index].EntryPricePending = true
+			items[index].LatestReturnPct = nil
+			continue
+		}
+		if latestPrice > 0 {
+			latestReturnPct := roundRankingPortfolioPct((latestPrice/entryPrice - 1) * 100)
 			items[index].LatestReturnPct = &latestReturnPct
 		}
 	}
@@ -2113,11 +2198,12 @@ func buildRankingPortfolioResponse(definition RankingPortfolioDefinition, result
 			SelectionRule:            definition.SelectionRule,
 			SelectionWindow:          definition.SelectionWindow,
 			RebalanceRule:            definition.RebalanceRule,
-			CalculationMethod:        rankingPortfolioCalculationMethodClose,
-			PriceBasis:               rankingPortfolioPriceBasisClose,
+			CalculationMethod:        rankingPortfolioCalculationMethodOpen,
+			PriceBasis:               rankingPortfolioPriceBasisOpen,
 			BatchID:                  result.BatchID,
 			SnapshotVersion:          result.SnapshotVersion,
 			SnapshotDate:             result.SnapshotDate,
+			SignalDate:               normalizeSourceTradeDate(result.SourceTradeDate),
 			SourceTradeDate:          result.SourceTradeDate,
 			RankingTime:              result.RankingTime.UTC().Format(time.RFC3339),
 			HoldingsEffectiveTime:    result.HoldingsEffectiveTime.UTC().Format(time.RFC3339),
@@ -2176,4 +2262,154 @@ func (s *Service) GetRankingPortfolio(ctx context.Context) (*RankingPortfolioCol
 	}
 
 	return &RankingPortfolioCollectionResponse{Items: items}, nil
+}
+
+// collectCurrentConstituentSymbols returns the de-duplicated set of current
+// constituent symbols across all active definitions of the given market scope.
+func (s *Service) collectCurrentConstituentSymbols(ctx context.Context, scope string) ([]RealtimeSymbol, error) {
+	scope = strings.ToUpper(strings.TrimSpace(scope))
+	definitions := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())
+	seen := map[string]struct{}{}
+	out := make([]RealtimeSymbol, 0, 16)
+	for _, definition := range definitions {
+		if strings.ToUpper(strings.TrimSpace(definition.Exchange)) != scope {
+			continue
+		}
+		constituents, _, _, err := s.buildCurrentRankingPortfolioSelection(ctx, definition)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range constituents {
+			key := snapshotPriceHintKey(c.Code, c.Exchange)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, RealtimeSymbol{Code: c.Code, Exchange: c.Exchange})
+		}
+	}
+	return out, nil
+}
+
+// persistRealtimeQuotes upserts the latest intraday quote for every symbol, and
+// when fillOpen is true (09:25 call auction) also fills the simulated entry open
+// price for the current trading day's batch. The entry trade date is the Beijing
+// date of `at`.
+func (s *Service) persistRealtimeQuotes(ctx context.Context, scope string, quotes []RealtimeQuote, fillOpen bool, at time.Time) error {
+	if s.repo == nil || len(quotes) == 0 {
+		return nil
+	}
+	entryTradeDate := at.In(beijingLocation()).Format("2006-01-02")
+	for _, q := range quotes {
+		if q.LastPrice <= 0 {
+			continue
+		}
+		if err := s.repo.UpsertRankingPortfolioRealtimePrice(ctx, RankingPortfolioRealtimePrice{
+			Code:      q.Code,
+			Exchange:  q.Exchange,
+			LastPrice: q.LastPrice,
+			QuoteTime: at.UTC(),
+		}); err != nil {
+			return err
+		}
+		// On the 09:25 call auction, the open price is the simulated buy price.
+		if fillOpen && q.IsOpen {
+			if err := s.repo.FillRankingPortfolioEntryOpenPrice(ctx, scope, q.Code, q.Exchange, q.LastPrice, entryTradeDate); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// OpenPriceBackfillResult summarises the outcome of BackfillMissingEntryOpenPrices.
+type OpenPriceBackfillResult struct {
+	// FilledCount is the number of market-price rows that had their open_price set.
+	FilledCount int
+	// StillPendingCount is the number of rows where the open-price resolver
+	// returned 0 (e.g. data not yet available or stock was suspended).
+	StillPendingCount int
+	// SkippedBeforeCutover is the number of rows skipped because their
+	// snapshot_date is before the cutover date (D0).
+	SkippedBeforeCutover int
+}
+
+// BackfillMissingEntryOpenPrices scans market_price rows whose open_price is 0
+// and snapshot_date >= cutoverDate, then fills them from the openPriceResolver.
+// It is idempotent: rows that already have open_price > 0 are never touched.
+// Returns a summary and any hard error (resolver returning 0 is not an error).
+func (s *Service) BackfillMissingEntryOpenPrices(ctx context.Context, cutoverDate string) (OpenPriceBackfillResult, error) {
+	cutoverDate = strings.TrimSpace(cutoverDate)
+	var result OpenPriceBackfillResult
+
+	if s.openPriceResolver == nil {
+		return result, fmt.Errorf("open price resolver not configured")
+	}
+
+	rows, err := s.repo.ListMarketPricesMissingOpenByDateRange(ctx, cutoverDate)
+	if err != nil {
+		return result, fmt.Errorf("list missing open prices: %w", err)
+	}
+	if len(rows) == 0 {
+		return result, nil
+	}
+
+	// Determine the T+1 entry trade date for each snapshot. The entry date is
+	// the next trading day after the snapshot date. We approximate this as the
+	// snapshot version itself when available, falling back to listing the
+	// snapshot record to read HoldingsEffectiveTime or using snapshot_date+1.
+	// In practice, snapshot_version == snapshot_date for this system.
+	for _, row := range rows {
+		if cutoverDate != "" && strings.TrimSpace(row.SnapshotDate) < cutoverDate {
+			result.SkippedBeforeCutover++
+			continue
+		}
+		// The entry (T+1) trade date for this snapshot is the next trading day.
+		// We resolve it by looking up an existing snapshot with a later date or
+		// by querying the repo for the next snapshot date after this one.
+		entryTradeDate, err := s.resolveEntryTradeDateForSnapshot(ctx, row.DefinitionID, row.SnapshotDate)
+		if err != nil || entryTradeDate == "" {
+			// Cannot determine T+1 date yet (e.g. next snapshot hasn't arrived);
+			// treat as still pending, not an error.
+			result.StillPendingCount++
+			continue
+		}
+
+		openPrice := s.openPriceResolver(ctx, row.Code, row.Exchange, entryTradeDate)
+		if openPrice <= 0 {
+			result.StillPendingCount++
+			continue
+		}
+
+		if err := s.repo.SetRankingPortfolioMarketPriceOpen(ctx,
+			row.DefinitionID, row.SnapshotVersion, row.Code, row.Exchange,
+			openPrice, entryTradeDate); err != nil {
+			return result, fmt.Errorf("set open price for %s(%s) on %s: %w",
+				row.Code, row.Exchange, entryTradeDate, err)
+		}
+		result.FilledCount++
+	}
+	return result, nil
+}
+
+// resolveEntryTradeDateForSnapshot returns the T+1 trading date for a given
+// snapshot date. It does so by finding the next snapshot in the DB that has a
+// later snapshot_date (data-driven, same approach used by the daily pipeline).
+// Returns "" if not yet available (e.g. the latest snapshot has no successor).
+func (s *Service) resolveEntryTradeDateForSnapshot(ctx context.Context, definitionID, snapshotDate string) (string, error) {
+	snapshotDate = strings.TrimSpace(snapshotDate)
+	if snapshotDate == "" {
+		return "", nil
+	}
+	var next RankingPortfolioSnapshot
+	if err := s.repo.db.WithContext(ctx).
+		Where("definition_id = ? AND snapshot_date > ?", definitionID, snapshotDate).
+		Order("snapshot_date ASC, id ASC").
+		First(&next).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil // no successor yet
+		}
+		return "", err
+	}
+	return strings.TrimSpace(next.SnapshotDate), nil
 }

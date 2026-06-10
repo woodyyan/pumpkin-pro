@@ -17,9 +17,12 @@ const (
 	rankingPortfolioSelectionRuleTop4          = "top4"
 	rankingPortfolioSelectionRuleTop10ByStreak = "top10_by_consecutive_days"
 	rankingPortfolioRebalanceRuleClose         = "t_close_rebalance_at_close"
+	rankingPortfolioRebalanceRuleOpen          = "t_close_generate_t1_open_rebalance"
 	rankingPortfolioCalculationMethodClose     = "close_price_rebalance"
+	rankingPortfolioCalculationMethodOpen      = "open_entry_close_valuation"
 	rankingPortfolioPriceBasisClose            = "close"
-	rankingPortfolioMethodNote                 = "收盘后生成排行榜，并按该收盘日收盘价模拟调仓；收益曲线、区间收益与个股收益均按收盘价口径计算。"
+	rankingPortfolioPriceBasisOpen             = "open_entry"
+	rankingPortfolioMethodNote                 = "收盘后基于当日收盘数据生成排行榜；次一交易日 9:25 集合竞价开盘价模拟买入；当日收盘价结算组合收益与净值曲线；个股涨幅按开盘买入价与最新实时价（每半小时）计算；含 0.02% 单边交易成本。"
 )
 
 // RankingPortfolioDefinition stores the portfolio rule definition separately
@@ -100,20 +103,43 @@ func (RankingPortfolioSnapshotConstituent) TableName() string {
 
 // RankingPortfolioMarketPrice stores source stock closes used for offline recompute.
 type RankingPortfolioMarketPrice struct {
-	ID              int64     `gorm:"primaryKey;autoIncrement"`
-	DefinitionID    string    `gorm:"size:64;not null;uniqueIndex:uidx_qrpmp_def_ver_code,priority:1;index:idx_qrpmp_def_date,priority:1"`
-	SnapshotVersion string    `gorm:"size:64;not null;uniqueIndex:uidx_qrpmp_def_ver_code,priority:2"`
-	SnapshotDate    string    `gorm:"size:10;not null;index:idx_qrpmp_def_date,priority:2"`
-	Code            string    `gorm:"size:10;not null;uniqueIndex:uidx_qrpmp_def_ver_code,priority:3;index:idx_qrpmp_def_date,priority:3"`
-	Exchange        string    `gorm:"size:8;not null;default:'SZSE'"`
-	ClosePrice      float64   `gorm:"not null;default:0"`
-	PriceTradeDate  string    `gorm:"size:10;not null;default:''"`
-	CreatedAt       time.Time `gorm:"not null"`
-	UpdatedAt       time.Time `gorm:"not null"`
+	ID              int64   `gorm:"primaryKey;autoIncrement"`
+	DefinitionID    string  `gorm:"size:64;not null;uniqueIndex:uidx_qrpmp_def_ver_code,priority:1;index:idx_qrpmp_def_date,priority:1"`
+	SnapshotVersion string  `gorm:"size:64;not null;uniqueIndex:uidx_qrpmp_def_ver_code,priority:2"`
+	SnapshotDate    string  `gorm:"size:10;not null;index:idx_qrpmp_def_date,priority:2"`
+	Code            string  `gorm:"size:10;not null;uniqueIndex:uidx_qrpmp_def_ver_code,priority:3;index:idx_qrpmp_def_date,priority:3"`
+	Exchange        string  `gorm:"size:8;not null;default:'SZSE'"`
+	ClosePrice      float64 `gorm:"not null;default:0"`
+	PriceTradeDate  string  `gorm:"size:10;not null;default:''"`
+	// OpenPrice 为 entry_date（信号日的次一交易日 T+1）9:25 集合竞价开盘价，
+	// 用作模拟组合的买入价。榜单生成（T 收盘后）时为 0，待 T+1 开盘回填。
+	OpenPrice float64 `gorm:"not null;default:0"`
+	// EntryTradeDate 为 OpenPrice 所属的 T+1 交易日（北京时间，YYYY-MM-DD）。
+	EntryTradeDate string    `gorm:"size:10;not null;default:''"`
+	CreatedAt      time.Time `gorm:"not null"`
+	UpdatedAt      time.Time `gorm:"not null"`
 }
 
 func (RankingPortfolioMarketPrice) TableName() string {
 	return "quadrant_ranking_portfolio_market_prices"
+}
+
+// RankingPortfolioRealtimePrice caches the most recent intraday quote per symbol,
+// refreshed every half hour during trading sessions (Beijing time). It is used ONLY
+// to compute current-constituent gain (latest_price / entry_open_price - 1) and must
+// NEVER feed the net-asset-value curve, which is settled with close prices only.
+type RankingPortfolioRealtimePrice struct {
+	ID        int64     `gorm:"primaryKey;autoIncrement"`
+	Code      string    `gorm:"size:10;not null;uniqueIndex:uidx_qrprt_code_ex,priority:1"`
+	Exchange  string    `gorm:"size:8;not null;default:'';uniqueIndex:uidx_qrprt_code_ex,priority:2"`
+	LastPrice float64   `gorm:"not null;default:0"`
+	QuoteTime time.Time `gorm:"not null"`
+	CreatedAt time.Time `gorm:"not null"`
+	UpdatedAt time.Time `gorm:"not null"`
+}
+
+func (RankingPortfolioRealtimePrice) TableName() string {
+	return "quadrant_ranking_portfolio_realtime_prices"
 }
 
 // RankingPortfolioResult stores one fully materialized, batch-consistent view
@@ -183,6 +209,22 @@ type RankingPortfolioAdminStatusItem struct {
 	AutoRepairStatus      string `json:"auto_repair_status,omitempty"`
 	AutoRepairMessage     string `json:"auto_repair_message,omitempty"`
 	UpdatedAt             string `json:"updated_at,omitempty"`
+	// CutoverDate is the go-live date of the open-entry pricing change.
+	// The admin repair job will not backfill dates strictly before this date.
+	CutoverDate string `json:"cutover_date,omitempty"`
+	// PendingOpenPriceCount is the number of market-price rows whose open_price
+	// is still 0 for this definition. > 0 indicates a data gap that needs repair.
+	PendingOpenPriceCount int `json:"pending_open_price_count"`
+	// LastRepairSummary holds the result of the most recent admin repair run.
+	LastRepairSummary *RankingPortfolioRepairSummary `json:"last_repair_summary,omitempty"`
+}
+
+// RankingPortfolioRepairSummary is embedded in admin status to surface the
+// outcome of the last manual repair run.
+type RankingPortfolioRepairSummary struct {
+	BackfilledDays       int  `json:"backfilled_days"`
+	StillPending         int  `json:"still_pending"`
+	TouchedCutoverFloor  bool `json:"touched_cutover_floor"`
 }
 
 type RankingPortfolioAdminStatusResponse struct {
@@ -204,22 +246,25 @@ type RankingPortfolioSeriesPoint struct {
 }
 
 type RankingPortfolioConstituentItem struct {
-	Rank             int      `json:"rank"`
-	SourceRank       int      `json:"source_rank,omitempty"`
-	Code             string   `json:"code"`
-	Name             string   `json:"name"`
-	Exchange         string   `json:"exchange"`
-	Board            string   `json:"board,omitempty"`
-	ConsecutiveDays  int      `json:"consecutive_days,omitempty"`
-	Weight           float64  `json:"weight"`
-	RankingScore     float64  `json:"ranking_score,omitempty"`
-	Opportunity      float64  `json:"opportunity,omitempty"`
-	Risk             float64  `json:"risk,omitempty"`
-	EntryTradeDate   string   `json:"entry_trade_date,omitempty" gorm:"-"`
-	EntryPrice       float64  `json:"entry_price,omitempty" gorm:"-"`
-	LatestTradeDate  string   `json:"latest_trade_date,omitempty" gorm:"-"`
-	LatestClosePrice float64  `json:"latest_close_price,omitempty" gorm:"-"`
-	LatestReturnPct  *float64 `json:"latest_return_pct,omitempty" gorm:"-"`
+	Rank              int      `json:"rank"`
+	SourceRank        int      `json:"source_rank,omitempty"`
+	Code              string   `json:"code"`
+	Name              string   `json:"name"`
+	Exchange          string   `json:"exchange"`
+	Board             string   `json:"board,omitempty"`
+	ConsecutiveDays   int      `json:"consecutive_days,omitempty"`
+	Weight            float64  `json:"weight"`
+	RankingScore      float64  `json:"ranking_score,omitempty"`
+	Opportunity       float64  `json:"opportunity,omitempty"`
+	Risk              float64  `json:"risk,omitempty"`
+	EntryTradeDate    string   `json:"entry_trade_date,omitempty" gorm:"-"`
+	EntryPrice        float64  `json:"entry_price,omitempty" gorm:"-"`
+	EntryPricePending bool     `json:"entry_price_pending,omitempty" gorm:"-"`
+	LatestTradeDate   string   `json:"latest_trade_date,omitempty" gorm:"-"`
+	LatestClosePrice  float64  `json:"latest_close_price,omitempty" gorm:"-"`
+	LatestPrice       float64  `json:"latest_price,omitempty" gorm:"-"`
+	LatestQuoteTime   string   `json:"latest_quote_time,omitempty" gorm:"-"`
+	LatestReturnPct   *float64 `json:"latest_return_pct,omitempty" gorm:"-"`
 }
 
 type RankingPortfolioRebalanceItem struct {
@@ -259,10 +304,13 @@ type RankingPortfolioMeta struct {
 	BatchID                         string   `json:"batch_id"`
 	SnapshotVersion                 string   `json:"snapshot_version"`
 	SnapshotDate                    string   `json:"snapshot_date"`
+	SignalDate                      string   `json:"signal_date,omitempty"`
+	EntryDate                       string   `json:"entry_date,omitempty"`
 	SourceTradeDate                 string   `json:"source_trade_date,omitempty"`
 	RankingTime                     string   `json:"ranking_time"`
 	HoldingsEffectiveTime           string   `json:"holdings_effective_time"`
 	NavAsOfTime                     string   `json:"nav_as_of_time"`
+	RealtimeAsOf                    string   `json:"realtime_as_of,omitempty"`
 	UpdatedAt                       string   `json:"updated_at"`
 	LatestNav                       float64  `json:"latest_nav"`
 	LatestPortfolioReturnPct        float64  `json:"latest_portfolio_return_pct"`

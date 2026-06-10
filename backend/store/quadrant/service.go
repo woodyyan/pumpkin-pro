@@ -16,6 +16,12 @@ import (
 // Implemented by the live-store module; returns 0 if unavailable.
 type PriceResolver func(ctx context.Context, code string, exchange string, tradeDate string) float64
 
+// OpenPriceResolver resolves a stock's opening price for an exact trade date.
+// It must return the 09:25 call-auction open (day-line Open) for the given date,
+// or 0 if unavailable. Used by the admin repair job to backfill missing entry
+// open prices for dates on or after the cutover date (D0).
+type OpenPriceResolver func(ctx context.Context, code string, exchange string, tradeDate string) float64
+
 // TradeDateResolver resolves the effective source trade date for a market batch.
 type TradeDateResolver func(ctx context.Context, exchange string, computedAt time.Time) string
 
@@ -23,6 +29,7 @@ type TradeDateResolver func(ctx context.Context, exchange string, computedAt tim
 type Service struct {
 	repo                *Repository
 	priceResolver       PriceResolver     // optional, for snapshot close_price
+	openPriceResolver   OpenPriceResolver // optional, for entry open price backfill
 	tradeDateResolver   TradeDateResolver // optional, for source_trade_date
 	worker              *Worker           // optional, injected for manual trigger
 	repairHook          func(context.Context) error
@@ -36,6 +43,12 @@ func NewService(repo *Repository) *Service {
 // SetPriceResolver injects the price resolution callback (called during init).
 func (s *Service) SetPriceResolver(r PriceResolver) {
 	s.priceResolver = r
+}
+
+// SetOpenPriceResolver injects the open-price resolver used by the admin repair
+// job to backfill missing T+1 entry open prices from the daily-bar data source.
+func (s *Service) SetOpenPriceResolver(r OpenPriceResolver) {
+	s.openPriceResolver = r
 }
 
 // SetTradeDateResolver injects the source-trade-date resolution callback.
@@ -424,14 +437,55 @@ func (s *Service) SetRankingPortfolioRepairHook(hook func(context.Context) error
 	s.portfolioRepairHook = hook
 }
 
+// RankingPortfolioRepairResult summarises the outcome of TriggerRankingPortfolioRepair.
+type RankingPortfolioRepairResult struct {
+	CutoverDate          string `json:"cutover_date"`
+	BackfillFilled       int    `json:"backfill_filled"`
+	BackfillStillPending int    `json:"backfill_still_pending"`
+	BackfillSkipped      int    `json:"backfill_skipped_before_cutover"`
+}
+
 func (s *Service) TriggerRankingPortfolioRepair(ctx context.Context) error {
+	_, err := s.TriggerRankingPortfolioRepairWithResult(ctx, "")
+	return err
+}
+
+// TriggerRankingPortfolioRepairWithResult runs the two-phase repair:
+//  1. Backfill missing entry open prices for dates >= cutoverDate.
+//  2. Rebuild lagging portfolio results starting from cutoverDate.
+//
+// cutoverDate is the go-live date ("YYYY-MM-DD", Beijing time). Pass "" to fall
+// back to the default lookback window (legacy behaviour, no D0 guard).
+func (s *Service) TriggerRankingPortfolioRepairWithResult(ctx context.Context, cutoverDate string) (RankingPortfolioRepairResult, error) {
+	cutoverDate = strings.TrimSpace(cutoverDate)
+	result := RankingPortfolioRepairResult{CutoverDate: cutoverDate}
+
 	if s.portfolioRepairHook != nil {
-		return s.portfolioRepairHook(ctx)
+		return result, s.portfolioRepairHook(ctx)
 	}
 	if s.repairHook != nil {
-		return s.repairHook(ctx)
+		return result, s.repairHook(ctx)
 	}
-	return s.RebuildLaggingRankingPortfolioResults(ctx, "", false)
+
+	// Phase 1: backfill missing T+1 open prices (only for D0+).
+	if s.openPriceResolver != nil && cutoverDate != "" {
+		backfill, err := s.BackfillMissingEntryOpenPrices(ctx, cutoverDate)
+		if err != nil {
+			return result, fmt.Errorf("phase1 open price backfill: %w", err)
+		}
+		result.BackfillFilled = backfill.FilledCount
+		result.BackfillStillPending = backfill.StillPendingCount
+		result.BackfillSkipped = backfill.SkippedBeforeCutover
+		log.Printf("[ranking-portfolio-repair] phase1 open price backfill: filled=%d pending=%d skipped=%d cutover=%s",
+			backfill.FilledCount, backfill.StillPendingCount, backfill.SkippedBeforeCutover, cutoverDate)
+	}
+
+	// Phase 2: rebuild lagging results from cutoverDate.
+	taskLogID := rankingPortfolioRepairTaskLogID(time.Now().UTC())
+	if err := s.RebuildLaggingRankingPortfolioResultsFromDate(ctx, taskLogID, false, cutoverDate); err != nil {
+		return result, fmt.Errorf("phase2 rebuild results: %w", err)
+	}
+	return result, nil
 }
 
 // allEmpty returns true if every item has an empty code.
@@ -916,6 +970,11 @@ func (s *Service) ListComputeLogs(ctx context.Context, limit int) ([]ComputeLogR
 }
 
 func (s *Service) GetRankingPortfolioAdminStatus(ctx context.Context) (*RankingPortfolioAdminStatusResponse, error) {
+	return s.GetRankingPortfolioAdminStatusWithCutover(ctx, "")
+}
+
+func (s *Service) GetRankingPortfolioAdminStatusWithCutover(ctx context.Context, cutoverDate string) (*RankingPortfolioAdminStatusResponse, error) {
+	cutoverDate = strings.TrimSpace(cutoverDate)
 	statuses, err := s.repo.ListLatestRankingPortfolioJobStatuses(ctx)
 	if err != nil {
 		return nil, err
@@ -927,6 +986,10 @@ func (s *Service) GetRankingPortfolioAdminStatus(ctx context.Context) (*RankingP
 		}
 		statusByDefinition[item.DefinitionID] = item
 	}
+
+	// Count market_price rows missing open_price for D0+ dates.
+	pendingByDef, _ := s.repo.CountMissingOpenPricesByDefinition(ctx, cutoverDate)
+
 	definitions := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())
 	items := make([]RankingPortfolioAdminStatusItem, 0, len(definitions))
 	for _, definition := range definitions {
@@ -934,13 +997,15 @@ func (s *Service) GetRankingPortfolioAdminStatus(ctx context.Context) (*RankingP
 		latestPortfolioDate, _ := s.repo.GetLatestRankingPortfolioResultDate(ctx, definition.ID)
 		lagDays := rankingPortfolioLagDays(latestRankingDate, latestPortfolioDate)
 		item := RankingPortfolioAdminStatusItem{
-			DefinitionID:        definition.ID,
-			DefinitionCode:      definition.Code,
-			DefinitionName:      definition.Name,
-			Exchange:            definition.Exchange,
-			LatestRankingDate:   latestRankingDate,
-			LatestPortfolioDate: latestPortfolioDate,
-			LagDays:             lagDays,
+			DefinitionID:          definition.ID,
+			DefinitionCode:        definition.Code,
+			DefinitionName:        definition.Name,
+			Exchange:              definition.Exchange,
+			LatestRankingDate:     latestRankingDate,
+			LatestPortfolioDate:   latestPortfolioDate,
+			LagDays:               lagDays,
+			CutoverDate:           cutoverDate,
+			PendingOpenPriceCount: pendingByDef[definition.ID],
 			Status: func() string {
 				if lagDays > 0 {
 					return "lagging"

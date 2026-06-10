@@ -19,6 +19,7 @@ func setupQuadrantTest(t *testing.T) (*Repository, func()) {
 		&RankingPortfolioSnapshot{},
 		&RankingPortfolioSnapshotConstituent{},
 		&RankingPortfolioMarketPrice{},
+		&RankingPortfolioRealtimePrice{},
 		&RankingPortfolioResult{},
 		&RankingPortfolioJobStatus{},
 	)

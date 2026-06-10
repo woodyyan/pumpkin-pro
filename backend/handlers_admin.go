@@ -383,7 +383,8 @@ func (a *appServer) handleAdminRankingPortfolioStatus(w http.ResponseWriter, r *
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
 		return
 	}
-	resp, err := a.quadrantService.GetRankingPortfolioAdminStatus(r.Context())
+	cutoverDate := a.cfg.RankingPortfolioRealtime.CutoverDate
+	resp, err := a.quadrantService.GetRankingPortfolioAdminStatusWithCutover(r.Context(), cutoverDate)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -399,13 +400,16 @@ func (a *appServer) handleAdminRankingPortfolioRepair(w http.ResponseWriter, r *
 		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
 		return
 	}
-	if err := a.quadrantService.TriggerRankingPortfolioRepair(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "触发模拟组合收益曲线补齐失败: "+err.Error())
+	cutoverDate := a.cfg.RankingPortfolioRealtime.CutoverDate
+	result, err := a.quadrantService.TriggerRankingPortfolioRepairWithResult(r.Context(), cutoverDate)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "触发开盘价补齐与曲线重算失败: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"ok": true,
-		"message": "已触发模拟组合收益曲线补齐，请稍后刷新后台状态。",
+		"ok":      true,
+		"message": "已触发开盘价补齐与曲线重算，请稍后刷新后台状态。",
+		"summary": result,
 	})
 }
 

@@ -1534,6 +1534,8 @@ function QuadrantAdminPanel({ onUnauthorized }) {
   const [expandedLog, setExpandedLog] = useState(null)
   const [triggering, setTriggering] = useState(false)
   const [repairing, setRepairing] = useState(false)
+  const [repairConfirming, setRepairConfirming] = useState(false)
+  const [repairSummary, setRepairSummary] = useState(null)
   const [actionError, setActionError] = useState('')
   const resource = useAdminResource({
     key: 'admin:quadrant',
@@ -1587,15 +1589,22 @@ function QuadrantAdminPanel({ onUnauthorized }) {
   }
 
   const handleRankingPortfolioRepair = async () => {
+    if (!repairConfirming) {
+      setRepairConfirming(true)
+      return
+    }
+    setRepairConfirming(false)
     setRepairing(true)
+    setRepairSummary(null)
     setActionError('')
     try {
-      await adminFetch('/api/admin/ranking-portfolio-repair', {
+      const resp = await adminFetch('/api/admin/ranking-portfolio-repair', {
         method: 'POST',
       })
+      if (resp?.summary) setRepairSummary(resp.summary)
       await resource.refresh()
     } catch (err) {
-      const message = handleAdminActionError(err, onUnauthorized, '触发模拟组合收益曲线补齐失败')
+      const message = handleAdminActionError(err, onUnauthorized, '触发开盘价补齐与曲线重算失败')
       if (message) {
         setActionError(message)
       }
@@ -1708,14 +1717,48 @@ function QuadrantAdminPanel({ onUnauthorized }) {
           <div>
             <h3 className="text-sm font-semibold text-foreground-muted">模拟组合收益曲线状态</h3>
             <p className="mt-1 text-xs text-foreground-dim">仅在管理后台展示每日状态、失败原因与滞后情况。</p>
+            {rankingPortfolioStatus.length > 0 && rankingPortfolioStatus[0]?.cutover_date && (
+              <p className="mt-0.5 text-xs text-foreground-disabled">
+                仅补齐 {rankingPortfolioStatus[0].cutover_date} 之后缺失的开盘价，不会修复上线前历史曲线。
+              </p>
+            )}
           </div>
-          <button
-            onClick={handleRankingPortfolioRepair}
-            disabled={repairing}
-            className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/30 dark:bg-amber-500/12 dark:text-amber-100 dark:hover:bg-amber-500/18 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {repairing ? '补齐中…' : '一键补齐模拟组合收益曲线'}
-          </button>
+          <div className="flex flex-col items-end gap-1.5">
+            {repairConfirming ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-amber-400">确认补齐开盘价并重算曲线（仅上线日后）？</span>
+                <button
+                  onClick={handleRankingPortfolioRepair}
+                  disabled={repairing}
+                  className="rounded-lg border border-amber-500/50 bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-200 transition hover:bg-amber-500/30 disabled:opacity-60"
+                >
+                  确认执行
+                </button>
+                <button
+                  onClick={() => setRepairConfirming(false)}
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground-dim hover:bg-background-alt"
+                >
+                  取消
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleRankingPortfolioRepair}
+                disabled={repairing}
+                className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/30 dark:bg-amber-500/12 dark:text-amber-100 dark:hover:bg-amber-500/18 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {repairing ? '补齐中…' : '补齐开盘价并重算曲线（仅上线日后）'}
+              </button>
+            )}
+            {repairSummary && !repairing && (
+              <div className="text-right text-[11px] text-foreground-dim">
+                上次补齐：回填 {repairSummary.backfill_filled ?? 0} 条
+                {repairSummary.backfill_still_pending > 0 && (
+                  <span className="ml-1 text-amber-400">· 仍待确认 {repairSummary.backfill_still_pending} 条</span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         {rankingPortfolioStatus.length === 0 ? (
           <p className="text-xs text-foreground-dim">暂无模拟组合任务状态。</p>
@@ -1728,6 +1771,7 @@ function QuadrantAdminPanel({ onUnauthorized }) {
                   <th className="pb-2 pr-4 font-medium">市场</th>
                   <th className="pb-2 pr-4 font-medium">最新榜单</th>
                   <th className="pb-2 pr-4 font-medium">最新收益曲线</th>
+                  <th className="pb-2 pr-4 font-medium">开盘价缺口</th>
                   <th className="pb-2 pr-4 font-medium">状态</th>
                   <th className="pb-2 pr-4 font-medium">自动补偿</th>
                   <th className="pb-2 pr-4 font-medium">失败原因</th>
@@ -1743,6 +1787,7 @@ function QuadrantAdminPanel({ onUnauthorized }) {
                     : item.status === 'lagging' || isLagging
                       ? 'text-amber-300'
                       : 'text-positive'
+                  const pendingOpen = Number(item.pending_open_price_count || 0)
                   return (
                     <tr key={item.definition_id} className="border-b border-border last:border-0 align-top">
                       <td className="py-2 pr-4">
@@ -1752,6 +1797,9 @@ function QuadrantAdminPanel({ onUnauthorized }) {
                       <td className="py-2 pr-4">{item.exchange}</td>
                       <td className="py-2 pr-4 tabular-nums">{item.latest_ranking_date || '--'}</td>
                       <td className="py-2 pr-4 tabular-nums">{item.latest_portfolio_date || '--'}</td>
+                      <td className={`py-2 pr-4 tabular-nums font-medium ${pendingOpen > 0 ? 'text-amber-400' : 'text-positive'}`}>
+                        {pendingOpen > 0 ? `缺 ${pendingOpen} 条` : '已补全'}
+                      </td>
                       <td className={`py-2 pr-4 font-medium ${statusClass}`}>{statusText}</td>
                       <td className="py-2 pr-4">{item.auto_repair_status || item.auto_repair_message || '--'}</td>
                       <td className="py-2 pr-4 max-w-[320px] break-words">{item.failure_reason || item.failure_stage || '--'}</td>

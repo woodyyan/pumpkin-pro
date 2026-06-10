@@ -145,3 +145,84 @@
 - `backend/store/auth` 需要保留稳定错误类型，`backend/main.go` 负责映射为用户可读的 `code + detail`。
 - `frontend/lib/auth-context.js` 的注册弹窗需要在提交前做最小必要校验，并对后端错误码做友好映射。
 - 注册表单内应直接展示密码长度要求，并把“推荐同时包含字母和数字”作为引导而非硬性失败条件，避免不必要挡路。
+
+## 决策 10: 卧龙 AI 精选模拟组合改为「T+1 开盘价建仓、当日收盘价估值」口径
+
+**日期**: 2026-06-07
+
+**背景**: 行情看板的卧龙 AI 精选模拟组合此前用榜单当日收盘价同时充当选股、建仓与估值价格（`close_price_rebalance`），存在时点错配/未来函数嫌疑：榜单一出（T 收盘后）就等于知道了买入价。业务要求改为更贴近真实交易的时序——T 收盘后选股，次一交易日 9:25 集合竞价开盘价模拟买入，当日收盘价结算收益与曲线。
+
+**决策**:
+1. 引入三条独立交易日口径：`signal_date`(T，选股依据收盘日) / `entry_date`(T+1，开盘建仓日) / `valuation_date`(收盘估值日)。
+2. 买入价 = `entry_date` 的 9:25 集合竞价开盘价（`RankingPortfolioMarketPrice.OpenPrice` + `EntryTradeDate`）。
+3. 净值曲线日收益改为等权 `open→close`（同一估值日开盘买入、收盘估值），不再用 `prevClose→curClose`。series 起点(T 收盘) NAV=1、日收益 0、不计涨跌。
+4. 交易成本仅在买入腿/卖出腿发生（等权 + 单边 0.02%），连续在仓换手率为 0、不重复扣（复用 `calculateRankingPortfolioTradeRatio`）。
+5. 个股「涨幅」= 实时价 / 开盘买入价 − 1。实时价每半小时刷新（`RankingPortfolioRealtimePrice` 缓存表 + `RealtimeWorker`），按北京时间分市场时点表：A 股 09:25/盘中半小时/15:30（共 12 点），港股 09:25/盘中半小时含12:00/16:30（共 15 点）。
+6. 「昨日收益率」固定取「最新结算交易日的前一天」(T-1)，即 `series[len-2]`，且至少需 3 个 series 点。
+7. 累计收益/最大回撤/波动率/日胜率/本月收益率算法不变，仅输入口径随 open→close 改变。
+8. 历史数据采用 **cut-over**：抛弃历史曲线，从新算法上线日 D0 起 NAV=1 重新计算，不回算历史。
+
+**原因**:
+1. open→close + 三日口径消除了「榜单一出即知买入价」的时点错配，可解释性强。
+2. 历史 `market_prices` 从未存过开盘价，9:25 集合竞价价无法从日线精确复原；老 close→close 与新 open→close 拼接会在切换点产生人为跳变，比断点更误导。cut-over 工作量小、口径一致、无跳变。
+3. 实时价仅服务于「当前成分股涨幅」展示，与净值曲线（只用收盘价结算）物理隔离，避免曲线盘中乱跳。
+
+**替代方案**:
+- 继续用收盘价建仓：否决，时点错配、有未来函数嫌疑。
+- 全量回算历史开盘价曲线：否决（仅保留为 plan B），数据不可校验、ROI 低、引入口径分叉。
+- 引入状态机/版本号管理推荐组合 vs 已建仓组合：否决，榜单只在每日盘后定时刷新、盘中不变，无需状态机。
+
+**影响**:
+- `RankingPortfolioMarketPrice` 增 `OpenPrice`/`EntryTradeDate`；新增 `RankingPortfolioRealtimePrice` 表与 migrator 注册。
+- 常量 `CalculationMethod=open_entry_close_valuation`、`PriceBasis=open_entry`、`MethodNote` 改写；`RebalanceRule` 沿用 `t_close_generate_t1_open_rebalance`。
+- `calculateRankingPortfolioPeriodReturn` 改为单日 open→close；`buildRankingPortfolioResult` series 循环对应调整；`buildRankingPortfolioLatestRebalance` 参考价改用 `OpenPrice`。
+- `enrichRankingPortfolioCurrentConstituents` 买入价取开盘价、最新价取实时价，开盘价未到时 `entry_price_pending=true`、涨幅置空、绝不用收盘价兜底。
+- `buildRankingPortfolioSummaryMetrics` 昨日收益率取 T-1。
+- Meta 增 `signal_date`/`entry_date`/`realtime_as_of`；ConstituentItem 增 `entry_price_pending`/`latest_price`/`latest_quote_time`。
+- 新增 `RealtimeWorker`（北京时间分市场时点表）+ `config.RankingPortfolioRealtimeConfig`，在 `main.go` 装配并注入基于 `live.MarketClient.FetchDetailedSymbolSnapshots` 的实时报价 fetcher。
+- 前端 `RankingPortfolioPanel.js` 展示开盘买入价、实时最新价、待开盘 pending 态，并更新口径说明文案。
+- `cmd/rebuild-ranking-portfolio-results` 标注为旧 close→close 口径（plan B 历史近似回算），不作为新口径标准重建路径。
+- `entry_date(T+1)` 由「下一个有行情快照的交易日」数据驱动推导（系统无独立节假日表）。
+
+---
+
+## 决策 11: Admin「一键补齐」按钮改造为两阶段开盘价修复
+
+**日期**: 2026-06-10
+
+**背景**: 上线后若某日 09:25 实时 worker 未能成功回填开盘价（网络故障、服务中断等），对应 `market_prices.open_price` 仍为 0，导致该交易日无法结算收益曲线。需要运维手段补齐。
+
+**决策**: 将 admin 后台「一键补齐」按钮职责从「补 close→close 曲线」改造为**两阶段开盘价修复**：
+1. **Phase 1（开盘价回填）**: 扫描 `snapshot_date >= D0` 的 `market_prices` 缺 `open_price` 行，通过 `OpenPriceResolver`（`live.MarketClient.FetchSymbolDailyBars` 取 DailyBar.Open）精确匹配 T+1 日开盘价，幂等写入；
+2. **Phase 2（曲线重算）**: 调用 `RebuildLaggingRankingPortfolioResultsFromDate(cutoverDate)`，从 D0 起重算缺失的收益曲线，含 D0 守卫（`fromDate` 不得早于 cutoverDate）。
+
+**D0 守卫原则**: 任何修复路径的 `fromDate` 均不得早于 `RANKING_PORTFOLIO_CUTOVER_DATE`（默认 `2026-06-10`），防止误回算旧口径历史数据。
+
+**OpenPriceResolver 设计**:
+- 类型：`OpenPriceResolver func(ctx, code, exchange, tradeDate) float64`
+- 精确匹配 `tradeDate`（T+1 日），不做日期 fallback。使用错日期的 open 会导致收益计算错误，宁缺毋错。
+- 通过 `service.SetOpenPriceResolver(r)` 注入，按钮场景专用，与盘中实时 worker 解耦。
+
+**接口变化**:
+- `POST /api/admin/ranking-portfolio-repair` → 返回 `{ok, message, summary: {cutover_date, backfill_filled, backfill_still_pending, backfill_skipped_before_cutover}}`
+- `GET /api/admin/ranking-portfolio-status` → 每条 item 新增 `cutover_date`, `pending_open_price_count` 字段
+
+**前端变化**:
+- 按钮文案：「一键补齐模拟组合收益曲线」→「补齐开盘价并重算曲线（仅上线日后）」
+- 增加二次确认弹窗（点击后先显示确认行+确认/取消按钮，再执行）
+- 执行后回显 summary（回填条数、待确认条数）
+- 状态表格新增「开盘价缺口」列（缺 N 条 / 已补全），`pending > 0` 高亮 amber
+
+**替代方案**:
+- 方案 2：复用旧 `RebuildLaggingRankingPortfolioResults` 不改 fromDate：否决，无 D0 守卫会触及旧口径数据
+- 方案 3：让 close price resolver 兼做 open 兜底：否决，收盘价 ≠ 开盘价，错误数据比缺数据更危险，pending 状态保持语义清晰
+
+**影响文件**:
+- `backend/config/config.go`：`RankingPortfolioRealtimeConfig` 加 `CutoverDate` 字段（env: `RANKING_PORTFOLIO_CUTOVER_DATE`，默认 `2026-06-10`）
+- `backend/store/quadrant/service.go`：新增 `OpenPriceResolver` 类型、`SetOpenPriceResolver`、`TriggerRankingPortfolioRepairWithResult`、`GetRankingPortfolioAdminStatusWithCutover`
+- `backend/store/quadrant/portfolio_service.go`：新增 `BackfillMissingEntryOpenPrices`、`resolveEntryTradeDateForSnapshot`、`RebuildLaggingRankingPortfolioResultsFromDate`（含 D0 守卫）
+- `backend/store/quadrant/repository.go`：新增 `ListMarketPricesMissingOpenByDateRange`、`SetRankingPortfolioMarketPriceOpen`、`CountMissingOpenPricesByDefinition`
+- `backend/store/quadrant/portfolio_model.go`：`RankingPortfolioAdminStatusItem` 加 `CutoverDate`/`PendingOpenPriceCount`/`LastRepairSummary`；新增 `RankingPortfolioRepairSummary`
+- `backend/handlers_admin.go`：`handleAdminRankingPortfolioStatus`/`handleAdminRankingPortfolioRepair` 接入 cutoverDate 与新返回字段
+- `backend/main.go`：新增 `newQuadrantOpenPriceResolver`，注入 `quadrantService.SetOpenPriceResolver`
+- `frontend/pages/admin.js`：按钮改造 + 二次确认 + summary 回显 + 状态表「开盘价缺口」列

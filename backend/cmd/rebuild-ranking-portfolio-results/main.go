@@ -1,3 +1,15 @@
+// Command rebuild-ranking-portfolio-results rebuilds materialized ranking
+// portfolio results from historical snapshots.
+//
+// ⚠️ 口径说明（重要）：
+// 本工具的净值序列(series)仍使用历史 close→close 口径（见 calculatePeriodReturn），
+// 这是「开盘价建仓」改造之前的旧口径。新版模拟组合已改为「T+1 9:25 开盘价建仓、
+// 当日收盘价估值」(open→close)，并采用 cut-over 策略：抛弃历史曲线、从新算法上线日
+// D0 起重新计算。
+//
+// 因此：本工具仅用于历史数据的近似回算（plan B），不应作为新口径模拟组合的标准
+// 重建路径。若产品明确需要展示 D0 之前的长历史曲线，再使用本工具按日线 Open 近似
+// 回补，并在展示层标注「D0 之前为近似回算」。日常运维请勿用本工具刷新当前批次。
 package main
 
 import (

@@ -222,16 +222,17 @@ func TestSaveAndGetRankingPortfolio(t *testing.T) {
 	for _, item := range aResp.LatestRebalance.Items {
 		itemsByCode[item.Code] = item
 	}
-	if item := itemsByCode["600002"]; item.Action != "sell" || item.FromWeight != 0.25 || item.ToWeight != 0 || item.ReferencePrice != 40 || item.ReferenceCostPrice != 39.992 {
+	// 调仓参考价使用 T+1 开盘价；保存（T 收盘）时开盘价尚未回填，故为 0（pending）。
+	if item := itemsByCode["600002"]; item.Action != "sell" || item.FromWeight != 0.25 || item.ToWeight != 0 || item.ReferencePrice != 0 {
 		t.Fatalf("unexpected sell rebalance item: %+v", item)
 	}
-	if item := itemsByCode["300001"]; item.Action != "sell" || item.FromWeight != 0.25 || item.ToWeight != 0 || item.ReferencePrice != 30 || item.ReferenceCostPrice != 29.994 {
+	if item := itemsByCode["300001"]; item.Action != "sell" || item.FromWeight != 0.25 || item.ToWeight != 0 || item.ReferencePrice != 0 {
 		t.Fatalf("unexpected sell rebalance item: %+v", item)
 	}
-	if item := itemsByCode["600003"]; item.Action != "buy" || item.FromWeight != 0 || item.ToWeight != 0.25 || item.ReferencePrice != 45 || item.ReferenceCostPrice != 45.009 {
+	if item := itemsByCode["600003"]; item.Action != "buy" || item.FromWeight != 0 || item.ToWeight != 0.25 || item.ReferencePrice != 0 {
 		t.Fatalf("unexpected buy rebalance item: %+v", item)
 	}
-	if item := itemsByCode["300002"]; item.Action != "buy" || item.FromWeight != 0 || item.ToWeight != 0.25 || item.ReferencePrice != 55 || item.ReferenceCostPrice != 55.011 {
+	if item := itemsByCode["300002"]; item.Action != "buy" || item.FromWeight != 0 || item.ToWeight != 0.25 || item.ReferencePrice != 0 {
 		t.Fatalf("unexpected buy rebalance item: %+v", item)
 	}
 }
@@ -251,8 +252,8 @@ func TestBuildRankingPortfolioSummaryMetrics(t *testing.T) {
 	if metrics.InceptionDays != 7 {
 		t.Fatalf("inception_days = %d, want 7", metrics.InceptionDays)
 	}
-	if metrics.LatestDailyReturnPct == nil || *metrics.LatestDailyReturnPct != 4.9505 {
-		t.Fatalf("latest_daily_return_pct = %v, want 4.9505", metrics.LatestDailyReturnPct)
+	if metrics.LatestDailyReturnPct == nil || *metrics.LatestDailyReturnPct != -1.9417 {
+		t.Fatalf("latest_daily_return_pct (昨日, T-1) = %v, want -1.9417", metrics.LatestDailyReturnPct)
 	}
 	if metrics.CurrentMonthReturnPct == nil || *metrics.CurrentMonthReturnPct != 6 {
 		t.Fatalf("current_month_return_pct = %v, want 6", metrics.CurrentMonthReturnPct)
@@ -301,25 +302,77 @@ func TestEnrichRankingPortfolioCurrentConstituents_UsesConsecutiveEntryTradeDate
 		t.Fatalf("seed ranking snapshots failed: %v", err)
 	}
 
+	// 买入价来自连续在仓周期建仓日(T+1=2026-05-07)的开盘价快照。
+	marketPrices := []RankingPortfolioMarketPrice{
+		{DefinitionID: defaultRankingPortfolioDefinitionID, SnapshotVersion: "2026-05-06", SnapshotDate: "2026-05-06", Code: "600001", Exchange: "SSE", OpenPrice: 10, EntryTradeDate: "2026-05-07", ClosePrice: 10, PriceTradeDate: "2026-05-06", CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.db.WithContext(ctx).Create(&marketPrices).Error; err != nil {
+		t.Fatalf("seed market prices failed: %v", err)
+	}
+	// 最新价来自每半小时刷新的实时价缓存。
+	if err := repo.UpsertRankingPortfolioRealtimePrice(ctx, RankingPortfolioRealtimePrice{Code: "600001", Exchange: "SSE", LastPrice: 12, QuoteTime: now}); err != nil {
+		t.Fatalf("seed realtime price failed: %v", err)
+	}
+
 	items := []RankingPortfolioConstituentItem{{Code: "600001", Exchange: "SSE"}}
 	definition := RankingPortfolioDefinition{ID: defaultRankingPortfolioDefinitionID}
 	if err := svc.enrichRankingPortfolioCurrentConstituents(ctx, definition, items, "2026-05-08"); err != nil {
 		t.Fatalf("enrich constituents failed: %v", err)
 	}
-	if items[0].EntryTradeDate != "2026-05-06" {
-		t.Fatalf("entry_trade_date = %s, want 2026-05-06", items[0].EntryTradeDate)
+	if items[0].EntryTradeDate != "2026-05-07" {
+		t.Fatalf("entry_trade_date = %s, want 2026-05-07 (T+1 建仓日)", items[0].EntryTradeDate)
 	}
 	if items[0].EntryPrice != 10 {
-		t.Fatalf("entry_price = %v, want 10", items[0].EntryPrice)
+		t.Fatalf("entry_price (开盘买入价) = %v, want 10", items[0].EntryPrice)
 	}
-	if items[0].LatestTradeDate != "2026-05-08" {
-		t.Fatalf("latest_trade_date = %s, want 2026-05-08", items[0].LatestTradeDate)
+	if items[0].EntryPricePending {
+		t.Fatalf("entry_price_pending should be false when open price exists")
 	}
-	if items[0].LatestClosePrice != 12 {
-		t.Fatalf("latest_close_price = %v, want 12", items[0].LatestClosePrice)
+	if items[0].LatestPrice != 12 {
+		t.Fatalf("latest_price (实时价) = %v, want 12", items[0].LatestPrice)
 	}
 	if items[0].LatestReturnPct == nil || *items[0].LatestReturnPct != 20 {
 		t.Fatalf("latest_return_pct = %v, want 20", items[0].LatestReturnPct)
+	}
+}
+
+func TestEnrichRankingPortfolioCurrentConstituents_PendingBeforeOpen(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	svc := NewService(repo)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	snapshots := []RankingPortfolioSnapshot{
+		{DefinitionID: defaultRankingPortfolioDefinitionID, SnapshotVersion: "2026-05-08", SnapshotDate: "2026-05-08", SourceTradeDate: "2026-05-08", CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.db.WithContext(ctx).Create(&snapshots).Error; err != nil {
+		t.Fatalf("seed snapshots failed: %v", err)
+	}
+	rows := []RankingPortfolioSnapshotConstituent{
+		{DefinitionID: defaultRankingPortfolioDefinitionID, SnapshotVersion: "2026-05-08", SnapshotDate: "2026-05-08", Code: "600001", Exchange: "SSE", Rank: 1, Weight: 0.25, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.db.WithContext(ctx).Create(&rows).Error; err != nil {
+		t.Fatalf("seed constituents failed: %v", err)
+	}
+	// 收盘价存在，但开盘价尚未回填（T+1 9:25 前）。
+	if err := repo.db.WithContext(ctx).Create(&RankingSnapshot{Code: "600001", Name: "股票600001", Exchange: "SSE", ClosePrice: 12, PriceTradeDate: "2026-05-08", SnapshotDate: "2026-05-08", CreatedAt: now}).Error; err != nil {
+		t.Fatalf("seed ranking snapshot failed: %v", err)
+	}
+
+	items := []RankingPortfolioConstituentItem{{Code: "600001", Exchange: "SSE"}}
+	definition := RankingPortfolioDefinition{ID: defaultRankingPortfolioDefinitionID}
+	if err := svc.enrichRankingPortfolioCurrentConstituents(ctx, definition, items, "2026-05-08"); err != nil {
+		t.Fatalf("enrich constituents failed: %v", err)
+	}
+	if !items[0].EntryPricePending {
+		t.Fatalf("expected entry_price_pending=true before open price filled, got %+v", items[0])
+	}
+	if items[0].EntryPrice != 0 {
+		t.Fatalf("entry_price must stay 0 (no close-price fallback), got %v", items[0].EntryPrice)
+	}
+	if items[0].LatestReturnPct != nil {
+		t.Fatalf("latest_return_pct must be nil while pending, got %v", *items[0].LatestReturnPct)
 	}
 }
 
@@ -490,5 +543,227 @@ func TestRebuildLaggingRankingPortfolioResults_BackfillsMissingMarketCloseFromHi
 	}
 	if marketPrice.PriceTradeDate != "2026-05-27" {
 		t.Fatalf("price_trade_date = %s, want 2026-05-27", marketPrice.PriceTradeDate)
+	}
+}
+
+// ── BackfillMissingEntryOpenPrices Tests ──
+
+func TestBackfillMissingEntryOpenPrices_FillsRows(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	// Seed a definition.
+	def := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())[0]
+	if err := repo.db.WithContext(ctx).Create(&def).Error; err != nil {
+		t.Fatalf("seed definition: %v", err)
+	}
+
+	// Seed a snapshot on D0 and the next day (T+1).
+	d0 := "2026-06-10"
+	d1 := "2026-06-11"
+	snaps := []RankingPortfolioSnapshot{
+		{DefinitionID: def.ID, SnapshotVersion: d0, SnapshotDate: d0, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
+		{DefinitionID: def.ID, SnapshotVersion: d1, SnapshotDate: d1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()},
+	}
+	if err := repo.db.WithContext(ctx).Create(&snaps).Error; err != nil {
+		t.Fatalf("seed snapshots: %v", err)
+	}
+
+	// Seed a market price row for D0 with open_price=0 (pending).
+	mp := RankingPortfolioMarketPrice{
+		DefinitionID:    def.ID,
+		SnapshotVersion: d0,
+		SnapshotDate:    d0,
+		Code:            "600001",
+		Exchange:        "SSE",
+		ClosePrice:      10.0,
+		OpenPrice:       0,
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
+	}
+	if err := repo.db.WithContext(ctx).Create(&mp).Error; err != nil {
+		t.Fatalf("seed market price: %v", err)
+	}
+
+	// Inject an open price resolver that returns a price for the entry date (D1).
+	svc.SetOpenPriceResolver(func(_ context.Context, code, exchange, tradeDate string) float64 {
+		if code == "600001" && exchange == "SSE" && tradeDate == d1 {
+			return 10.5
+		}
+		return 0
+	})
+
+	result, err := svc.BackfillMissingEntryOpenPrices(ctx, d0)
+	if err != nil {
+		t.Fatalf("backfill failed: %v", err)
+	}
+	if result.FilledCount != 1 {
+		t.Fatalf("FilledCount = %d, want 1", result.FilledCount)
+	}
+	if result.StillPendingCount != 0 {
+		t.Fatalf("StillPendingCount = %d, want 0", result.StillPendingCount)
+	}
+
+	// Verify the DB row was updated.
+	var updated RankingPortfolioMarketPrice
+	if err := repo.db.WithContext(ctx).
+		Where("definition_id = ? AND snapshot_version = ? AND code = ?", def.ID, d0, "600001").
+		First(&updated).Error; err != nil {
+		t.Fatalf("reload market price: %v", err)
+	}
+	if updated.OpenPrice != 10.5 {
+		t.Fatalf("open_price = %v, want 10.5", updated.OpenPrice)
+	}
+	if updated.EntryTradeDate != d1 {
+		t.Fatalf("entry_trade_date = %s, want %s", updated.EntryTradeDate, d1)
+	}
+}
+
+func TestBackfillMissingEntryOpenPrices_SkipsBeforeCutover(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	def := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())[0]
+	if err := repo.db.WithContext(ctx).Create(&def).Error; err != nil {
+		t.Fatalf("seed definition: %v", err)
+	}
+
+	// Snapshot before cutover.
+	old := "2026-05-01"
+	oldSnap := RankingPortfolioSnapshot{
+		DefinitionID: def.ID, SnapshotVersion: old, SnapshotDate: old,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := repo.db.WithContext(ctx).Create(&oldSnap).Error; err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+	oldMP := RankingPortfolioMarketPrice{
+		DefinitionID: def.ID, SnapshotVersion: old, SnapshotDate: old,
+		Code: "600001", Exchange: "SSE", ClosePrice: 9.0, OpenPrice: 0,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := repo.db.WithContext(ctx).Create(&oldMP).Error; err != nil {
+		t.Fatalf("seed market price: %v", err)
+	}
+
+	called := false
+	svc.SetOpenPriceResolver(func(_ context.Context, code, exchange, tradeDate string) float64 {
+		called = true
+		return 9.5
+	})
+
+	// cutoverDate is after the snapshot date → should be skipped entirely.
+	result, err := svc.BackfillMissingEntryOpenPrices(ctx, "2026-06-10")
+	if err != nil {
+		t.Fatalf("backfill failed: %v", err)
+	}
+	if result.FilledCount != 0 {
+		t.Fatalf("FilledCount = %d, want 0 (pre-cutover rows must be skipped)", result.FilledCount)
+	}
+	if called {
+		t.Fatal("open price resolver must not be called for pre-cutover rows")
+	}
+}
+
+func TestBackfillMissingEntryOpenPrices_PendingWhenNoSuccessorSnapshot(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	def := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())[0]
+	if err := repo.db.WithContext(ctx).Create(&def).Error; err != nil {
+		t.Fatalf("seed definition: %v", err)
+	}
+
+	// Only one snapshot; no successor exists yet.
+	d0 := "2026-06-10"
+	snap := RankingPortfolioSnapshot{
+		DefinitionID: def.ID, SnapshotVersion: d0, SnapshotDate: d0,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := repo.db.WithContext(ctx).Create(&snap).Error; err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+	mp := RankingPortfolioMarketPrice{
+		DefinitionID: def.ID, SnapshotVersion: d0, SnapshotDate: d0,
+		Code: "600001", Exchange: "SSE", ClosePrice: 10.0, OpenPrice: 0,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := repo.db.WithContext(ctx).Create(&mp).Error; err != nil {
+		t.Fatalf("seed market price: %v", err)
+	}
+
+	svc.SetOpenPriceResolver(func(_ context.Context, _, _, _ string) float64 { return 10.5 })
+
+	result, err := svc.BackfillMissingEntryOpenPrices(ctx, d0)
+	if err != nil {
+		t.Fatalf("backfill failed: %v", err)
+	}
+	if result.FilledCount != 0 {
+		t.Fatalf("FilledCount = %d, want 0 (no successor snapshot yet)", result.FilledCount)
+	}
+	if result.StillPendingCount != 1 {
+		t.Fatalf("StillPendingCount = %d, want 1", result.StillPendingCount)
+	}
+}
+
+func TestRebuildLaggingRankingPortfolioResultsFromDate_D0Guard(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	// Seed definition.
+	defs := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())
+	for i := range defs {
+		if err := repo.db.WithContext(ctx).Create(&defs[i]).Error; err != nil {
+			t.Fatalf("seed definition: %v", err)
+		}
+	}
+
+	// Seed two ranking snapshots: one before cutover (old) and one after (new).
+	old := "2026-05-01"
+	new_ := "2026-06-10"
+	exchange := "SZSE"
+	for _, date := range []string{old, new_} {
+		snap := RankingSnapshot{
+			Code:           "000001",
+			Name:           "平安银行",
+			Exchange:       exchange,
+			Rank:           1,
+			Opportunity:    0.9,
+			Risk:           0.1,
+			ClosePrice:     10.0,
+			PriceTradeDate: date,
+			SnapshotDate:   date,
+			CreatedAt:      time.Now().UTC(),
+		}
+		if err := repo.db.WithContext(ctx).Create(&snap).Error; err != nil {
+			t.Fatalf("seed ranking snapshot: %v", err)
+		}
+	}
+
+	// Run rebuild with D0 = new_ (should only attempt new_, not old).
+	// Since there are no constituents/market-prices, results are empty — but the
+	// logic must not error and must not attempt to build a result for old.
+	if err := svc.RebuildLaggingRankingPortfolioResultsFromDate(ctx, "test-d0-guard", false, new_); err != nil {
+		t.Fatalf("rebuild with D0 guard failed: %v", err)
+	}
+
+	// Verify that no result was created for the pre-cutover date.
+	var count int64
+	if err := repo.db.WithContext(ctx).
+		Model(&RankingPortfolioResult{}).
+		Where("snapshot_date < ?", new_).
+		Count(&count).Error; err != nil {
+		t.Fatalf("count pre-cutover results: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 pre-cutover results, got %d", count)
 	}
 }

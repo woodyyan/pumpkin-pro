@@ -147,6 +147,18 @@ def test_parse_baostock_industry_value_extracts_code_and_name():
     assert module.parse_baostock_industry_value("") == ("", "")
 
 
+def test_import_baostock_uses_python_import(monkeypatch):
+    sentinel = object()
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "baostock":
+            return sentinel
+        return __import__(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr('builtins.__import__', fake_import)
+    assert module.import_baostock() is sentinel
+
+
 class _FakeBaoLoginResult:
     def __init__(self, error_code="0", error_msg=""):
         self.error_code = error_code

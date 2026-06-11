@@ -136,12 +136,86 @@ def test_request_with_retry_retries_then_succeeds(monkeypatch):
 
 
 def test_industry_source_order_supports_auto_and_manual_selection():
-    assert module.industry_source_order("auto") == ["akshare", "eastmoney", "tencent"]
+    assert module.industry_source_order("auto") == ["baostock", "akshare", "eastmoney", "tencent"]
     assert module.industry_source_order("eastmoney") == ["eastmoney"]
 
 
 
-def test_fetch_industry_rows_falls_back_from_akshare_to_eastmoney(monkeypatch, tmp_path):
+def test_parse_baostock_industry_value_extracts_code_and_name():
+    assert module.parse_baostock_industry_value("J66货币金融服务") == ("J66", "货币金融服务")
+    assert module.parse_baostock_industry_value("房地产业") == ("", "房地产业")
+    assert module.parse_baostock_industry_value("") == ("", "")
+
+
+class _FakeBaoLoginResult:
+    def __init__(self, error_code="0", error_msg=""):
+        self.error_code = error_code
+        self.error_msg = error_msg
+
+
+class _FakeBaoQueryResult:
+    def __init__(self, rows, error_code="0", error_msg=""):
+        self._rows = rows
+        self._index = -1
+        self.error_code = error_code
+        self.error_msg = error_msg
+        self.fields = ["updateDate", "code", "code_name", "industry", "industryClassification"]
+
+    def next(self):
+        self._index += 1
+        return self._index < len(self._rows)
+
+    def get_row_data(self):
+        return self._rows[self._index]
+
+
+class _FakeBaoStock:
+    def __init__(self, rows, login_code="0", query_code="0"):
+        self._rows = rows
+        self._login_code = login_code
+        self._query_code = query_code
+        self.logged_out = False
+
+    def login(self):
+        return _FakeBaoLoginResult(self._login_code, "login failed" if self._login_code != "0" else "")
+
+    def query_stock_industry(self):
+        return _FakeBaoQueryResult(self._rows, self._query_code, "query failed" if self._query_code != "0" else "")
+
+    def logout(self):
+        self.logged_out = True
+
+
+
+def test_fetch_industry_rows_uses_baostock_first(monkeypatch, tmp_path):
+    db_path = tmp_path / "factor.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        module.ensure_schema(conn)
+        conn.execute("INSERT INTO factor_securities (code, symbol, name, exchange, board, is_st, is_active, source, updated_at) VALUES ('000001','000001.SZ','平安银行','SZSE','MAIN',0,1,'test','now')")
+        conn.commit()
+        args = module.parse_args(["--mode", "industries"])
+        fake_bs = _FakeBaoStock([
+            ["2026-06-11", "sz.000001", "平安银行", "J66货币金融服务", "证监会行业分类"],
+        ])
+
+        def fake_fetch_baostock(inner_conn, inner_args):
+            return [("000001", "J66 货币金融服务", "货币金融服务", "baostock:query_stock_industry", "now")], "baostock:query_stock_industry"
+
+        def fail_akshare(inner_conn, inner_args):
+            raise AssertionError("akshare should not be called when baostock succeeds")
+
+        monkeypatch.setattr(module, "import_baostock", lambda: fake_bs)
+        monkeypatch.setattr(module, "fetch_industry_rows_baostock", fake_fetch_baostock)
+        monkeypatch.setattr(module, "fetch_industry_rows_akshare", fail_akshare)
+        rows, source = module.fetch_industry_rows(conn, args)
+        assert source == "baostock:query_stock_industry"
+        assert rows == [("000001", "J66 货币金融服务", "货币金融服务", "baostock:query_stock_industry", rows[0][4])]
+    finally:
+        conn.close()
+
+
+def test_fetch_industry_rows_falls_back_from_baostock_to_akshare(monkeypatch, tmp_path):
     db_path = tmp_path / "factor.db"
     conn = sqlite3.connect(db_path)
     try:
@@ -150,18 +224,18 @@ def test_fetch_industry_rows_falls_back_from_akshare_to_eastmoney(monkeypatch, t
         conn.commit()
         args = module.parse_args(["--mode", "industries"])
 
-        def fail_akshare(inner_conn, inner_args):
-            raise RuntimeError("akshare down")
+        def fail_baostock(inner_conn, inner_args):
+            raise RuntimeError("baostock down")
 
-        def ok_eastmoney(inner_conn, inner_args):
+        def ok_akshare(inner_conn, inner_args):
             return [(
-                "000001", "银行", "银行", "eastmoney:qt_clist_get", "now"
-            )], "eastmoney:qt_clist_get"
+                "000001", "银行", "银行", "akshare:stock_board_industry_cons_em", "now"
+            )], "akshare:stock_board_industry_cons_em"
 
-        monkeypatch.setattr(module, "fetch_industry_rows_akshare", fail_akshare)
-        monkeypatch.setattr(module, "fetch_industry_rows_eastmoney", ok_eastmoney)
+        monkeypatch.setattr(module, "fetch_industry_rows_baostock", fail_baostock)
+        monkeypatch.setattr(module, "fetch_industry_rows_akshare", ok_akshare)
         rows, source = module.fetch_industry_rows(conn, args)
-        assert source == "eastmoney:qt_clist_get"
+        assert source == "akshare:stock_board_industry_cons_em"
         assert rows[0][0] == "000001"
     finally:
         conn.close()
@@ -388,7 +462,7 @@ def test_source_args_are_available_for_all_modes():
     args = module.parse_args([
         "--mode", "all",
         "--securities-source", "tencent",
-        "--industries-source", "eastmoney",
+        "--industries-source", "baostock",
         "--daily-bars-source", "eastmoney",
         "--index-bars-source", "tencent",
         "--financials-source", "akshare",
@@ -397,7 +471,7 @@ def test_source_args_are_available_for_all_modes():
         "--verbose",
     ])
     assert args.securities_source == "tencent"
-    assert args.industries_source == "eastmoney"
+    assert args.industries_source == "baostock"
     assert args.daily_bars_source == "eastmoney"
     assert args.index_bars_source == "tencent"
     assert args.financials_source == "akshare"

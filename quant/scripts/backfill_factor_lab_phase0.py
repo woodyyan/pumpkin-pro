@@ -48,7 +48,7 @@ DEFAULT_LOOKBACK_DAYS = 370    # calendar days, usually enough for ~250 trading 
 DEFAULT_ADJUST = "qfq"
 EXTERNAL_SOURCE_ORDER = ["akshare", "eastmoney", "tencent"]
 SECURITIES_SOURCE_ORDER = ["akshare", "eastmoney", "tencent", "local"]
-INDUSTRY_SOURCE_ORDER = ["akshare", "eastmoney", "tencent"]
+INDUSTRY_SOURCE_ORDER = ["baostock", "akshare", "eastmoney", "tencent"]
 MIN_FULL_UNIVERSE_SECURITY_COUNT = 1000
 EASTMONEY_CLIST_URL = "https://82.push2.eastmoney.com/api/qt/clist/get"
 EASTMONEY_KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
@@ -429,6 +429,11 @@ def import_pandas():
 def import_requests():
     import requests  # type: ignore
     return requests
+
+
+def import_baostock():
+    import baostock as bs  # type: ignore
+    return bs
 
 
 def call_with_retry(
@@ -861,6 +866,59 @@ def industry_rows_from_quote_records(records: list[dict[str, Any]], source: str)
     return [rows_by_code[code] for code in sorted(rows_by_code.keys())]
 
 
+def parse_baostock_industry_value(raw: Any) -> tuple[str, str]:
+    text = str(raw or "").strip()
+    if not text:
+        return "", ""
+    matched = re.match(r"^([A-Z]\d+)\s*(.+)$", text)
+    if matched:
+        return matched.group(1), matched.group(2).strip()
+    return "", text
+
+
+def fetch_industry_rows_baostock(conn: sqlite3.Connection, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
+    log_step("industries: 尝试外部源 BaoStock 全量行业")
+    bs = import_baostock()
+    login_result = bs.login()
+    if str(getattr(login_result, "error_code", "")) != "0":
+        raise RuntimeError(f"BaoStock 登录失败: {getattr(login_result, 'error_msg', '')}")
+    try:
+        query = bs.query_stock_industry()
+        if str(getattr(query, "error_code", "")) != "0":
+            raise RuntimeError(f"BaoStock query_stock_industry 失败: {getattr(query, 'error_msg', '')}")
+        target_codes = set(load_local_code_universe(conn, args, include_all_boards=False))
+        rows_by_code: dict[str, tuple[Any, ...]] = {}
+        now = utc_now()
+        while query.next():
+            row = query.get_row_data()
+            if len(row) < 5:
+                continue
+            code = normalize_code(row[1])
+            if not code or code in rows_by_code:
+                continue
+            if target_codes and code not in target_codes:
+                continue
+            industry_code, industry_name = parse_baostock_industry_value(row[3])
+            cleaned_name = normalize_industry_name(industry_name)
+            if not cleaned_name:
+                continue
+            raw_industry = str(row[3] or "").strip()
+            if industry_code:
+                raw_industry = f"{industry_code} {industry_name}".strip()
+            rows_by_code[code] = (code, raw_industry, cleaned_name, "baostock:query_stock_industry", now)
+        rows = [rows_by_code[code] for code in sorted(rows_by_code.keys())]
+        if args.limit > 0:
+            rows = rows[:args.limit]
+        if not rows:
+            raise RuntimeError("BaoStock 行业数据为空")
+        return rows, "baostock:query_stock_industry"
+    finally:
+        try:
+            bs.logout()
+        except Exception:
+            pass
+
+
 def fetch_industry_rows_eastmoney(conn: sqlite3.Connection, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
     records = fetch_securities_eastmoney_direct(args)
     rows = industry_rows_from_quote_records(records, "eastmoney:qt_clist_get")
@@ -938,7 +996,9 @@ def fetch_industry_rows(conn: sqlite3.Connection, args: argparse.Namespace) -> t
     failures: list[str] = []
     for item in industry_source_order(args.industries_source):
         try:
-            if item == "akshare":
+            if item == "baostock":
+                rows, source = fetch_industry_rows_baostock(conn, args)
+            elif item == "akshare":
                 rows, source = fetch_industry_rows_akshare(conn, args)
             elif item == "eastmoney":
                 rows, source = fetch_industry_rows_eastmoney(conn, args)
@@ -2376,7 +2436,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--index-code", default=DEFAULT_INDEX_CODE, help="中证全指指数代码，默认 000985")
     parser.add_argument("--report-limit", type=int, default=8, help="最多扫描多少个报告期")
     parser.add_argument("--securities-source", choices=["auto", "akshare", "eastmoney", "tencent", "local"], default="auto", help="股票池数据源；auto=AKShare→东方财富→腾讯行情→本地兜底")
-    parser.add_argument("--industries-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="行业数据源；auto=AKShare→东方财富→腾讯")
+    parser.add_argument("--industries-source", choices=["auto", "baostock", "akshare", "eastmoney", "tencent"], default="auto", help="行业数据源；auto=BaoStock→AKShare→东方财富→腾讯")
     parser.add_argument("--daily-bars-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="个股日线数据源；auto=AKShare→东方财富→腾讯")
     parser.add_argument("--index-bars-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="指数日线数据源；auto=AKShare→东方财富→腾讯")
     parser.add_argument("--financials-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="财务数据源；auto=AKShare→东方财富→腾讯基础面兜底")

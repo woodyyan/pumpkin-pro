@@ -1783,7 +1783,7 @@ function QuadrantAdminPanel({ onUnauthorized }) {
               <button
                 onClick={handleRankingPortfolioRepair}
                 disabled={repairing}
-                className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/30 dark:bg-amber-500/12 dark:text-amber-100 dark:hover:bg-amber-500/18 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/50 dark:bg-amber-500/30 dark:text-amber-100 dark:hover:bg-amber-500/40 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {repairing ? '补齐中…' : '补齐开盘价并重算曲线（仅上线日后）'}
               </button>

@@ -13,7 +13,7 @@ function formatDateTime(value) {
   return date.toLocaleString('zh-CN', { hour12: false })
 }
 
-export default function AIAnalysisShareCard({ payload }) {
+export default function AIAnalysisShareCard({ payload, isDark = true }) {
   const normalizedPayload = buildAIAnalysisSharePayload(payload)
   if (!normalizedPayload?.result?.analysis) return null
 
@@ -26,7 +26,8 @@ export default function AIAnalysisShareCard({ payload }) {
   return (
     <div
       data-share-card-root="true"
-      className="w-[1080px] overflow-hidden rounded-[32px] border border-border bg-[#090b10] p-8 text-foreground shadow-[0_32px_120px_rgba(0,0,0,0.45)]"
+      className="w-[1080px] overflow-hidden rounded-[32px] border border-border p-8 text-foreground shadow-[0_32px_120px_rgba(0,0,0,0.45)]"
+      style={{ backgroundColor: isDark ? '#090b10' : '#f8f9fb' }}
     >
       <div className="rounded-[24px] border border-primary/20 bg-[radial-gradient(circle_at_top_left,_rgba(230,126,34,0.16),_transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] px-5 py-4">
         <div className="flex items-center justify-between gap-5">

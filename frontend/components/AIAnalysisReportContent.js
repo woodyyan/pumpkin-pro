@@ -1,9 +1,9 @@
 import InfoTip from './InfoTip'
 
 const SIGNAL_MAP = {
-  buy: { label: '看多', arrow: '↑', hint: '偏多配置', color: 'text-negative', bg: 'bg-red-500/12', border: 'border-red-400/40', dot: '🔴' },
-  sell: { label: '看空', arrow: '↓', hint: '注意风险', color: 'text-positive', bg: 'bg-positive/10', border: 'border-emerald-400/40', dot: '🟢' },
-  hold: { label: '观望', arrow: '→', hint: '持仓不变', color: 'text-amber-600 dark:text-amber-300', bg: 'bg-amber-100 dark:bg-amber-500/12', border: 'border-amber-400/40', dot: '🟡' },
+  buy: { label: '看多', arrow: '↑', hint: '偏多配置', color: 'text-negative', bg: 'bg-red-500/12 dark:bg-red-500/25', border: 'border-red-400/40 dark:border-red-400/55', dot: '🔴' },
+  sell: { label: '看空', arrow: '↓', hint: '注意风险', color: 'text-positive', bg: 'bg-emerald-500/10 dark:bg-emerald-500/25', border: 'border-emerald-400/40 dark:border-emerald-400/55', dot: '🟢' },
+  hold: { label: '观望', arrow: '→', hint: '持仓不变', color: 'text-amber-600 dark:text-amber-300', bg: 'bg-amber-100 dark:bg-amber-500/25', border: 'border-amber-400/40 dark:border-amber-400/55', dot: '🟡' },
 }
 
 function formatDateTime(value) {

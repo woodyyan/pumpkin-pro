@@ -3,8 +3,8 @@ import Head from 'next/head'
 import changelogData from '../data/changelog.json'
 
 const TYPE_STYLES = {
-  新功能: 'border-sky-500/30 dark:border-sky-400/35 bg-sky-100 dark:bg-sky-500/12 text-sky-700 dark:text-sky-100 shadow-none dark:shadow-[0_10px_30px_rgba(56,189,248,0.12)]',
-  修复优化: 'border-emerald-500/30 dark:border-emerald-400/35 bg-emerald-100 dark:bg-positive/10 text-emerald-700 dark:text-emerald-100 shadow-none dark:shadow-[0_10px_30px_rgba(16,185,129,0.12)]',
+  新功能: 'border-sky-500/30 dark:border-sky-400/50 bg-sky-100 dark:bg-sky-500/30 text-sky-700 dark:text-sky-100 shadow-none dark:shadow-[0_10px_30px_rgba(56,189,248,0.12)]',
+  修复优化: 'border-emerald-500/30 dark:border-emerald-400/50 bg-emerald-100 dark:bg-emerald-500/30 text-emerald-700 dark:text-emerald-100 shadow-none dark:shadow-[0_10px_30px_rgba(16,185,129,0.12)]',
   工程维护: 'border-amber-500/30 dark:border-amber-400/35 bg-amber-100 dark:bg-amber-500/12 text-amber-700 dark:text-amber-100 shadow-none dark:shadow-[0_10px_30px_rgba(245,158,11,0.12)]',
 }
 

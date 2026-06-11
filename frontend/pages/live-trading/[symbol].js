@@ -2340,6 +2340,8 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolNam
   const [shareNotice, setShareNotice] = useState('')
   const [shareError, setShareError] = useState('')
   const shareCardWrapRef = useRef(null)
+  const { resolvedTheme } = useTheme()
+  const isDark = resolvedTheme !== 'light'
 
   const sharePayload = useMemo(() => buildAIAnalysisSharePayload({
     symbol,
@@ -2385,6 +2387,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolNam
       const exportResult = await exportAIAnalysisShareImages({
         element: shareElement,
         payload: sharePayload,
+        isDark,
       })
       if (exportResult.action === 'shared') {
         setShareNotice(exportResult.total > 1 ? `已唤起系统分享，共 ${exportResult.total} 张图片。` : '已唤起系统分享。')
@@ -2439,7 +2442,7 @@ function AIAnalysisPanel({ analyzing, result, error, onClose, onRetry, symbolNam
       ) : null}
 
       <div ref={shareCardWrapRef} aria-hidden className="pointer-events-none fixed left-[-20000px] top-0 z-[-1]">
-        {sharePayload ? <AIAnalysisShareCard payload={sharePayload} /> : null}
+        {sharePayload ? <AIAnalysisShareCard payload={sharePayload} isDark={isDark} /> : null}
       </div>
     </>
   )

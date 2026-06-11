@@ -213,17 +213,17 @@ async function requestServerShareFiles(payload, fallbackUrl) {
     : []
 }
 
-async function renderShareFilesClient(element, payload) {
+async function renderShareFilesClient(element, payload, backgroundColor = '#090b10') {
   const { toCanvas } = await import('html-to-image')
   const canvas = await toCanvas(element, {
-    backgroundColor: '#090b10',
+    backgroundColor,
     pixelRatio: AI_ANALYSIS_SHARE_PIXEL_RATIO,
     cacheBust: true,
   })
   return splitCanvasIntoShareFiles(canvas, payload)
 }
 
-export async function exportAIAnalysisShareImages({ element, payload, fallbackUrl = '/api/share/ai-analysis-image' }) {
+export async function exportAIAnalysisShareImages({ element, payload, fallbackUrl = '/api/share/ai-analysis-image', isDark = true }) {
   const normalizedPayload = buildAIAnalysisSharePayload(payload)
   if (!normalizedPayload?.result?.analysis) throw new Error('分析结果尚未准备好')
   if (!element) throw new Error('分享图内容尚未渲染完成')
@@ -236,12 +236,14 @@ export async function exportAIAnalysisShareImages({ element, payload, fallbackUr
   let files = []
   let method = 'client'
 
+  const backgroundColor = isDark ? '#090b10' : '#f8f9fb'
+
   if (shouldUseServerShareFallback({ userAgent, elementHeight })) {
     files = await requestServerShareFiles(normalizedPayload, fallbackUrl)
     method = 'server'
   } else {
     try {
-      files = await renderShareFilesClient(element, normalizedPayload)
+      files = await renderShareFilesClient(element, normalizedPayload, backgroundColor)
     } catch {
       files = await requestServerShareFiles(normalizedPayload, fallbackUrl)
       method = 'server'

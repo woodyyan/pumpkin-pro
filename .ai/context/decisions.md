@@ -267,3 +267,31 @@
 - `backend/handlers_admin.go`：`handleAdminRankingPortfolioStatus`/`handleAdminRankingPortfolioRepair` 接入 cutoverDate 与新返回字段
 - `backend/main.go`：新增 `newQuadrantOpenPriceResolver`，注入 `quadrantService.SetOpenPriceResolver`
 - `frontend/pages/admin.js`：按钮改造 + 二次确认 + summary 回显 + 状态表「开盘价缺口」列
+
+## 决策 14: Factor Lab industries 失败改为 warning 放行，dividends 改为手动刷新
+
+**日期**: 2026-06-11
+
+**背景**: 因子实验室 Phase 0 里 `industries` 长期只依赖 AkShare，且被视为阻断步骤；上游偶发失败时会直接让整条流水线停在 Phase 0。与此同时，`dividends` 每晚全量逐股刷新耗时长、更新频率却很低，容易把夜间自动链路拖慢甚至超时。
+
+**决策**:
+1. `industries` 自动源顺序改为 `akshare -> eastmoney -> tencent`。
+2. `industries` 外部刷新失败时，Phase 0 只产出 `partial/warning`，不得再 hard fail 全流水线；Phase1/Phase2 必须继续执行。
+3. admin 状态页必须展示 `industries` 的最近状态、warning、覆盖率、最近成功刷新时间。
+4. `dividends` 从 nightly Phase 0 默认模式中移除，改为 admin 手动触发；保留“缺口修复”和“全量刷新”两个手动入口。
+
+**原因**:
+1. 行业字段对筛选和展示重要，但短时上游波动不应卡死整条因子链路。
+2. 行业失败时最重要的是暴露健康度和覆盖率，让运维可见，而不是把 Phase1/Phase2 一起拖死。
+3. 分红数据天然低频，放入 nightly 全量刷新既浪费窗口，也放大外部源慢请求风险。
+
+**替代方案**:
+- 继续把 `industries` 设为 critical: 否决，单点外部源波动会反复导致最新快照停滞。
+- 仅把 `industries` 改成非 critical 但不展示健康度: 否决，运维无法区分“放行但健康”与“放行但已严重退化”。
+- 保留 `dividends` nightly 自动全量刷新: 否决，收益低且直接占用 nightly 时间预算。
+
+**影响**:
+- `quant/scripts/backfill_factor_lab_phase0.py` 支持 industries 多源 fallback，并在失败时记录 warning summary。
+- `quant/scripts/update_factor_lab_phase0_incremental.py` 默认 nightly modes 不再包含 `dividends`，但允许手动 `full_refresh_dividends`。
+- `backend/store/factorlab/worker.go` 和 admin query/status 需要支持 `partial` 状态、dividends 手动 scope、industries 健康元数据。
+- `frontend/pages/admin.js` 新增 industries 健康卡片、dividends 手动全量刷新按钮与策略说明。

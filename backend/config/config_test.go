@@ -21,6 +21,7 @@ func TestLoadDefaults(t *testing.T) {
 		"AI_API_KEY", "AI_BASE_URL", "AI_MODEL", "AI_CONFIG_CIPHER_KEY",
 		"FACTOR_LAB_DAILY_COMPUTE_ENABLED", "FACTOR_LAB_COMPUTE_HOUR", "FACTOR_LAB_COMPUTE_MINUTE",
 		"FACTOR_LAB_PYTHON_BIN", "FACTOR_LAB_PHASE0_SCRIPT", "FACTOR_LAB_PHASE1_SCRIPT", "FACTOR_LAB_PHASE2_SCRIPT",
+		"FACTOR_LAB_DAILY_MODES", "FACTOR_LAB_INDUSTRIES_SOURCE",
 		"FACTOR_LAB_DAILY_BARS_SOURCE", "FACTOR_LAB_FINANCIALS_SOURCE", "FACTOR_LAB_DIVIDENDS_SOURCE",
 		"FACTOR_LAB_PROGRESS_INTERVAL", "FACTOR_LAB_ITEM_PROGRESS_INTERVAL", "FACTOR_LAB_TIMEOUT_MINUTES", "FACTOR_LAB_STEP_TIMEOUT_MINUTES",
 	} {
@@ -107,6 +108,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.FactorLab.Phase0ScriptPath != "quant/scripts/update_factor_lab_phase0_incremental.py" {
 		t.Errorf("unexpected FactorLab phase0 script: %s", cfg.FactorLab.Phase0ScriptPath)
 	}
+	if len(cfg.FactorLab.DailyModes) != 5 || cfg.FactorLab.DailyModes[0] != "securities" || cfg.FactorLab.DailyModes[4] != "financials" {
+		t.Errorf("unexpected FactorLab daily modes: %#v", cfg.FactorLab.DailyModes)
+	}
+	if cfg.FactorLab.IndustriesSource != "auto" {
+		t.Errorf("expected FactorLab.IndustriesSource auto, got %s", cfg.FactorLab.IndustriesSource)
+	}
 	if cfg.FactorLab.ProgressInterval != 500 || cfg.FactorLab.ItemProgressInterval != 1 {
 		t.Errorf("unexpected FactorLab progress defaults: %d/%d", cfg.FactorLab.ProgressInterval, cfg.FactorLab.ItemProgressInterval)
 	}
@@ -131,7 +138,13 @@ func TestEnvOverride(t *testing.T) {
 		{"AI_CONFIG_CIPHER_KEY", "12345678901234567890123456789012", func(c Config) bool { return c.AI.CipherKey == "12345678901234567890123456789012" }},
 		{"FACTOR_LAB_COMPUTE_HOUR", "21", func(c Config) bool { return c.FactorLab.ComputeHour == 21 }},
 		{"FACTOR_LAB_COMPUTE_MINUTE", "0", func(c Config) bool { return c.FactorLab.ComputeMinute == 0 }},
-		{"FACTOR_LAB_PHASE0_SCRIPT", "/app/quant/scripts/update_factor_lab_phase0_incremental.py", func(c Config) bool { return c.FactorLab.Phase0ScriptPath == "/app/quant/scripts/update_factor_lab_phase0_incremental.py" }},
+		{"FACTOR_LAB_DAILY_MODES", "securities,industries", func(c Config) bool {
+			return len(c.FactorLab.DailyModes) == 2 && c.FactorLab.DailyModes[1] == "industries"
+		}},
+		{"FACTOR_LAB_INDUSTRIES_SOURCE", "eastmoney", func(c Config) bool { return c.FactorLab.IndustriesSource == "eastmoney" }},
+		{"FACTOR_LAB_PHASE0_SCRIPT", "/app/quant/scripts/update_factor_lab_phase0_incremental.py", func(c Config) bool {
+			return c.FactorLab.Phase0ScriptPath == "/app/quant/scripts/update_factor_lab_phase0_incremental.py"
+		}},
 		{"FACTOR_LAB_ITEM_PROGRESS_INTERVAL", "2", func(c Config) bool { return c.FactorLab.ItemProgressInterval == 2 }},
 		{"PORTFOLIO_SNAPSHOT_ASHARE_HOUR", "15", func(c Config) bool { return c.PortfolioSnapshot.AShareHour == 15 }},
 		{"PORTFOLIO_SNAPSHOT_HK_MINUTE", "30", func(c Config) bool { return c.PortfolioSnapshot.HKMinute == 30 }},

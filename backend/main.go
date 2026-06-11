@@ -3800,6 +3800,8 @@ func main() {
 		Phase0ScriptPath:     cfg.FactorLab.Phase0ScriptPath,
 		Phase1ScriptPath:     cfg.FactorLab.Phase1ScriptPath,
 		Phase2ScriptPath:     cfg.FactorLab.Phase2ScriptPath,
+		DailyModes:           cfg.FactorLab.DailyModes,
+		IndustriesSource:     cfg.FactorLab.IndustriesSource,
 		DailyBarsSource:      cfg.FactorLab.DailyBarsSource,
 		FinancialsSource:     cfg.FactorLab.FinancialsSource,
 		DividendsSource:      cfg.FactorLab.DividendsSource,

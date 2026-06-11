@@ -32,8 +32,9 @@ DEFAULT_BUFFER_DAYS = 7
 DEFAULT_FINANCIAL_REPORT_LIMIT = 2
 DEFAULT_DIVIDEND_REPORT_LIMIT = 2
 DEFAULT_STEP_TIMEOUT_SECONDS = 1800
-DEFAULT_MODES = ("securities", "industries", "daily-bars", "index-bars", "financials", "dividends")
-DEFAULT_CRITICAL_MODES = {"securities", "industries", "daily-bars", "index-bars"}
+DEFAULT_MODES = ("securities", "industries", "daily-bars", "index-bars", "financials")
+SUPPORTED_MODES = ("securities", "industries", "daily-bars", "index-bars", "financials", "dividends")
+DEFAULT_CRITICAL_MODES = {"securities", "daily-bars", "index-bars"}
 
 
 @dataclass
@@ -50,7 +51,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--db", default="", help="pumpkin.db 路径；默认自动查找 data/pumpkin.db")
     parser.add_argument("--write", action="store_true", help="实际写入数据库；默认 dry-run")
     parser.add_argument("--modes", default=",".join(DEFAULT_MODES), help="逗号分隔的模式列表")
-    parser.add_argument("--scope", choices=["incremental", "repair_missing_dividend_yield", "repair_missing_fcfm_inputs"], default="incremental", help="增量或字段修复范围")
+    parser.add_argument("--scope", choices=["incremental", "repair_missing_dividend_yield", "repair_missing_fcfm_inputs", "full_refresh_dividends"], default="incremental", help="增量或字段修复范围")
     parser.add_argument("--critical-modes", default=",".join(sorted(DEFAULT_CRITICAL_MODES)), help="失败后必须返回 failed 的关键模式")
     parser.add_argument("--lookback-days", type=int, default=DEFAULT_LOOKBACK_DAYS, help="无本地日期时的兜底回看自然日")
     parser.add_argument("--buffer-days", type=int, default=DEFAULT_BUFFER_DAYS, help="从本地最新日期向前回退的增量缓冲天数")
@@ -59,6 +60,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--step-timeout-seconds", type=int, default=DEFAULT_STEP_TIMEOUT_SECONDS, help="每个子任务超时时间")
     parser.add_argument("--progress-interval", type=int, default=500, help="普通子任务每处理多少项输出一次进度")
     parser.add_argument("--item-progress-interval", type=int, default=1, help="逐股票子任务每处理多少项输出一次进度")
+    parser.add_argument("--industries-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="行业增量数据源")
     parser.add_argument("--daily-bars-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="tencent", help="日线增量数据源，默认腾讯以减少逐股慢失败")
     parser.add_argument("--financials-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="财务增量数据源")
     parser.add_argument("--dividends-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="分红增量数据源")
@@ -269,6 +271,7 @@ def build_mode_command(args: argparse.Namespace, mode: str, conn: sqlite3.Connec
         cmd.extend(["--snapshot-date", args.snapshot_date])
 
     if mode == "industries":
+        cmd.extend(["--industries-source", args.industries_source])
         log_step("incremental: industries refresh Shenwan L1 mapping for active A-share universe")
     elif mode == "daily-bars":
         target_date = latest_date(conn, "factor_market_metrics", "trade_date") or latest_date(conn, "factor_daily_bars", "trade_date")
@@ -305,6 +308,9 @@ def build_mode_command(args: argparse.Namespace, mode: str, conn: sqlite3.Connec
         if args.scope == "repair_missing_dividend_yield":
             codes = codes_missing_dividend_yield(conn)
             log_step(f"incremental: dividends repair_missing_dividend_yield codes={len(codes)} source={args.dividends_source}")
+        elif args.scope == "full_refresh_dividends":
+            codes = active_security_codes(conn)
+            log_step(f"incremental: dividends full_refresh codes={len(codes)} source={args.dividends_source}")
         else:
             codes = codes_with_stale_dividends(conn)
             log_step(f"incremental: dividends stale_codes={len(codes)} source={args.dividends_source}")
@@ -319,8 +325,29 @@ def run_mode(args: argparse.Namespace, mode: str, conn: sqlite3.Connection) -> M
     started = datetime.now()
     cmd = build_mode_command(args, mode, conn)
     log_step(f"incremental: 开始 {mode}: {' '.join(cmd)}")
+    parsed_status = ""
     try:
-        completed = subprocess.run(cmd, cwd=str(SCRIPT_DIR.parents[1]), text=True, timeout=args.step_timeout_seconds, check=False)
+        process = subprocess.Popen(
+            cmd,
+            cwd=str(SCRIPT_DIR.parents[1]),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+        )
+        assert process.stdout is not None
+        try:
+            for raw_line in process.stdout:
+                line = raw_line.rstrip("\n")
+                if line:
+                    print(line, flush=True)
+                    if line.startswith("summary=") and " status=" in line:
+                        parsed_status = line.rsplit(" status=", 1)[-1].strip()
+            completed_returncode = process.wait(timeout=args.step_timeout_seconds)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            raise
     except subprocess.TimeoutExpired:
         duration = (datetime.now() - started).total_seconds()
         message = f"timeout after {args.step_timeout_seconds}s"
@@ -328,9 +355,9 @@ def run_mode(args: argparse.Namespace, mode: str, conn: sqlite3.Connection) -> M
         return ModeResult(mode=mode, status="failed", return_code=124, duration_seconds=duration, error=message)
 
     duration = (datetime.now() - started).total_seconds()
-    status = "success" if completed.returncode == 0 else "failed"
+    status = parsed_status or ("success" if completed_returncode == 0 else "failed")
     log_step(f"incremental: {mode} 完成 status={status} duration={duration:.1f}s")
-    return ModeResult(mode=mode, status=status, return_code=completed.returncode, duration_seconds=duration, error="" if completed.returncode == 0 else f"exit {completed.returncode}")
+    return ModeResult(mode=mode, status=status, return_code=completed_returncode, duration_seconds=duration, error="" if completed_returncode == 0 else f"exit {completed_returncode}")
 
 
 def main(argv: list[str]) -> int:
@@ -352,7 +379,7 @@ def main(argv: list[str]) -> int:
     modes = split_csv(args.modes)
     if modes == ["all"] or not modes:
         modes = list(DEFAULT_MODES)
-    unsupported = [mode for mode in modes if mode not in DEFAULT_MODES]
+    unsupported = [mode for mode in modes if mode not in SUPPORTED_MODES]
     if unsupported:
         raise ValueError("不支持的增量模式: " + ",".join(unsupported))
     critical_modes = set(split_csv(args.critical_modes))
@@ -368,14 +395,20 @@ def main(argv: list[str]) -> int:
     try:
         for mode in modes:
             results.append(run_mode(args, mode, conn))
-        failed = [item for item in results if item.status != "success"]
+        failed = [item for item in results if item.status == "failed"]
+        partial = [item for item in results if item.status == "partial"]
         critical_failed = [item for item in failed if item.mode in critical_modes]
-        status = "success" if not failed else ("failed" if critical_failed else "partial")
+        status = "success"
+        if critical_failed:
+            status = "failed"
+        elif failed or partial:
+            status = "partial"
         summary = {
             "status": status,
             "total": len(results),
             "success": sum(1 for item in results if item.status == "success"),
             "failed": len(failed),
+            "partial": len(partial),
             "results": [item.__dict__ for item in results],
         }
         print(f"summary={json.dumps(summary, ensure_ascii=False)} status={status}", flush=True)

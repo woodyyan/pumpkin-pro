@@ -39,4 +39,10 @@ A 股和港股交易日不完全一致，常见差异场景：
 - 因子实验室、个股静态资料等用户可见“行业”统一展示 `company_profiles.industry_name`，口径固定为“申万一级行业”。
 - `factor_security_industries` 仅作为原始来源捕获表，不直接作为用户展示主口径。
 - 港股行业统一记为 `not_applicable`，前端展示为“不适用”，不要为港股强行套用申万行业。
-- 行业刷新属于 Factor Lab Phase 0，必须在每日自动预计算链路中一起执行，默认北京时间 21:00。
+- 行业刷新属于 Factor Lab Phase 0，默认仍在每日 21:00 的自动预计算链路中执行，但外部源失败时只记录 `partial/warning`，不能再阻断 Phase1/Phase2。
+- 行业自动源顺序固定为 `akshare -> eastmoney -> tencent`；如果运维显式指定单一源，仍允许只跑该源用于排障。
+
+## 因子实验室刷新频率
+- `securities`、`industries`、`daily-bars`、`index-bars`、`financials` 属于夜间自动链路；默认北京时间 21:00 触发 Phase 0，随后串行进入 Phase1/Phase2。
+- `dividends` 不再属于夜间自动链路。默认策略是保留最近一次成功结果，并在 admin 后台手动触发全量刷新或缺口修复。
+- `dividends` 的手动全量刷新建议窗口：年报/分红实施密集披露后、半年报密集披露后、分红预案集中期、admin 覆盖率或质量告警出现时。

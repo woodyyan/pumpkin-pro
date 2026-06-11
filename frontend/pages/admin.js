@@ -194,6 +194,12 @@ function formatNumber(value) {
   return Number(value).toLocaleString('zh-CN')
 }
 
+function formatPercentValue(value, digits = 1) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '--'
+  return `${(num * 100).toFixed(digits)}%`
+}
+
 function formatUserDisplay(user) {
   if (!user) return '--'
   if (user.email) return user.email
@@ -1351,6 +1357,12 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
   const data = resource.data
   const worker = data?.worker || {}
   const coverage = data?.coverage || {}
+  const metadata = coverage.metadata || {}
+  const industriesMeta = metadata.industries || {}
+  const industriesHealth = metadata.industries_health || {}
+  const dividendsMeta = metadata.dividends || {}
+  const industriesSummary = industriesMeta.summary || {}
+  const industriesWarning = Array.isArray(industriesSummary.warnings) ? industriesSummary.warnings[0] : null
   const phases = worker.current?.phases || []
   const history = worker.history || []
   const triggerPipeline = async (override = null) => {
@@ -1382,7 +1394,7 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-foreground-muted">因子实验室计算</h2>
-          <p className="mt-1 text-xs text-foreground-dim">每天 21:00 在 backend 容器内串行执行 Phase0 增量、Phase1 快照、Phase2 因子分。</p>
+          <p className="mt-1 text-xs text-foreground-dim">每天 21:00 在 backend 容器内串行执行 Phase0 增量（默认不含 dividends）、Phase1 快照、Phase2 因子分。</p>
         </div>
         <button
           type="button"
@@ -1408,14 +1420,37 @@ function FactorLabPipelinePanel({ onUnauthorized }) {
         <div className="grid gap-3 md:grid-cols-4">
           <label className="text-xs text-foreground-dim">阶段<select value={manualPhase} onChange={(e) => setManualPhase(e.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background-alt px-2 py-2 text-foreground outline-none transition focus:border-primary"><option value="all">完整流水线</option><option value="phase0">只跑 Phase0</option><option value="phase1">只跑 Phase1</option><option value="phase2">只跑 Phase2</option><option value="phase1_phase2">Phase1 + Phase2</option></select></label>
           <label className="text-xs text-foreground-dim">Phase0 mode<select value={phase0Mode} onChange={(e) => setPhase0Mode(e.target.value)} disabled={!['all', 'phase0'].includes(manualPhase)} className="mt-1 w-full rounded-lg border border-border bg-background-alt px-2 py-2 text-foreground outline-none transition focus:border-primary disabled:cursor-not-allowed disabled:text-foreground-disabled disabled:opacity-40"><option value="all">all</option><option value="securities">securities</option><option value="industries">industries</option><option value="daily-bars">daily-bars</option><option value="index-bars">index-bars</option><option value="financials">financials</option><option value="dividends">dividends</option></select></label>
-          <label className="text-xs text-foreground-dim">范围<select value={manualScope} onChange={(e) => setManualScope(e.target.value)} disabled={!['all', 'phase0'].includes(manualPhase)} className="mt-1 w-full rounded-lg border border-border bg-background-alt px-2 py-2 text-foreground outline-none transition focus:border-primary disabled:cursor-not-allowed disabled:text-foreground-disabled disabled:opacity-40"><option value="incremental">incremental</option><option value="repair_missing_dividend_yield">修复股息率</option><option value="repair_missing_fcfm_inputs">修复自由现金流率</option></select></label>
+          <label className="text-xs text-foreground-dim">范围<select value={manualScope} onChange={(e) => setManualScope(e.target.value)} disabled={!['all', 'phase0'].includes(manualPhase)} className="mt-1 w-full rounded-lg border border-border bg-background-alt px-2 py-2 text-foreground outline-none transition focus:border-primary disabled:cursor-not-allowed disabled:text-foreground-disabled disabled:opacity-40"><option value="incremental">incremental</option><option value="repair_missing_dividend_yield">修复股息率</option><option value="repair_missing_fcfm_inputs">修复自由现金流率</option><option value="full_refresh_dividends">全量刷新股息率</option></select></label>
           <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline()} className="self-end rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-foreground transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50">{triggering ? '触发中...' : '按选择运行'}</button>
         </div>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline({ phase: 'phase0', phase0_mode: 'dividends', scope: 'repair_missing_dividend_yield' })} className="rounded-lg border border-amber-500/25 bg-amber-50 px-3 py-1.5 text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/10 dark:text-amber-100 disabled:opacity-40">只修复股息率</button>
+          <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline({ phase: 'phase0', phase0_mode: 'dividends', scope: 'full_refresh_dividends' })} className="rounded-lg border border-amber-500/25 bg-amber-50 px-3 py-1.5 text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/10 dark:text-amber-100 disabled:opacity-40">全量刷新股息率</button>
           <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline({ phase: 'phase0', phase0_mode: 'financials', scope: 'repair_missing_fcfm_inputs' })} className="rounded-lg border border-blue-400/25 bg-blue-500/10 px-3 py-1.5 text-blue-100 disabled:opacity-40">只修复自由现金流率</button>
           <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline({ phase: 'phase0', phase0_mode: 'industries', scope: 'incremental' })} className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-primary disabled:opacity-40">只刷新行业</button>
           <button type="button" disabled={triggering || worker.running} onClick={() => triggerPipeline({ phase: 'phase1_phase2', phase0_mode: 'all', scope: 'incremental' })} className="rounded-lg border border-emerald-400/25 bg-positive/10 px-3 py-1.5 text-emerald-100 disabled:opacity-40">只重算 Phase1+2</button>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="mb-2 text-sm font-semibold text-foreground-muted">行业刷新健康度</div>
+          <div className="space-y-1 text-xs text-foreground-dim">
+            <div>最近状态：{industriesMeta.status || '--'}</div>
+            <div>最近完成：{formatAdminDateTime(industriesMeta.finished_at)}</div>
+            <div>覆盖率：{industriesHealth.universe ? `${formatNumber(industriesHealth.covered)} / ${formatNumber(industriesHealth.universe)} · ${formatPercentValue(industriesHealth.coverage_ratio)}` : '--'}</div>
+            <div>最近成功刷新：{industriesHealth.last_success_at ? formatAdminDateTime(industriesHealth.last_success_at) : '--'}</div>
+            <div>最近 warning：{industriesWarning?.error || '--'}</div>
+            <div>口径：自动链路允许 warning 放行，不再 hard fail。</div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="mb-2 text-sm font-semibold text-foreground-muted">股息率刷新策略</div>
+          <div className="space-y-1 text-xs text-foreground-dim">
+            <div>自动链路：默认不跑 dividends。</div>
+            <div>最近状态：{dividendsMeta.status || '--'}</div>
+            <div>最近完成：{formatAdminDateTime(dividendsMeta.finished_at)}</div>
+            <div>建议手动时间点：年报密集披露后、半年报密集披露后、分红预案集中期、覆盖率告警时。</div>
+          </div>
         </div>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-3">
@@ -1458,6 +1493,9 @@ function normalizeFactorRunSelection(phase, phase0Mode, scope) {
   }
   if (scope === 'repair_missing_fcfm_inputs' && phase0Mode !== 'financials') {
     return { ...payload, error: '修复自由现金流率时，Phase0 mode 必须选择 financials。' }
+  }
+  if (scope === 'full_refresh_dividends' && phase0Mode !== 'dividends') {
+    return { ...payload, error: '全量刷新股息率时，Phase0 mode 必须选择 dividends。' }
   }
   return payload
 }

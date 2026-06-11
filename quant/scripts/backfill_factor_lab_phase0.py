@@ -48,7 +48,7 @@ DEFAULT_LOOKBACK_DAYS = 370    # calendar days, usually enough for ~250 trading 
 DEFAULT_ADJUST = "qfq"
 EXTERNAL_SOURCE_ORDER = ["akshare", "eastmoney", "tencent"]
 SECURITIES_SOURCE_ORDER = ["akshare", "eastmoney", "tencent", "local"]
-INDUSTRY_SOURCE_ORDER = ["akshare"]
+INDUSTRY_SOURCE_ORDER = ["akshare", "eastmoney", "tencent"]
 MIN_FULL_UNIVERSE_SECURITY_COUNT = 1000
 EASTMONEY_CLIST_URL = "https://82.push2.eastmoney.com/api/qt/clist/get"
 EASTMONEY_KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
@@ -395,6 +395,15 @@ class IndustryRefreshPayload:
     missing_sources: list[str]
 
 
+@dataclass
+class IndustryCoverageStatus:
+    profile_count: int
+    universe_count: int
+    coverage_ratio: float
+    last_success_at: str
+    stale_days: Optional[int]
+
+
 def log_step(message: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
 
@@ -549,6 +558,19 @@ def normalize_date(value: Any) -> str:
     if pd.isna(ts):
         return ""
     return ts.strftime("%Y-%m-%d")
+
+
+def parse_timestamp(value: Any) -> Optional[datetime]:
+    if value is None or value == "":
+        return None
+    pd = import_pandas()
+    try:
+        ts = pd.to_datetime(value, errors="coerce", utc=True)
+    except Exception:
+        return None
+    if pd.isna(ts):
+        return None
+    return ts.to_pydatetime()
 
 
 def find_column(columns: Iterable[Any], aliases: list[str]) -> Optional[str]:
@@ -824,6 +846,43 @@ def validate_industry_payload_size(conn: sqlite3.Connection, rows: list[tuple[An
         )
 
 
+def industry_rows_from_quote_records(records: list[dict[str, Any]], source: str) -> list[tuple[Any, ...]]:
+    now = utc_now()
+    rows_by_code: dict[str, tuple[Any, ...]] = {}
+    for record in records:
+        code = normalize_code(record.get("code"))
+        if not code or code in rows_by_code:
+            continue
+        raw_industry = first_industry_value(record)
+        industry_name = normalize_industry_name(raw_industry)
+        if not industry_name:
+            continue
+        rows_by_code[code] = (code, str(raw_industry or "").strip(), industry_name, source, now)
+    return [rows_by_code[code] for code in sorted(rows_by_code.keys())]
+
+
+def fetch_industry_rows_eastmoney(conn: sqlite3.Connection, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
+    records = fetch_securities_eastmoney_direct(args)
+    rows = industry_rows_from_quote_records(records, "eastmoney:qt_clist_get")
+    target_codes = set(load_local_code_universe(conn, args, include_all_boards=False))
+    if target_codes:
+        rows = [row for row in rows if row[0] in target_codes]
+    if not rows:
+        raise RuntimeError("东方财富行业字段为空")
+    return rows, "eastmoney:qt_clist_get"
+
+
+def fetch_industry_rows_tencent(conn: sqlite3.Connection, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
+    records = fetch_securities_tencent(conn, args)
+    rows = industry_rows_from_quote_records(records, "tencent:qt_gtimg")
+    target_codes = set(load_local_code_universe(conn, args, include_all_boards=False))
+    if target_codes:
+        rows = [row for row in rows if row[0] in target_codes]
+    if not rows:
+        raise RuntimeError("腾讯行业字段为空")
+    return rows, "tencent:qt_gtimg"
+
+
 def fetch_industry_rows_akshare(conn: sqlite3.Connection, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
     log_step("industries: 尝试外部源 1/2 AkShare 行业板块成份")
     ak = import_akshare()
@@ -877,10 +936,14 @@ def fetch_industry_rows_akshare(conn: sqlite3.Connection, args: argparse.Namespa
 
 def fetch_industry_rows(conn: sqlite3.Connection, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
     failures: list[str] = []
-    for item in INDUSTRY_SOURCE_ORDER:
+    for item in industry_source_order(args.industries_source):
         try:
             if item == "akshare":
                 rows, source = fetch_industry_rows_akshare(conn, args)
+            elif item == "eastmoney":
+                rows, source = fetch_industry_rows_eastmoney(conn, args)
+            elif item == "tencent":
+                rows, source = fetch_industry_rows_tencent(conn, args)
             else:
                 raise ValueError(f"未知 industries source: {item}")
             validate_industry_payload_size(conn, rows, args, source)
@@ -963,6 +1026,78 @@ def upsert_industry_mapping_rows(conn: sqlite3.Connection, rows: list[tuple[Any,
         """,
         rows,
     )
+
+
+def compute_industry_coverage_status(conn: sqlite3.Connection) -> IndustryCoverageStatus:
+    universe_count = active_a_share_security_count(conn)
+    try:
+        profile_count_row = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM company_profiles
+            WHERE exchange IN ('SSE', 'SZSE')
+              AND code <> ''
+              AND industry_name <> ''
+            """
+        ).fetchone()
+    except sqlite3.Error:
+        profile_count_row = (0,)
+    profile_count = int(profile_count_row[0] or 0) if profile_count_row else 0
+
+    try:
+        latest_row = conn.execute(
+            """
+            SELECT MAX(updated_at)
+            FROM factor_security_industries
+            WHERE industry_name <> ''
+            """
+        ).fetchone()
+    except sqlite3.Error:
+        latest_row = ("",)
+    last_success_at = str(latest_row[0] or "") if latest_row else ""
+    stale_days: Optional[int] = None
+    parsed_last = parse_timestamp(last_success_at)
+    if parsed_last:
+        stale_days = max((datetime.now(timezone.utc).date() - parsed_last.date()).days, 0)
+
+    coverage_ratio = 0.0
+    if universe_count > 0:
+        coverage_ratio = profile_count / universe_count
+    return IndustryCoverageStatus(
+        profile_count=profile_count,
+        universe_count=universe_count,
+        coverage_ratio=coverage_ratio,
+        last_success_at=last_success_at,
+        stale_days=stale_days,
+    )
+
+
+def is_industry_coverage_healthy(status: IndustryCoverageStatus, min_ratio: float = 0.95, max_stale_days: int = 30) -> bool:
+    if status.universe_count <= 0:
+        return False
+    if status.coverage_ratio < min_ratio:
+        return False
+    if status.stale_days is None:
+        return False
+    return status.stale_days <= max_stale_days
+
+
+def append_industries_warning(summary: dict[str, Any], conn: sqlite3.Connection, error: str) -> dict[str, Any]:
+    status = compute_industry_coverage_status(conn)
+    warning = {
+        "mode": "industries",
+        "error": error,
+        "profile_count": status.profile_count,
+        "universe_count": status.universe_count,
+        "coverage_ratio": round(status.coverage_ratio, 4),
+        "last_success_at": status.last_success_at,
+        "stale_days": status.stale_days,
+        "healthy": is_industry_coverage_healthy(status),
+    }
+    warnings = list(summary.get("warnings") or [])
+    warnings.append(warning)
+    summary["warnings"] = warnings
+    return summary
 
 
 def backfill_industries(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) -> TaskStats:
@@ -1063,6 +1198,10 @@ def chunked(items: list[Any], size: int) -> Iterable[list[Any]]:
 
 def source_order(selected: str, order: list[str]) -> list[str]:
     return order if selected == "auto" else [selected]
+
+
+def industry_source_order(selected: str) -> list[str]:
+    return INDUSTRY_SOURCE_ORDER if selected == "auto" else [selected]
 
 
 def log_source_failure(mode: str, item: str, exc: Exception, args: argparse.Namespace) -> None:
@@ -1300,6 +1439,17 @@ def parse_tencent_quote_line(line: str) -> Optional[dict[str, Any]]:
     code = normalize_code(parts[2])
     if not code:
         return None
+    industry = ""
+    for raw in parts[47:]:
+        text = normalize_industry_name(raw)
+        if not text:
+            continue
+        if not re.search(r"[\u4e00-\u9fff]", text):
+            continue
+        standardized = standardize_a_share_industry(text)
+        if standardized["industry_name"] or text.endswith(("制造", "服务", "设备", "银行", "证券", "保险", "医药", "饮料", "电子", "通信")):
+            industry = text
+            break
     return {
         "code": code,
         "name": parts[1],
@@ -1310,6 +1460,7 @@ def parse_tencent_quote_line(line: str) -> Optional[dict[str, Any]]:
         "pe": safe_float(parts[39]),
         "market_cap": safe_scaled_float(parts[45], 1e8),
         "pb": safe_float(parts[46]),
+        "industry": industry,
     }
 
 
@@ -2225,6 +2376,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--index-code", default=DEFAULT_INDEX_CODE, help="中证全指指数代码，默认 000985")
     parser.add_argument("--report-limit", type=int, default=8, help="最多扫描多少个报告期")
     parser.add_argument("--securities-source", choices=["auto", "akshare", "eastmoney", "tencent", "local"], default="auto", help="股票池数据源；auto=AKShare→东方财富→腾讯行情→本地兜底")
+    parser.add_argument("--industries-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="行业数据源；auto=AKShare→东方财富→腾讯")
     parser.add_argument("--daily-bars-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="个股日线数据源；auto=AKShare→东方财富→腾讯")
     parser.add_argument("--index-bars-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="指数日线数据源；auto=AKShare→东方财富→腾讯")
     parser.add_argument("--financials-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="财务数据源；auto=AKShare→东方财富→腾讯基础面兜底")
@@ -2263,8 +2415,16 @@ def main(argv: list[str]) -> int:
         print(f"summary={json.dumps(summary, ensure_ascii=False)} status={status}", flush=True)
         return 0 if status in {"success", "partial"} else 1
     except Exception as exc:  # noqa: BLE001
+        summary: dict[str, Any] = {}
+        final_status = "failed"
+        if args.mode == "industries":
+            summary = append_industries_warning(summary, conn, str(exc))
+            final_status = "partial"
         if args.write:
-            finish_task_run(conn, run_id, "failed", TaskStats(), {}, str(exc))
+            finish_task_run(conn, run_id, final_status, TaskStats(), summary, str(exc))
+        if final_status == "partial":
+            print(f"summary={json.dumps(summary, ensure_ascii=False)} status=partial", flush=True)
+            return 0
         print(f"failed: {exc}", file=sys.stderr)
         return 1
     finally:

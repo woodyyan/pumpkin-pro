@@ -38,6 +38,8 @@ type WorkerConfig struct {
 	Phase0ScriptPath     string
 	Phase1ScriptPath     string
 	Phase2ScriptPath     string
+	DailyModes           []string
+	IndustriesSource     string
 	DailyBarsSource      string
 	FinancialsSource     string
 	DividendsSource      string
@@ -128,6 +130,9 @@ func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
 	if strings.TrimSpace(cfg.DailyBarsSource) == "" {
 		cfg.DailyBarsSource = "tencent"
 	}
+	if strings.TrimSpace(cfg.IndustriesSource) == "" {
+		cfg.IndustriesSource = "auto"
+	}
 	if strings.TrimSpace(cfg.FinancialsSource) == "" {
 		cfg.FinancialsSource = "auto"
 	}
@@ -151,6 +156,9 @@ func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
 	}
 	if cfg.ItemProgressInterval <= 0 {
 		cfg.ItemProgressInterval = 1
+	}
+	if len(cfg.DailyModes) == 0 {
+		cfg.DailyModes = []string{"securities", "industries", "daily-bars", "index-bars", "financials"}
 	}
 	if strings.TrimSpace(cfg.BackupDir) == "" && strings.TrimSpace(cfg.DBPath) != "" {
 		cfg.BackupDir = filepath.Join(filepath.Dir(cfg.DBPath), "backups", "factorlab")
@@ -183,7 +191,7 @@ func (w *Worker) Start(ctx context.Context) {
 }
 
 func (w *Worker) RunOnce(ctx context.Context) error {
-	return w.runPipeline(ctx, "scheduled", PipelineRunRequest{Phase: "all", Phase0Mode: "all", Scope: "incremental"})
+	return w.runPipeline(ctx, "scheduled", PipelineRunRequest{Phase: "all", Phase0Mode: strings.Join(w.cfg.DailyModes, ","), Scope: "incremental"})
 }
 
 func (w *Worker) StartManual(ctx context.Context, request PipelineRunRequest) (*PipelineRunStatus, error) {
@@ -237,14 +245,21 @@ func validatePipelineRunRequest(request PipelineRunRequest) error {
 	if !containsString([]string{"all", "phase0", "phase1", "phase2", "phase1_phase2"}, request.Phase) {
 		return fmt.Errorf("unsupported factor lab phase: %s", request.Phase)
 	}
-	if !containsString([]string{"all", "securities", "industries", "daily-bars", "index-bars", "financials", "dividends"}, request.Phase0Mode) {
-		return fmt.Errorf("unsupported phase0 mode: %s", request.Phase0Mode)
+	if request.Phase0Mode != "all" {
+		for _, mode := range splitPhase0Modes(request.Phase0Mode) {
+			if !containsString([]string{"securities", "industries", "daily-bars", "index-bars", "financials", "dividends"}, mode) {
+				return fmt.Errorf("unsupported phase0 mode: %s", request.Phase0Mode)
+			}
+		}
 	}
-	if !containsString([]string{"incremental", "repair_missing_dividend_yield", "repair_missing_fcfm_inputs"}, request.Scope) {
+	if !containsString([]string{"incremental", "repair_missing_dividend_yield", "repair_missing_fcfm_inputs", "full_refresh_dividends"}, request.Scope) {
 		return fmt.Errorf("unsupported factor lab scope: %s", request.Scope)
 	}
 	if request.Scope == "repair_missing_dividend_yield" && (request.Phase0Mode != "dividends" || !containsString([]string{"all", "phase0"}, request.Phase)) {
 		return fmt.Errorf("repair_missing_dividend_yield requires phase=all|phase0 and phase0_mode=dividends")
+	}
+	if request.Scope == "full_refresh_dividends" && (request.Phase0Mode != "dividends" || !containsString([]string{"all", "phase0"}, request.Phase)) {
+		return fmt.Errorf("full_refresh_dividends requires phase=all|phase0 and phase0_mode=dividends")
 	}
 	if request.Scope == "repair_missing_fcfm_inputs" && (request.Phase0Mode != "financials" || !containsString([]string{"all", "phase0"}, request.Phase)) {
 		return fmt.Errorf("repair_missing_fcfm_inputs requires phase=all|phase0 and phase0_mode=financials")
@@ -416,12 +431,27 @@ func (w *Worker) runScript(ctx context.Context, label, scriptPath string, args [
 		return err
 	}
 	w.updatePhase(label, func(phase *PhaseStatus) {
-		phase.Status = "success"
+		phase.Status = phaseStatusFromSummary(phase)
 		phase.FinishedAt = &finished
 		phase.DurationSeconds = finished.Sub(started).Seconds()
 	})
 	log.Printf("%s ✅ %s completed", factorLabWorkerLogPrefix, label)
 	return nil
+}
+
+func phaseStatusFromSummary(phase *PhaseStatus) string {
+	if phase == nil || phase.Summary == nil {
+		return "success"
+	}
+	status, _ := phase.Summary["status"].(string)
+	status = strings.TrimSpace(status)
+	if status == "partial" {
+		return "partial"
+	}
+	if status == "failed" {
+		return "failed"
+	}
+	return "success"
 }
 
 func (w *Worker) captureScriptOutput(label, stream string, reader io.Reader, wg *sync.WaitGroup) {
@@ -532,12 +562,28 @@ func (w *Worker) completeRun() {
 	w.lastRunAt = finished
 	w.lastError = ""
 	if w.current != nil {
-		w.current.Status = "success"
+		w.current.Status = pipelineStatusFromPhases(w.current.Phases)
 		w.current.CurrentPhase = ""
 		w.current.FinishedAt = &finished
 		w.current.DurationSeconds = finished.Sub(w.current.StartedAt).Seconds()
 		w.appendHistoryLocked(*w.current)
 	}
+}
+
+func pipelineStatusFromPhases(phases []PhaseStatus) string {
+	hasPartial := false
+	for _, phase := range phases {
+		if phase.Status == "failed" {
+			return "failed"
+		}
+		if phase.Status == "partial" {
+			hasPartial = true
+		}
+	}
+	if hasPartial {
+		return "partial"
+	}
+	return "success"
 }
 
 func (w *Worker) appendHistoryLocked(run PipelineRunStatus) {
@@ -618,12 +664,28 @@ func buildPhase0CommandArgs(cfg WorkerConfig, request PipelineRunRequest) []stri
 		"--scope", request.Scope,
 		"--progress-interval", fmt.Sprintf("%d", cfg.ProgressInterval),
 		"--item-progress-interval", fmt.Sprintf("%d", cfg.ItemProgressInterval),
+		"--industries-source", cfg.IndustriesSource,
 		"--daily-bars-source", cfg.DailyBarsSource,
 		"--financials-source", cfg.FinancialsSource,
 		"--dividends-source", cfg.DividendsSource,
 		"--step-timeout-seconds", fmt.Sprintf("%d", int(cfg.StepTimeout.Seconds())),
 	}
 	return args
+}
+
+func splitPhase0Modes(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	seen := make(map[string]bool)
+	for _, part := range parts {
+		mode := strings.TrimSpace(part)
+		if mode == "" || seen[mode] {
+			continue
+		}
+		seen[mode] = true
+		result = append(result, mode)
+	}
+	return result
 }
 
 func buildPhase1CommandArgs(cfg WorkerConfig) []string {

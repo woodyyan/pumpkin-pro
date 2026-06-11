@@ -16,6 +16,11 @@ spec.loader.exec_module(module)
 def test_split_csv_trims_empty_items():
     assert module.split_csv("securities, daily-bars,,financials ") == ["securities", "daily-bars", "financials"]
 
+def test_default_modes_exclude_dividends_but_supported_modes_keep_manual_refresh():
+    assert module.DEFAULT_MODES == ("securities", "industries", "daily-bars", "index-bars", "financials")
+    assert "dividends" not in module.DEFAULT_MODES
+    assert "dividends" in module.SUPPORTED_MODES
+
 
 def test_buffered_start_date_uses_yyyymmdd_format():
     assert module.buffered_start_date("2026-05-20", 7) == "20260513"
@@ -92,12 +97,14 @@ def test_build_industries_command_adds_mode_without_code_list(tmp_path):
     db_path = tmp_path / "factor.db"
     conn = sqlite3.connect(db_path)
     try:
-        args = module.parse_args(["--db", str(db_path)])
+        args = module.parse_args(["--db", str(db_path), "--industries-source", "eastmoney"])
         args.db_path = db_path
         args.temp_files = []
         cmd = module.build_mode_command(args, "industries", conn)
         assert "--mode" in cmd
         assert cmd[cmd.index("--mode") + 1] == "industries"
+        assert "--industries-source" in cmd
+        assert cmd[cmd.index("--industries-source") + 1] == "eastmoney"
         assert "--code-list-file" not in cmd
         assert "--daily-bars-source" not in cmd
     finally:
@@ -163,5 +170,22 @@ def test_repair_missing_fcfm_inputs_selects_missing_growth_yoy_rows(tmp_path):
         cmd = module.build_mode_command(args, "financials", conn)
         code_list = cmd[cmd.index("--code-list-file") + 1]
         assert Path(code_list).read_text().strip() == "000001"
+    finally:
+        conn.close()
+
+
+def test_full_refresh_dividends_selects_active_universe(tmp_path):
+    db_path = tmp_path / "factor.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("CREATE TABLE factor_securities (code TEXT, is_active INTEGER, is_st INTEGER, board TEXT)")
+        conn.execute("CREATE TABLE factor_dividend_records (code TEXT, updated_at TEXT)")
+        conn.execute("INSERT INTO factor_securities VALUES ('000001',1,0,'MAIN'),('000002',1,1,'MAIN'),('300001',1,0,'CHINEXT')")
+        args = module.parse_args(["--db", str(db_path), "--scope", "full_refresh_dividends"])
+        args.db_path = db_path
+        args.temp_files = []
+        cmd = module.build_mode_command(args, "dividends", conn)
+        code_list = cmd[cmd.index("--code-list-file") + 1]
+        assert Path(code_list).read_text().strip().splitlines() == ["000001", "300001"]
     finally:
         conn.close()

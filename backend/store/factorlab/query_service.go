@@ -2,6 +2,7 @@ package factorlab
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -92,6 +93,7 @@ func (s *Service) AdminStatus(ctx context.Context, worker WorkerStatus) (FactorP
 	if err != nil {
 		dbHealth = "failed: " + err.Error()
 	}
+	coverage.Metadata = s.buildPhase0Metadata(ctx, worker)
 	return FactorPipelineAdminStatus{Worker: worker, DBHealth: dbHealth, LatestSnapshot: date, Coverage: coverage}, nil
 }
 
@@ -121,6 +123,78 @@ func (s *Service) Coverage(ctx context.Context, snapshotDate string) (FactorCove
 	}
 	warnings := buildCoverageWarnings(stats.Total, raw, factors)
 	return FactorCoverageResponse{SnapshotDate: date, Universe: stats.Total, RawMetrics: raw, Factors: factors, Warnings: warnings}, nil
+}
+
+func (s *Service) buildPhase0Metadata(ctx context.Context, worker WorkerStatus) map[string]any {
+	metadata := map[string]any{}
+	metadata["worker_schedule"] = map[string]any{
+		"enabled": worker.Enabled,
+	}
+	metadata["industries_health"] = s.buildIndustriesHealthMeta(ctx)
+	if industriesRun, err := s.repo.LatestBackfillRunByMode(ctx, "industries"); err == nil && industriesRun != nil {
+		metadata["industries"] = buildBackfillRunMeta(industriesRun)
+	}
+	if dividendsRun, err := s.repo.LatestBackfillRunByMode(ctx, "dividends"); err == nil && dividendsRun != nil {
+		metadata["dividends"] = buildBackfillRunMeta(dividendsRun)
+	}
+	return metadata
+}
+
+func (s *Service) buildIndustriesHealthMeta(ctx context.Context) map[string]any {
+	universe, err1 := s.repo.ActiveAShareUniverseCount(ctx)
+	covered, err2 := s.repo.CoveredAShareIndustryProfileCount(ctx)
+	latestAt, err3 := s.repo.LatestIndustryRefreshAt(ctx)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return map[string]any{}
+	}
+	ratio := 0.0
+	if universe > 0 {
+		ratio = float64(covered) / float64(universe)
+	}
+	staleDays := any(nil)
+	if parsed, ok := parseFlexibleTime(latestAt); ok {
+		staleDays = int(time.Since(parsed).Hours() / 24)
+	}
+	return map[string]any{
+		"covered":         covered,
+		"universe":        universe,
+		"coverage_ratio":  ratio,
+		"last_success_at": latestAt,
+		"stale_days":      staleDays,
+	}
+}
+
+func parseFlexibleTime(value string) (time.Time, bool) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02 15:04:05.999999999-07:00"}
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, text); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func buildBackfillRunMeta(run *FactorTaskRun) map[string]any {
+	if run == nil {
+		return map[string]any{}
+	}
+	meta := map[string]any{
+		"status":        run.Status,
+		"started_at":    run.StartedAt,
+		"finished_at":   run.FinishedAt,
+		"error_message": run.ErrorMessage,
+	}
+	if strings.TrimSpace(run.SummaryJSON) != "" {
+		var summary map[string]any
+		if json.Unmarshal([]byte(run.SummaryJSON), &summary) == nil {
+			meta["summary"] = summary
+		}
+	}
+	return meta
 }
 
 func buildCoverageWarnings(total int64, raw, factors map[string]int64) []string {

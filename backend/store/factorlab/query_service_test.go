@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/woodyyan/pumpkin-pro/backend/store/companyprofile"
 	"github.com/woodyyan/pumpkin-pro/backend/tests/testutil"
 )
 
@@ -18,6 +19,7 @@ func setupFactorLabQueryService(t *testing.T) (*Service, *Repository) {
 	if err := NewMigrator().AutoMigrate(db); err != nil {
 		t.Fatalf("migrate factorlab: %v", err)
 	}
+	testutil.AutoMigrateModels(t, db, &companyprofile.CompanyProfileRecord{}, &companyprofile.IndustryMappingRecord{})
 	repo := NewRepository(db)
 	return NewService(repo), repo
 }
@@ -43,6 +45,58 @@ func seedFactorScores(t *testing.T, repo *Repository) {
 	}
 	if err := repo.CreateTaskRun(context.Background(), FactorTaskRun{ID: "run-1", TaskType: "factor_score_compute", SnapshotDate: "2026-05-08", Status: TaskStatusSuccess, StartedAt: now}); err != nil {
 		t.Fatalf("seed task run: %v", err)
+	}
+}
+
+func seedFactorLabAdminMetadata(t *testing.T, repo *Repository) {
+	t.Helper()
+	now := time.Now().UTC()
+	securities := []FactorSecurity{
+		{Code: "000001", Symbol: "000001.SZ", Name: "平安银行", Exchange: "SZSE", Board: BoardMain, IsActive: true, UpdatedAt: now},
+		{Code: "000002", Symbol: "000002.SZ", Name: "万科A", Exchange: "SZSE", Board: BoardMain, IsActive: true, UpdatedAt: now},
+	}
+	if err := repo.db.WithContext(context.Background()).Create(&securities).Error; err != nil {
+		t.Fatalf("seed factor securities: %v", err)
+	}
+	profiles := []companyprofile.CompanyProfileRecord{
+		{Symbol: "000001.SZ", Exchange: "SZSE", Code: "000001", Name: "平安银行", IndustryName: "银行", ListingStatus: companyprofile.ListingStatusListed, ProfileStatus: companyprofile.ProfileStatusComplete, QualityFlags: `[]`, CreatedAt: now, UpdatedAt: now},
+		{Symbol: "000002.SZ", Exchange: "SZSE", Code: "000002", Name: "万科A", IndustryName: "房地产", ListingStatus: companyprofile.ListingStatusListed, ProfileStatus: companyprofile.ProfileStatusComplete, QualityFlags: `[]`, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := repo.db.WithContext(context.Background()).Create(&profiles).Error; err != nil {
+		t.Fatalf("seed company profiles: %v", err)
+	}
+	industryRows := []FactorSecurityIndustry{
+		{Code: "000001", RawIndustryName: "银行", IndustryName: "银行", IndustrySource: "eastmoney:qt_clist_get", UpdatedAt: now},
+		{Code: "000002", RawIndustryName: "房地产", IndustryName: "房地产", IndustrySource: "eastmoney:qt_clist_get", UpdatedAt: now},
+	}
+	if err := repo.db.WithContext(context.Background()).Create(&industryRows).Error; err != nil {
+		t.Fatalf("seed security industries: %v", err)
+	}
+	industriesFinishedAt := now.Add(-110 * time.Minute)
+	dividendsFinishedAt := now.Add(-23 * time.Hour)
+	industriesSummary := `{"status":"partial","warnings":[{"mode":"industries","error":"akshare down","coverage_ratio":1.0}]}`
+	if err := repo.CreateTaskRun(context.Background(), FactorTaskRun{
+		ID:           "run-industries",
+		TaskType:     TaskTypeBackfill,
+		Status:       TaskStatusPartial,
+		StartedAt:    now.Add(-2 * time.Hour),
+		FinishedAt:   &industriesFinishedAt,
+		ParamsJSON:   `{"mode":"industries","args":{"mode":"industries"}}`,
+		SummaryJSON:  industriesSummary,
+		ErrorMessage: "akshare down",
+	}); err != nil {
+		t.Fatalf("seed industries task run: %v", err)
+	}
+	if err := repo.CreateTaskRun(context.Background(), FactorTaskRun{
+		ID:          "run-dividends",
+		TaskType:    TaskTypeBackfill,
+		Status:      TaskStatusSuccess,
+		StartedAt:   now.Add(-24 * time.Hour),
+		FinishedAt:  &dividendsFinishedAt,
+		ParamsJSON:  `{"mode":"dividends","args":{"mode":"dividends"}}`,
+		SummaryJSON: `{"status":"success","total":2,"success":2,"failed":0}`,
+	}); err != nil {
+		t.Fatalf("seed dividends task run: %v", err)
 	}
 }
 
@@ -84,6 +138,7 @@ func TestFactorLabMetaWithCoverage(t *testing.T) {
 func TestFactorLabAdminStatusIncludesCoverageAndRecentRuns(t *testing.T) {
 	svc, repo := setupFactorLabQueryService(t)
 	seedFactorScores(t, repo)
+	seedFactorLabAdminMetadata(t, repo)
 	status, err := svc.AdminStatus(context.Background(), WorkerStatus{Enabled: true, Schedule: "21:00"})
 	if err != nil {
 		t.Fatalf("admin status: %v", err)
@@ -99,6 +154,22 @@ func TestFactorLabAdminStatusIncludesCoverageAndRecentRuns(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(status.Coverage.Warnings, " "), "fcf_margin 覆盖率低于 80%") {
 		t.Fatalf("expected fcf_margin warning, got %+v", status.Coverage.Warnings)
+	}
+	metadata := status.Coverage.Metadata
+	if metadata == nil {
+		t.Fatal("expected admin metadata")
+	}
+	industriesHealth, _ := metadata["industries_health"].(map[string]any)
+	if industriesHealth["coverage_ratio"].(float64) != 1 {
+		t.Fatalf("expected industries coverage ratio 1, got %+v", industriesHealth)
+	}
+	industriesMeta, _ := metadata["industries"].(map[string]any)
+	if industriesMeta["status"] != TaskStatusPartial {
+		t.Fatalf("expected industries latest status partial, got %+v", industriesMeta)
+	}
+	dividendsMeta, _ := metadata["dividends"].(map[string]any)
+	if dividendsMeta["status"] != TaskStatusSuccess {
+		t.Fatalf("expected dividends latest status success, got %+v", dividendsMeta)
 	}
 }
 

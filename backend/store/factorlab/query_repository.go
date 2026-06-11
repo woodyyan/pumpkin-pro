@@ -2,6 +2,7 @@ package factorlab
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 )
 
@@ -108,6 +109,69 @@ func (r *Repository) DBQuickCheck(ctx context.Context) (string, error) {
 	var result string
 	err := r.db.WithContext(ctx).Raw("PRAGMA quick_check").Row().Scan(&result)
 	return result, err
+}
+
+func (r *Repository) LatestBackfillRunByMode(ctx context.Context, mode string) (*FactorTaskRun, error) {
+	var runs []FactorTaskRun
+	err := r.db.WithContext(ctx).
+		Where("task_type = ?", TaskTypeBackfill).
+		Order("started_at DESC").
+		Limit(20).
+		Find(&runs).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range runs {
+		var payload map[string]any
+		if json.Unmarshal([]byte(run.ParamsJSON), &payload) != nil {
+			continue
+		}
+		argsPayload, _ := payload["args"].(map[string]any)
+		modeValue, _ := payload["mode"].(string)
+		if strings.TrimSpace(modeValue) == strings.TrimSpace(mode) {
+			copyRun := run
+			return &copyRun, nil
+		}
+		if argsMode, _ := argsPayload["mode"].(string); strings.TrimSpace(argsMode) == strings.TrimSpace(mode) {
+			copyRun := run
+			return &copyRun, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *Repository) ActiveAShareUniverseCount(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT COUNT(*)
+		FROM factor_securities
+		WHERE exchange IN ('SSE', 'SZSE')
+		  AND board IN ('MAIN', 'CHINEXT')
+		  AND is_active = 1
+	`).Row().Scan(&count)
+	return count, err
+}
+
+func (r *Repository) CoveredAShareIndustryProfileCount(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT COUNT(*)
+		FROM company_profiles
+		WHERE exchange IN ('SSE', 'SZSE')
+		  AND code <> ''
+		  AND industry_name <> ''
+	`).Row().Scan(&count)
+	return count, err
+}
+
+func (r *Repository) LatestIndustryRefreshAt(ctx context.Context) (string, error) {
+	var value string
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT COALESCE(MAX(updated_at), '')
+		FROM factor_security_industries
+		WHERE industry_name <> ''
+	`).Row().Scan(&value)
+	return strings.TrimSpace(value), err
 }
 
 func (r *Repository) ScanSnapshots(ctx context.Context, input ScanInput) (ScanResult, error) {

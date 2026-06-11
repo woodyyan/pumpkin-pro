@@ -56,10 +56,12 @@ type FactorLabConfig struct {
 	DailyComputeEnabled  bool
 	ComputeHour          int
 	ComputeMinute        int
+	DailyModes           []string
 	PythonBin            string
 	Phase0ScriptPath     string
 	Phase1ScriptPath     string
 	Phase2ScriptPath     string
+	IndustriesSource     string
 	DailyBarsSource      string
 	FinancialsSource     string
 	DividendsSource      string
@@ -228,10 +230,12 @@ func Load() Config {
 			DailyComputeEnabled:  getEnvAsBool("FACTOR_LAB_DAILY_COMPUTE_ENABLED", true),
 			ComputeHour:          getEnvAsInt("FACTOR_LAB_COMPUTE_HOUR", 21),
 			ComputeMinute:        getEnvAsInt("FACTOR_LAB_COMPUTE_MINUTE", 0),
+			DailyModes:           parseCSVEnv(getEnv("FACTOR_LAB_DAILY_MODES", "securities,industries,daily-bars,index-bars,financials")),
 			PythonBin:            getEnv("FACTOR_LAB_PYTHON_BIN", "python3"),
 			Phase0ScriptPath:     getEnv("FACTOR_LAB_PHASE0_SCRIPT", "quant/scripts/update_factor_lab_phase0_incremental.py"),
 			Phase1ScriptPath:     getEnv("FACTOR_LAB_PHASE1_SCRIPT", "quant/scripts/compute_factor_lab_phase1.py"),
 			Phase2ScriptPath:     getEnv("FACTOR_LAB_PHASE2_SCRIPT", "quant/scripts/compute_factor_lab_phase2.py"),
+			IndustriesSource:     getEnv("FACTOR_LAB_INDUSTRIES_SOURCE", "auto"),
 			DailyBarsSource:      getEnv("FACTOR_LAB_DAILY_BARS_SOURCE", "tencent"),
 			FinancialsSource:     getEnv("FACTOR_LAB_FINANCIALS_SOURCE", "auto"),
 			DividendsSource:      getEnv("FACTOR_LAB_DIVIDENDS_SOURCE", "auto"),
@@ -303,6 +307,21 @@ func parseCommaSeparated(raw string) []string {
 	seen := make(map[string]bool)
 	for _, part := range parts {
 		value := strings.ToLower(strings.TrimSpace(part))
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+func parseCSVEnv(raw string) []string {
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	seen := make(map[string]bool)
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
 		if value == "" || seen[value] {
 			continue
 		}

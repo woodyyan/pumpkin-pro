@@ -135,7 +135,13 @@ def test_request_with_retry_retries_then_succeeds(monkeypatch):
     assert attempts["count"] == 3
 
 
-def test_fetch_industry_rows_only_uses_akshare(monkeypatch, tmp_path):
+def test_industry_source_order_supports_auto_and_manual_selection():
+    assert module.industry_source_order("auto") == ["akshare", "eastmoney", "tencent"]
+    assert module.industry_source_order("eastmoney") == ["eastmoney"]
+
+
+
+def test_fetch_industry_rows_falls_back_from_akshare_to_eastmoney(monkeypatch, tmp_path):
     db_path = tmp_path / "factor.db"
     conn = sqlite3.connect(db_path)
     try:
@@ -143,18 +149,19 @@ def test_fetch_industry_rows_only_uses_akshare(monkeypatch, tmp_path):
         conn.execute("INSERT INTO factor_securities (code, symbol, name, exchange, board, is_st, is_active, source, updated_at) VALUES ('000001','000001.SZ','平安银行','SZSE','MAIN',0,1,'test','now')")
         conn.commit()
         args = module.parse_args(["--mode", "industries"])
-        called = {"akshare": 0}
 
-        def fake_fetch_industry_rows_akshare(inner_conn, inner_args):
-            called["akshare"] += 1
+        def fail_akshare(inner_conn, inner_args):
+            raise RuntimeError("akshare down")
+
+        def ok_eastmoney(inner_conn, inner_args):
             return [(
-                "000001", "银行", "银行", "akshare:stock_board_industry_cons_em", "now"
-            )], "akshare:stock_board_industry_cons_em"
+                "000001", "银行", "银行", "eastmoney:qt_clist_get", "now"
+            )], "eastmoney:qt_clist_get"
 
-        monkeypatch.setattr(module, "fetch_industry_rows_akshare", fake_fetch_industry_rows_akshare)
+        monkeypatch.setattr(module, "fetch_industry_rows_akshare", fail_akshare)
+        monkeypatch.setattr(module, "fetch_industry_rows_eastmoney", ok_eastmoney)
         rows, source = module.fetch_industry_rows(conn, args)
-        assert called["akshare"] == 1
-        assert source == "akshare:stock_board_industry_cons_em"
+        assert source == "eastmoney:qt_clist_get"
         assert rows[0][0] == "000001"
     finally:
         conn.close()
@@ -381,6 +388,7 @@ def test_source_args_are_available_for_all_modes():
     args = module.parse_args([
         "--mode", "all",
         "--securities-source", "tencent",
+        "--industries-source", "eastmoney",
         "--daily-bars-source", "eastmoney",
         "--index-bars-source", "tencent",
         "--financials-source", "akshare",
@@ -389,12 +397,32 @@ def test_source_args_are_available_for_all_modes():
         "--verbose",
     ])
     assert args.securities_source == "tencent"
+    assert args.industries_source == "eastmoney"
     assert args.daily_bars_source == "eastmoney"
     assert args.index_bars_source == "tencent"
     assert args.financials_source == "akshare"
     assert args.dividends_source == "eastmoney"
     assert args.progress_interval == 3
     assert args.verbose is True
+
+
+
+def test_compute_industry_coverage_status_parses_timestamp_strings(tmp_path):
+    db_path = tmp_path / "factor.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        module.ensure_schema(conn)
+        conn.execute("INSERT INTO factor_securities (code, symbol, name, exchange, board, is_st, is_active, source, updated_at) VALUES ('000001','000001.SZ','平安银行','SZSE','MAIN',0,1,'test','2026-06-01 00:00:00')")
+        conn.execute("INSERT INTO company_profiles (symbol, exchange, code, name, industry_name, listing_status, profile_status, quality_flags, created_at, updated_at) VALUES ('000001.SZ','SZSE','000001','平安银行','银行','LISTED','COMPLETE','[]','2026-06-01 08:30:00','2026-06-01 08:30:00')")
+        conn.execute("INSERT INTO factor_security_industries (code, raw_industry_name, industry_name, industry_source, updated_at) VALUES ('000001','银行','银行','test','2026-06-01 08:30:00')")
+        conn.commit()
+        status = module.compute_industry_coverage_status(conn)
+        assert status.profile_count == 1
+        assert status.universe_count == 1
+        assert status.coverage_ratio == 1.0
+        assert status.stale_days is not None
+    finally:
+        conn.close()
 
 
 def test_normalize_capex_value_keeps_cash_outflow_non_negative():

@@ -18,4 +18,12 @@ describe('admin factor lab pipeline labels', () => {
     assert.match(pageSource, /只刷新行业/)
     assert.match(pageSource, /phase0_mode: 'industries'/)
   })
+
+  it('shows dividends manual full refresh and industries health guidance', () => {
+    assert.match(pageSource, /full_refresh_dividends/)
+    assert.match(pageSource, /全量刷新股息率/)
+    assert.match(pageSource, /默认不跑 dividends/)
+    assert.match(pageSource, /行业刷新健康度/)
+    assert.match(pageSource, /自动链路允许 warning 放行，不再 hard fail/)
+  })
 })

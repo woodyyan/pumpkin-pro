@@ -21,8 +21,11 @@ func TestNormalizeWorkerConfigDefaults(t *testing.T) {
 	if cfg.Phase2ScriptPath != defaultPhase2Script {
 		t.Fatalf("expected default phase2 script, got %q", cfg.Phase2ScriptPath)
 	}
-	if cfg.DailyBarsSource != "tencent" || cfg.FinancialsSource != "auto" || cfg.DividendsSource != "auto" {
-		t.Fatalf("unexpected sources: daily=%s financials=%s dividends=%s", cfg.DailyBarsSource, cfg.FinancialsSource, cfg.DividendsSource)
+	if cfg.IndustriesSource != "auto" || cfg.DailyBarsSource != "tencent" || cfg.FinancialsSource != "auto" || cfg.DividendsSource != "auto" {
+		t.Fatalf("unexpected sources: industries=%s daily=%s financials=%s dividends=%s", cfg.IndustriesSource, cfg.DailyBarsSource, cfg.FinancialsSource, cfg.DividendsSource)
+	}
+	if !reflect.DeepEqual(cfg.DailyModes, []string{"securities", "industries", "daily-bars", "index-bars", "financials"}) {
+		t.Fatalf("unexpected daily modes: %#v", cfg.DailyModes)
 	}
 	if cfg.ItemProgressInterval != 1 {
 		t.Fatalf("unexpected item progress interval: %d", cfg.ItemProgressInterval)
@@ -63,6 +66,7 @@ func TestBuildPhaseCommandArgs(t *testing.T) {
 		"--scope", "repair_missing_dividend_yield",
 		"--progress-interval", "123",
 		"--item-progress-interval", "2",
+		"--industries-source", "auto",
 		"--daily-bars-source", "tencent",
 		"--financials-source", "auto",
 		"--dividends-source", "auto",
@@ -80,6 +84,7 @@ func TestBuildPhaseCommandArgs(t *testing.T) {
 		"--scope", "repair_missing_fcfm_inputs",
 		"--progress-interval", "123",
 		"--item-progress-interval", "2",
+		"--industries-source", "auto",
 		"--daily-bars-source", "tencent",
 		"--financials-source", "auto",
 		"--dividends-source", "auto",
@@ -129,6 +134,33 @@ func TestValidatePipelineRunRequestRejectsInvalidRepairScope(t *testing.T) {
 	}
 	if err := validatePipelineRunRequest(PipelineRunRequest{Phase: "phase0", Phase0Mode: "industries", Scope: "incremental"}); err != nil {
 		t.Fatalf("expected valid industries request: %v", err)
+	}
+}
+
+func TestValidatePipelineRunRequestSupportsFullRefreshDividendsAndCSVPhase0Modes(t *testing.T) {
+	if err := validatePipelineRunRequest(PipelineRunRequest{Phase: "phase0", Phase0Mode: "dividends", Scope: "full_refresh_dividends"}); err != nil {
+		t.Fatalf("expected full_refresh_dividends request valid: %v", err)
+	}
+	if err := validatePipelineRunRequest(PipelineRunRequest{Phase: "phase0", Phase0Mode: "securities,industries", Scope: "incremental"}); err != nil {
+		t.Fatalf("expected csv phase0 modes valid: %v", err)
+	}
+	if err := validatePipelineRunRequest(PipelineRunRequest{Phase: "phase0", Phase0Mode: "industries,unknown", Scope: "incremental"}); err == nil {
+		t.Fatal("expected invalid csv phase0 modes request")
+	}
+}
+
+func TestPipelineStatusHelpers(t *testing.T) {
+	if got := phaseStatusFromSummary(&PhaseStatus{Summary: map[string]any{"status": "partial"}}); got != "partial" {
+		t.Fatalf("expected partial phase status, got %q", got)
+	}
+	if got := phaseStatusFromSummary(&PhaseStatus{Summary: map[string]any{"status": "failed"}}); got != "failed" {
+		t.Fatalf("expected failed phase status, got %q", got)
+	}
+	if got := pipelineStatusFromPhases([]PhaseStatus{{Status: "success"}, {Status: "partial"}}); got != "partial" {
+		t.Fatalf("expected partial pipeline status, got %q", got)
+	}
+	if got := pipelineStatusFromPhases([]PhaseStatus{{Status: "success"}, {Status: "failed"}}); got != "failed" {
+		t.Fatalf("expected failed pipeline status, got %q", got)
 	}
 }
 

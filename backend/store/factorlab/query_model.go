@@ -126,6 +126,7 @@ type FactorCoverageResponse struct {
 	RawMetrics   map[string]int64 `json:"raw_metrics"`
 	Factors      map[string]int64 `json:"factors"`
 	Warnings     []string         `json:"warnings"`
+	Metadata     map[string]any   `json:"metadata,omitempty"`
 }
 
 type FactorPipelineAdminStatus struct {

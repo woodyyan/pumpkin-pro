@@ -90,6 +90,27 @@ func TestHandleAdminPaymentCheckoutSessionsUsesCurrentAdmin(t *testing.T) {
 	}
 }
 
+func TestHandleAdminPaymentCheckoutSessionsSupportsExplicitLocalWalletSelection(t *testing.T) {
+	service := &stubPaymentService{
+		createResult: &payment.CreateCheckoutSessionResult{PaymentID: "pay_alipay", Status: payment.StatusCheckoutOpen, PaymentMethod: payment.PaymentMethodAlipay, CheckoutSessionID: "cs_alipay", CheckoutURL: "https://checkout.stripe.com/alipay"},
+	}
+	server := &appServer{paymentService: service}
+	body := bytes.NewBufferString(`{"amount_minor":200,"currency":"cny","payment_method":"alipay","title":"Alipay Test"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/payments/checkout-sessions", body)
+	req = req.WithContext(admin.WithCurrentAdmin(req.Context(), admin.CurrentAdmin{AdminID: "admin_456"}))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+
+	server.handleAdminPaymentCheckoutSessions(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+	if service.lastCreateInput.PaymentMethod != payment.PaymentMethodAlipay {
+		t.Fatalf("expected explicit payment method forwarded, got %+v", service.lastCreateInput)
+	}
+}
+
 func TestHandleAdminPaymentsListsRecords(t *testing.T) {
 	service := &stubPaymentService{
 		listItems: []payment.PaymentRecord{{ID: "pay_1", Status: payment.StatusSucceeded}},

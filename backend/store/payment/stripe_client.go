@@ -20,7 +20,9 @@ type stripeCheckoutSessionRequest struct {
 	PaymentID          string
 	AmountMinor        int64
 	Currency           string
+	PaymentMethodCode  string
 	PaymentMethodTypes []string
+	WeChatPayClient    string
 	SuccessURL         string
 	CancelURL          string
 	Title              string
@@ -107,6 +109,13 @@ func (c *stripeClient) CreateCheckoutSession(ctx context.Context, req stripeChec
 			Description: stripe.String(req.Description),
 			Metadata:    cloneStripeMetadata(req.Metadata),
 		},
+	}
+	if req.WeChatPayClient != "" {
+		params.PaymentMethodOptions = &stripe.CheckoutSessionCreatePaymentMethodOptionsParams{
+			WeChatPay: &stripe.CheckoutSessionCreatePaymentMethodOptionsWeChatPayParams{
+				Client: stripe.String(req.WeChatPayClient),
+			},
+		}
 	}
 	if req.ExpiresAt != nil {
 		params.ExpiresAt = stripe.Int64(req.ExpiresAt.UTC().Unix())

@@ -12,6 +12,10 @@ const (
 
 	ScenarioHostedCheckout = "hosted_checkout"
 
+	PaymentMethodCard      = "card"
+	PaymentMethodAlipay    = "alipay"
+	PaymentMethodWeChatPay = "wechat_pay"
+
 	StatusInitiated         = "initiated"
 	StatusCheckoutOpen      = "checkout_open"
 	StatusProcessing        = "processing"
@@ -101,21 +105,34 @@ func (PaymentEventRecord) TableName() string {
 	return "payment_events"
 }
 
+type AdminTestPaymentMethodView struct {
+	Code                string   `json:"code"`
+	Label               string   `json:"label"`
+	Enabled             bool     `json:"enabled"`
+	SupportedCurrencies []string `json:"supported_currencies,omitempty"`
+	RecommendedCurrency string   `json:"recommended_currency,omitempty"`
+	CheckoutFlow        string   `json:"checkout_flow,omitempty"`
+	Description         string   `json:"description,omitempty"`
+	TestingNote         string   `json:"testing_note,omitempty"`
+}
+
 type PaymentConfigView struct {
-	Provider                string   `json:"provider"`
-	Mode                    string   `json:"mode"`
-	Ready                   bool     `json:"ready"`
-	SecretKeyConfigured     bool     `json:"secret_key_configured"`
-	WebhookSecretConfigured bool     `json:"webhook_secret_configured"`
-	DefaultCurrency         string   `json:"default_currency"`
-	AllowedPaymentMethods   []string `json:"allowed_payment_methods"`
-	SupportedScenarios      []string `json:"supported_scenarios"`
+	Provider                string                       `json:"provider"`
+	Mode                    string                       `json:"mode"`
+	Ready                   bool                         `json:"ready"`
+	SecretKeyConfigured     bool                         `json:"secret_key_configured"`
+	WebhookSecretConfigured bool                         `json:"webhook_secret_configured"`
+	DefaultCurrency         string                       `json:"default_currency"`
+	AllowedPaymentMethods   []string                     `json:"allowed_payment_methods"`
+	AdminTestPaymentMethods []AdminTestPaymentMethodView `json:"admin_test_payment_methods,omitempty"`
+	SupportedScenarios      []string                     `json:"supported_scenarios"`
 }
 
 type AdminCreateCheckoutSessionInput struct {
 	Purpose            string   `json:"purpose"`
 	AmountMinor        int64    `json:"amount_minor"`
 	Currency           string   `json:"currency"`
+	PaymentMethod      string   `json:"payment_method"`
 	PaymentMethodTypes []string `json:"payment_method_types"`
 	Title              string   `json:"title"`
 	Description        string   `json:"description"`
@@ -124,6 +141,7 @@ type AdminCreateCheckoutSessionInput struct {
 type CreateCheckoutSessionResult struct {
 	PaymentID          string  `json:"payment_id"`
 	Status             string  `json:"status"`
+	PaymentMethod      string  `json:"payment_method,omitempty"`
 	CheckoutSessionID  string  `json:"checkout_session_id"`
 	CheckoutURL        string  `json:"checkout_url"`
 	PaymentIntentID    string  `json:"payment_intent_id,omitempty"`

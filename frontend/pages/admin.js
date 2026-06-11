@@ -20,6 +20,9 @@ import {
   useAdminResource,
 } from '../lib/admin-data'
 import {
+  resolveAdminPaymentDraftForMethod,
+  resolveAdminPaymentMethodMeta,
+  resolveAdminPaymentMethodOptions,
   resolveAdminPaymentPollingState,
   resolveAdminSelectedPaymentId,
 } from '../lib/admin-payments'
@@ -2402,6 +2405,7 @@ function AdminPaymentsPanel({ onUnauthorized }) {
   const [createDraft, setCreateDraft] = useState({
     amount_minor: 100,
     currency: 'cny',
+    payment_method: 'card',
     payment_method_types: ['card'],
     title: 'Stripe Admin Test Payment',
   })
@@ -2451,6 +2455,9 @@ function AdminPaymentsPanel({ onUnauthorized }) {
   const selectedEvents = detail?.events || []
   const configReady = Boolean(config?.ready)
   const resourceError = paymentsResource.error || detailResource.error
+  const paymentMethodOptions = resolveAdminPaymentMethodOptions(config)
+  const selectedCreateMethodMeta = resolveAdminPaymentMethodMeta(config, createDraft.payment_method || createDraft.payment_method_types?.[0] || 'card')
+  const selectedCreateCurrencies = (selectedCreateMethodMeta?.supported_currencies?.length ? selectedCreateMethodMeta.supported_currencies : ['cny']).map((item) => String(item).toLowerCase())
 
   useEffect(() => {
     const nextPaymentId = resolveAdminSelectedPaymentId(payments, selectedPaymentId)
@@ -2466,6 +2473,19 @@ function AdminPaymentsPanel({ onUnauthorized }) {
     }
   }, [autoPollPaymentId, paymentsResource.data])
 
+  useEffect(() => {
+    const enabledMethod = paymentMethodOptions.find((item) => item?.enabled)
+    if (!enabledMethod) return
+    const currentMethod = createDraft.payment_method || createDraft.payment_method_types?.[0] || ''
+    if (currentMethod !== enabledMethod.code && !paymentMethodOptions.some((item) => item?.code === currentMethod && item?.enabled)) {
+      setCreateDraft((current) => resolveAdminPaymentDraftForMethod(current, config, enabledMethod.code))
+      return
+    }
+    if (selectedCreateMethodMeta && !selectedCreateCurrencies.includes(String(createDraft.currency || '').toLowerCase())) {
+      setCreateDraft((current) => resolveAdminPaymentDraftForMethod(current, config, currentMethod || enabledMethod.code))
+    }
+  }, [config, createDraft.currency, createDraft.payment_method, createDraft.payment_method_types, paymentMethodOptions, selectedCreateCurrencies, selectedCreateMethodMeta])
+
   const refreshPaymentsPanel = useCallback(async () => {
     await paymentsResource.refresh()
     if (selectedPaymentId) {
@@ -2475,6 +2495,10 @@ function AdminPaymentsPanel({ onUnauthorized }) {
 
   const updateDraft = (key, value) => {
     setCreateDraft((current) => ({ ...current, [key]: value }))
+  }
+
+  const handleSelectCreateMethod = (paymentMethod) => {
+    setCreateDraft((current) => resolveAdminPaymentDraftForMethod(current, config, paymentMethod))
   }
 
   const handleCreate = async () => {
@@ -2487,9 +2511,11 @@ function AdminPaymentsPanel({ onUnauthorized }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(createDraft),
       })
+      const createdMethod = result.payment_method || createDraft.payment_method || createDraft.payment_method_types?.[0] || 'card'
+      const methodLabel = PAYMENT_METHOD_LABELS[createdMethod] || createdMethod
       setSelectedPaymentId(result.payment_id || '')
       setAutoPollPaymentId(result.payment_id || '')
-      setActionSuccess('测试支付已创建，可直接打开 Stripe Hosted Checkout 继续验证。')
+      setActionSuccess(`测试支付已创建：${methodLabel}。${result.allowed_payment_note || '可直接打开 Stripe Hosted Checkout 继续验证。'}`)
       await paymentsResource.refresh()
       if (result.checkout_url) {
         window.open(result.checkout_url, '_blank', 'noopener,noreferrer')
@@ -2538,7 +2564,7 @@ function AdminPaymentsPanel({ onUnauthorized }) {
         <div>
           <h2 className="text-base font-semibold text-foreground-muted">💳 支付测试</h2>
           <p className="mt-1 text-xs leading-6 text-foreground-dim">
-            一期仅用于 admin 验证 Stripe Hosted Checkout 一次性支付链路，不改公开站点。当前默认只先跑通银行卡支付测试，默认币种为人民币（CNY）。
+            当前仅用于 admin 内测 Stripe Hosted Checkout 一次性支付链路，不改公开站点。现已支持银行卡、支付宝、微信支付三种测试方式，最终状态仍以 webhook 回写为准。
           </p>
         </div>
         <button
@@ -2570,8 +2596,23 @@ function AdminPaymentsPanel({ onUnauthorized }) {
         <StatCard label="当前模式" value={(config?.mode || '--').toUpperCase()} sub={config?.mode === 'test' ? '一期限制为测试模式' : '非测试模式不可创建'} />
         <StatCard label="Secret Key" value={config?.secret_key_configured ? '已配置' : '未配置'} sub="服务端 Stripe 凭据" />
         <StatCard label="Webhook Secret" value={config?.webhook_secret_configured ? '已配置' : '未配置'} sub="Webhook 验签必需" />
-        <StatCard label="默认币种" value={(config?.default_currency || 'cny').toUpperCase()} sub="人民币（CNY）" />
-        <StatCard label="允许支付方式" value={formatPaymentMethodList(config?.allowed_payment_methods)} sub="首期建议仅 card" />
+        <StatCard label="默认币种" value={(config?.default_currency || 'cny').toUpperCase()} sub="admin 测试默认值" />
+        <StatCard label="允许支付方式" value={formatPaymentMethodList(config?.allowed_payment_methods)} sub="通过 env 控制 admin 内测范围" />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
+        {paymentMethodOptions.map((item) => (
+          <div key={item.code} className={`rounded-2xl border px-4 py-3 ${item.enabled ? 'border-border bg-background-alt/40' : 'border-border/70 bg-[var(--color-bg-hover)]/60'}`}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-semibold text-foreground-muted">{item.label}</div>
+              <span className={`rounded-full border px-2 py-1 text-[11px] ${item.enabled ? 'border-emerald-400/25 bg-positive/10 text-positive' : 'border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] text-foreground-dim'}`}>
+                {item.enabled ? '已启用' : '未启用'}
+              </span>
+            </div>
+            <div className="mt-2 text-xs leading-6 text-foreground-dim">{item.description || '--'}</div>
+            <div className="mt-2 text-[11px] text-foreground-disabled">币种：{(item.supported_currencies || []).map((currency) => String(currency).toUpperCase()).join(' / ') || '--'} · 形态：{item.checkout_flow || '--'}</div>
+          </div>
+        ))}
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
@@ -2594,24 +2635,32 @@ function AdminPaymentsPanel({ onUnauthorized }) {
               <p className="mt-1 text-[11px] text-foreground-disabled">例如 100 表示 ¥1.00</p>
             </div>
             <div>
+              <label className="mb-1.5 block text-xs text-foreground-dim">支付方式</label>
+              <select
+                value={createDraft.payment_method || createDraft.payment_method_types[0] || 'card'}
+                onChange={(event) => handleSelectCreateMethod(event.target.value)}
+                className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
+              >
+                {paymentMethodOptions.filter((item) => item?.enabled).map((item) => (
+                  <option key={item.code} value={item.code}>{item.label}</option>
+                ))}
+              </select>
+              {selectedCreateMethodMeta ? (
+                <p className="mt-1 text-[11px] text-foreground-disabled">{selectedCreateMethodMeta.description}</p>
+              ) : null}
+            </div>
+            <div>
               <label className="mb-1.5 block text-xs text-foreground-dim">币种</label>
               <select
                 value={createDraft.currency}
                 onChange={(event) => updateDraft('currency', event.target.value)}
                 className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
               >
-                <option value="cny">CNY</option>
+                {selectedCreateCurrencies.map((currency) => (
+                  <option key={currency} value={currency}>{String(currency).toUpperCase()}</option>
+                ))}
               </select>
-            </div>
-            <div>
-              <label className="mb-1.5 block text-xs text-foreground-dim">支付方式</label>
-              <select
-                value={createDraft.payment_method_types[0] || 'card'}
-                onChange={(event) => updateDraft('payment_method_types', [event.target.value])}
-                className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
-              >
-                <option value="card">银行卡（借记卡 / 信用卡）</option>
-              </select>
+              <p className="mt-1 text-[11px] text-foreground-disabled">推荐币种：{String(selectedCreateMethodMeta?.recommended_currency || createDraft.currency || 'cny').toUpperCase()}</p>
             </div>
             <div>
               <label className="mb-1.5 block text-xs text-foreground-dim">测试标题</label>
@@ -2622,6 +2671,12 @@ function AdminPaymentsPanel({ onUnauthorized }) {
                 className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
               />
             </div>
+            {selectedCreateMethodMeta ? (
+              <div className="rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-3 text-xs text-sky-100">
+                <div className="font-medium">测试提示</div>
+                <div className="mt-1 leading-6">{selectedCreateMethodMeta.testing_note || '创建后可直接打开 Stripe Hosted Checkout 继续验证。'}</div>
+              </div>
+            ) : null}
             <button
               type="button"
               disabled={creating || !configReady}
@@ -2717,7 +2772,7 @@ function AdminPaymentsPanel({ onUnauthorized }) {
 
               <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <AIConfigMetric label="金额" value={formatMinorAmount(selectedPayment.amount_minor, selectedPayment.currency)} sub="一次性支付测试" />
-                <AIConfigMetric label="支付方式" value={formatPaymentMethodList(selectedPayment.payment_method_selected || selectedPayment.payment_method_request)} sub="首期默认 card" />
+                <AIConfigMetric label="支付方式" value={formatPaymentMethodList(selectedPayment.payment_method_selected || selectedPayment.payment_method_request)} sub="以 Checkout 实际完成方式为准" />
                 <AIConfigMetric label="Session ID" value={selectedPayment.checkout_session_id || '--'} sub="Stripe Checkout Session" />
                 <AIConfigMetric label="PaymentIntent ID" value={selectedPayment.payment_intent_id || '--'} sub="便于定位 webhook" />
               </div>

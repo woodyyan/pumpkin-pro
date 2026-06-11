@@ -1,5 +1,37 @@
 # 设计决策记录
 
+## 决策 14: Stripe 本地钱包二期继续走 admin-only Hosted Checkout 单方式测试
+
+**日期**: 2026-06-11
+
+**背景**: Stripe 一期已经在 `/admin` 落地 card-only 的 Hosted Checkout 测试链路。二期需要把支付宝和微信支付也接进来，但用户明确要求仍然只做 admin 内测，不改公开站点，不把普通用户流量卷入本地钱包验证。
+
+**决策**:
+1. 支付宝与微信支付二期继续复用既有 `payments + payment_events + admin API + Stripe Hosted Checkout + webhook` 架构，不新增公开站点支付入口。
+2. admin 每笔测试单只允许选择一种主支付方式（`card` / `alipay` / `wechat_pay`），不在同一笔 Checkout Session 内混合多个本地钱包做灰盒测试。
+3. 当前阶段只支持 **一次性 payment mode**，不进入 subscription / setup 模式。
+4. 微信支付在创建 Checkout Session 时必须显式设置 `payment_method_options.wechat_pay.client=web`，以适配 PC admin 场景的二维码扫码链路。
+5. admin 前端的支付方式下拉、币种列表和测试提示由后端返回的支付方式元数据驱动，避免前后端各自硬编码一套能力口径。
+
+**原因**:
+1. Hosted Checkout 已经在一期验证过审计链路和 webhook 状态机，复用它比为本地钱包重做一套自定义前端更稳。
+2. 单笔只测一种主支付方式，能让“为什么 Checkout 没显示该方式 / 为什么创建失败”这类问题更容易定位，不会被 fallback card 噪音干扰。
+3. 支付宝与微信支付在 Stripe Checkout 下都更适合单次支付验证；若现在混入订阅，会把本地钱包接入问题和 recurring 模型问题耦合在一起。
+4. 微信支付 PC 测试是二维码扫码链路，不补 `client=web` 会让 session 参数与预期测试形态不一致。
+5. 能力元数据由后端下发后，前端才能稳定显示“是否启用、支持币种、跳转/扫码提示”，避免文案和真实配置漂移。
+
+**替代方案**:
+- 在同一笔 session 同时塞入 `card + alipay + wechat_pay`：否决，admin 内测需要可诊断性，混合多方式只会让 eligibility 和展示问题更难解释。
+- 二期直接切到自定义前端 / PaymentIntents：否决，当前目标是先验证 Stripe 本地钱包链路，Hosted Checkout 变量更少、回归范围更小。
+- 直接把本地钱包拉进 subscription 方案：否决，Stripe 对支付宝/微信支付的 recurring 能力和限制与 card 差异很大，应该后续单独设计。
+
+**影响**:
+- `backend/store/payment` 需要显式建模 admin 主支付方式、支持币种、Hosted Checkout flow 和 method-specific options。
+- `/api/admin/payments/config` 需要返回 admin 可测试支付方式元数据，供 `/admin` 面板驱动选择器和提示。
+- `/admin` 支付面板需要支持按支付方式切换币种与测试提示，并继续沿用“只跟踪当前本地测试单”的轮询策略。
+
+---
+
 ## 决策 13: resolveEntryTradeDateForSnapshot 加今日北京时间兜底
 
 **日期**: 2026-06-11

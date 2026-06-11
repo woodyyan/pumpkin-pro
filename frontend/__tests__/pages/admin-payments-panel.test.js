@@ -37,12 +37,13 @@ describe('admin payments panel integration', () => {
     assert.match(pageSource, /await paymentsResource\.refresh\(\)/)
   })
 
-  it('surfaces explicit test-mode, webhook and card-first guidance', () => {
+  it('surfaces explicit test-mode and local wallet guidance', () => {
     assert.match(pageSource, /当前模式/)
     assert.match(pageSource, /Webhook Secret/)
-    assert.match(pageSource, /默认只先跑通银行卡支付测试/)
-    assert.match(pageSource, /人民币（CNY）/)
+    assert.match(pageSource, /现已支持银行卡、支付宝、微信支付三种测试方式/)
     assert.match(pageSource, /Stripe Hosted Checkout/)
+    assert.match(pageSource, /支付宝/)
+    assert.match(pageSource, /微信支付/)
   })
 
   it('shows history and detail timeline affordances', () => {
@@ -51,5 +52,14 @@ describe('admin payments panel integration', () => {
     assert.match(pageSource, /事件时间线/)
     assert.match(pageSource, /手动过期/)
     assert.match(pageSource, /打开 Checkout/)
+  })
+
+  it('renders config-driven local wallet choices and testing hints', () => {
+    assert.match(pageSource, /resolveAdminPaymentMethodOptions\(config\)/)
+    assert.match(pageSource, /resolveAdminPaymentMethodMeta\(config, createDraft\.payment_method/)
+    assert.match(pageSource, /handleSelectCreateMethod\(event\.target\.value\)/)
+    assert.match(pageSource, /payment_method: 'card'/)
+    assert.match(pageSource, /payment_method_types: \['card'\]/)
+    assert.match(pageSource, /测试提示/)
   })
 })

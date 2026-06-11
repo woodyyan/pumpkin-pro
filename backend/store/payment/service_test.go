@@ -41,7 +41,7 @@ func newTestService(t *testing.T) (*Service, *Repository) {
 			SecretKey:             "sk_test_demo",
 			WebhookSecret:         "whsec_demo",
 			DefaultCurrency:       "cny",
-			AllowedPaymentMethods: []string{"card"},
+			AllowedPaymentMethods: []string{"card", "alipay", "wechat_pay"},
 			SuccessPath:           "/admin?tab=payments&checkout=success",
 			CancelPath:            "/admin?tab=payments&checkout=cancel",
 			CheckoutExpireMinutes: 60,
@@ -98,6 +98,102 @@ func TestCreateAdminCheckoutSessionPersistsPayment(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].EventType != "checkout.session.created" {
 		t.Fatalf("unexpected events: %+v", events)
+	}
+}
+
+func TestCreateAdminCheckoutSessionSupportsAlipayAdminTesting(t *testing.T) {
+	svc, _ := newTestService(t)
+	svc.SetGateway(&stubStripeGateway{
+		createFn: func(ctx context.Context, req stripeCheckoutSessionRequest) (*stripeCheckoutSessionResponse, error) {
+			if req.PaymentMethodCode != PaymentMethodAlipay {
+				t.Fatalf("expected alipay payment method code, got %s", req.PaymentMethodCode)
+			}
+			if len(req.PaymentMethodTypes) != 1 || req.PaymentMethodTypes[0] != PaymentMethodAlipay {
+				t.Fatalf("unexpected payment methods: %#v", req.PaymentMethodTypes)
+			}
+			if req.WeChatPayClient != "" {
+				t.Fatalf("expected no wechat pay client for alipay, got %s", req.WeChatPayClient)
+			}
+			return &stripeCheckoutSessionResponse{
+				SessionID:          "cs_test_alipay",
+				URL:                "https://checkout.stripe.com/c/pay/alipay",
+				PaymentMethodTypes: []string{PaymentMethodAlipay},
+			}, nil
+		},
+	})
+
+	result, err := svc.CreateAdminCheckoutSession(context.Background(), "admin_alipay", AdminCreateCheckoutSessionInput{
+		AmountMinor:   2000,
+		Currency:      "cny",
+		PaymentMethod: PaymentMethodAlipay,
+		Title:         "Alipay Admin Test",
+	})
+	if err != nil {
+		t.Fatalf("CreateAdminCheckoutSession() error = %v", err)
+	}
+	if result.PaymentMethod != PaymentMethodAlipay {
+		t.Fatalf("expected alipay result, got %+v", result)
+	}
+	if result.AllowedPaymentNote == "" {
+		t.Fatalf("expected testing note returned for alipay")
+	}
+}
+
+func TestCreateAdminCheckoutSessionBuildsWeChatPayCheckoutOptions(t *testing.T) {
+	svc, _ := newTestService(t)
+	svc.SetGateway(&stubStripeGateway{
+		createFn: func(ctx context.Context, req stripeCheckoutSessionRequest) (*stripeCheckoutSessionResponse, error) {
+			if req.PaymentMethodCode != PaymentMethodWeChatPay {
+				t.Fatalf("expected wechat_pay code, got %s", req.PaymentMethodCode)
+			}
+			if len(req.PaymentMethodTypes) != 1 || req.PaymentMethodTypes[0] != PaymentMethodWeChatPay {
+				t.Fatalf("unexpected payment methods: %#v", req.PaymentMethodTypes)
+			}
+			if req.WeChatPayClient != "web" {
+				t.Fatalf("expected wechat_pay client web, got %s", req.WeChatPayClient)
+			}
+			return &stripeCheckoutSessionResponse{
+				SessionID:          "cs_test_wechat",
+				URL:                "https://checkout.stripe.com/c/pay/wechat",
+				PaymentMethodTypes: []string{PaymentMethodWeChatPay},
+			}, nil
+		},
+	})
+
+	result, err := svc.CreateAdminCheckoutSession(context.Background(), "admin_wechat", AdminCreateCheckoutSessionInput{
+		AmountMinor:   888,
+		Currency:      "cny",
+		PaymentMethod: PaymentMethodWeChatPay,
+		Title:         "WeChat Pay Admin Test",
+	})
+	if err != nil {
+		t.Fatalf("CreateAdminCheckoutSession() error = %v", err)
+	}
+	if result.PaymentMethod != PaymentMethodWeChatPay {
+		t.Fatalf("expected wechat_pay result, got %+v", result)
+	}
+}
+
+func TestCreateAdminCheckoutSessionRejectsDisabledOrUnsupportedLocalWalletRequests(t *testing.T) {
+	svc, _ := newTestService(t)
+	svc.cfg.Stripe.AllowedPaymentMethods = []string{PaymentMethodCard}
+
+	_, err := svc.CreateAdminCheckoutSession(context.Background(), "admin_card_only", AdminCreateCheckoutSessionInput{
+		AmountMinor:   100,
+		PaymentMethod: PaymentMethodAlipay,
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected invalid input for disabled alipay, got %v", err)
+	}
+
+	svc.cfg.Stripe.AllowedPaymentMethods = []string{PaymentMethodCard, PaymentMethodWeChatPay}
+	_, err = svc.CreateAdminCheckoutSession(context.Background(), "admin_wechat", AdminCreateCheckoutSessionInput{
+		AmountMinor:   100,
+		PaymentMethod: PaymentMethodWeChatPay,
+		Currency:      "usd",
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected invalid input for unsupported wechat currency, got %v", err)
 	}
 }
 
@@ -228,8 +324,17 @@ func TestGetConfigViewUsesNormalizedDefaults(t *testing.T) {
 	if view.DefaultCurrency != "cny" {
 		t.Fatalf("expected cny default currency, got %s", view.DefaultCurrency)
 	}
-	if len(view.AllowedPaymentMethods) != 1 || view.AllowedPaymentMethods[0] != "card" {
+	if len(view.AllowedPaymentMethods) != 3 {
 		t.Fatalf("unexpected allowed methods: %#v", view.AllowedPaymentMethods)
+	}
+	if len(view.AdminTestPaymentMethods) != 3 {
+		t.Fatalf("expected three admin test methods, got %#v", view.AdminTestPaymentMethods)
+	}
+	if view.AdminTestPaymentMethods[1].Code != PaymentMethodAlipay || !view.AdminTestPaymentMethods[1].Enabled {
+		t.Fatalf("unexpected alipay config: %#v", view.AdminTestPaymentMethods[1])
+	}
+	if view.AdminTestPaymentMethods[2].Code != PaymentMethodWeChatPay || view.AdminTestPaymentMethods[2].CheckoutFlow != "qr_code" {
+		t.Fatalf("unexpected wechat pay config: %#v", view.AdminTestPaymentMethods[2])
 	}
 }
 

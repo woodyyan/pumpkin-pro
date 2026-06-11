@@ -39,7 +39,7 @@ func (s *Service) SetGateway(gateway stripeGateway) {
 func (s *Service) GetConfigView(_ context.Context) *PaymentConfigView {
 	allowedMethods := normalizeAllowedPaymentMethods(s.cfg.Stripe.AllowedPaymentMethods)
 	if len(allowedMethods) == 0 {
-		allowedMethods = []string{"card"}
+		allowedMethods = []string{PaymentMethodCard}
 	}
 	secretConfigured := strings.TrimSpace(s.cfg.Stripe.SecretKey) != ""
 	webhookConfigured := strings.TrimSpace(s.cfg.Stripe.WebhookSecret) != ""
@@ -51,6 +51,7 @@ func (s *Service) GetConfigView(_ context.Context) *PaymentConfigView {
 		WebhookSecretConfigured: webhookConfigured,
 		DefaultCurrency:         normalizeCurrency(s.cfg.Stripe.DefaultCurrency),
 		AllowedPaymentMethods:   allowedMethods,
+		AdminTestPaymentMethods: buildAdminTestPaymentMethodViews(allowedMethods),
 		SupportedScenarios:      []string{ScenarioHostedCheckout},
 	}
 }
@@ -80,10 +81,13 @@ func (s *Service) CreateAdminCheckoutSession(ctx context.Context, adminID string
 	if purpose != PurposeAdminTest {
 		return nil, fmt.Errorf("%w: 一期仅支持 admin_test", ErrInvalidInput)
 	}
-	currency := normalizeCurrency(firstNonEmptyString(input.Currency, s.cfg.Stripe.DefaultCurrency, "cny"))
-	paymentMethodTypes := normalizePaymentMethodSelection(input.PaymentMethodTypes, s.cfg.Stripe.AllowedPaymentMethods)
-	if len(paymentMethodTypes) == 0 {
-		return nil, fmt.Errorf("%w: 至少需要一个支付方式", ErrInvalidInput)
+	paymentMethod, err := resolveAdminPaymentMethod(input, s.cfg.Stripe.AllowedPaymentMethods)
+	if err != nil {
+		return nil, err
+	}
+	currency := normalizeCurrency(firstNonEmptyString(input.Currency, paymentMethod.RecommendedCurrency, s.cfg.Stripe.DefaultCurrency, "cny"))
+	if !paymentMethod.SupportsCurrency(currency) {
+		return nil, fmt.Errorf("%w: %s 当前仅支持 %s 测试", ErrInvalidInput, paymentMethod.Label, strings.ToUpper(strings.Join(paymentMethod.SupportedCurrencies, "/")))
 	}
 	title := strings.TrimSpace(input.Title)
 	if title == "" {
@@ -104,10 +108,11 @@ func (s *Service) CreateAdminCheckoutSession(ctx context.Context, adminID string
 	successURL := buildAdminReturnURL(s.cfg.AppPublicBaseURL, s.cfg.Stripe.SuccessPath, paymentID, "success")
 	cancelURL := buildAdminReturnURL(s.cfg.AppPublicBaseURL, s.cfg.Stripe.CancelPath, paymentID, "cancel")
 	metadata := map[string]string{
-		"payment_id":       paymentID,
-		"purpose":          purpose,
-		"scenario_type":    ScenarioHostedCheckout,
-		"trigger_admin_id": adminID,
+		"payment_id":               paymentID,
+		"purpose":                  purpose,
+		"scenario_type":            ScenarioHostedCheckout,
+		"trigger_admin_id":         adminID,
+		"requested_payment_method": paymentMethod.Code,
 	}
 	metadataJSON, _ := json.Marshal(metadata)
 
@@ -122,7 +127,7 @@ func (s *Service) CreateAdminCheckoutSession(ctx context.Context, adminID string
 		Title:                title,
 		AmountMinor:          amountMinor,
 		Currency:             currency,
-		PaymentMethodRequest: strings.Join(paymentMethodTypes, ","),
+		PaymentMethodRequest: paymentMethod.Code,
 		SuccessURL:           successURL,
 		CancelURL:            cancelURL,
 		IdempotencyKey:       idempotencyKey,
@@ -139,7 +144,9 @@ func (s *Service) CreateAdminCheckoutSession(ctx context.Context, adminID string
 		PaymentID:          paymentID,
 		AmountMinor:        amountMinor,
 		Currency:           currency,
-		PaymentMethodTypes: paymentMethodTypes,
+		PaymentMethodCode:  paymentMethod.Code,
+		PaymentMethodTypes: cloneStringSlice(paymentMethod.CheckoutPaymentMethodTypes),
+		WeChatPayClient:    paymentMethod.WeChatPayClient,
 		SuccessURL:         successURL,
 		CancelURL:          cancelURL,
 		Title:              title,
@@ -212,12 +219,14 @@ func (s *Service) CreateAdminCheckoutSession(ctx context.Context, adminID string
 	}
 
 	return &CreateCheckoutSessionResult{
-		PaymentID:         record.ID,
-		Status:            record.Status,
-		CheckoutSessionID: stringValue(record.CheckoutSessionID),
-		CheckoutURL:       record.CheckoutURL,
-		PaymentIntentID:   stringValue(record.PaymentIntentID),
-		SessionExpiresAt:  formatTimePtr(record.SessionExpiresAt),
+		PaymentID:          record.ID,
+		Status:             record.Status,
+		PaymentMethod:      paymentMethod.Code,
+		CheckoutSessionID:  stringValue(record.CheckoutSessionID),
+		CheckoutURL:        record.CheckoutURL,
+		PaymentIntentID:    stringValue(record.PaymentIntentID),
+		SessionExpiresAt:   formatTimePtr(record.SessionExpiresAt),
+		AllowedPaymentNote: paymentMethod.TestingNote,
 	}, nil
 }
 
@@ -498,32 +507,125 @@ func normalizeAllowedPaymentMethods(values []string) []string {
 	return result
 }
 
-func normalizePaymentMethodSelection(requested []string, allowed []string) []string {
-	normalizedAllowed := normalizeAllowedPaymentMethods(allowed)
-	if len(normalizedAllowed) == 0 {
-		normalizedAllowed = []string{"card"}
+type adminPaymentMethodSpec struct {
+	Code                       string
+	Label                      string
+	CheckoutPaymentMethodTypes []string
+	SupportedCurrencies        []string
+	RecommendedCurrency        string
+	CheckoutFlow               string
+	Description                string
+	TestingNote                string
+	WeChatPayClient            string
+}
+
+func (s adminPaymentMethodSpec) SupportsCurrency(currency string) bool {
+	currency = normalizeCurrency(currency)
+	if len(s.SupportedCurrencies) == 0 {
+		return true
 	}
-	if len(requested) == 0 {
-		return normalizedAllowed
+	for _, item := range s.SupportedCurrencies {
+		if normalizeCurrency(item) == currency {
+			return true
+		}
 	}
-	allowedSet := make(map[string]bool, len(normalizedAllowed))
-	for _, item := range normalizedAllowed {
-		allowedSet[item] = true
+	return false
+}
+
+func buildAdminTestPaymentMethodViews(allowed []string) []AdminTestPaymentMethodView {
+	allowedSet := make(map[string]bool)
+	for _, code := range normalizeAllowedPaymentMethods(allowed) {
+		allowedSet[code] = true
 	}
-	result := make([]string, 0, len(requested))
-	seen := make(map[string]bool)
-	for _, item := range requested {
-		normalized := strings.ToLower(strings.TrimSpace(item))
-		if normalized == "" || seen[normalized] || !allowedSet[normalized] {
+	result := make([]AdminTestPaymentMethodView, 0, len(adminPaymentMethodOrder))
+	for _, code := range adminPaymentMethodOrder {
+		spec, ok := adminPaymentMethodSpecs[code]
+		if !ok {
 			continue
 		}
-		seen[normalized] = true
-		result = append(result, normalized)
-	}
-	if len(result) == 0 {
-		return normalizedAllowed
+		result = append(result, AdminTestPaymentMethodView{
+			Code:                spec.Code,
+			Label:               spec.Label,
+			Enabled:             allowedSet[spec.Code],
+			SupportedCurrencies: cloneStringSlice(spec.SupportedCurrencies),
+			RecommendedCurrency: spec.RecommendedCurrency,
+			CheckoutFlow:        spec.CheckoutFlow,
+			Description:         spec.Description,
+			TestingNote:         spec.TestingNote,
+		})
 	}
 	return result
+}
+
+func resolveAdminPaymentMethod(input AdminCreateCheckoutSessionInput, allowed []string) (adminPaymentMethodSpec, error) {
+	allowedMethods := normalizeAllowedPaymentMethods(allowed)
+	if len(allowedMethods) == 0 {
+		allowedMethods = []string{PaymentMethodCard}
+	}
+	allowedSet := make(map[string]bool, len(allowedMethods))
+	for _, item := range allowedMethods {
+		allowedSet[item] = true
+	}
+	requested := strings.ToLower(strings.TrimSpace(input.PaymentMethod))
+	if requested == "" {
+		for _, item := range input.PaymentMethodTypes {
+			requested = strings.ToLower(strings.TrimSpace(item))
+			if requested != "" {
+				break
+			}
+		}
+	}
+	if requested == "" {
+		requested = allowedMethods[0]
+	}
+	spec, ok := adminPaymentMethodSpecs[requested]
+	if !ok {
+		return adminPaymentMethodSpec{}, fmt.Errorf("%w: 不支持的支付方式 %s", ErrInvalidInput, requested)
+	}
+	if !allowedSet[requested] {
+		return adminPaymentMethodSpec{}, fmt.Errorf("%w: 当前环境未启用 %s", ErrInvalidInput, spec.Label)
+	}
+	return spec, nil
+}
+
+var adminPaymentMethodOrder = []string{
+	PaymentMethodCard,
+	PaymentMethodAlipay,
+	PaymentMethodWeChatPay,
+}
+
+var adminPaymentMethodSpecs = map[string]adminPaymentMethodSpec{
+	PaymentMethodCard: {
+		Code:                       PaymentMethodCard,
+		Label:                      "银行卡",
+		CheckoutPaymentMethodTypes: []string{PaymentMethodCard},
+		SupportedCurrencies:        []string{"cny", "hkd"},
+		RecommendedCurrency:        "cny",
+		CheckoutFlow:               "hosted_checkout",
+		Description:                "Stripe Hosted Checkout 直接收单，适合验证银行卡一次性支付链路。",
+		TestingNote:                "银行卡支付会直接在 Stripe Hosted Checkout 内完成，不涉及跳转或扫码。",
+	},
+	PaymentMethodAlipay: {
+		Code:                       PaymentMethodAlipay,
+		Label:                      "支付宝",
+		CheckoutPaymentMethodTypes: []string{PaymentMethodAlipay},
+		SupportedCurrencies:        []string{"cny", "hkd"},
+		RecommendedCurrency:        "cny",
+		CheckoutFlow:               "redirect",
+		Description:                "支付宝在 Hosted Checkout 中走跳转授权，仅用于一次性支付内测。",
+		TestingNote:                "选择支付宝后会从 Stripe Checkout 跳转到支付宝授权页，完成授权后再回到 admin。",
+	},
+	PaymentMethodWeChatPay: {
+		Code:                       PaymentMethodWeChatPay,
+		Label:                      "微信支付",
+		CheckoutPaymentMethodTypes: []string{PaymentMethodWeChatPay},
+		SupportedCurrencies:        []string{"cny", "hkd"},
+		RecommendedCurrency:        "cny",
+		CheckoutFlow:               "qr_code",
+		Description:                "微信支付在 PC 端 Hosted Checkout 下展示二维码，适合 admin 内测扫码支付链路。",
+		TestingNote:                "PC 端会展示二维码，请使用手机微信扫码完成测试支付。",
+		WeChatPayClient:            "web",
+	},
 }
 
 func buildAdminReturnURL(baseURL, path, paymentID, checkoutState string) string {

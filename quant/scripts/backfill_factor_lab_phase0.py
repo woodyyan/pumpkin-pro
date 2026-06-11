@@ -494,7 +494,11 @@ def utc_now() -> str:
 def normalize_code(value: Any) -> str:
     text = str(value or "").strip().upper()
     if "." in text:
-        text = text.split(".", 1)[0]
+        left, right = text.split(".", 1)
+        if left in {"SH", "SZ", "BJ"} and right:
+            text = right
+        else:
+            text = left
     digits = "".join(ch for ch in text if ch.isdigit())
     if not digits:
         return ""

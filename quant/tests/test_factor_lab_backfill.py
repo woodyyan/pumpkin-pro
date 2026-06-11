@@ -14,6 +14,8 @@ spec.loader.exec_module(module)
 
 
 def test_classify_board_and_symbol_helpers():
+    assert module.normalize_code("sz.000001") == "000001"
+    assert module.normalize_code("600519.SH") == "600519"
     assert module.classify_board("688001") == "STAR"
     assert module.classify_board("300001") == "CHINEXT"
     assert module.classify_board("920001") == "BJ"
@@ -199,7 +201,7 @@ class _FakeBaoStock:
 
 
 
-def test_fetch_industry_rows_uses_baostock_first(monkeypatch, tmp_path):
+def test_fetch_industry_rows_baostock_parses_real_code_format(monkeypatch, tmp_path):
     db_path = tmp_path / "factor.db"
     conn = sqlite3.connect(db_path)
     try:
@@ -211,18 +213,15 @@ def test_fetch_industry_rows_uses_baostock_first(monkeypatch, tmp_path):
             ["2026-06-11", "sz.000001", "平安银行", "J66货币金融服务", "证监会行业分类"],
         ])
 
-        def fake_fetch_baostock(inner_conn, inner_args):
-            return [("000001", "J66 货币金融服务", "货币金融服务", "baostock:query_stock_industry", "now")], "baostock:query_stock_industry"
-
         def fail_akshare(inner_conn, inner_args):
             raise AssertionError("akshare should not be called when baostock succeeds")
 
         monkeypatch.setattr(module, "import_baostock", lambda: fake_bs)
-        monkeypatch.setattr(module, "fetch_industry_rows_baostock", fake_fetch_baostock)
         monkeypatch.setattr(module, "fetch_industry_rows_akshare", fail_akshare)
         rows, source = module.fetch_industry_rows(conn, args)
         assert source == "baostock:query_stock_industry"
         assert rows == [("000001", "J66 货币金融服务", "货币金融服务", "baostock:query_stock_industry", rows[0][4])]
+        assert fake_bs.logged_out is True
     finally:
         conn.close()
 
@@ -289,6 +288,24 @@ def test_build_industry_refresh_payload_maps_to_company_profiles(tmp_path):
         assert payload.profiles[0][9] == "食品饮料"
         assert payload.profiles[0][11] == "sw_l1"
         assert any(row[0] == "eastmoney" and row[1] == "白酒" and row[3] == "食品饮料" for row in payload.mappings)
+    finally:
+        conn.close()
+
+
+def test_build_industry_refresh_payload_maps_baostock_csrc_industries(tmp_path):
+    db_path = tmp_path / "factor.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        module.ensure_schema(conn)
+        conn.execute("INSERT INTO factor_securities (code, symbol, name, exchange, board, is_st, is_active, source, updated_at) VALUES ('000001','000001.SZ','平安银行','SZSE','MAIN',0,1,'test','now')")
+        conn.execute("INSERT INTO factor_security_industries (code, raw_industry_name, industry_name, industry_source, updated_at) VALUES ('000001','J66 货币金融服务','货币金融服务','baostock:query_stock_industry','now')")
+        conn.commit()
+        args = module.parse_args(["--mode", "industries"])
+        payload = module.build_industry_refresh_payload(conn, args)
+        assert payload.total == 1
+        assert payload.failed == 0
+        assert payload.profiles[0][8] == "banks"
+        assert payload.profiles[0][9] == "银行"
     finally:
         conn.close()
 

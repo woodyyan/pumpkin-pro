@@ -86,7 +86,7 @@ type PaymentEventRecord struct {
 	PaymentID         string     `gorm:"size:36;index" json:"payment_id,omitempty"`
 	Provider          string     `gorm:"size:20;not null;default:'stripe';index" json:"provider"`
 	Source            string     `gorm:"size:24;not null;default:'webhook';index" json:"source"`
-	StripeEventID     string     `gorm:"size:128;uniqueIndex" json:"stripe_event_id,omitempty"`
+	StripeEventID     *string    `gorm:"size:128;uniqueIndex" json:"stripe_event_id,omitempty"`
 	EventType         string     `gorm:"size:80;not null;default:'';index" json:"event_type"`
 	ObjectType        string     `gorm:"size:48;not null;default:''" json:"object_type"`
 	ObjectID          string     `gorm:"size:128;not null;default:'';index" json:"object_id"`

@@ -325,7 +325,7 @@ func (s *Service) HandleWebhook(ctx context.Context, payload []byte, signatureHe
 			ID:                uuid.NewString(),
 			Provider:          ProviderStripe,
 			Source:            EventSourceWebhook,
-			StripeEventID:     event.ID,
+			StripeEventID:     nullableString(event.ID),
 			EventType:         event.Type,
 			ObjectType:        event.ObjectType,
 			ObjectID:          firstNonEmptyString(event.CheckoutSessionID, event.PaymentIntentID, event.ChargeID, event.RefundID),
@@ -336,9 +336,6 @@ func (s *Service) HandleWebhook(ctx context.Context, payload []byte, signatureHe
 			CreatedAt:         now,
 			OccurredAt:        event.OccurredAt,
 		}
-		if eventRecord.StripeEventID == "" {
-			eventRecord.StripeEventID = uuid.NewString()
-		}
 
 		record, err := resolvePaymentForWebhook(ctx, repo, event)
 		if err != nil {
@@ -346,7 +343,13 @@ func (s *Service) HandleWebhook(ctx context.Context, payload []byte, signatureHe
 				return err
 			}
 			eventRecord.ErrorMessage = "关联支付记录不存在"
-			return repo.CreateEvent(ctx, eventRecord)
+			if err := repo.CreateEvent(ctx, eventRecord); err != nil {
+				if isUniqueConstraintError(err) && stringValue(eventRecord.StripeEventID) != "" {
+					return nil
+				}
+				return err
+			}
+			return nil
 		}
 
 		before := record.Status
@@ -357,6 +360,9 @@ func (s *Service) HandleWebhook(ctx context.Context, payload []byte, signatureHe
 		eventRecord.Processed = true
 
 		if err := repo.CreateEvent(ctx, eventRecord); err != nil {
+			if isUniqueConstraintError(err) && stringValue(eventRecord.StripeEventID) != "" {
+				return nil
+			}
 			return err
 		}
 		return repo.UpdatePayment(ctx, record)

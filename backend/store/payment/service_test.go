@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -98,6 +99,47 @@ func TestCreateAdminCheckoutSessionPersistsPayment(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].EventType != "checkout.session.created" {
 		t.Fatalf("unexpected events: %+v", events)
+	}
+}
+
+func TestCreateAdminCheckoutSessionAllowsRepeatedSuccessfulCreatesWithoutSyntheticStripeEventConflicts(t *testing.T) {
+	svc, repo := newTestService(t)
+	callCount := 0
+	svc.SetGateway(&stubStripeGateway{
+		createFn: func(ctx context.Context, req stripeCheckoutSessionRequest) (*stripeCheckoutSessionResponse, error) {
+			callCount++
+			return &stripeCheckoutSessionResponse{
+				SessionID:          fmt.Sprintf("cs_test_repeat_%d", callCount),
+				URL:                "https://checkout.stripe.com/c/pay/repeat",
+				PaymentIntentID:    fmt.Sprintf("pi_test_repeat_%d", callCount),
+				PaymentMethodTypes: []string{"card"},
+			}, nil
+		},
+	})
+
+	for i := 0; i < 2; i++ {
+		result, err := svc.CreateAdminCheckoutSession(context.Background(), "admin_repeat", AdminCreateCheckoutSessionInput{AmountMinor: 999})
+		if err != nil {
+			t.Fatalf("attempt %d: CreateAdminCheckoutSession() error = %v", i+1, err)
+		}
+		events, err := repo.ListEventsByPaymentID(context.Background(), result.PaymentID, 10)
+		if err != nil {
+			t.Fatalf("attempt %d: ListEventsByPaymentID() error = %v", i+1, err)
+		}
+		if len(events) != 1 {
+			t.Fatalf("attempt %d: expected one admin event, got %d", i+1, len(events))
+		}
+		if events[0].StripeEventID != nil {
+			t.Fatalf("attempt %d: expected synthetic admin event stripe_event_id to stay nil, got %v", i+1, events[0].StripeEventID)
+		}
+	}
+
+	items, total, err := repo.ListPayments(context.Background(), ListPaymentsInput{Purpose: PurposeAdminTest, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListPayments() error = %v", err)
+	}
+	if total != 2 || len(items) != 2 {
+		t.Fatalf("expected two checkout-open payments persisted, total=%d len=%d", total, len(items))
 	}
 }
 
@@ -256,7 +298,7 @@ func TestHandleWebhookUpdatesSucceededPayment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEventsByPaymentID() error = %v", err)
 	}
-	if len(events) != 1 || events[0].StripeEventID != "evt_1" || !events[0].Processed {
+	if len(events) != 1 || stringValue(events[0].StripeEventID) != "evt_1" || !events[0].Processed {
 		t.Fatalf("unexpected webhook events: %+v", events)
 	}
 }
@@ -425,6 +467,55 @@ func TestRepositoryNormalizesBlankExternalIDsToNil(t *testing.T) {
 	}
 	if stored.CheckoutSessionID != nil || stored.PaymentIntentID != nil || stored.ChargeID != nil {
 		t.Fatalf("expected blank external ids normalized to nil, got checkout=%v intent=%v charge=%v", stored.CheckoutSessionID, stored.PaymentIntentID, stored.ChargeID)
+	}
+}
+
+func TestRepositoryNormalizesBlankEventStripeIDsToNil(t *testing.T) {
+	_, repo := newTestService(t)
+	now := time.Now().UTC()
+	blankStripeEventID := "   "
+	recordA := &PaymentEventRecord{
+		ID:            "evt_record_a",
+		PaymentID:     "pay_a",
+		Provider:      ProviderStripe,
+		Source:        EventSourceAdmin,
+		StripeEventID: &blankStripeEventID,
+		EventType:     "checkout.session.created",
+		ObjectType:    "checkout_session",
+		ReceivedAt:    now,
+		CreatedAt:     now,
+	}
+	recordB := &PaymentEventRecord{
+		ID:         "evt_record_b",
+		PaymentID:  "pay_b",
+		Provider:   ProviderStripe,
+		Source:     EventSourceSystem,
+		EventType:  "checkout.session.expired",
+		ObjectType: "checkout_session",
+		ReceivedAt: now.Add(time.Second),
+		CreatedAt:  now.Add(time.Second),
+	}
+	if err := repo.CreateEvent(context.Background(), recordA); err != nil {
+		t.Fatalf("CreateEvent(recordA) error = %v", err)
+	}
+	if err := repo.CreateEvent(context.Background(), recordB); err != nil {
+		t.Fatalf("CreateEvent(recordB) error = %v", err)
+	}
+
+	storedA, err := repo.GetEventByStripeEventID(context.Background(), "")
+	if !errors.Is(err, ErrNotFound) || storedA != nil {
+		t.Fatalf("expected blank lookup to be treated as not found, got record=%v err=%v", storedA, err)
+	}
+
+	var items []PaymentEventRecord
+	if err := repo.db.WithContext(context.Background()).Order("id ASC").Find(&items).Error; err != nil {
+		t.Fatalf("query payment_events error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected two payment events, got %d", len(items))
+	}
+	if items[0].StripeEventID != nil || items[1].StripeEventID != nil {
+		t.Fatalf("expected blank synthetic stripe_event_id values normalized to nil, got %#v", items)
 	}
 }
 

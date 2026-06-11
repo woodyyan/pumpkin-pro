@@ -167,13 +167,25 @@ func normalizePaymentRecord(record *PaymentRecord) {
 	record.ChargeID = nullableString(stringValue(record.ChargeID))
 }
 
+func normalizePaymentEventRecord(record *PaymentEventRecord) {
+	if record == nil {
+		return
+	}
+	record.StripeEventID = nullableString(stringValue(record.StripeEventID))
+}
+
 func (r *Repository) CreateEvent(ctx context.Context, record *PaymentEventRecord) error {
+	normalizePaymentEventRecord(record)
 	return r.db.WithContext(ctx).Create(record).Error
 }
 
 func (r *Repository) GetEventByStripeEventID(ctx context.Context, stripeEventID string) (*PaymentEventRecord, error) {
+	stripeEventID = strings.TrimSpace(stripeEventID)
+	if stripeEventID == "" {
+		return nil, ErrNotFound
+	}
 	var record PaymentEventRecord
-	if err := r.db.WithContext(ctx).First(&record, "stripe_event_id = ?", strings.TrimSpace(stripeEventID)).Error; err != nil {
+	if err := r.db.WithContext(ctx).First(&record, "stripe_event_id = ?", stripeEventID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}
@@ -198,4 +210,15 @@ func (r *Repository) ListEventsByPaymentID(ctx context.Context, paymentID string
 		return nil, err
 	}
 	return items, nil
+}
+
+func isUniqueConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unique") || strings.Contains(message, "duplicate") || strings.Contains(message, "constraint failed")
 }

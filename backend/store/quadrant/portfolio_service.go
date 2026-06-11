@@ -2395,7 +2395,12 @@ func (s *Service) BackfillMissingEntryOpenPrices(ctx context.Context, cutoverDat
 // resolveEntryTradeDateForSnapshot returns the T+1 trading date for a given
 // snapshot date. It does so by finding the next snapshot in the DB that has a
 // later snapshot_date (data-driven, same approach used by the daily pipeline).
-// Returns "" if not yet available (e.g. the latest snapshot has no successor).
+//
+// Fallback (D0 / latest snapshot): when no successor snapshot exists yet, the
+// snapshot is the most recent one, so T+1 is today in Beijing time — provided
+// today is strictly later than the snapshot date (i.e. the snapshot belongs to
+// a previous trading day). This covers the cutover day and the HK portfolio
+// case where only one snapshot has been persisted so far.
 func (s *Service) resolveEntryTradeDateForSnapshot(ctx context.Context, definitionID, snapshotDate string) (string, error) {
 	snapshotDate = strings.TrimSpace(snapshotDate)
 	if snapshotDate == "" {
@@ -2407,7 +2412,15 @@ func (s *Service) resolveEntryTradeDateForSnapshot(ctx context.Context, definiti
 		Order("snapshot_date ASC, id ASC").
 		First(&next).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", nil // no successor yet
+			// No successor snapshot yet — this is the latest batch.
+			// If the snapshot was taken on a previous day, T+1 is today
+			// (Beijing time). If the snapshot date equals today, we cannot
+			// determine T+1 yet (it hasn't started).
+			todayBJ := time.Now().In(beijingLocation()).Format("2006-01-02")
+			if todayBJ > snapshotDate {
+				return todayBJ, nil
+			}
+			return "", nil
 		}
 		return "", err
 	}

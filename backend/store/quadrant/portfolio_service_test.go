@@ -669,6 +669,118 @@ func TestBackfillMissingEntryOpenPrices_SkipsBeforeCutover(t *testing.T) {
 	}
 }
 
+// 修复A 回归：当 snapshot 是最新一条（无后继），但 snapshot_date < 今天（北京时间）时，
+// resolveEntryTradeDateForSnapshot 应以今日作为 T+1，而不是返回 ""。
+// 这覆盖了 D0 当天及港股只有一条 snapshot 的场景。
+func TestBackfillMissingEntryOpenPrices_FillsWhenLatestSnapshotHasNoSuccessor(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	def := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())[0]
+	if err := repo.db.WithContext(ctx).Create(&def).Error; err != nil {
+		t.Fatalf("seed definition: %v", err)
+	}
+
+	// Use yesterday as snapshot_date so todayBJ > snapshotDate is always true.
+	yesterday := time.Now().In(beijingLocation()).AddDate(0, 0, -1).Format("2006-01-02")
+	todayBJ := time.Now().In(beijingLocation()).Format("2006-01-02")
+
+	snap := RankingPortfolioSnapshot{
+		DefinitionID: def.ID, SnapshotVersion: yesterday, SnapshotDate: yesterday,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := repo.db.WithContext(ctx).Create(&snap).Error; err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+	mp := RankingPortfolioMarketPrice{
+		DefinitionID: def.ID, SnapshotVersion: yesterday, SnapshotDate: yesterday,
+		Code: "600001", Exchange: "SSE", ClosePrice: 10.0, OpenPrice: 0,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := repo.db.WithContext(ctx).Create(&mp).Error; err != nil {
+		t.Fatalf("seed market price: %v", err)
+	}
+
+	// Resolver returns a price only when called with today as entry date.
+	svc.SetOpenPriceResolver(func(_ context.Context, _, _, tradeDate string) float64 {
+		if tradeDate == todayBJ {
+			return 11.2
+		}
+		return 0
+	})
+
+	result, err := svc.BackfillMissingEntryOpenPrices(ctx, yesterday)
+	if err != nil {
+		t.Fatalf("backfill failed: %v", err)
+	}
+	if result.FilledCount != 1 {
+		t.Fatalf("FilledCount = %d, want 1 (latest snapshot with no successor should use today as T+1)", result.FilledCount)
+	}
+	if result.StillPendingCount != 0 {
+		t.Fatalf("StillPendingCount = %d, want 0", result.StillPendingCount)
+	}
+
+	var updated RankingPortfolioMarketPrice
+	if err := repo.db.WithContext(ctx).
+		Where("definition_id = ? AND snapshot_version = ? AND code = ?", def.ID, yesterday, "600001").
+		First(&updated).Error; err != nil {
+		t.Fatalf("reload market price: %v", err)
+	}
+	if updated.OpenPrice != 11.2 {
+		t.Fatalf("open_price = %v, want 11.2", updated.OpenPrice)
+	}
+	if updated.EntryTradeDate != todayBJ {
+		t.Fatalf("entry_trade_date = %s, want %s (today BJ)", updated.EntryTradeDate, todayBJ)
+	}
+}
+
+// 修复A 回归：当 snapshot_date == 今天（T+1 尚未到来）时，兜底不应触发，
+// 应仍然返回 pending（T+1 还没开始，无法确定 entry date）。
+func TestBackfillMissingEntryOpenPrices_StillPendingWhenSnapshotDateIsToday(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+
+	def := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())[0]
+	if err := repo.db.WithContext(ctx).Create(&def).Error; err != nil {
+		t.Fatalf("seed definition: %v", err)
+	}
+
+	// snapshot_date == today: T+1 hasn't started yet, no fallback should fire.
+	todayBJ := time.Now().In(beijingLocation()).Format("2006-01-02")
+	snap := RankingPortfolioSnapshot{
+		DefinitionID: def.ID, SnapshotVersion: todayBJ, SnapshotDate: todayBJ,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := repo.db.WithContext(ctx).Create(&snap).Error; err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+	mp := RankingPortfolioMarketPrice{
+		DefinitionID: def.ID, SnapshotVersion: todayBJ, SnapshotDate: todayBJ,
+		Code: "600001", Exchange: "SSE", ClosePrice: 10.0, OpenPrice: 0,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := repo.db.WithContext(ctx).Create(&mp).Error; err != nil {
+		t.Fatalf("seed market price: %v", err)
+	}
+
+	svc.SetOpenPriceResolver(func(_ context.Context, _, _, _ string) float64 { return 10.5 })
+
+	result, err := svc.BackfillMissingEntryOpenPrices(ctx, todayBJ)
+	if err != nil {
+		t.Fatalf("backfill failed: %v", err)
+	}
+	if result.FilledCount != 0 {
+		t.Fatalf("FilledCount = %d, want 0 (snapshot_date==today, T+1 not yet determinable)", result.FilledCount)
+	}
+	if result.StillPendingCount != 1 {
+		t.Fatalf("StillPendingCount = %d, want 1", result.StillPendingCount)
+	}
+}
+
 func TestBackfillMissingEntryOpenPrices_PendingWhenNoSuccessorSnapshot(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
@@ -680,17 +792,18 @@ func TestBackfillMissingEntryOpenPrices_PendingWhenNoSuccessorSnapshot(t *testin
 		t.Fatalf("seed definition: %v", err)
 	}
 
-	// Only one snapshot; no successor exists yet.
-	d0 := "2026-06-10"
+	// snapshot_date == today: no successor and snapshotDate == todayBJ,
+	// so the fallback must NOT fire (T+1 cannot be determined yet).
+	todayBJ := time.Now().In(beijingLocation()).Format("2006-01-02")
 	snap := RankingPortfolioSnapshot{
-		DefinitionID: def.ID, SnapshotVersion: d0, SnapshotDate: d0,
+		DefinitionID: def.ID, SnapshotVersion: todayBJ, SnapshotDate: todayBJ,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	if err := repo.db.WithContext(ctx).Create(&snap).Error; err != nil {
 		t.Fatalf("seed snapshot: %v", err)
 	}
 	mp := RankingPortfolioMarketPrice{
-		DefinitionID: def.ID, SnapshotVersion: d0, SnapshotDate: d0,
+		DefinitionID: def.ID, SnapshotVersion: todayBJ, SnapshotDate: todayBJ,
 		Code: "600001", Exchange: "SSE", ClosePrice: 10.0, OpenPrice: 0,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
@@ -700,7 +813,7 @@ func TestBackfillMissingEntryOpenPrices_PendingWhenNoSuccessorSnapshot(t *testin
 
 	svc.SetOpenPriceResolver(func(_ context.Context, _, _, _ string) float64 { return 10.5 })
 
-	result, err := svc.BackfillMissingEntryOpenPrices(ctx, d0)
+	result, err := svc.BackfillMissingEntryOpenPrices(ctx, todayBJ)
 	if err != nil {
 		t.Fatalf("backfill failed: %v", err)
 	}

@@ -1,5 +1,26 @@
 # 设计决策记录
 
+## 决策 13: resolveEntryTradeDateForSnapshot 加今日北京时间兜底
+
+**日期**: 2026-06-11
+
+**背景**: `BackfillMissingEntryOpenPrices` 通过 `resolveEntryTradeDateForSnapshot` 推断 T+1 买入日期，逻辑是查 `snapshot_date > 当前快照日` 的后继 snapshot。D0（切换当天）以及港股只有一条 snapshot 时，不存在后继 → `ErrRecordNotFound → entryTradeDate="" → StillPendingCount++`，openPriceResolver 根本不被调用，所有股票永远 pending。
+
+**决策**: 当找不到后继 snapshot 且 `todayBJ > snapshotDate` 时，以今日北京日期作为 T+1 的兜底值。当 `snapshotDate == todayBJ` 时不触发兜底（T+1 尚未到来，entry date 无法确定）。
+
+**原因**:
+1. 无后继 snapshot = 这是最新一批，下一个交易日就是今天（北京时间），这是合理的数据驱动推断
+2. `snapshotDate < todayBJ` 的守卫确保不会用今天的日期来填充「未来的」entry date
+3. 对港股 D0 这种只有一条 snapshot 的情况，能自动处理，无需特殊逻辑
+
+**替代方案**:
+- 继续依赖后继 snapshot — 否决，D0 和单条 snapshot 场景永远不可补齐
+- 在 admin repair 里手动传入 entry date — 否决，增加操作复杂度，且依赖人工干预
+
+**影响**: `portfolio_service.go resolveEntryTradeDateForSnapshot`；原有测试 `TestBackfillMissingEntryOpenPrices_PendingWhenNoSuccessorSnapshot` 更新为使用 `snapshotDate=todayBJ` 以保持原有语义；新增两个回归测试
+
+---
+
 ## 决策 1: 浅色/深色模式方案
 
 **日期**: 2026-05-26

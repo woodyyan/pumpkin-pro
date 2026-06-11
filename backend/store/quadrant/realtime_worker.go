@@ -203,15 +203,85 @@ func NewRealtimeWorker(service *Service, fetcher RealtimeQuoteFetcher, cfg Realt
 	}
 }
 
-// Start launches per-market schedule loops.
+// Start launches per-market schedule loops. It also spawns a one-shot
+// catch-up goroutine for each market that fires immediately when the process
+// starts after the 09:25 call-auction window has already passed (e.g. after a
+// restart on the same trading day), ensuring the entry open price is still
+// filled before the end of the morning session.
 func (w *RealtimeWorker) Start(ctx context.Context) {
 	if !w.cfg.Enabled || w.service == nil || w.fetcher == nil {
 		log.Printf("%s disabled", realtimeWorkerLogPrefix)
 		return
 	}
+	go w.catchUpIfMissedOpenAuction(ctx, realtimeScopeAShare)
+	go w.catchUpIfMissedOpenAuction(ctx, realtimeScopeHK)
 	go w.scheduleLoop(ctx, realtimeScopeAShare, w.cfg.ASharePoints)
 	go w.scheduleLoop(ctx, realtimeScopeHK, w.cfg.HKPoints)
 	log.Printf("%s started (A-share %v / HK %v, Beijing time)", realtimeWorkerLogPrefix, w.cfg.ASharePoints, w.cfg.HKPoints)
+}
+
+// catchUpIfMissedOpenAuction runs once at startup. If the current Beijing time
+// is strictly after 09:25 but before the end of the trading morning (10:30,
+// conservative upper bound that still guarantees a valid open price), and the
+// process has not yet recorded a run for this scope today, it triggers an
+// immediate open-price fill with forceOpen=true. This compensates for the
+// service being (re)started after the scheduled 09:25 window.
+func (w *RealtimeWorker) catchUpIfMissedOpenAuction(ctx context.Context, scope string) {
+	now := w.cfg.NowFunc()
+	bj := now.In(beijingLocation())
+
+	// Only act on weekdays.
+	if bj.Weekday() == time.Saturday || bj.Weekday() == time.Sunday {
+		return
+	}
+
+	openMins, _ := parseRefreshPoint(realtimeOpenPoint) // 09:25 = 565
+	currentMins := bj.Hour()*60 + bj.Minute()
+	catchUpWindowEndMins := 10*60 + 30 // 10:30, well within the morning session
+
+	if currentMins <= openMins || currentMins > catchUpWindowEndMins {
+		// Either before or at 09:25 (scheduled loop will handle it), or past
+		// the catch-up window (too late to fill a meaningful open price).
+		return
+	}
+
+	// Check whether we already ran for this scope today.
+	w.mu.Lock()
+	lastAt, ran := w.lastRun[scope]
+	w.mu.Unlock()
+	if ran && lastAt.In(beijingLocation()).Format("2006-01-02") == bj.Format("2006-01-02") {
+		return
+	}
+
+	log.Printf("%s %s catch-up: process started after 09:25; filling entry open price now", realtimeWorkerLogPrefix, scope)
+	// Mark the run before executing so that the lastRun guard works regardless
+	// of whether symbols are found (empty constituent list is a valid no-op).
+	w.markRun(scope, now)
+	if err := w.runOnceForceOpen(ctx, scope, now); err != nil {
+		log.Printf("%s %s catch-up failed: %v", realtimeWorkerLogPrefix, scope, err)
+	}
+}
+
+// runOnceForceOpen is like RunOnce but unconditionally treats the fetched
+// prices as open prices (forceOpen=true), regardless of what time `at` is.
+// Used by the startup catch-up path when 09:25 was missed.
+func (w *RealtimeWorker) runOnceForceOpen(ctx context.Context, scope string, at time.Time) error {
+	symbols, err := w.service.collectCurrentConstituentSymbols(ctx, scope)
+	if err != nil {
+		return err
+	}
+	if len(symbols) == 0 {
+		return nil
+	}
+	quotes, err := w.fetcher(ctx, symbols)
+	if err != nil {
+		return err
+	}
+	for i := range quotes {
+		quotes[i].IsOpen = true
+	}
+	w.markRun(scope, at)
+	return w.service.persistRealtimeQuotes(ctx, scope, quotes, true, at)
 }
 
 func (w *RealtimeWorker) scheduleLoop(ctx context.Context, scope string, points []string) {

@@ -242,3 +242,177 @@ func TestRealtimeWorker_RunOnceFillsOpenAndRealtime(t *testing.T) {
 	}
 	_ = worker
 }
+
+// Bug2 回归：snapshots 表为空时（D0 切换日清库后首次运行），
+// FillRankingPortfolioEntryOpenPrice 仍能成功写入开盘价，
+// 而不是因为 ErrRecordNotFound 被 continue 跳过。
+func TestFillRankingPortfolioEntryOpenPrice_WorksWithEmptySnapshots(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// 只建 definition，不建任何 snapshot（模拟 D0 清库后状态）。
+	def := buildRankingPortfolioDefinitionRecord(defaultRankingPortfolioDefinitionSpecs()[0], now)
+	if err := repo.db.WithContext(ctx).Create(&def).Error; err != nil {
+		t.Fatalf("seed definition: %v", err)
+	}
+	// market_prices 行已存在（由当天榜单写入），但 open_price=0。
+	mp := RankingPortfolioMarketPrice{
+		DefinitionID:    def.ID,
+		SnapshotVersion: "2026-06-10",
+		SnapshotDate:    "2026-06-10",
+		Code:            "600001",
+		Exchange:        "SSE",
+		ClosePrice:      10.0,
+		PriceTradeDate:  "2026-06-10",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := repo.db.WithContext(ctx).Create(&mp).Error; err != nil {
+		t.Fatalf("seed market price: %v", err)
+	}
+
+	// 触发 fill（09:25 worker 调用路径）。
+	if err := repo.FillRankingPortfolioEntryOpenPrice(ctx, "ASHARE", "600001", "SSE", 10.5, "2026-06-10"); err != nil {
+		t.Fatalf("FillRankingPortfolioEntryOpenPrice: %v", err)
+	}
+
+	// 开盘价必须已写入。
+	openPrice, entryDate, err := repo.GetRankingPortfolioEntryOpenPrice(ctx, def.ID, "600001", "SSE", "2026-06-10")
+	if err != nil {
+		t.Fatalf("GetRankingPortfolioEntryOpenPrice: %v", err)
+	}
+	if openPrice != 10.5 {
+		t.Fatalf("open_price = %v, want 10.5 (snapshots table was empty but fill must still work)", openPrice)
+	}
+	if entryDate != "2026-06-10" {
+		t.Fatalf("entry_trade_date = %q, want 2026-06-10", entryDate)
+	}
+}
+
+// Bug1 回归：服务在 09:25 之后但 10:30 之前启动时，
+// catchUpIfMissedOpenAuction 应当触发一次强制开盘价填充；
+// 在 09:25 之前或 10:30 之后启动时不应触发。
+//
+// 这组测试只验证时间窗口判断是否正确——通过检查 lastRun 是否被更新来判断
+// catch-up 是否执行（fetcher 在 symbols 为空时不会被调用，那是正常分支）。
+func TestRealtimeWorker_CatchUpIfMissedOpenAuction(t *testing.T) {
+	bj := beijingLocation()
+
+	cases := []struct {
+		name        string
+		nowBJ       time.Time
+		wantAttempt bool // whether catchUp should attempt runOnceForceOpen (updates lastRun)
+	}{
+		{
+			name:        "before 09:25 – no catch-up",
+			nowBJ:       time.Date(2026, 6, 10, 9, 0, 0, 0, bj),
+			wantAttempt: false,
+		},
+		{
+			name:        "exactly 09:25 – no catch-up (scheduled loop handles it)",
+			nowBJ:       time.Date(2026, 6, 10, 9, 25, 0, 0, bj),
+			wantAttempt: false,
+		},
+		{
+			name:        "09:40 – missed auction, catch-up fires",
+			nowBJ:       time.Date(2026, 6, 10, 9, 40, 0, 0, bj),
+			wantAttempt: true,
+		},
+		{
+			name:        "10:30 – still within window, catch-up fires",
+			nowBJ:       time.Date(2026, 6, 10, 10, 30, 0, 0, bj),
+			wantAttempt: true,
+		},
+		{
+			name:        "10:31 – past window, no catch-up",
+			nowBJ:       time.Date(2026, 6, 10, 10, 31, 0, 0, bj),
+			wantAttempt: false,
+		},
+		{
+			name:        "weekend – no catch-up",
+			nowBJ:       time.Date(2026, 6, 7, 9, 40, 0, 0, bj), // Saturday
+			wantAttempt: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fetcher := func(_ context.Context, _ []RealtimeSymbol) ([]RealtimeQuote, error) {
+				return nil, nil
+			}
+
+			repo, cleanup := setupQuadrantTest(t)
+			defer cleanup()
+			svc := NewService(repo)
+			ctx := context.Background()
+
+			worker := NewRealtimeWorker(svc, fetcher, RealtimeWorkerConfig{
+				Enabled: true,
+				NowFunc: func() time.Time { return tc.nowBJ },
+			})
+			// Run synchronously (no goroutine) to make the test deterministic.
+			worker.catchUpIfMissedOpenAuction(ctx, realtimeScopeAShare)
+
+			worker.mu.Lock()
+			_, ran := worker.lastRun[realtimeScopeAShare]
+			worker.mu.Unlock()
+
+			if ran != tc.wantAttempt {
+				t.Fatalf("lastRun updated = %v, want %v (time: %s)", ran, tc.wantAttempt, tc.nowBJ.Format("15:04"))
+			}
+		})
+	}
+}
+
+// Bug1 回归（集成）：runOnceForceOpen 在 forceOpen=true 时必须写入开盘价。
+// 直接调用 persistRealtimeQuotes（绕过依赖真实榜单的 collectCurrentConstituentSymbols），
+// 验证核心路径：IsOpen=true → FillRankingPortfolioEntryOpenPrice → open_price 落库。
+func TestRealtimeWorker_CatchUpFillsOpenPriceWhenStartedLate(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	bj := beijingLocation()
+
+	// 建 definition + market_prices 行（open_price=0）。
+	def := buildRankingPortfolioDefinitionRecord(defaultRankingPortfolioDefinitionSpecs()[0], now)
+	if err := repo.db.WithContext(ctx).Create(&def).Error; err != nil {
+		t.Fatalf("seed definition: %v", err)
+	}
+	mp := RankingPortfolioMarketPrice{
+		DefinitionID:    def.ID,
+		SnapshotVersion: "2026-06-10",
+		SnapshotDate:    "2026-06-10",
+		Code:            "600001",
+		Exchange:        "SSE",
+		ClosePrice:      10.0,
+		PriceTradeDate:  "2026-06-10",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := repo.db.WithContext(ctx).Create(&mp).Error; err != nil {
+		t.Fatalf("seed market price: %v", err)
+	}
+
+	svc := NewService(repo)
+
+	// 模拟 09:40 启动后 catchUp 调用 persistRealtimeQuotes(forceOpen=true)。
+	startAt := time.Date(2026, 6, 10, 9, 40, 0, 0, bj)
+	quotes := []RealtimeQuote{{Code: "600001", Exchange: "SSE", LastPrice: 10.8, IsOpen: true}}
+	if err := svc.persistRealtimeQuotes(ctx, realtimeScopeAShare, quotes, true, startAt); err != nil {
+		t.Fatalf("persistRealtimeQuotes(forceOpen=true): %v", err)
+	}
+
+	openPrice, entryDate, err := repo.GetRankingPortfolioEntryOpenPrice(ctx, def.ID, "600001", "SSE", "2026-06-10")
+	if err != nil {
+		t.Fatalf("GetRankingPortfolioEntryOpenPrice: %v", err)
+	}
+	if openPrice != 10.8 {
+		t.Fatalf("open_price = %v, want 10.8 (catch-up must fill with forceOpen=true)", openPrice)
+	}
+	if entryDate != "2026-06-10" {
+		t.Fatalf("entry_trade_date = %q, want 2026-06-10", entryDate)
+	}
+}

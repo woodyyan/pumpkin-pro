@@ -186,6 +186,26 @@
 
 ---
 
+## 决策 12: FillRankingPortfolioEntryOpenPrice 去掉 snapshot_version 约束
+
+**日期**: 2026-06-11
+
+**背景**: D0 清库后 snapshots 表为空，`FillRankingPortfolioEntryOpenPrice` 原逻辑先查 snapshots 取 latest.SnapshotVersion，表为空时 ErrRecordNotFound → continue，导致所有 open_price 永远写不进去，成分股全天 pending。
+
+**决策**: 去掉 `snapshot_version` 过滤，直接按 `definition_id + code + exchange + open_price<=0` UPDATE market_prices，不依赖 snapshots 表。
+
+**原因**:
+1. `open_price <= 0` 条件已保证幂等（已填的行不会被重复写）
+2. market_prices 行在快照写入时已正确绑定 definition_id，不需要再绕道 snapshots 做版本隔离
+3. 任何 snapshot_version 的行都应该被填入开盘价，约束 snapshot_version 只会在 D0 等边界场景下造成漏填
+
+**替代方案**:
+- 保留 snapshot_version，改用子查询 — 否决，仍依赖 snapshots 表非空，边界场景同样失败
+
+**影响**: `repository.go FillRankingPortfolioEntryOpenPrice`，新增测试 `TestFillRankingPortfolioEntryOpenPrice_WorksWithEmptySnapshots`
+
+---
+
 ## 决策 11: Admin「一键补齐」按钮改造为两阶段开盘价修复
 
 **日期**: 2026-06-10

@@ -839,6 +839,11 @@ func (r *Repository) SetRankingPortfolioMarketPriceOpen(ctx context.Context, def
 // FillRankingPortfolioEntryOpenPrice fills the simulated entry (T+1 open) price
 // across all definitions of the given market scope. Only rows whose open price
 // has not been filled yet are updated (idempotent for the trading day).
+//
+// The update targets market_prices rows directly by definition_id + code +
+// exchange + open_price<=0, without requiring a snapshots row to exist first.
+// This makes the fill safe on D0 (cutover day) when the snapshots table may
+// still be empty.
 func (r *Repository) FillRankingPortfolioEntryOpenPrice(ctx context.Context, scope, code, exchange string, openPrice float64, entryTradeDate string) error {
 	code = strings.TrimSpace(code)
 	scope = strings.ToUpper(strings.TrimSpace(scope))
@@ -849,7 +854,7 @@ func (r *Repository) FillRankingPortfolioEntryOpenPrice(ctx context.Context, sco
 	normalizedExchange := strings.ToUpper(strings.TrimSpace(exchange))
 	now := time.Now().UTC()
 
-	// Resolve the latest snapshot version per definition of the scope.
+	// Resolve all definitions for this market scope.
 	var defs []RankingPortfolioDefinition
 	if err := r.db.WithContext(ctx).
 		Where("exchange = ?", scope).
@@ -857,18 +862,11 @@ func (r *Repository) FillRankingPortfolioEntryOpenPrice(ctx context.Context, sco
 		return err
 	}
 	for _, def := range defs {
-		var latest RankingPortfolioSnapshot
-		if err := r.db.WithContext(ctx).
-			Where("definition_id = ?", def.ID).
-			Order("snapshot_date DESC, id DESC").
-			First(&latest).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				continue
-			}
-			return err
-		}
+		// Update all unfilled rows for this symbol across any snapshot version.
+		// snapshot_version is intentionally omitted: on D0 the snapshots table
+		// may be empty, so we must not rely on a latest-snapshot look-up.
 		query := r.db.WithContext(ctx).Model(&RankingPortfolioMarketPrice{}).
-			Where("definition_id = ? AND snapshot_version = ? AND code = ? AND open_price <= ?", def.ID, latest.SnapshotVersion, code, 0)
+			Where("definition_id = ? AND code = ? AND open_price <= ?", def.ID, code, 0)
 		if normalizedExchange != "" {
 			query = query.Where("exchange = ?", normalizedExchange)
 		}

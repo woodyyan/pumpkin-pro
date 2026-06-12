@@ -115,7 +115,6 @@ function AppLayout({ Component, pageProps }) {
   const router = useRouter()
   const currentPath = router.asPath
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const mobileMenuRef = useRef(null)
   const { unreadCount, markAsSeen } = useChangelogUnread()
 
   useEffect(() => {
@@ -138,14 +137,16 @@ function AppLayout({ Component, pageProps }) {
   useEffect(() => {
     if (!mobileMenuOpen) return undefined
 
-    const handler = (event) => {
-      if (mobileMenuRef.current && !mobileMenuRef.current.contains(event.target)) {
-        setMobileMenuOpen(false)
-      }
-    }
+    const previousBodyOverflow = document.body.style.overflow
+    const previousHtmlOverflow = document.documentElement.style.overflow
 
-    window.addEventListener('mousedown', handler)
-    return () => window.removeEventListener('mousedown', handler)
+    document.body.style.overflow = 'hidden'
+    document.documentElement.style.overflow = 'hidden'
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow
+      document.documentElement.style.overflow = previousHtmlOverflow
+    }
   }, [mobileMenuOpen])
 
   return (
@@ -184,7 +185,7 @@ function AppLayout({ Component, pageProps }) {
         />
       </Head>
       <div className="min-h-screen bg-background text-foreground flex flex-col">
-        <nav ref={mobileMenuRef} className="fixed top-0 left-0 right-0 bg-[var(--color-bg-overlay)] backdrop-blur-md border-b border-border z-50">
+        <nav className="fixed top-0 left-0 right-0 bg-[var(--color-bg-overlay)] backdrop-blur-md border-b border-border z-50">
           <div className="h-16 flex items-center justify-between px-4 md:px-6 gap-3">
             <Link href="/" className="flex items-center space-x-2 min-w-0 shrink-0">
               <img src="/logo.png" alt="卧龙" width={36} height={36} className="rounded shrink-0" />
@@ -220,9 +221,9 @@ function AppLayout({ Component, pageProps }) {
               <AccountEntry />
             </div>
           </div>
-
-          <MobileNavMenu open={mobileMenuOpen} currentPath={currentPath} unreadCount={unreadCount} />
         </nav>
+
+        <MobileNavMenu open={mobileMenuOpen} currentPath={currentPath} unreadCount={unreadCount} onClose={() => setMobileMenuOpen(false)} />
 
         <main className="flex-1 mt-16 p-4 md:p-6">
           <Component {...pageProps} />

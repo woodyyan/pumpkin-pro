@@ -29,20 +29,27 @@ describe('mobile nav grouped menu', () => {
     assert.equal(state.activeGroupKey, 'dashboard')
   })
 
-  it('renders the mobile menu as an independent fixed panel with its own overlay and scroll area', () => {
-    assert.match(mobileNavSource, /className="fixed inset-x-0 bottom-0 top-16 z-40 md:hidden"/)
-    assert.match(mobileNavSource, /aria-label="关闭移动导航菜单"/)
-    assert.match(mobileNavSource, /role="dialog"/)
-    assert.match(mobileNavSource, /overflow-y-auto/)
-    assert.match(mobileNavSource, /onClick=\{onClose\}/)
+  it('renders the mobile menu as a left slide-in drawer layered above its overlay', () => {
+    // 抽屉容器铺满全屏，移动端专用
+    assert.match(mobileNavSource, /className="fixed inset-0 z-40 md:hidden"/)
+    // 遮罩按钮在底层 z-0，可关闭
+    assert.match(mobileNavSource, /aria-label="关闭移动导航菜单"[\s\S]*?absolute inset-0 z-0 bg-black\/50/)
+    // 面板从左侧滑入，显式置于上层 z-10
+    assert.match(mobileNavSource, /role="dialog"[\s\S]*?absolute inset-y-0 left-0 z-10/)
+    assert.match(mobileNavSource, /-translate-x-full/)
+    assert.match(mobileNavSource, /translate-x-0/)
+    // 不再使用此前易踩坑的 backdrop-blur-md
     assert.doesNotMatch(mobileNavSource, /backdrop-blur-md/)
   })
 
-  it('layers the close overlay below the dialog so iOS Safari hit-testing reaches every group', () => {
-    // 遮罩按钮必须显式置于底层 z-0
-    assert.match(mobileNavSource, /aria-label="关闭移动导航菜单"[\s\S]*?className="absolute inset-0 z-0 bg-black\/40"/)
-    // 对话框内容必须显式置于上层，并通过 isolate 建立独立层叠上下文
-    assert.match(mobileNavSource, /role="dialog"[\s\S]*?className="relative isolate z-10 h-full overflow-y-auto/)
+  it('flattens every group and its items so each entry is reachable in one tap', () => {
+    // 平铺：不再有「点击一级菜单标题展开/收起」的折叠逻辑
+    assert.doesNotMatch(mobileNavSource, /setExpandedGroupKey/)
+    assert.doesNotMatch(mobileNavSource, /aria-expanded/)
+    // 子项链接点击后关闭抽屉
+    assert.match(mobileNavSource, /href=\{item\.href\}[\s\S]*?onClick=\{onClose\}/)
+    // 支持 Esc 关闭
+    assert.match(mobileNavSource, /event\.key === 'Escape'/)
   })
 
   it('locks page scroll in _app and closes the menu through a dedicated callback', () => {

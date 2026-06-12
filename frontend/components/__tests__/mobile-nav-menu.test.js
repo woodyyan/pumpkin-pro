@@ -38,6 +38,13 @@ describe('mobile nav grouped menu', () => {
     assert.doesNotMatch(mobileNavSource, /backdrop-blur-md/)
   })
 
+  it('layers the close overlay below the dialog so iOS Safari hit-testing reaches every group', () => {
+    // 遮罩按钮必须显式置于底层 z-0
+    assert.match(mobileNavSource, /aria-label="关闭移动导航菜单"[\s\S]*?className="absolute inset-0 z-0 bg-black\/40"/)
+    // 对话框内容必须显式置于上层，并通过 isolate 建立独立层叠上下文
+    assert.match(mobileNavSource, /role="dialog"[\s\S]*?className="relative isolate z-10 h-full overflow-y-auto/)
+  })
+
   it('locks page scroll in _app and closes the menu through a dedicated callback', () => {
     assert.match(appSource, /document\.body\.style\.overflow = 'hidden'/)
     assert.match(appSource, /document\.documentElement\.style\.overflow = 'hidden'/)

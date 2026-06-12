@@ -41,7 +41,7 @@ export default function MobileNavMenu({ open, currentPath, unreadCount, onClose 
       <button
         type="button"
         aria-label="关闭移动导航菜单"
-        className="absolute inset-0 bg-black/40"
+        className="absolute inset-0 z-0 bg-black/40"
         onClick={onClose}
       />
 
@@ -49,7 +49,7 @@ export default function MobileNavMenu({ open, currentPath, unreadCount, onClose 
         role="dialog"
         aria-modal="true"
         aria-label="移动导航菜单"
-        className="relative h-full overflow-y-auto border-t border-border bg-[var(--color-bg-overlay)] px-4 py-3 shadow-2xl"
+        className="relative isolate z-10 h-full overflow-y-auto border-t border-border bg-[var(--color-bg-overlay)] px-4 py-3 shadow-2xl"
       >
         <div className="space-y-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
           {groups.map((group) => {

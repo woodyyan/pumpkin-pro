@@ -10,7 +10,7 @@ describe('mobile nav grouped menu', () => {
     assert.deepEqual(state.groups.map((group) => group.label), ['卧龙AI', '看板', '跟踪', '选股', '更多'])
     assert.deepEqual(
       state.groups.find((group) => group.key === 'tracking').items.map((item) => item.label),
-      ['自选股', '持仓管理']
+      ['自选股', '组合跟踪', '持仓管理']
     )
     assert.equal(state.activeGroupKey, 'tracking')
   })

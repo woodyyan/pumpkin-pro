@@ -48,8 +48,9 @@ describe('live-trading page syntax', () => {
     assert.ok(!refreshBody.includes('loadRankingPortfolio('))
   })
 
-  it('still keeps the ranking portfolio panel on the live-trading page', () => {
-    assert.ok(pageSource.includes('RankingPortfolioPanel'))
-    assert.ok(pageSource.includes("import('../components/RankingPortfolioPanel')"))
+  it('removes the ranking portfolio panel from the live-trading page', () => {
+    assert.doesNotMatch(pageSource, /RankingPortfolioPanel/)
+    assert.doesNotMatch(pageSource, /quadrant\/ranking-portfolio/)
+    assert.doesNotMatch(pageSource, /卧龙AI精选模拟组合/)
   })
 })

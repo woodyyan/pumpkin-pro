@@ -21,6 +21,7 @@ export const NAV_GROUPS = [
     label: '跟踪',
     items: [
       { key: 'watchlist', href: '/watchlist', label: '自选股', matchNested: true },
+      { key: 'portfolio-tracking', href: '/portfolio-tracking', label: '组合跟踪', matchNested: true },
       { key: 'portfolio', href: '/portfolio', label: '持仓管理', matchNested: true },
     ],
   },

@@ -12,6 +12,7 @@ describe('navigation config', () => {
     assert.ok(hrefs.includes('/ai/backtest'))
     assert.ok(hrefs.includes('/quadrant'))
     assert.ok(hrefs.includes('/watchlist'))
+    assert.ok(hrefs.includes('/portfolio-tracking'))
     assert.ok(hrefs.includes('/live-trading'))
   })
 

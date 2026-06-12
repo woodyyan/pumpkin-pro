@@ -40,4 +40,13 @@ describe('coming soon placeholder pages', () => {
     assert.match(pageSource, /RankingOverviewSection/)
     assert.match(pageSource, /canonical" href="https:\/\/wolongtrader\.top\/quadrant"/)
   })
+
+  it('renders portfolio tracking as a real page instead of a placeholder', () => {
+    const pageSource = readFileSync(new URL('../../pages/portfolio-tracking.js', import.meta.url), 'utf8')
+
+    assert.doesNotThrow(() => parse(pageSource, { sourceType: 'module', plugins: ['jsx'] }))
+    assert.doesNotMatch(pageSource, /ComingSoonPage/)
+    assert.match(pageSource, /RankingPortfolioPanel/)
+    assert.match(pageSource, /canonical" href="https:\/\/wolongtrader\.top\/portfolio-tracking"/)
+  })
 })

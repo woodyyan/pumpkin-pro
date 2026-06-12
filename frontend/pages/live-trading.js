@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import dynamic from 'next/dynamic'
 import Head from 'next/head'
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import { isAuthRequiredError } from '../lib/auth-storage'
-
-const RankingPortfolioPanel = dynamic(() => import('../components/RankingPortfolioPanel'), { ssr: false })
 
 export default function LiveTradingOverviewPage() {
   const { isLoggedIn, openAuthModal, ready } = useAuth()
@@ -20,8 +17,6 @@ export default function LiveTradingOverviewPage() {
   const [error, setError] = useState('')
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [signalConfigMap, setSignalConfigMap] = useState({})
-  const [rankingPortfolioData, setRankingPortfolioData] = useState(null)
-  const [rankingPortfolioLoading, setRankingPortfolioLoading] = useState(false)
 
   const privateAccessReady = ready && isLoggedIn
 
@@ -83,18 +78,6 @@ export default function LiveTradingOverviewPage() {
     }
   }
 
-  const loadRankingPortfolio = async () => {
-    try {
-      setRankingPortfolioLoading(true)
-      const data = await requestJson('/api/quadrant/ranking-portfolio')
-      setRankingPortfolioData(data)
-    } catch {
-      // Ranking portfolio loading is non-critical
-    } finally {
-      setRankingPortfolioLoading(false)
-    }
-  }
-
   const loadMarketOverview = async () => {
     const [aRes, hkRes] = await Promise.allSettled([
       requestJson('/api/live/market/overview?exchange=SSE'),
@@ -136,7 +119,6 @@ export default function LiveTradingOverviewPage() {
   useEffect(() => {
     if (!ready) return
     loadPublicData()
-    loadRankingPortfolio()
     if (privateAccessReady) {
       loadPrivateData({ bootstrap: true })
     } else {
@@ -199,7 +181,7 @@ export default function LiveTradingOverviewPage() {
     <div className="space-y-6">
       <Head>
         <title>行情看板 — 卧龙AI量化交易台</title>
-        <meta name="description" content="卧龙AI量化交易台行情看板 — 大盘指数、卧龙AI精选模拟组合与关注股票列表。支持登录后维护关注池并进入个股详情页。" />
+        <meta name="description" content="卧龙AI量化交易台行情看板 — 大盘指数与关注股票列表。支持登录后维护关注池并进入个股详情页。" />
         <link rel="canonical" href="https://wolongtrader.top/live-trading" />
       </Head>
 
@@ -221,8 +203,6 @@ export default function LiveTradingOverviewPage() {
           )}
         </div>
       </section>
-
-      <RankingPortfolioPanel data={rankingPortfolioData} loading={rankingPortfolioLoading} />
 
       {error ? (
         <div className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-negative">

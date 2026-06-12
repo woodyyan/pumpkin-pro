@@ -1,31 +1,27 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 
-const appSource = readFileSync(new URL('../../pages/_app.js', import.meta.url), 'utf8')
+import { buildNavigationState } from '../../lib/navigation.js'
 
-function getMobileNavBlock() {
-  const start = appSource.indexOf('const NAV_ITEMS = [')
-  const end = appSource.indexOf(']\n\nconst DESKTOP_NAV_ITEMS', start)
+describe('mobile nav grouped menu', () => {
+  it('uses the new first-level group order and keeps tracking children together', () => {
+    const state = buildNavigationState('/watchlist', 0)
 
-  assert.notEqual(start, -1, 'NAV_ITEMS definition not found')
-  assert.notEqual(end, -1, 'NAV_ITEMS closing bracket not found')
-
-  return appSource.slice(start, end)
-}
-
-describe('mobile nav menu config', () => {
-  it('removes the home label and keeps the requested order', () => {
-    const navBlock = getMobileNavBlock()
-    const labels = [...navBlock.matchAll(/label: '([^']+)'/g)].map((match) => match[1])
-
-    assert.equal(navBlock.includes("label: '首页'"), false)
-    assert.deepEqual(labels, ['行情看板', '选股器', '回测引擎', '策略库', '持仓管理', '因子实验室', '更新日志'])
+    assert.deepEqual(state.groups.map((group) => group.label), ['卧龙AI', '看板', '跟踪', '选股', '更多'])
+    assert.deepEqual(
+      state.groups.find((group) => group.key === 'tracking').items.map((item) => item.label),
+      ['自选股', '持仓管理']
+    )
+    assert.equal(state.activeGroupKey, 'tracking')
   })
 
-  it('keeps the changelog badge key on the last mobile nav entry', () => {
-    const navBlock = getMobileNavBlock()
+  it('treats live-trading detail pages as the market entry under 看板', () => {
+    const state = buildNavigationState('/live-trading/00700', 0)
+    const dashboardGroup = state.groups.find((group) => group.key === 'dashboard')
+    const marketItem = dashboardGroup.items.find((item) => item.key === 'market-overview')
 
-    assert.ok(navBlock.includes("{ href: '/changelog', label: '更新日志', badgeKey: 'changelog' }"))
+    assert.equal(dashboardGroup.isActive, true)
+    assert.equal(marketItem.isActive, true)
+    assert.equal(state.activeGroupKey, 'dashboard')
   })
 })

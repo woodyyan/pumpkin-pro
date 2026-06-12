@@ -39,8 +39,13 @@ frontend/
 | 路径 | 文件 | 说明 |
 |---|---|---|
 | `/` | `index.js` | 首页/落地页 |
-| `/live-trading` | `live-trading.js` | 行情看板概览 |
-| `/live-trading/[symbol]` | `live-trading/[symbol].js` | 个股详情页 (194KB) |
+| `/live-trading` | `live-trading.js` | 市场行情页（导航归属「看板」） |
+| `/live-trading/[symbol]` | `live-trading/[symbol].js` | 个股详情页 (194KB)，active 仍归属「看板 / 市场行情」 |
+| `/ai/analysis` | `ai/analysis.js` | AI分析占位页（一期「敬请期待」） |
+| `/ai/picker` | `ai/picker.js` | AI选股占位页（一期「敬请期待」） |
+| `/ai/backtest` | `ai/backtest.js` | AI回测占位页（一期「敬请期待」） |
+| `/quadrant` | `quadrant.js` | 四象限独立占位页（一期「敬请期待」） |
+| `/watchlist` | `watchlist.js` | 自选股占位页（一期「敬请期待」） |
 | `/stock-picker` | `stock-picker.js` | 选股器 |
 | `/backtest` | `backtest.js` | 回测引擎 |
 | `/strategies` | `strategies.js` | 策略库 |
@@ -51,9 +56,19 @@ frontend/
 | `/changelog` | `changelog.js` | 更新日志 |
 | `/share/ai-analysis-preview` | `share/ai-analysis-preview.js` | AI分析分享图预览 (独立布局) |
 
+### 导航架构（2026-06-12）
+- 主站导航不再在 `_app.js` 内硬编码多套数组，而是统一收敛到 `frontend/lib/navigation.js`。
+- PC 端导航由 `components/DesktopNavMenu.js` + `components/NavDropdown.js` 渲染：hover 展开下拉，点击一级导航只负责展开/收起，不做跳转。
+- 移动端导航由 `components/MobileNavMenu.js` 渲染：保留汉堡入口，菜单内部按「卧龙AI / 看板 / 跟踪 / 选股 / 更多」分组折叠，一次只展开一个分组。
+- 占位页统一复用 `components/ComingSoonPage.js`，文案固定为标题 + 「敬请期待」，避免散落多个空白实现。
+
 ### 关键组件
 - `ThemeToggle.js`: 主题切换按钮（三态：浅色/深色/跟随系统）
 - `NavSearchBox.js`: 导航栏股票搜索
+- `DesktopNavMenu.js`: 桌面端一级导航与 hover 下拉
+- `MobileNavMenu.js`: 移动端分组折叠菜单
+- `NavDropdown.js`: 桌面端二级导航下拉面板
+- `ComingSoonPage.js`: 占位页通用组件
 - `QuadrantChart.js`: 四象限风险图表
 - `RankingPanel.js` / `RankingPortfolioPanel.js`: 排行榜
 - `PortfolioAttributionSection.js`: 持仓归因分析

@@ -2,26 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import dynamic from 'next/dynamic'
 import Head from 'next/head'
-import QuadrantSearchBox from '../components/QuadrantSearchBox'
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import { isAuthRequiredError } from '../lib/auth-storage'
-import {
-  buildQuadrantDetailSymbol,
-  createQuadrantSearchState,
-  findQuadrantStockByCode,
-  getQuadrantSearchEntry,
-  searchQuadrantStocks,
-  updateQuadrantSearchEntry,
-} from '../lib/quadrant-search'
-import { formatCloseDateLabel, parseTradeDateLabelDate } from '../lib/trade-date-label'
 
-const QuadrantChart = dynamic(() => import('../components/QuadrantChart'), { ssr: false })
-const RankingPanel = dynamic(() => import('../components/RankingPanel'), { ssr: false })
 const RankingPortfolioPanel = dynamic(() => import('../components/RankingPortfolioPanel'), { ssr: false })
 
 export default function LiveTradingOverviewPage() {
-  const { isLoggedIn, openAuthModal, ready, user } = useAuth()
+  const { isLoggedIn, openAuthModal, ready } = useAuth()
   const [watchlist, setWatchlist] = useState({ items: [], active_symbol: '', session_state: 'idle' })
   const [snapshots, setSnapshots] = useState([])
   const [marketOverviewA, setMarketOverviewA] = useState(null)
@@ -32,15 +20,8 @@ export default function LiveTradingOverviewPage() {
   const [error, setError] = useState('')
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [signalConfigMap, setSignalConfigMap] = useState({})
-  const [quadrantData, setQuadrantData] = useState(null)
-  const [quadrantLoading, setQuadrantLoading] = useState(false)
-  const [quadrantExchange, setQuadrantExchange] = useState('ASHARE') // 'ASHARE' | 'HKEX'
-  const [rankingData, setRankingData] = useState(null)
-  const [rankingLoading, setRankingLoading] = useState(false)
-  const [rankingExchange, setRankingExchange] = useState('ASHARE') // independent tab state for ranking
   const [rankingPortfolioData, setRankingPortfolioData] = useState(null)
   const [rankingPortfolioLoading, setRankingPortfolioLoading] = useState(false)
-  const [quadrantSearchState, setQuadrantSearchState] = useState(() => createQuadrantSearchState())
 
   const privateAccessReady = ready && isLoggedIn
 
@@ -48,7 +29,6 @@ export default function LiveTradingOverviewPage() {
     setWatchlist({ items: [], active_symbol: '', session_state: 'idle' })
     setSnapshots([])
     setSignalConfigMap({})
-    setQuadrantData(null)
     setError('')
     setErrorNeedsLogin(false)
   }, [])
@@ -70,23 +50,6 @@ export default function LiveTradingOverviewPage() {
     })
     return map
   }, [snapshots])
-
-  const currentQuadrantSearch = useMemo(
-    () => getQuadrantSearchEntry(quadrantSearchState, quadrantExchange),
-    [quadrantSearchState, quadrantExchange]
-  )
-
-  const currentQuadrantStocks = quadrantData?.all_stocks || []
-
-  const currentQuadrantSearchResults = useMemo(
-    () => searchQuadrantStocks(currentQuadrantStocks, currentQuadrantSearch.query, quadrantExchange),
-    [currentQuadrantStocks, currentQuadrantSearch.query, quadrantExchange]
-  )
-
-  const highlightedQuadrantStock = useMemo(
-    () => findQuadrantStockByCode(currentQuadrantStocks, currentQuadrantSearch.selectedCode, quadrantExchange),
-    [currentQuadrantStocks, currentQuadrantSearch.selectedCode, quadrantExchange]
-  )
 
   const loadWatchlist = async () => {
     const data = await requestJson('/api/live/watchlist')
@@ -120,41 +83,6 @@ export default function LiveTradingOverviewPage() {
     }
   }
 
-  const loadQuadrant = async (watchlistSymbols = [], exchange = 'ASHARE') => {
-    try {
-      setQuadrantLoading(true)
-      const params = new URLSearchParams()
-      if (exchange === 'HKEX') params.set('exchange', 'HKEX')
-      // ASHARE is the default, no need to send param
-      if (watchlistSymbols.length > 0) params.set('watchlist_symbols', watchlistSymbols.join(','))
-      const qs = params.toString()
-      const data = await requestJson(`/api/quadrant${qs ? `?${qs}` : ''}`)
-      setQuadrantData(data)
-    } catch {
-      // Quadrant loading is non-critical
-    } finally {
-      setQuadrantLoading(false)
-    }
-  }
-
-  const loadRanking = async (exchange) => {
-    try {
-      setRankingLoading(true)
-      const params = new URLSearchParams()
-      params.set('limit', '20')
-      if (exchange && exchange !== 'ASHARE') {
-        params.set('exchange', exchange)
-      }
-      // ASHARE 不传 exchange，走后端默认值 (SSE+SZSE)
-      const data = await requestJson(`/api/quadrant/ranking?${params.toString()}`)
-      setRankingData(data)
-    } catch {
-      // Ranking loading is non-critical
-    } finally {
-      setRankingLoading(false)
-    }
-  }
-
   const loadRankingPortfolio = async () => {
     try {
       setRankingPortfolioLoading(true)
@@ -167,12 +95,6 @@ export default function LiveTradingOverviewPage() {
     }
   }
 
-  const handleRankingExchangeChange = (newExchange) => {
-    if (newExchange === rankingExchange) return
-    setRankingExchange(newExchange)
-    loadRanking(newExchange)
-  }
-
   const loadMarketOverview = async () => {
     const [aRes, hkRes] = await Promise.allSettled([
       requestJson('/api/live/market/overview?exchange=SSE'),
@@ -182,17 +104,11 @@ export default function LiveTradingOverviewPage() {
     if (hkRes.status === 'fulfilled') setMarketOverviewHK(hkRes.value)
   }
 
-  const loadPrivateData = async ({ bootstrap = false, refreshQuadrant = false } = {}) => {
+  const loadPrivateData = async ({ bootstrap = false } = {}) => {
     try {
-      if (bootstrap || refreshQuadrant) {
-        const wl = await loadWatchlist()
+      if (bootstrap) {
+        await loadWatchlist()
         await loadSignalConfigs()
-        // Load quadrant with watchlist symbols filtered by current exchange
-        const symbols = (wl?.items || []).map((i) => i.symbol)
-        const filteredSymbols = quadrantExchange === 'HKEX'
-          ? symbols.filter((s) => s.toUpperCase().endsWith('.HK'))
-          : symbols.filter((s) => !s.toUpperCase().endsWith('.HK'))
-        await loadQuadrant(filteredSymbols, quadrantExchange)
       }
       await loadSnapshots()
       updateError('')
@@ -220,7 +136,6 @@ export default function LiveTradingOverviewPage() {
   useEffect(() => {
     if (!ready) return
     loadPublicData()
-    loadRanking(rankingExchange)
     loadRankingPortfolio()
     if (privateAccessReady) {
       loadPrivateData({ bootstrap: true })
@@ -239,21 +154,6 @@ export default function LiveTradingOverviewPage() {
 
     return () => window.clearInterval(intervalId)
   }, [ready, refreshRealtimeSections])
-
-  useEffect(() => {
-    if (!currentQuadrantSearch.selectedCode) return
-    if (quadrantLoading) return
-    if (currentQuadrantStocks.length === 0) return
-    if (highlightedQuadrantStock) return
-
-    setQuadrantSearchState((prev) => updateQuadrantSearchEntry(prev, quadrantExchange, { selectedCode: '' }))
-  }, [
-    currentQuadrantSearch.selectedCode,
-    currentQuadrantStocks.length,
-    highlightedQuadrantStock,
-    quadrantExchange,
-    quadrantLoading,
-  ])
 
   const handleAddWatch = async (event) => {
     event.preventDefault()
@@ -291,47 +191,6 @@ export default function LiveTradingOverviewPage() {
     window.open(`/live-trading/${encodeURIComponent(symbol)}`, '_blank')
   }
 
-  const handleQuadrantSearchChange = useCallback((query) => {
-    setQuadrantSearchState((prev) => updateQuadrantSearchEntry(prev, quadrantExchange, {
-      query,
-      selectedCode: '',
-    }))
-  }, [quadrantExchange])
-
-  const handleQuadrantSearchSelect = useCallback((stock) => {
-    if (!stock?.c) return
-    setQuadrantSearchState((prev) => updateQuadrantSearchEntry(prev, quadrantExchange, {
-      query: stock.n || stock.c,
-      selectedCode: stock.c,
-    }))
-  }, [quadrantExchange])
-
-  const handleQuadrantSearchClear = useCallback(() => {
-    setQuadrantSearchState((prev) => updateQuadrantSearchEntry(prev, quadrantExchange, {
-      query: '',
-      selectedCode: '',
-    }))
-  }, [quadrantExchange])
-
-  const handleOpenHighlightedQuadrantDetail = useCallback(() => {
-    if (!highlightedQuadrantStock?.c) return
-    const symbol = buildQuadrantDetailSymbol(highlightedQuadrantStock.c, quadrantExchange)
-    if (!symbol) return
-    window.open(`/live-trading/${symbol}`, '_blank')
-  }, [highlightedQuadrantStock, quadrantExchange])
-
-  const handleQuadrantExchangeChange = async (newExchange) => {
-    if (newExchange === quadrantExchange) return
-    setQuadrantExchange(newExchange)
-    setQuadrantData(null)
-    // Reload quadrant with new exchange
-    const symbols = (watchlist.items || []).map((i) => i.symbol)
-    const filteredSymbols = newExchange === 'HKEX'
-      ? symbols.filter((s) => s.toUpperCase().endsWith('.HK'))
-      : symbols.filter((s) => !s.toUpperCase().endsWith('.HK'))
-    await loadQuadrant(filteredSymbols, newExchange)
-  }
-
   const sortedWatchlist = useMemo(() => {
     return [...(watchlist.items || [])]
   }, [watchlist.items])
@@ -340,7 +199,7 @@ export default function LiveTradingOverviewPage() {
     <div className="space-y-6">
       <Head>
         <title>行情看板 — 卧龙AI量化交易台</title>
-        <meta name="description" content="卧龙AI量化交易台行情看板 — 实时 A 股/港股行情、四象限风险全景图、关注池管理。支持 AI 个股智能诊断与技术指标分析。" />
+        <meta name="description" content="卧龙AI量化交易台行情看板 — 大盘指数、卧龙AI精选模拟组合与关注股票列表。支持登录后维护关注池并进入个股详情页。" />
         <link rel="canonical" href="https://wolongtrader.top/live-trading" />
       </Head>
 
@@ -363,181 +222,7 @@ export default function LiveTradingOverviewPage() {
         </div>
       </section>
 
-      {/* Quadrant Analysis */}
-      <section className="rounded-2xl border border-border bg-card p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">风险机会全景图</h3>
-            {quadrantData?.meta?.computed_at && (
-              <div className="mt-1 flex items-center gap-2 text-xs text-foreground-dim">
-                <span>{formatCloseDateLabel(quadrantData.meta.source_trade_date, quadrantData.meta.computed_at)}</span>
-                {quadrantData.meta.total_count > 0 && <span>· {quadrantData.meta.total_count.toLocaleString()} 只</span>}
-                {(() => {
-                  const staleDate = parseTradeDateLabelDate(quadrantData.meta.source_trade_date) || parseTradeDateLabelDate(quadrantData.meta.computed_at)
-                  if (!staleDate) return null
-                  const daysDiff = Math.floor((Date.now() - new Date(staleDate).getTime()) / (1000 * 60 * 60 * 24))
-                  if (daysDiff > 3) {
-                    return <span className="rounded bg-amber-200 dark:bg-amber-500/15 px-1.5 py-0.5 text-amber-800 dark:text-amber-200 text-xs font-medium">数据已过期（{daysDiff} 天前）</span>
-                  }
-                  return null
-                })()}
-              </div>
-            )}
-          </div>
-          {/* Exchange Tab Switch */}
-          <div className="flex items-center gap-1 rounded-lg bg-[var(--color-bg-hover)] p-0.5">
-            {[
-              { key: 'ASHARE', label: 'A 股' },
-              { key: 'HKEX', label: '港股' },
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => handleQuadrantExchangeChange(tab.key)}
-                className={`rounded-md px-3 py-1 text-xs font-medium transition ${
-                  quadrantExchange === tab.key
-                    ? 'bg-primary text-black'
-                    : 'text-foreground-dim hover:text-foreground-muted hover:bg-[var(--color-bg-hover)]'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-4">
-          <QuadrantSearchBox
-            market={quadrantExchange}
-            query={currentQuadrantSearch.query}
-            results={currentQuadrantSearchResults}
-            selectedCode={currentQuadrantSearch.selectedCode}
-            disabled={!quadrantData || currentQuadrantStocks.length === 0}
-            onQueryChange={handleQuadrantSearchChange}
-            onSelect={handleQuadrantSearchSelect}
-            onClear={handleQuadrantSearchClear}
-          />
-        </div>
-
-        {quadrantLoading && !quadrantData ? (
-          <div className="mt-6 flex items-center justify-center py-12 text-sm text-foreground-dim">
-            <span className="animate-pulse">加载四象限数据...</span>
-          </div>
-        ) : quadrantData && quadrantData.all_stocks && quadrantData.all_stocks.length > 0 ? (
-          <>
-            <div className="mt-4 w-full">
-              <QuadrantChart
-                allStocks={quadrantData.all_stocks}
-                watchlist={quadrantData.watchlist_details || []}
-                market={quadrantExchange}
-                highlightCode={currentQuadrantSearch.selectedCode}
-                autoOpenTooltip={Boolean(currentQuadrantSearch.selectedCode)}
-              />
-            </div>
-
-            {highlightedQuadrantStock && (
-              <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 md:flex-row md:items-center md:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">
-                    <span className="font-semibold text-primary">已定位</span>
-                    <span className="font-medium">{highlightedQuadrantStock.n}</span>
-                    <span className="font-mono text-xs text-foreground-dim">{highlightedQuadrantStock.c}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-[11px] ${quadrantBadgeClass(highlightedQuadrantStock.q)}`}>
-                      {highlightedQuadrantStock.q}区
-                    </span>
-                  </div>
-                  <div className="mt-1 text-xs text-foreground-dim">
-                    机会 {Number(highlightedQuadrantStock.o || 0).toFixed(1)} / 风险 {Number(highlightedQuadrantStock.r || 0).toFixed(1)}
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleOpenHighlightedQuadrantDetail}
-                    className="inline-flex items-center justify-center rounded-xl border border-primary/35 bg-primary/10 px-3 py-2 text-xs font-medium text-primary transition hover:bg-primary/15"
-                  >
-                    查看详情
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleQuadrantSearchClear}
-                    className="inline-flex items-center justify-center rounded-xl border border-border px-3 py-2 text-xs text-foreground-muted transition hover:bg-[var(--color-bg-hover)] hover:text-foreground-muted"
-                  >
-                    清除高亮
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Summary stats */}
-            <div className="mt-4 space-y-3">
-              <div className="flex flex-wrap gap-3 text-xs">
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-positive/10 px-2.5 py-1 text-positive">
-                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />
-                  机会区 {quadrantData.summary?.opportunity_zone || 0}
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1 text-amber-300">
-                  <span className="inline-block h-2 w-2 rounded-full bg-amber-400" />
-                  拥挤区 {quadrantData.summary?.crowded_zone || 0}
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-negative/10 px-2.5 py-1 text-negative">
-                  <span className="inline-block h-2 w-2 rounded-full bg-rose-400" />
-                  泡沫区 {quadrantData.summary?.bubble_zone || 0}
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-bg-hover)] px-2.5 py-1 text-foreground-muted">
-                  <span className="inline-block h-2 w-2 rounded-full bg-white/40" />
-                  防御区 {quadrantData.summary?.defensive_zone || 0}
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-lg bg-blue-500/10 px-2.5 py-1 text-blue-300">
-                  <span className="inline-block h-2 w-2 rounded-full bg-blue-400" />
-                  中性区 {quadrantData.summary?.neutral_zone || 0}
-                </span>
-              </div>
-
-              {/* Watchlist details text summary */}
-              {(quadrantData.watchlist_details || []).length > 0 && (
-                <div className="rounded-xl border border-border/60 bg-[var(--color-bg-hover)] p-3">
-                  <div className="text-xs font-medium text-foreground-dim">我的关注（{quadrantData.watchlist_details.length} 只）</div>
-                  <div className="mt-2 space-y-1">
-                    {quadrantData.watchlist_details.map((w) => (
-                      <div key={w.code} className="flex items-center gap-2 text-xs">
-                        <span className={`inline-block h-2 w-2 rounded-full ${
-                          w.quadrant === '机会' ? 'bg-emerald-400' :
-                          w.quadrant === '拥挤' ? 'bg-amber-400' :
-                          w.quadrant === '泡沫' ? 'bg-rose-400' :
-                          w.quadrant === '防御' ? 'bg-white/40' :
-                          'bg-blue-400'
-                        }`} />
-                        <span className="font-medium text-foreground-muted">{w.name}</span>
-                        <span className="text-foreground-dim">—</span>
-                        <span className="text-foreground-muted">{w.quadrant}区</span>
-                        <span className="text-foreground-dim">（机会 {w.opportunity.toFixed(0)} / 风险 {w.risk.toFixed(0)}）</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-foreground-dim">
-            {quadrantData?.all_stocks?.length === 0
-              ? '四象限数据尚未计算，请等待凌晨定时任务完成。'
-              : '加载四象限数据中...'}
-          </div>
-        )}
-      </section>
-
-      {/* AI Ranking (卧龙AI精选) */}
       <RankingPortfolioPanel data={rankingPortfolioData} loading={rankingPortfolioLoading} />
-
-      <RankingPanel
-        items={rankingData?.items}
-        meta={rankingData?.meta}
-        loading={rankingLoading}
-        exchange={rankingExchange}
-        onExchangeChange={handleRankingExchangeChange}
-      />
 
       {error ? (
         <div className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-negative">
@@ -726,13 +411,6 @@ function formatCompact(value) {
   return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
 }
 
-function formatDateTime(value) {
-  if (!value) return '--'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', { hour12: false })
-}
-
 function detectExchange(symbol) {
   if (!symbol) return 'HKEX'
   const upper = String(symbol).toUpperCase()
@@ -751,21 +429,6 @@ function detectExchangeLabel(symbol) {
   const ex = detectExchange(symbol)
   const labels = { SSE: '沪市', SZSE: '深市', HKEX: '港股' }
   return labels[ex] || ex
-}
-
-function quadrantBadgeClass(quadrant) {
-  switch (quadrant) {
-    case '机会':
-      return 'bg-positive/10 text-positive'
-    case '拥挤':
-      return 'bg-amber-500/12 text-amber-300'
-    case '泡沫':
-      return 'bg-negative/10 text-negative'
-    case '防御':
-      return 'bg-[var(--color-bg-secondary)] text-foreground-muted'
-    default:
-      return 'bg-blue-500/12 text-blue-300'
-  }
 }
 
 function formatMarketIndexTitle(name, code) {

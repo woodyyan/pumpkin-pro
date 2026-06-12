@@ -10,7 +10,6 @@ const pageCases = [
   { relativePath: '../../pages/ai/analysis.js', title: 'AI分析' },
   { relativePath: '../../pages/ai/picker.js', title: 'AI选股' },
   { relativePath: '../../pages/ai/backtest.js', title: 'AI回测' },
-  { relativePath: '../../pages/quadrant.js', title: '四象限' },
   { relativePath: '../../pages/watchlist.js', title: '自选股' },
 ]
 
@@ -30,5 +29,15 @@ describe('coming soon placeholder pages', () => {
 
     assert.doesNotThrow(() => parse(componentSource, { sourceType: 'module', plugins: ['jsx'] }))
     assert.match(componentSource, /敬请期待/)
+  })
+
+  it('renders quadrant as a real page instead of a placeholder', () => {
+    const pageSource = readFileSync(new URL('../../pages/quadrant.js', import.meta.url), 'utf8')
+
+    assert.doesNotThrow(() => parse(pageSource, { sourceType: 'module', plugins: ['jsx'] }))
+    assert.doesNotMatch(pageSource, /ComingSoonPage/)
+    assert.match(pageSource, /QuadrantOverviewSection/)
+    assert.match(pageSource, /RankingOverviewSection/)
+    assert.match(pageSource, /canonical" href="https:\/\/wolongtrader\.top\/quadrant"/)
   })
 })

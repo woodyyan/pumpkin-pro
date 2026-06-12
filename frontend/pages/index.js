@@ -38,8 +38,8 @@ const FEATURES = [
     cta: '配置信号',
   },
   {
-    icon: '🗺️', title: '风险全景', href: '/live-trading',
-    points: ['四象限模型（机会 / 拥挤 / 泡沫 / 防御）', '全市场 A 股覆盖', '关注池股票高亮标注', '每日凌晨自动更新', '鼠标悬停查看个股详情'],
+    icon: '🗺️', title: '风险全景', href: '/quadrant',
+    points: ['四象限模型（机会 / 拥挤 / 泡沫 / 防御）', 'A 股 + 港股双市场切换', '卧龙AI精选榜单联动查看', '登录后高亮关注股票', '每日收盘后自动更新'],
     cta: '查看全景',
   },
 ]
@@ -101,12 +101,12 @@ const SCENARIOS = [
   {
     icon: '🌌',
     title: '我想抄作业',
-    href: '/live-trading',
+    href: '/quadrant',
     cta: '去看全景',
     recommended: false,
     value: '🎯 先看全市场机会，再缩小到卧龙AI精选名单',
     steps: [
-      '进入「行情看板」页面，切换到「风险机会全景图」区域',
+      '进入「四象限」页面，先看风险机会全景图',
       '查看四象限分布，优先关注机会区和高亮标的',
       '继续查看下方「卧龙AI精选」，打开感兴趣股票的详情页',
     ],
@@ -302,7 +302,7 @@ export default function HomePage() {
     <div className="space-y-0">
       <Head>
         <title>卧龙AI量化交易台 — AI驱动的量化分析平台</title>
-        <meta name="description" content="卧龙AI量化交易台（Wolong Pro）— 面向个人投资者的 AI 量化分析平台。支持 A 股+港股，AI 个股诊断、策略回测、选股器、信号推送、四象限风险全景，免费开始使用。" />
+        <meta name="description" content="卧龙AI量化交易台（Wolong Pro）— 面向个人投资者的 AI 量化分析平台。支持 A 股+港股，AI 个股诊断、四象限风险全景、卧龙AI精选、策略回测与信号推送。" />
         <link rel="canonical" href="https://wolongtrader.top/" />
       </Head>
 

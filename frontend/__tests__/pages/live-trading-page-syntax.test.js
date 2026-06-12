@@ -17,10 +17,10 @@ describe('live-trading page syntax', () => {
     })
   })
 
-  it('uses unified trade-date helper for quadrant data labels', () => {
-    assert.ok(pageSource.includes("formatCloseDateLabel(quadrantData.meta.source_trade_date, quadrantData.meta.computed_at)"))
-    assert.ok(pageSource.includes('parseTradeDateLabelDate(quadrantData.meta.source_trade_date)'))
-    assert.ok(!pageSource.includes('数据日期：{formatDateTime(quadrantData.meta.computed_at)}'))
+  it('keeps quadrant and ranking sections out of live-trading overview', () => {
+    assert.ok(!pageSource.includes('风险机会全景图'))
+    assert.ok(!pageSource.includes('QuadrantSearchBox'))
+    assert.ok(!pageSource.includes('RankingPanel'))
   })
 
   it('keeps only market and watchlist on 10-second polling', () => {
@@ -46,5 +46,10 @@ describe('live-trading page syntax', () => {
     assert.ok(refreshBody.includes('loadPrivateData()'))
     assert.ok(!refreshBody.includes('loadRanking('))
     assert.ok(!refreshBody.includes('loadRankingPortfolio('))
+  })
+
+  it('still keeps the ranking portfolio panel on the live-trading page', () => {
+    assert.ok(pageSource.includes('RankingPortfolioPanel'))
+    assert.ok(pageSource.includes("import('../components/RankingPortfolioPanel')"))
   })
 })

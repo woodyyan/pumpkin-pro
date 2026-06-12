@@ -1,30 +1,9 @@
-// ── Tests for live-trading.js loadRanking URL construction ──
+// ── Tests for quadrant-api.js ranking URL construction ──
 // 回归测试：保证 A 股/港股 ranking API 的 query string 格式正确
-//
-// Bug: 旧代码 exchange=ASHARE 时 qs 为空字符串，
-//      最终 URL 变成 /api/quadrant/ranking&limit=20（缺少 ? 前缀）
-// Fix: 改用 URLSearchParams 构建
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-
-// ═══════════════════════════════════════════════════
-// 从 live-trading.js 提取的纯函数（保持同步）
-// ═══════════════════════════════════════════════════
-
-function buildRankingUrl(exchange) {
-  const params = new URLSearchParams()
-  params.set('limit', '20')
-  if (exchange && exchange !== 'ASHARE') {
-    params.set('exchange', exchange)
-  }
-  // ASHARE 不传 exchange，走后端默认值 (SSE+SZSE)
-  return `/api/quadrant/ranking?${params.toString()}`
-}
-
-// ═══════════════════════════════════════════════════
-// 测试用例
-// ═══════════════════════════════════════════════════
+import { buildQuadrantRankingUrl as buildRankingUrl } from '../../lib/quadrant-api.js'
 
 describe('buildRankingUrl — URL construction', () => {
 

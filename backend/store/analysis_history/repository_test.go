@@ -195,6 +195,47 @@ func TestListBySymbol(t *testing.T) {
 	}
 }
 
+func TestListByUser_PaginatesAcrossSymbols(t *testing.T) {
+	repo, cleanup := setupTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	base := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
+	items := []AnalysisHistoryRecord{
+		{ID: genID(), UserID: "u-global", Symbol: "00700.HK", SymbolName: "腾讯控股", ResultJSON: "{}", MetaJSON: "{}", CreatedAt: base.Add(-1 * time.Minute)},
+		{ID: genID(), UserID: "u-global", Symbol: "600519.SH", SymbolName: "贵州茅台", ResultJSON: "{}", MetaJSON: "{}", CreatedAt: base.Add(-2 * time.Minute)},
+		{ID: genID(), UserID: "u-global", Symbol: "000001.SZ", SymbolName: "平安银行", ResultJSON: "{}", MetaJSON: "{}", CreatedAt: base.Add(-3 * time.Minute)},
+		{ID: genID(), UserID: "other-user", Symbol: "09988.HK", SymbolName: "阿里巴巴", ResultJSON: "{}", MetaJSON: "{}", CreatedAt: base},
+	}
+	for _, item := range items {
+		copy := item
+		if err := repo.Create(ctx, &copy); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+	}
+
+	page1, total, err := repo.ListByUser(ctx, "u-global", 2, 0)
+	if err != nil {
+		t.Fatalf("page1: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("total = %d", total)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("page1 len = %d", len(page1))
+	}
+	if page1[0].Symbol != "00700.HK" || page1[1].Symbol != "600519.SH" {
+		t.Fatalf("unexpected page1 order: %s, %s", page1[0].Symbol, page1[1].Symbol)
+	}
+
+	page2, _, err := repo.ListByUser(ctx, "u-global", 2, 2)
+	if err != nil {
+		t.Fatalf("page2: %v", err)
+	}
+	if len(page2) != 1 || page2[0].Symbol != "000001.SZ" {
+		t.Fatalf("unexpected page2 payload: %+v", page2)
+	}
+}
+
 func TestGetLatestBySymbol(t *testing.T) {
 	repo, cleanup := setupTestDB(t)
 	defer cleanup()

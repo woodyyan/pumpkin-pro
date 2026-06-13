@@ -1787,6 +1787,65 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 // GET    /api/live/symbols/{symbol}/analysis-history              → 列表
 // GET    /api/live/symbols/{symbol}/analysis-history?id=xxx        → 单条详情（含完整 analysis 内容）
 // DELETE /api/live/symbols/{symbol}/analysis-history?id=xxx        → 删除单条
+func (a *appServer) handleGlobalAIAnalysisHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	if strings.TrimSpace(userID) == "" {
+		writeError(w, http.StatusUnauthorized, "请先登录")
+		return
+	}
+
+	page := parseLimit(r.URL.Query().Get("page"), 1)
+	if page < 1 {
+		page = 1
+	}
+	pageSize := parseLimit(r.URL.Query().Get("page_size"), 10)
+	if pageSize > 20 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	records, total, err := a.analysisHistoryRepo.ListByUser(r.Context(), userID, pageSize, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "查询分析历史失败")
+		return
+	}
+
+	groupedBySymbol := make(map[string][]analysis_history.AnalysisHistoryRecord)
+	for _, record := range records {
+		groupedBySymbol[record.Symbol] = append(groupedBySymbol[record.Symbol], record)
+	}
+	performanceByID := make(map[string]*analysis_history.HistorySignalPerformance, len(records))
+	qualityByID := make(map[string]*analysis_history.HistoryQualityValidation, len(records))
+	for sym, group := range groupedBySymbol {
+		perf, quality := a.buildAnalysisHistoryMetrics(r.Context(), sym, group)
+		for id, item := range perf {
+			performanceByID[id] = item
+		}
+		for id, item := range quality {
+			qualityByID[id] = item
+		}
+	}
+
+	items := make([]analysis_history.HistoryListItem, 0, len(records))
+	for _, rec := range records {
+		item := rec.ToListItem()
+		item.SignalPerformance = performanceByID[rec.ID]
+		item.QualityValidation = qualityByID[rec.ID].SummaryOnly()
+		items = append(items, item)
+	}
+
+	writeLiveJSON(w, http.StatusOK, map[string]any{
+		"items":     items,
+		"page":      page,
+		"page_size": pageSize,
+		"total":     total,
+	})
+}
+
 func (a *appServer) handleAnalysisHistorySubroutes(w http.ResponseWriter, r *http.Request, symbol string) {
 	userID := currentUserID(r)
 	if userID == "" {
@@ -3955,6 +4014,7 @@ func main() {
 	mux.HandleFunc("/api/quadrant/ranking-portfolio", server.handleQuadrantRankingPortfolio)
 
 	mux.HandleFunc("/api/search", server.withOptionalAuth(server.handleSearchStocks))
+	mux.HandleFunc("/api/ai-analysis/history", server.withRequiredAuth(server.handleGlobalAIAnalysisHistory))
 
 	mux.HandleFunc("/api/admin/quadrant-logs", server.withSuperAdminAuth(server.handleAdminQuadrantLogs))
 	mux.HandleFunc("/api/admin/quadrant-overview", server.withSuperAdminAuth(server.handleAdminQuadrantOverview))

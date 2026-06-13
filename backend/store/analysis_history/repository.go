@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -47,6 +48,29 @@ func (r *Repository) ListBySymbol(ctx context.Context, userID, symbol string, li
 		Limit(limit).
 		Find(&records).Error
 	return records, err
+}
+
+// ListByUser 获取用户的全局分析历史（按 created_at 倒序分页）
+func (r *Repository) ListByUser(ctx context.Context, userID string, limit, offset int) ([]AnalysisHistoryRecord, int64, error) {
+	if strings.TrimSpace(userID) == "" {
+		return []AnalysisHistoryRecord{}, 0, nil
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := r.db.WithContext(ctx).Model(&AnalysisHistoryRecord{}).Where("user_id = ?", userID)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var records []AnalysisHistoryRecord
+	err := query.Order("created_at DESC").Limit(limit).Offset(offset).Find(&records).Error
+	return records, total, err
 }
 
 // GetLatestBySymbol 获取某用户在某股票的最新一条分析

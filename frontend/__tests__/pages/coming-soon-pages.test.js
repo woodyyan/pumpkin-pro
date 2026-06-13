@@ -6,14 +6,13 @@ import { readFileSync } from 'node:fs'
 const requireFromCwd = createRequire(process.cwd() + '/')
 const { parse } = requireFromCwd('next/dist/compiled/babel/parser')
 
-const pageCases = [
-  { relativePath: '../../pages/ai/analysis.js', title: 'AI分析' },
+const placeholderPageCases = [
   { relativePath: '../../pages/ai/picker.js', title: 'AI选股' },
   { relativePath: '../../pages/ai/backtest.js', title: 'AI回测' },
 ]
 
 describe('coming soon placeholder pages', () => {
-  for (const pageCase of pageCases) {
+  for (const pageCase of placeholderPageCases) {
     it(`keeps ${pageCase.title} as a minimal placeholder page`, () => {
       const pageSource = readFileSync(new URL(pageCase.relativePath, import.meta.url), 'utf8')
 
@@ -22,6 +21,16 @@ describe('coming soon placeholder pages', () => {
       assert.match(pageSource, new RegExp(`title=\"${pageCase.title}\"`))
     })
   }
+
+  it('renders AI analysis as a real page instead of a placeholder', () => {
+    const pageSource = readFileSync(new URL('../../pages/ai/analysis.js', import.meta.url), 'utf8')
+
+    assert.doesNotThrow(() => parse(pageSource, { sourceType: 'module', plugins: ['jsx'] }))
+    assert.doesNotMatch(pageSource, /ComingSoonPage/)
+    assert.match(pageSource, /AIAnalysisEntryForm/)
+    assert.match(pageSource, /GlobalAIAnalysisHistorySection/)
+    assert.match(pageSource, /AIAnalysisCapabilityCards/)
+  })
 
   it('renders the shared placeholder copy', () => {
     const componentSource = readFileSync(new URL('../../components/ComingSoonPage.js', import.meta.url), 'utf8')

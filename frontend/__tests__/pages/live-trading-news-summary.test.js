@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const pageSource = readFileSync(new URL('../../pages/live-trading/[symbol].js', import.meta.url), 'utf8')
+const helpersSource = readFileSync(new URL('../../lib/ai-analysis-helpers.js', import.meta.url), 'utf8')
+const workspaceSource = readFileSync(new URL('../../components/AIAnalysisWorkspace.js', import.meta.url), 'utf8')
 
 describe('live trading news summary integration', () => {
   it('renders the news summary card near the top of the detail page', () => {
@@ -19,18 +21,20 @@ describe('live trading news summary integration', () => {
 
   it('loads summary and panel data through dedicated endpoints', () => {
     assert.match(pageSource, /\/news\/summary/)
-    assert.match(pageSource, /\/news\?limit=8/)
+    assert.match(pageSource, /\?limit=24/)
+    assert.match(helpersSource, /\/news\?limit=8/)
     assert.match(pageSource, /NEWS_SUMMARY_REFRESH_MS = 10 \* 60 \* 1000/)
   })
 
-  it('passes news_context into AI analysis payload', () => {
-    assert.match(pageSource, /buildAINewsContext/)
-    assert.match(pageSource, /news_context: newsPayload/)
+  it('passes news_context into AI analysis payload through the shared helper', () => {
+    assert.match(helpersSource, /buildAINewsContext/)
+    assert.match(helpersSource, /news_context: newsContext\.payload/)
+    assert.match(pageSource, /fetchNewsContext: fetchAIAnalysisNewsContext/)
   })
 
-  it('surfaces news loading state inside the AI wait panel', () => {
-    assert.match(pageSource, /aiNewsContextState/)
-    assert.match(pageSource, /新闻上下文/)
-    assert.match(pageSource, /最近的媒体新闻、公司公告和财报/)
+  it('surfaces news loading state inside the AI wait panel flow', () => {
+    assert.match(pageSource, /newsContextState: 'loading'/)
+    assert.match(workspaceSource, /新闻上下文暂不可用/)
+    assert.match(workspaceSource, /newsState === 'error'/)
   })
 })

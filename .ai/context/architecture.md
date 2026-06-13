@@ -39,7 +39,7 @@ frontend/
 | 路径 | 文件 | 说明 |
 |---|---|---|
 | `/` | `index.js` | 首页/落地页 |
-| `/live-trading` | `live-trading.js` | 市场行情页（导航归属「看板」） |
+| `/live-trading` | `live-trading.js` | 市场行情页（导航归属「看板」）；当前实现为 `Hero + 核心指数卡片 + 扩展指数 + 市场摘要` 的 dashboard，总览 A/H 股指数 |
 | `/live-trading/[symbol]` | `live-trading/[symbol].js` | 个股详情页 (194KB)，active 仍归属「看板 / 市场行情」 |
 | `/ai/analysis` | `ai/analysis.js` | AI分析占位页（一期「敬请期待」） |
 | `/ai/picker` | `ai/picker.js` | AI选股占位页（一期「敬请期待」） |
@@ -62,6 +62,16 @@ frontend/
 - 移动端导航由 `components/MobileNavMenu.js` 渲染：保留汉堡入口，菜单内部按「卧龙AI / 看板 / 跟踪 / 选股 / 更多」分组折叠，一次只展开一个分组。
 - 占位页统一复用 `components/ComingSoonPage.js`，文案固定为标题 + 「敬请期待」，避免散落多个空白实现。
 
+### 页面模式补充（2026-06-13）
+- `frontend/pages/live-trading.js` 已从单行指数文本列表升级为 dashboard 页面，内部自行完成：
+  - 指数标准化：`normalizeIndex(...)`
+  - 页面分组：`buildMarketState(...)`
+  - 市场摘要：`buildMarketInsights(...)`
+  - 占位趋势图：`buildTrendSeries(...)`
+- 趋势图组件继续复用 `frontend/components/MiniChart.js`，当前仅用于表达“近几次观察点的方向感”，不是专业分时图。
+- `/api/live/market/overview` 尚未提供真实指数趋势数据，因此页面暂用前端推导的 7 点占位序列支撑卡片视觉；后续若后端补齐真实序列，应直接替换 `buildTrendSeries(...)` 的输入来源。
+- 页面首屏核心指数固定为 6 张：上证指数、深证成指、创业板指、恒生指数、恒生中国企业指数、恒生科技指数；扩展指数预留沪深300、科创50、上证50、中证500。
+
 ### 关键组件
 - `ThemeToggle.js`: 主题切换按钮（三态：浅色/深色/跟随系统）
 - `NavSearchBox.js`: 导航栏股票搜索
@@ -73,6 +83,7 @@ frontend/
 - `RankingPanel.js` / `RankingPortfolioPanel.js`: 排行榜
 - `PortfolioAttributionSection.js`: 持仓归因分析
 - `AIAnalysisReportContent.js`: AI分析报告内容
+- `MiniChart.js`: 轻量 canvas 迷你图，目前已复用于 admin 面板和市场行情页卡片
 
 ## 后端持仓快照架构补充（2026-06-02）
 

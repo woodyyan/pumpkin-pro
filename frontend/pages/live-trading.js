@@ -1,13 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import Head from 'next/head'
 import Link from 'next/link'
+import MiniChart from '../components/MiniChart'
 import { requestJson } from '../lib/api'
+import {
+  buildMarketState,
+  formatNumber,
+  formatPercent,
+  formatSignedNumber,
+  formatTime,
+} from '../lib/live-trading-market'
 
 export default function LiveTradingOverviewPage() {
   const [marketOverviewA, setMarketOverviewA] = useState(null)
   const [marketOverviewHK, setMarketOverviewHK] = useState(null)
   const [hasLoaded, setHasLoaded] = useState(false)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -22,6 +31,7 @@ export default function LiveTradingOverviewPage() {
         if (cancelled) return
         if (aRes.status === 'fulfilled') setMarketOverviewA(aRes.value)
         if (hkRes.status === 'fulfilled') setMarketOverviewHK(hkRes.value)
+        setLastUpdatedAt(new Date())
         setHasLoaded(true)
       } catch {
         if (!cancelled) {
@@ -41,7 +51,7 @@ export default function LiveTradingOverviewPage() {
     }
   }, [])
 
-  const indexes = [...(marketOverviewA?.indexes || []), ...(marketOverviewHK?.indexes || [])]
+  const marketState = useMemo(() => buildMarketState(marketOverviewA, marketOverviewHK), [marketOverviewA, marketOverviewHK])
 
   return (
     <div className="space-y-6">
@@ -51,41 +61,96 @@ export default function LiveTradingOverviewPage() {
         <link rel="canonical" href="https://wolongtrader.top/live-trading" />
       </Head>
 
-      <section className="rounded-2xl border border-border bg-card px-5 py-5">
-        <div className="max-w-3xl">
-          <div className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-dim">Market</div>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground md:text-3xl">市场行情</h1>
-          <p className="mt-2 text-sm leading-6 text-foreground-muted">
-            这里专注展示大盘指数。关注股票、实时卡片和进入个股详情的入口已迁移到自选股页面。
-          </p>
-          <div className="mt-4 flex flex-wrap gap-3 text-sm">
-            <Link href="/watchlist" className="inline-flex items-center rounded-xl bg-primary px-4 py-2 font-medium text-black transition hover:opacity-90">
-              去自选股
-            </Link>
-            <Link href="/quadrant" className="inline-flex items-center rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-2 font-medium text-foreground transition hover:border-primary/40 hover:text-primary">
-              看四象限
-            </Link>
+      <section className="overflow-hidden rounded-3xl border border-border bg-card px-5 py-5 md:px-6 md:py-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-3xl">
+            <div className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-dim">Market</div>
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground md:text-3xl">市场行情</h1>
+            <p className="mt-2 text-sm leading-6 text-foreground-muted">
+              这里专注展示大盘指数。关注股票、实时卡片和进入个股详情的入口已迁移到自选股页面。
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3 text-sm">
+              <Link href="/watchlist" className="inline-flex items-center rounded-xl bg-primary px-4 py-2 font-medium text-black transition hover:opacity-90">
+                去自选股
+              </Link>
+              <Link href="/quadrant" className="inline-flex items-center rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-2 font-medium text-foreground transition hover:border-primary/40 hover:text-primary">
+                看四象限
+              </Link>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[420px] lg:max-w-[540px] lg:flex-1">
+            {marketState.heroStats.map((item) => (
+              <div key={item.label} className="rounded-2xl border border-border/80 bg-[var(--color-bg-hover)] px-4 py-4">
+                <div className="text-xs font-medium uppercase tracking-[0.14em] text-foreground-dim">{item.label}</div>
+                <div className="mt-2 text-lg font-semibold text-foreground">{item.value}</div>
+                <div className="mt-1 text-xs leading-5 text-foreground-muted">{item.description}</div>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      <section className="rounded-2xl border border-border bg-card px-5 py-4">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-          <span className="text-xs font-medium text-foreground-dim">大盘</span>
-          {indexes.map((index) => (
-            <div key={index.code} className="flex items-baseline gap-1.5">
-              <span className="text-xs text-foreground-dim">{formatMarketIndexTitle(index.name, index.code)}</span>
-              <span className="text-sm font-semibold tabular-nums text-foreground">{formatNumber(index.last, 2)}</span>
-              <span className={`text-xs font-medium tabular-nums ${index.change_rate >= 0 ? 'text-negative' : 'text-positive'}`}>
-                {formatPercent(index.change_rate)}
-              </span>
-            </div>
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="text-xs font-medium uppercase tracking-[0.16em] text-foreground-dim">Core Indexes</div>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">核心指数卡片</h2>
+            <p className="mt-1 text-sm text-foreground-muted">首屏保留 A 股与港股各自最重要的宽基与科技主线，适合快速看方向。</p>
+          </div>
+          <div className="text-xs text-foreground-dim">
+            {lastUpdatedAt ? `最近刷新 ${formatTime(lastUpdatedAt)}` : !hasLoaded ? '加载中...' : '等待行情刷新'}
+          </div>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {marketState.coreIndexes.map((index) => (
+            <MarketIndexCard key={index.code} index={index} />
           ))}
-          {!hasLoaded && indexes.length === 0 && (
-            <span className="text-xs text-foreground-dim animate-pulse">加载中...</span>
-          )}
-          {hasLoaded && indexes.length === 0 && (
-            <span className="text-xs text-foreground-dim">暂未获取到指数行情，请稍后重试。</span>
+          {!hasLoaded && marketState.coreIndexes.length === 0 && Array.from({ length: 6 }).map((_, idx) => <MarketCardSkeleton key={idx} />)}
+        </div>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)]">
+        <div className="space-y-4 rounded-3xl border border-border bg-card px-5 py-5">
+          <div>
+            <div className="text-xs font-medium uppercase tracking-[0.16em] text-foreground-dim">Style Radar</div>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">扩展指数观察</h2>
+            <p className="mt-1 text-sm text-foreground-muted">补充大小盘、硬科技与权重风格，避免首页只剩宽基列表。</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {marketState.secondaryIndexes.map((index) => (
+              <CompactIndexCard key={index.code} index={index} />
+            ))}
+            {marketState.secondaryIndexes.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-border px-4 py-5 text-sm text-foreground-dim">
+                当前数据源暂未提供更多扩展指数，可优先补充沪深300、科创50、上证50、中证500。
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-4 rounded-3xl border border-border bg-card px-5 py-5">
+          <div>
+            <div className="text-xs font-medium uppercase tracking-[0.16em] text-foreground-dim">Market Insights</div>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">市场观察摘要</h2>
+            <p className="mt-1 text-sm text-foreground-muted">用少量文字解释今天的指数强弱分布，而不是只堆行情数值。</p>
+          </div>
+          <div className="space-y-3">
+            {marketState.insights.map((item) => (
+              <div key={item.title} className="rounded-2xl border border-border/80 bg-[var(--color-bg-hover)] px-4 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-medium text-foreground">{item.title}</div>
+                  <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-medium ${item.accentClass}`}>
+                    {item.tag}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-foreground-muted">{item.description}</p>
+              </div>
+            ))}
+          </div>
+          {hasLoaded && marketState.coreIndexes.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-border px-4 py-5 text-sm text-foreground-dim">
+              暂未获取到指数行情，请稍后重试。
+            </div>
           )}
         </div>
       </section>
@@ -93,34 +158,69 @@ export default function LiveTradingOverviewPage() {
   )
 }
 
-function formatPercent(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
-  const num = Number(value) * 100
-  const sign = num > 0 ? '+' : ''
-  return `${sign}${num.toFixed(2)}%`
+function MarketIndexCard({ index }) {
+  const accentClass = index.changeRate >= 0 ? 'text-negative' : 'text-positive'
+  const chartColor = index.changeRate >= 0 ? '#ef4444' : '#22c55e'
+  const chartAreaColor = index.changeRate >= 0 ? 'rgba(239,68,68,0.16)' : 'rgba(34,197,94,0.16)'
+
+  return (
+    <article className="overflow-hidden rounded-3xl border border-border bg-card px-5 py-5 shadow-[0_10px_30px_rgba(15,23,42,0.08)]">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-base font-semibold text-foreground">{index.title}</span>
+            <span className="inline-flex rounded-full border border-border px-2 py-0.5 text-[11px] text-foreground-dim">{index.market}</span>
+          </div>
+          <div className="mt-1 text-xs text-foreground-muted">{index.description}</div>
+        </div>
+        <span className="rounded-full bg-[var(--color-bg-hover)] px-2.5 py-1 text-[11px] font-medium text-foreground-dim">{index.importance}</span>
+      </div>
+
+      <div className="mt-5 flex items-end justify-between gap-3">
+        <div>
+          <div className="text-2xl font-semibold tabular-nums text-foreground">{formatNumber(index.last, 2)}</div>
+          <div className={`mt-1 text-sm font-medium tabular-nums ${accentClass}`}>{formatPercent(index.changeRate)}</div>
+        </div>
+        <div className={`text-right text-xs tabular-nums ${accentClass}`}>
+          <div>{formatSignedNumber(index.changeAmount, 2)}</div>
+          <div className="mt-1 text-foreground-dim">{index.pointLabel}</div>
+        </div>
+      </div>
+
+      <div className="mt-4 overflow-hidden rounded-2xl border border-border/70 bg-[var(--color-bg-hover)] px-3 py-3">
+        <MiniChart
+          data={index.trend}
+          label="近7个观察点"
+          width={320}
+          height={120}
+          color={chartColor}
+          areaColor={chartAreaColor}
+        />
+      </div>
+    </article>
+  )
 }
 
-function formatNumber(value, digits = 2) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
-  return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: digits, minimumFractionDigits: digits })
+function CompactIndexCard({ index }) {
+  const accentClass = index.changeRate >= 0 ? 'text-negative' : 'text-positive'
+
+  return (
+    <article className="rounded-2xl border border-border/80 bg-[var(--color-bg-hover)] px-4 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-foreground">{index.title}</div>
+          <div className="mt-1 text-xs text-foreground-muted">{index.description}</div>
+        </div>
+        <span className="inline-flex rounded-full border border-border px-2 py-0.5 text-[11px] text-foreground-dim">{index.market}</span>
+      </div>
+      <div className="mt-3 flex items-end justify-between gap-3">
+        <div className="text-lg font-semibold tabular-nums text-foreground">{formatNumber(index.last, 2)}</div>
+        <div className={`text-sm font-medium tabular-nums ${accentClass}`}>{formatPercent(index.changeRate)}</div>
+      </div>
+    </article>
+  )
 }
 
-function formatMarketIndexTitle(name, code) {
-  const rawName = String(name || '').trim()
-  const upperCode = String(code || '').trim().toUpperCase()
-  const nameMap = {
-    'Hang Seng Index': '恒生指数',
-    'Hang Seng China Enterprises Index': '恒生中国企业指数',
-    'Hang Seng TECH Index': '恒生科技指数',
-  }
-  if (nameMap[rawName]) return nameMap[rawName]
-  const codeMap = {
-    HSI: '恒生指数',
-    HSCEI: '恒生中国企业指数',
-    HSTECH: '恒生科技指数',
-    '000001': '上证指数',
-    '399001': '深证成指',
-    '399006': '创业板指',
-  }
-  return codeMap[upperCode] || rawName || upperCode || '--'
+function MarketCardSkeleton() {
+  return <div className="h-[250px] animate-pulse rounded-3xl border border-border bg-card" />
 }

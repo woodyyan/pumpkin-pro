@@ -42,7 +42,7 @@ describe('live-trading page syntax', () => {
 
   it('points users to watchlist for stock-level actions', () => {
     assert.ok(pageSource.includes('Link href="/watchlist"'))
-    assert.ok(pageSource.includes('个股关注与实时卡片已迁移到自选股页面'))
+    assert.ok(pageSource.includes('去自选股'))
     assert.ok(pageSource.includes('canonical" href="https://wolongtrader.top/live-trading"'))
   })
 
@@ -51,7 +51,7 @@ describe('live-trading page syntax', () => {
     assert.ok(!pageSource.includes('主图查看'))
     assert.ok(!pageSource.includes('FocusIndexPanel'))
     assert.ok(!pageSource.includes('onClick={() => onActivate(index.code)}'))
-    assert.ok(pageSource.includes('真实趋势'))
+    assert.ok(!pageSource.includes('真实趋势'))
     assert.ok(!pageSource.includes('占位趋势'))
   })
 

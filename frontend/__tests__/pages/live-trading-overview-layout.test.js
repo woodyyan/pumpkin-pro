@@ -5,8 +5,17 @@ import { readFileSync } from 'node:fs'
 const pageSource = readFileSync(new URL('../../pages/live-trading.js', import.meta.url), 'utf8')
 
 describe('live trading overview layout', () => {
-  it('keeps the core index cards section', () => {
+  it('keeps the core index cards section and removes extra helper copy', () => {
     assert.match(pageSource, /核心指数卡片/)
+    assert.doesNotMatch(pageSource, /展示后端返回的真实指数趋势序列/)
+    assert.doesNotMatch(pageSource, /行情时间/)
+    assert.doesNotMatch(pageSource, /这里专注展示大盘指数/)
+    assert.doesNotMatch(pageSource, /首屏保留 A 股与港股各自最重要的宽基与科技主线/)
+    assert.doesNotMatch(pageSource, /首屏核心 \+ 扩展风格指数一并观察/)
+    assert.doesNotMatch(pageSource, /用于快速判断市场广度/)
+    assert.doesNotMatch(pageSource, /用少量文字解释今天的指数强弱分布/)
+    assert.doesNotMatch(pageSource, /真实趋势/)
+    assert.doesNotMatch(pageSource, / 点/)
   })
 
   it('removes the focus chart module', () => {

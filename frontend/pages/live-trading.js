@@ -9,14 +9,12 @@ import {
   formatNumber,
   formatPercent,
   formatSignedNumber,
-  formatTime,
 } from '../lib/live-trading-market'
 
 export default function LiveTradingOverviewPage() {
   const [marketOverviewA, setMarketOverviewA] = useState(null)
   const [marketOverviewHK, setMarketOverviewHK] = useState(null)
   const [hasLoaded, setHasLoaded] = useState(false)
-  const [lastUpdatedAt, setLastUpdatedAt] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -31,7 +29,6 @@ export default function LiveTradingOverviewPage() {
         if (cancelled) return
         if (aRes.status === 'fulfilled') setMarketOverviewA(aRes.value)
         if (hkRes.status === 'fulfilled') setMarketOverviewHK(hkRes.value)
-        setLastUpdatedAt(new Date())
         setHasLoaded(true)
       } catch {
         if (!cancelled) {
@@ -66,13 +63,6 @@ export default function LiveTradingOverviewPage() {
           <div className="max-w-3xl">
             <div className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-dim">Market</div>
             <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground md:text-3xl">市场行情</h1>
-            <p className="mt-2 text-sm leading-6 text-foreground-muted">
-              这里专注展示大盘指数。关注股票、实时卡片和进入个股详情的入口已迁移到自选股页面。
-            </p>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-foreground-dim">
-              <span className="inline-flex rounded-full border border-border px-2.5 py-1">{marketState.trendSummary || '展示后端返回的真实指数趋势序列'}</span>
-              {marketState.updatedAt ? <span>行情时间 {formatTime(marketState.updatedAt)}</span> : null}
-            </div>
             <div className="mt-4 flex flex-wrap gap-3 text-sm">
               <Link href="/watchlist" className="inline-flex items-center rounded-xl bg-primary px-4 py-2 font-medium text-black transition hover:opacity-90">
                 去自选股
@@ -87,7 +77,6 @@ export default function LiveTradingOverviewPage() {
               <div key={item.label} className="rounded-2xl border border-border/80 bg-[var(--color-bg-hover)] px-4 py-4">
                 <div className="text-xs font-medium uppercase tracking-[0.14em] text-foreground-dim">{item.label}</div>
                 <div className="mt-2 text-lg font-semibold text-foreground">{item.value}</div>
-                <div className="mt-1 text-xs leading-5 text-foreground-muted">{item.description}</div>
               </div>
             ))}
           </div>
@@ -99,10 +88,6 @@ export default function LiveTradingOverviewPage() {
           <div>
             <div className="text-xs font-medium uppercase tracking-[0.16em] text-foreground-dim">Core Indexes</div>
             <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">核心指数卡片</h2>
-            <p className="mt-1 text-sm text-foreground-muted">首屏保留 A 股与港股各自最重要的宽基与科技主线，直接展示关键指数卡片。</p>
-          </div>
-          <div className="text-xs text-foreground-dim">
-            {lastUpdatedAt ? `最近刷新 ${formatTime(lastUpdatedAt)}` : !hasLoaded ? '加载中...' : '等待行情刷新'}
           </div>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -117,7 +102,6 @@ export default function LiveTradingOverviewPage() {
         <div>
           <div className="text-xs font-medium uppercase tracking-[0.16em] text-foreground-dim">Market Insights</div>
           <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">市场观察摘要</h2>
-          <p className="mt-1 text-sm text-foreground-muted">用少量文字解释今天的指数强弱分布，而不是只堆行情数值。</p>
         </div>
         <div className="grid gap-3 lg:grid-cols-3">
           {marketState.insights.map((item) => (
@@ -183,10 +167,6 @@ function MarketIndexCard({ index }) {
           color={chartColor}
           areaColor={chartAreaColor}
         />
-      </div>
-      <div className="mt-3 flex items-center justify-between text-xs text-foreground-dim">
-        <span>真实趋势</span>
-        <span>{index.chartMeta?.pointCount || index.trend.length} 点</span>
       </div>
     </article>
   )

@@ -234,7 +234,6 @@ export function AIAnalysisEntryForm({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-foreground">AI 个股分析</h1>
-          <p className="mt-1 text-sm text-foreground-dim">输入股票代码或名称，AI 会给出方向判断、交易建议、执行条件与风险提示。</p>
         </div>
         {selectedTarget ? (
           <div className="rounded-xl border border-primary/20 bg-primary/8 px-3 py-2 text-xs text-primary">
@@ -297,18 +296,18 @@ export function AIAnalysisEntryForm({
             onSubmit()
           }}
           disabled={loading || resolving}
-          className="rounded-2xl bg-primary px-5 py-3 text-sm font-medium text-foreground shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex items-center justify-center gap-1.5 rounded-2xl border border-primary/35 bg-primary/12 px-5 py-3 text-sm font-medium text-primary shadow-sm transition hover:border-primary/55 hover:bg-primary/18 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {loading ? '分析中...' : resolving ? '匹配中...' : 'AI分析'}
+          <span aria-hidden>✨</span>
+          <span>{loading ? '分析中...' : resolving ? '匹配中...' : 'AI分析'}</span>
         </button>
       </div>
       {requireLogin ? (
-        <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-500/8 px-4 py-3 text-sm text-amber-100/90">
+        <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-500/8 px-4 py-3 text-sm text-amber-800 dark:text-amber-100/90">
           需要登录后才能发起 AI 分析和查看个人历史记录。
-          <button type="button" onClick={onLogin} className="ml-2 underline underline-offset-2">去登录</button>
+          <button type="button" onClick={onLogin} className="ml-2 font-medium text-amber-900 underline underline-offset-2 dark:text-inherit">去登录</button>
         </div>
       ) : null}
-      <div className="mt-4 text-xs text-foreground-dim">支持复用右上角搜索接口 `/api/search`，输入股票名称时若命中多个标的，需要先从候选列表中选择。</div>
     </section>
   )
 }

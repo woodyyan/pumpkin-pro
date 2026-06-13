@@ -77,7 +77,7 @@ function getQualityValidationStatusClass(validation) {
     case 'miss':
       return 'text-negative bg-negative/10 border-rose-400/25'
     case 'pending':
-      return 'text-amber-200 bg-amber-500/10 border-amber-400/25'
+      return 'text-amber-800 dark:text-amber-200 bg-amber-500/10 border-amber-400/25'
     default:
       return 'text-foreground-dim bg-[var(--color-bg-hover)] border-border'
   }
@@ -95,7 +95,7 @@ function buildQualityWindowStatusLabel(window) {
 }
 
 function getQualityWindowStatusClass(window) {
-  if (!window?.ready) return 'text-amber-200 bg-amber-500/10 border-amber-400/25'
+  if (!window?.ready) return 'text-amber-800 dark:text-amber-200 bg-amber-500/10 border-amber-400/25'
   if (window.direction_status === 'hit') return 'text-sky-200 bg-sky-500/10 border-sky-400/25'
   if (window.direction_status === 'miss') return 'text-negative bg-negative/10 border-rose-400/25'
   return 'text-foreground-dim bg-[var(--color-bg-hover)] border-border'
@@ -157,12 +157,13 @@ function HistoryQualitySummary({ validation }) {
 
 function HistoryCard({ item, expanded, onToggle, detailLoading, detailData, allowDetail = true, onDelete }) {
   const signalMap = {
-    buy: { label: '看多', arrow: '↑', color: 'text-negative', dot: '🔴', bg: 'bg-red-500/12', border: 'border-red-400/40' },
-    sell: { label: '看空', arrow: '↓', color: 'text-positive', dot: '🟢', bg: 'bg-positive/10', border: 'border-emerald-400/40' },
-    hold: { label: '观望', arrow: '→', color: 'text-amber-300', dot: '🟡', bg: 'bg-amber-500/12', border: 'border-amber-400/40' },
+    buy: { label: '看多', arrow: '↑', color: 'text-negative dark:text-negative', dot: '🔴', bg: 'bg-red-500/12', border: 'border-red-400/40' },
+    sell: { label: '看空', arrow: '↓', color: 'text-positive dark:text-positive', dot: '🟢', bg: 'bg-positive/10', border: 'border-emerald-400/40' },
+    hold: { label: '观望', arrow: '→', color: 'text-amber-700 dark:text-amber-300', dot: '🟡', bg: 'bg-amber-500/12', border: 'border-amber-400/40' },
   }
   const sig = signalMap[item.signal] || signalMap.hold
   const stale = isStale(item.created_at)
+  const symbolNameClass = item.signal === 'hold' ? sig.color : 'text-foreground dark:text-foreground'
   const signalPerformance = (expanded ? detailData?.signal_performance : null) || item.signal_performance || null
   const qualityValidation = (expanded ? detailData?.quality_validation : null) || item.quality_validation || null
   const performanceSummary = buildSignalPerformanceSummary(item.signal, signalPerformance)
@@ -180,7 +181,7 @@ function HistoryCard({ item, expanded, onToggle, detailLoading, detailData, allo
             <span className="shrink-0 text-sm">{sig.dot}</span>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className={`text-sm font-semibold ${sig.color}`}>{item.symbol_name || item.symbol}</span>
+                <span className={`text-sm font-semibold ${symbolNameClass}`}>{item.symbol_name || item.symbol}</span>
                 <span className="font-mono text-[11px] text-foreground-dim">{item.symbol}</span>
                 <span className={`rounded-full border px-2 py-0.5 text-[10px] ${sig.border} ${sig.bg} ${sig.color}`}>{sig.label}</span>
                 <span className="text-[11px] text-foreground-dim">置信度 {item.confidence_score ?? '--'}%</span>

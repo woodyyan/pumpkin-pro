@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 const pageSource = readFileSync(new URL('../../pages/ai/analysis.js', import.meta.url), 'utf8')
 const helperSource = readFileSync(new URL('../../lib/ai-analysis-helpers.js', import.meta.url), 'utf8')
 const historySource = readFileSync(new URL('../../components/AIAnalysisHistorySection.js', import.meta.url), 'utf8')
+const workspaceSource = readFileSync(new URL('../../components/AIAnalysisWorkspace.js', import.meta.url), 'utf8')
 
 describe('/ai/analysis page structure', () => {
   it('uses shared AI analysis workspace and global history section', () => {
@@ -45,5 +46,13 @@ describe('AI analysis history presentation', () => {
     assert.match(historySource, /5 日验证等质量结果/)
     assert.match(historySource, /buildQualityValidationHeadline/)
     assert.match(historySource, /HistoryQualitySummary/)
+  })
+
+  it('uses stronger light-mode colors for login prompt and history badges', () => {
+    assert.match(pageSource, /AIAnalysisEntryForm/)
+    assert.match(workspaceSource, /text-amber-800 dark:text-amber-100\/90/)
+    assert.match(workspaceSource, /text-amber-900 underline underline-offset-2 dark:text-inherit/)
+    assert.match(historySource, /text-amber-700 dark:text-amber-300/)
+    assert.match(historySource, /text-amber-800 dark:text-amber-200 bg-amber-500\/10 border-amber-400\/25/)
   })
 })

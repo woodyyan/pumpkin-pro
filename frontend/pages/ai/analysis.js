@@ -3,7 +3,6 @@ import { useRouter } from 'next/router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useAuth } from '../../lib/auth-context'
-import { fetchSymbolSnapshot, fetchSymbolDailyBars } from '../../lib/portfolio-dashboard'
 import { requestJson } from '../../lib/api'
 import {
   AI_ANALYSIS_GLOBAL_HISTORY_PAGE_SIZE,
@@ -12,6 +11,7 @@ import {
   deriveControllerWaitState,
   fetchAIAnalysisNewsContext,
   fetchGlobalAIAnalysisHistory,
+  loadAIAnalysisDependencies,
   mapAIAnalysisError,
   maybePromptNotification,
   resolveAnalysisTarget,
@@ -142,36 +142,13 @@ export default function AIAnalysisPage() {
   }, [query])
 
   const loadAnalysisDependencies = useCallback(async (target) => {
-    const symbol = target.symbol
-    const [snapshotData, dailyBarsData, fundamentalsData, portfolioRes] = await Promise.all([
-      fetchSymbolSnapshot(symbol),
-      fetchSymbolDailyBars(symbol, 240),
-      requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/fundamentals`).catch(() => null),
-      isLoggedIn ? requestJson(`/api/portfolio/${encodeURIComponent(symbol)}`).catch(() => null) : Promise.resolve(null),
-    ])
-    setSnapshotPayload(snapshotData)
-    setLastUpdateAt(new Date().toISOString())
-    const bars = Array.isArray(dailyBarsData?.bars) ? dailyBarsData.bars : []
-    if (bars.length > 0) {
-      const recent = bars.slice(-60)
-      const closes = recent.map((item) => Number(item.close) || 0).filter((value) => value > 0)
-      const sum = (arr) => arr.reduce((acc, value) => acc + value, 0)
-      const calcMA = (days) => {
-        const subset = closes.slice(-days)
-        return subset.length ? Number((sum(subset) / subset.length).toFixed(3)) : null
-      }
-      setMovingAveragePayload({
-        price_ref: closes.at(-1) || 0,
-        ma5: calcMA(5),
-        ma20: calcMA(20),
-        ma60: calcMA(60),
-        status: 'derived',
-      })
-    } else {
-      setMovingAveragePayload(null)
-    }
-    setFundamentalsItems(fundamentalsData?.items || fundamentalsData?.fundamentals || null)
-    setPortfolioData(portfolioRes?.item || null)
+    const dependencies = await loadAIAnalysisDependencies(target, { isLoggedIn })
+    setSnapshotPayload(dependencies.snapshotPayload)
+    setMovingAveragePayload(dependencies.movingAveragePayload)
+    setFundamentalsItems(dependencies.fundamentalsItems)
+    setPortfolioData(dependencies.portfolioData)
+    setLastUpdateAt(dependencies.lastUpdateAt)
+    return dependencies
   }, [isLoggedIn])
 
   const buildMarketOverview = useCallback(async (exchange) => {
@@ -236,16 +213,16 @@ export default function AIAnalysisPage() {
     })
 
     try {
-      await loadAnalysisDependencies(target)
+      const dependencies = await loadAnalysisDependencies(target)
       const context = await buildAIAnalysisContext({
         symbol: target.symbol,
         symbolName: target.symbolName,
         exchange: target.exchange,
-        snapshotPayload: snapshotPayload || (await fetchSymbolSnapshot(target.symbol)),
-        lastUpdateAt: lastUpdateAt || new Date().toISOString(),
-        movingAveragePayload,
-        fundamentalsItems,
-        portfolioData,
+        snapshotPayload: dependencies.snapshotPayload,
+        lastUpdateAt: dependencies.lastUpdateAt,
+        movingAveragePayload: dependencies.movingAveragePayload,
+        fundamentalsItems: dependencies.fundamentalsItems,
+        portfolioData: dependencies.portfolioData,
         buildMarketOverview,
         fetchNewsContext: fetchAIAnalysisNewsContext,
         formatYiCurrency,
@@ -266,7 +243,7 @@ export default function AIAnalysisPage() {
         return { ...current, analyzing: false, error: mapAIAnalysisError(err), showPanel: true }
       })
     }
-  }, [isLoggedIn, selectedTarget, query, openAuthModal, loadAnalysisDependencies, snapshotPayload, lastUpdateAt, movingAveragePayload, fundamentalsItems, portfolioData, buildMarketOverview, loadHistory, historyPage])
+  }, [isLoggedIn, selectedTarget, query, openAuthModal, loadAnalysisDependencies, buildMarketOverview, loadHistory, historyPage])
 
   return (
     <>

@@ -1,7 +1,8 @@
 import { requestJson } from './api'
 import { isAuthRequiredError } from './auth-storage'
-import { buildAINewsContext } from './symbol-news-ui'
 import { deriveAIAnalysisWaitState } from './ai-analysis-wait'
+import { fetchSymbolDailyBars, fetchSymbolSnapshot } from './portfolio-dashboard'
+import { buildAINewsContext } from './symbol-news-ui'
 
 export const AI_ANALYSIS_MIN_QUERY_LEN = 2
 export const AI_ANALYSIS_SEARCH_LIMIT = 8
@@ -181,6 +182,29 @@ export async function buildAIAnalysisContext({
   }
 }
 
+export function deriveMovingAveragePayloadFromBars(bars = []) {
+  const safeBars = Array.isArray(bars) ? bars : []
+  if (!safeBars.length) return null
+
+  const recent = safeBars.slice(-60)
+  const closes = recent.map((item) => Number(item?.close) || 0).filter((value) => value > 0)
+  if (!closes.length) return null
+
+  const sum = (arr) => arr.reduce((acc, value) => acc + value, 0)
+  const calcMA = (days) => {
+    const subset = closes.slice(-days)
+    return subset.length ? Number((sum(subset) / subset.length).toFixed(3)) : null
+  }
+
+  return {
+    price_ref: closes.at(-1) || 0,
+    ma5: calcMA(5),
+    ma20: calcMA(20),
+    ma60: calcMA(60),
+    status: 'derived',
+  }
+}
+
 export async function fetchAIAnalysisNewsContext(symbol) {
   try {
     const [newsSummaryData, newsListData] = await Promise.all([
@@ -208,6 +232,34 @@ export async function runAIAnalysisRequest({ symbol, payload }) {
 
 export async function fetchGlobalAIAnalysisHistory({ page = 1, pageSize = AI_ANALYSIS_GLOBAL_HISTORY_PAGE_SIZE } = {}) {
   return requestJson(`/api/ai-analysis/history?page=${page}&page_size=${pageSize}`)
+}
+
+export async function loadAIAnalysisDependencies(target, { isLoggedIn = false } = {}) {
+  const symbol = target?.symbol
+  if (!symbol) {
+    throw new Error('缺少股票标识，无法准备分析数据')
+  }
+
+  const [snapshot, dailyBars, fundamentalsData, portfolioRes] = await Promise.all([
+    fetchSymbolSnapshot(symbol),
+    fetchSymbolDailyBars(symbol, 240),
+    requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/fundamentals`).catch(() => null),
+    isLoggedIn ? requestJson(`/api/portfolio/${encodeURIComponent(symbol)}`).catch(() => null) : Promise.resolve(null),
+  ])
+
+  const bars = Array.isArray(dailyBars) ? dailyBars : []
+  const movingAveragePayload = deriveMovingAveragePayloadFromBars(bars)
+  const fundamentalsItems = fundamentalsData?.items || fundamentalsData?.fundamentals || null
+  const portfolioData = portfolioRes?.item || null
+  const lastUpdateAt = new Date().toISOString()
+
+  return {
+    snapshotPayload: snapshot ? { snapshot } : null,
+    movingAveragePayload,
+    fundamentalsItems,
+    portfolioData,
+    lastUpdateAt,
+  }
 }
 
 export async function fetchSymbolAIAnalysisHistory(symbol, { limit = 10 } = {}) {
@@ -240,6 +292,10 @@ export function createAIAnalysisInitialState() {
 
 export function deriveControllerWaitState(state, { hasPosition = false } = {}) {
   return deriveAIAnalysisWaitState(state.waitElapsedSec, { hasPosition, newsState: state.newsContextState })
+}
+
+export function maybePromptNotification() {
+  return typeof window !== 'undefined' && typeof Notification !== 'undefined' && Notification.permission === 'default'
 }
 
 export function mapAIAnalysisError(err) {

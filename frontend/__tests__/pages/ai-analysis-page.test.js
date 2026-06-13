@@ -26,6 +26,14 @@ describe('/ai/analysis page structure', () => {
     assert.match(pageSource, /fetchGlobalAIAnalysisHistory/)
     assert.match(pageSource, /AI_ANALYSIS_GLOBAL_HISTORY_PAGE_SIZE/)
   })
+
+  it('builds AI analysis context from returned dependencies instead of stale page state', () => {
+    assert.match(pageSource, /const dependencies = await loadAnalysisDependencies\(target\)/)
+    assert.match(pageSource, /snapshotPayload: dependencies\.snapshotPayload/)
+    assert.match(pageSource, /movingAveragePayload: dependencies\.movingAveragePayload/)
+    assert.match(pageSource, /fundamentalsItems: dependencies\.fundamentalsItems/)
+    assert.match(pageSource, /portfolioData: dependencies\.portfolioData/)
+  })
 })
 
 describe('shared AI analysis helpers', () => {
@@ -38,6 +46,20 @@ describe('shared AI analysis helpers', () => {
     assert.match(helperSource, /fetchGlobalAIAnalysisHistory/)
     assert.match(helperSource, /\/api\/ai-analysis\/history\?page=/)
   })
+
+  it('exposes shared dependency loading helpers for analysis pages', () => {
+    assert.match(helperSource, /export async function loadAIAnalysisDependencies/)
+    assert.match(helperSource, /fetchSymbolSnapshot\(symbol\)/)
+    assert.match(helperSource, /fetchSymbolDailyBars\(symbol, 240\)/)
+    assert.match(helperSource, /deriveMovingAveragePayloadFromBars\(bars\)/)
+  })
+
+  it('normalizes snapshot and daily bars into the structure expected by the shared context builder', () => {
+    assert.match(helperSource, /const \[snapshot, dailyBars, fundamentalsData, portfolioRes\] = await Promise\.all\(\[/)
+    assert.match(helperSource, /const bars = Array\.isArray\(dailyBars\) \? dailyBars : \[\]/)
+    assert.match(helperSource, /snapshotPayload: snapshot \? \{ snapshot \} : null/)
+    assert.doesNotMatch(helperSource, /dailyBarsData\?\.bars/)
+  })
 })
 
 describe('AI analysis history presentation', () => {
@@ -46,6 +68,15 @@ describe('AI analysis history presentation', () => {
     assert.match(historySource, /5 日验证等质量结果/)
     assert.match(historySource, /buildQualityValidationHeadline/)
     assert.match(historySource, /HistoryQualitySummary/)
+  })
+
+  it('matches the live-trading AI button visual style', () => {
+    assert.match(workspaceSource, /title="AI 综合分析该股票"/)
+    assert.match(workspaceSource, /bg-gradient-to-r from-indigo-500 to-violet-500/)
+    assert.match(workspaceSource, /shadow-\[0_0_16px_rgba\(99,102,241,0\.35\)\]/)
+    assert.match(workspaceSource, /hover:scale-\[1\.03\]/)
+    assert.match(workspaceSource, /animate-ai-glow/)
+    assert.match(workspaceSource, /✨ AI 分析/)
   })
 
   it('uses stronger light-mode colors for login prompt and history badges', () => {

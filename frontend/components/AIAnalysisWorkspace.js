@@ -178,7 +178,7 @@ export function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitSta
           <div key={step.key} className="rounded-xl border border-border bg-card/60 px-3.5 py-3">
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs font-medium text-foreground-muted">{step.label}</span>
-              <span className={`rounded-full px-2 py-0.5 text-[10px] ${step.status === 'done' ? 'bg-sky-500/10 text-sky-200' : step.status === 'active' ? 'bg-primary/15 text-primary' : 'bg-[var(--color-bg-hover)] text-foreground-dim'}`}>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] ${step.status === 'done' ? 'bg-sky-500/10 text-sky-700 dark:text-sky-200' : step.status === 'active' ? 'bg-primary/15 text-primary' : 'bg-[var(--color-bg-hover)] text-foreground-dim'}`}>
                 {step.status === 'done' ? '已完成' : step.status === 'active' ? '处理中' : '待开始'}
               </span>
             </div>
@@ -233,7 +233,7 @@ export function AIAnalysisEntryForm({
     <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">AI 个股分析</h1>
+          <h1 className="text-xl font-semibold text-foreground">AI 股票分析</h1>
         </div>
         {selectedTarget ? (
           <div className="rounded-xl border border-primary/20 bg-primary/8 px-3 py-2 text-xs text-primary">
@@ -296,10 +296,10 @@ export function AIAnalysisEntryForm({
             onSubmit()
           }}
           disabled={loading || resolving}
-          className="inline-flex items-center justify-center gap-1.5 rounded-2xl border border-primary/35 bg-primary/12 px-5 py-3 text-sm font-medium text-primary shadow-sm transition hover:border-primary/55 hover:bg-primary/18 disabled:cursor-not-allowed disabled:opacity-60"
+          title="AI 综合分析该股票"
+          className="inline-flex items-center gap-1.5 self-start rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 px-4 py-2 text-xs font-semibold text-white shadow-[0_0_16px_rgba(99,102,241,0.35)] transition-all duration-300 animate-ai-glow hover:scale-[1.03] hover:shadow-[0_0_24px_rgba(99,102,241,0.5)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:self-auto"
         >
-          <span aria-hidden>✨</span>
-          <span>{loading ? '分析中...' : resolving ? '匹配中...' : 'AI分析'}</span>
+          {loading ? '✨ 分析中...' : resolving ? '✨ 匹配中...' : '✨ AI 分析'}
         </button>
       </div>
       {requireLogin ? (

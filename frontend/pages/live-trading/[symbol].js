@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import InfoTip from '../../components/InfoTip'
 import AIAnalysisReportContent from '../../components/AIAnalysisReportContent'
 import AIAnalysisShareCard from '../../components/AIAnalysisShareCard'
+import { notifyAIAnalysisFinished } from '../../components/AIAnalysisWorkspace'
 import SymbolNewsPanel from '../../components/SymbolNewsPanel'
 import SymbolNewsSummaryCard from '../../components/SymbolNewsSummaryCard'
 import { useTheme } from '../../lib/theme-context'
@@ -771,13 +772,7 @@ export default function LiveTradingDetailPage() {
       if (!result) throw lastErr
 
       setAiResult(result)
-      // 浏览器通知：AI 分析完成
-      sendNotification(NOTIFICATION_CATEGORIES.AI_ANALYSIS, {
-        symbol,
-        symbolName: symbolName || symbol,
-        signal: result?.analysis?.signal,
-        confidenceScore: result?.analysis?.confidence_score,
-      })
+      notifyAIAnalysisFinished({ symbol, symbolName: symbolName || symbol, result })
       // 刷新历史记录（新结果已异步保存到后端）
       loadAnalysisHistory(symbol, { limit: 10 })
     } catch (err) {
@@ -2145,9 +2140,9 @@ export default function LiveTradingDetailPage() {
 
 function AIAnalysisLoadingPanel({ symbolName, symbol, elapsedSec, waitState, referenceItem, newsState, notifPromptVisible, onNotifPromptClose }) {
   const signalToneMap = {
-    buy: 'text-red-200 bg-red-500/10 border-red-400/25',
-    sell: 'text-positive bg-positive/10 border-emerald-400/25',
-    hold: 'text-amber-200 bg-amber-500/10 border-amber-400/25',
+    buy: 'text-red-700 dark:text-red-200 bg-red-500/10 border-red-400/25',
+    sell: 'text-positive dark:text-positive bg-positive/10 border-emerald-400/25',
+    hold: 'text-amber-800 dark:text-amber-200 bg-amber-500/10 border-amber-400/25',
   }
   const referenceSignalLabel = referenceItem?.signal ? getSignalLabel(referenceItem.signal) : ''
   const referenceSignalTone = signalToneMap[referenceItem?.signal] || 'text-foreground-muted bg-[var(--color-bg-hover)] border-border'
@@ -2538,7 +2533,7 @@ function getQualityValidationStatusClass(validation) {
     case 'miss':
       return 'text-negative bg-negative/10 border-rose-400/25'
     case 'pending':
-      return 'text-amber-200 bg-amber-500/10 border-amber-400/25'
+      return 'text-amber-800 dark:text-amber-200 bg-amber-500/10 border-amber-400/25'
     default:
       return 'text-foreground-dim bg-[var(--color-bg-hover)] border-border'
   }
@@ -2556,7 +2551,7 @@ function buildQualityWindowStatusLabel(window) {
 }
 
 function getQualityWindowStatusClass(window) {
-  if (!window?.ready) return 'text-amber-200 bg-amber-500/10 border-amber-400/25'
+  if (!window?.ready) return 'text-amber-800 dark:text-amber-200 bg-amber-500/10 border-amber-400/25'
   if (window.direction_status === 'hit') return 'text-sky-200 bg-sky-500/10 border-sky-400/25'
   if (window.direction_status === 'miss') return 'text-negative bg-negative/10 border-rose-400/25'
   return 'text-foreground-dim bg-[var(--color-bg-hover)] border-border'

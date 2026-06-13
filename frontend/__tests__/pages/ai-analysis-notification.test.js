@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 const symbolPageSource = readFileSync(new URL('../../pages/live-trading/[symbol].js', import.meta.url), 'utf8')
 const workspaceSource = readFileSync(new URL('../../components/AIAnalysisWorkspace.js', import.meta.url), 'utf8')
 const analysisPageSource = readFileSync(new URL('../../pages/ai/analysis.js', import.meta.url), 'utf8')
+const helperSource = readFileSync(new URL('../../lib/ai-analysis-helpers.js', import.meta.url), 'utf8')
 const settingsPageSource = readFileSync(new URL('../../pages/settings.js', import.meta.url), 'utf8')
 
 describe('AI analysis browser notification integration', () => {
@@ -17,16 +18,17 @@ describe('AI analysis browser notification integration', () => {
   })
 
   it('uses shared notification prompt state on both live-trading and AI analysis pages', () => {
-    assert.match(symbolPageSource, /notifPromptVisible: shouldPromptNotification/)
+    assert.match(symbolPageSource, /aiNotifPromptVisible/)
     assert.match(symbolPageSource, /onNotifPromptClose/)
     assert.match(analysisPageSource, /notifPromptVisible: maybePromptNotification\(\)/)
     assert.match(analysisPageSource, /onNotifPromptClose/)
   })
 
   it('checks notification permission through the shared helper before analysis starts', () => {
-    assert.match(symbolPageSource, /const shouldPromptNotification = maybePromptNotification\(\)/)
+    assert.match(symbolPageSource, /getNotificationPermission\(\)/)
     assert.match(analysisPageSource, /if \(maybePromptNotification\(\)\)/)
-    assert.match(workspaceSource, /return getNotificationPermission\(\) === 'default'/)
+    assert.match(helperSource, /export function maybePromptNotification\(\)/)
+    assert.match(helperSource, /Notification\.permission === 'default'/)
   })
 
   it('triggers shared notification dispatch after successful AI analysis', () => {
@@ -130,6 +132,11 @@ describe('settings page webhook channel support', () => {
 })
 
 describe('live-trading AI entry copy and history labeling', () => {
+  it('uses stronger light-mode colors for waiting panel hold and pending badges', () => {
+    assert.match(symbolPageSource, /hold: 'text-amber-800 dark:text-amber-200 bg-amber-500\/10 border-amber-400\/25'/)
+    assert.match(symbolPageSource, /return 'text-amber-800 dark:text-amber-200 bg-amber-500\/10 border-amber-400\/25'/)
+  })
+
   it('renders separate desktop and mobile copy for the AI entry', () => {
     assert.match(symbolPageSource, /AI_ENTRY_COPY_DESKTOP = 'AI 会给出看多\/看空判断、交易建议、执行条件和风险提示'/)
     assert.match(symbolPageSource, /AI_ENTRY_COPY_MOBILE = '看方向、给建议、提条件、控风险'/)
@@ -138,11 +145,9 @@ describe('live-trading AI entry copy and history labeling', () => {
     assert.match(symbolPageSource, /text-\[12px\] leading-5 text-foreground-muted md:hidden/)
   })
 
-  it('renames the history section to AI analysis history with the approved subtitle', () => {
-    assert.match(symbolPageSource, /SymbolAIAnalysisHistorySection/)
-    assert.match(symbolPageSource, /import \{ SymbolAIAnalysisHistorySection, AI_HISTORY_SUBTITLE \} from '\.\.\/\.\.\/components\/AIAnalysisHistorySection'/)
-    const historySectionStart = symbolPageSource.indexOf('<SymbolAIAnalysisHistorySection')
-    assert.notEqual(historySectionStart, -1)
+  it('keeps the approved AI analysis history subtitle on the detail page', () => {
+    assert.match(symbolPageSource, /AI_HISTORY_SUBTITLE = '最近一次观点 \+ 5日验证'/)
+    assert.match(symbolPageSource, /AnalysisHistoryPanel/)
   })
 
   it('uses darker light-mode text colors for AI suggestion and catalysts in history cards', () => {

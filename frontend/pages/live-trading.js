@@ -56,7 +56,7 @@ export default function LiveTradingOverviewPage() {
           <div className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-dim">Market</div>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground md:text-3xl">市场行情</h1>
           <p className="mt-2 text-sm leading-6 text-foreground-muted">
-            这里专注展示大盘指数。关注股票、实时卡片和进入个股详情的入口已迁移到自选股页面，市场页只保留更轻量的指数视图。
+            这里专注展示大盘指数。关注股票、实时卡片和进入个股详情的入口已迁移到自选股页面。
           </p>
           <div className="mt-4 flex flex-wrap gap-3 text-sm">
             <Link href="/watchlist" className="inline-flex items-center rounded-xl bg-primary px-4 py-2 font-medium text-black transition hover:opacity-90">

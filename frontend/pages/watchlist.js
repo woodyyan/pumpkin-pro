@@ -161,12 +161,11 @@ export default function WatchlistPage() {
             <div className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-dim">Watchlist</div>
             <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground md:text-3xl">自选股</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-foreground-muted">
-              这里集中管理你的关注股票。卡片会按 10 秒节奏刷新实时行情，点击任意股票可进入个股详情页继续查看技术指标、AI 分析和信号配置。
+              这里集中管理你的关注股票。点击任意股票可进入个股详情页继续查看技术指标、AI 分析和信号配置。
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs text-foreground-dim">
             <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-3 py-1.5">支持 A 股 / 港股</span>
-            <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-3 py-1.5">10 秒刷新卡片行情</span>
             <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-3 py-1.5">点击进入个股详情</span>
           </div>
         </div>

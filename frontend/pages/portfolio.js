@@ -294,7 +294,7 @@ function EmptyPortfolio() {
       <h3 className="text-base font-medium text-foreground-muted mb-1">暂无持仓数据</h3>
       <p className="text-sm text-foreground-dim max-w-xs">
         在个股详情页添加持仓后，这里会展示你的组合全貌。
-        <Link href="/live-trading" className="text-primary hover:text-primary/80 underline ml-1">去添加 →</Link>
+        <Link href="/watchlist" className="text-primary hover:text-primary/80 underline ml-1">去添加 →</Link>
       </p>
     </div>
   )

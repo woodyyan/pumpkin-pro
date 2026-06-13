@@ -860,7 +860,7 @@ export default function BacktestPage() {
 
         const handleAddWatch = async () => {
           if (!isLoggedIn) {
-            openAuthModal('login', '登录后可关注股票到行情看板。');
+            openAuthModal('login', '登录后可关注股票到自选股。');
             return;
           }
           setAddingWatch(true);

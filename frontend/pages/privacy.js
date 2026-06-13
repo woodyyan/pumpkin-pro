@@ -26,7 +26,7 @@ export default function PrivacyPolicy() {
             <li><strong>账户信息</strong>：注册邮箱、密码（加密存储），用于身份验证与登录。</li>
             <li><strong>投资画像</strong>：账户资金规模、风险偏好、投资目标、投资周期、投资经验、最大可承受回撤，用于个性化分析建议。</li>
             <li><strong>持仓记录</strong>：股票代码、持仓数量、买入均价、买入日期、备注，用于盈亏计算与展示。</li>
-            <li><strong>关注池</strong>：您添加的股票代码及自定义名称，用于行情看板数据展示。</li>
+            <li><strong>关注池</strong>：您添加的股票代码及自定义名称，用于自选股和个股详情展示。</li>
             <li><strong>策略配置</strong>：自建策略的名称、参数、说明，用于信号评估与回测。</li>
             <li><strong>Webhook 配置</strong>：推送地址 URL、签名密钥，用于交易信号投递。</li>
           </ul>

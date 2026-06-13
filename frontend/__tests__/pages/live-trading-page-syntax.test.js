@@ -17,40 +17,23 @@ describe('live-trading page syntax', () => {
     })
   })
 
-  it('keeps quadrant and ranking sections out of live-trading overview', () => {
-    assert.ok(!pageSource.includes('风险机会全景图'))
-    assert.ok(!pageSource.includes('QuadrantSearchBox'))
-    assert.ok(!pageSource.includes('RankingPanel'))
+  it('keeps only market overview data on the page', () => {
+    assert.ok(pageSource.includes("requestJson('/api/live/market/overview?exchange=SSE')"))
+    assert.ok(pageSource.includes("requestJson('/api/live/market/overview')"))
+    assert.ok(!pageSource.includes('/api/live/watchlist'))
+    assert.ok(!pageSource.includes('添加关注股票'))
+    assert.ok(!pageSource.includes('signalConfigMap'))
   })
 
-  it('keeps only market and watchlist on 10-second polling', () => {
-    assert.ok(!pageSource.includes('行情看板概览'))
-    assert.ok(!pageSource.includes('手动刷新'))
-    assert.ok(!pageSource.includes('manualRefreshing'))
-    assert.ok(!pageSource.includes('handleManualRefresh'))
-    assert.ok(pageSource.includes('const refreshRealtimeSections = useCallback(() => {'))
-    assert.ok(pageSource.includes('loadPublicData()'))
-    assert.ok(pageSource.includes('loadPrivateData()'))
+  it('keeps 10-second polling for market indexes', () => {
     assert.ok(pageSource.includes('window.setInterval(() => {'))
-    assert.ok(pageSource.includes('refreshRealtimeSections()'))
+    assert.ok(pageSource.includes('loadMarketOverview()'))
     assert.ok(pageSource.includes('10000'))
-
-    const refreshStart = pageSource.indexOf('const refreshRealtimeSections = useCallback(() => {')
-    assert.notEqual(refreshStart, -1, 'refreshRealtimeSections definition not found')
-
-    const refreshEnd = pageSource.indexOf('}, [privateAccessReady])', refreshStart)
-    assert.notEqual(refreshEnd, -1, 'refreshRealtimeSections closing not found')
-
-    const refreshBody = pageSource.slice(refreshStart, refreshEnd)
-    assert.ok(refreshBody.includes('loadPublicData()'))
-    assert.ok(refreshBody.includes('loadPrivateData()'))
-    assert.ok(!refreshBody.includes('loadRanking('))
-    assert.ok(!refreshBody.includes('loadRankingPortfolio('))
   })
 
-  it('removes the ranking portfolio panel from the live-trading page', () => {
-    assert.doesNotMatch(pageSource, /RankingPortfolioPanel/)
-    assert.doesNotMatch(pageSource, /quadrant\/ranking-portfolio/)
-    assert.doesNotMatch(pageSource, /卧龙AI精选模拟组合/)
+  it('points users to watchlist for stock-level actions', () => {
+    assert.ok(pageSource.includes('Link href="/watchlist"'))
+    assert.ok(pageSource.includes('个股关注与实时卡片已迁移到自选股页面'))
+    assert.ok(pageSource.includes('canonical" href="https://wolongtrader.top/live-trading"'))
   })
 })

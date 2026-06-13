@@ -10,7 +10,6 @@ const pageCases = [
   { relativePath: '../../pages/ai/analysis.js', title: 'AI分析' },
   { relativePath: '../../pages/ai/picker.js', title: 'AI选股' },
   { relativePath: '../../pages/ai/backtest.js', title: 'AI回测' },
-  { relativePath: '../../pages/watchlist.js', title: '自选股' },
 ]
 
 describe('coming soon placeholder pages', () => {
@@ -39,6 +38,15 @@ describe('coming soon placeholder pages', () => {
     assert.match(pageSource, /QuadrantOverviewSection/)
     assert.match(pageSource, /RankingOverviewSection/)
     assert.match(pageSource, /canonical" href="https:\/\/wolongtrader\.top\/quadrant"/)
+  })
+
+  it('renders watchlist as a real page instead of a placeholder', () => {
+    const pageSource = readFileSync(new URL('../../pages/watchlist.js', import.meta.url), 'utf8')
+
+    assert.doesNotThrow(() => parse(pageSource, { sourceType: 'module', plugins: ['jsx'] }))
+    assert.doesNotMatch(pageSource, /ComingSoonPage/)
+    assert.match(pageSource, /添加关注股票/)
+    assert.match(pageSource, /canonical" href="https:\/\/wolongtrader\.top\/watchlist"/)
   })
 
   it('renders portfolio tracking as a real page instead of a placeholder', () => {

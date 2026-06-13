@@ -27,7 +27,7 @@ const INDEX_NAME_CODE_MAP = {
 
 function buildMarketState(marketOverviewA, marketOverviewHK) {
   const indexes = [...(marketOverviewA?.indexes || []), ...(marketOverviewHK?.indexes || [])]
-  const normalizedIndexes = indexes.map(normalizeIndex).filter(Boolean)
+  const normalizedIndexes = indexes.map((index) => normalizeIndex(index, { exchange: inferExchange(index) })).filter(Boolean)
   const byCode = new Map(normalizedIndexes.map((item) => [item.code, item]))
 
   const coreIndexes = CORE_INDEX_CODES.map((code) => byCode.get(code)).filter(Boolean)
@@ -38,6 +38,8 @@ function buildMarketState(marketOverviewA, marketOverviewHK) {
   const strongest = [...normalizedIndexes].sort((a, b) => (b.changeRate || -Infinity) - (a.changeRate || -Infinity))[0]
   const weakest = [...normalizedIndexes].sort((a, b) => (a.changeRate || Infinity) - (b.changeRate || Infinity))[0]
   const total = normalizedIndexes.length
+  const updatedAt = [marketOverviewA?.ts, marketOverviewHK?.ts].filter(Boolean).sort().at(-1) || ''
+  const trendSummary = [marketOverviewA?.trend_summary, marketOverviewHK?.trend_summary].filter(Boolean).join('；')
 
   return {
     heroStats: [
@@ -59,11 +61,13 @@ function buildMarketState(marketOverviewA, marketOverviewHK) {
     ],
     coreIndexes,
     secondaryIndexes,
-    insights: buildMarketInsights({ coreIndexes, secondaryIndexes, strongest, weakest, risingCount, total }),
+    insights: buildMarketInsights({ coreIndexes, secondaryIndexes, strongest, weakest, risingCount, total, trendSummary }),
+    updatedAt,
+    trendSummary,
   }
 }
 
-function buildMarketInsights({ coreIndexes, secondaryIndexes, strongest, weakest, risingCount, total }) {
+function buildMarketInsights({ coreIndexes, secondaryIndexes, strongest, weakest, risingCount, total, trendSummary }) {
   const aCore = coreIndexes.filter((item) => item.market === 'A股')
   const hkCore = coreIndexes.filter((item) => item.market === '港股')
   const aAverage = averageChangeRate(aCore)
@@ -93,14 +97,14 @@ function buildMarketInsights({ coreIndexes, secondaryIndexes, strongest, weakest
       tag: strongest && weakest ? `${strongest.title} ↔ ${weakest.title}` : '等待数据',
       accentClass: 'bg-[var(--color-bg-hover)] text-foreground',
       description:
-        total > 0
-          ? `当前上涨指数 ${risingCount} 个，最强的是 ${strongest?.title || '--'}，最弱的是 ${weakest?.title || '--'}。有助于判断是普涨普跌还是结构分化。`
+        trendSummary || total > 0
+          ? `${trendSummary || `当前上涨指数 ${risingCount} 个`}。最强的是 ${strongest?.title || '--'}，最弱的是 ${weakest?.title || '--'}。有助于判断是普涨普跌还是结构分化。`
           : '暂无可用指数数据，无法生成广度摘要。',
     },
   ]
 }
 
-function normalizeIndex(index) {
+function normalizeIndex(index, options = {}) {
   if (!index || (!index.code && !index.name)) return null
   const rawCode = String(index.code || '').trim().toUpperCase()
   const mappedCode = rawCode || INDEX_NAME_CODE_MAP[String(index.name || '').trim()] || ''
@@ -116,8 +120,9 @@ function normalizeIndex(index) {
 
   const last = toNumber(index.last)
   const changeRate = toNumber(index.change_rate)
-  const changeAmount = toNumber(index.change_amount)
-  const trend = buildTrendSeries(last, changeRate)
+  const changeAmount = pickChangeAmount(index, last, changeRate)
+  const trend = normalizeTrendSeries(index, { last, changeRate, exchange: options.exchange, code: mappedCode })
+  const chartMeta = buildChartMeta(index, trend)
 
   return {
     code: mappedCode,
@@ -131,7 +136,102 @@ function normalizeIndex(index) {
     changeAmount,
     pointLabel: '涨跌点',
     trend,
+    chartMeta,
+    ts: String(index.ts || '').trim(),
   }
+}
+
+function normalizeTrendSeries(index, { last, changeRate, exchange, code }) {
+  const candidates = [index.trend_points, index.trendPoints, index.series, index.chart_data, index.sparkline]
+  for (const candidate of candidates) {
+    const normalized = mapTrendPoints(candidate)
+    if (normalized.length >= 2) {
+      return normalized
+    }
+  }
+
+  if (exchange && code) {
+    const benchmarkSeries = pickBenchmarkSeries(index, exchange, code)
+    const normalized = mapDailyBarsToTrend(benchmarkSeries)
+    if (normalized.length >= 2) {
+      return normalized
+    }
+  }
+
+  return buildTrendSeries(last, changeRate)
+}
+
+function pickBenchmarkSeries(index, exchange, code) {
+  const benchmarks = index.benchmarks && typeof index.benchmarks === 'object' ? index.benchmarks : null
+  if (!benchmarks) return null
+  const normalizedExchange = String(exchange || '').toUpperCase()
+
+  if (normalizedExchange === 'SSE' || normalizedExchange === 'SZSE') {
+    if (code === '000001') return benchmarks.SHCI || benchmarks['000001'] || benchmarks.default || null
+    if (code === '399001') return benchmarks.SZCI || benchmarks['399001'] || benchmarks.default || null
+    if (code === '399006') return benchmarks.CYBZ || benchmarks['399006'] || benchmarks.default || null
+    return benchmarks[code] || benchmarks.default || null
+  }
+
+  if (normalizedExchange === 'HKEX') {
+    return benchmarks[code] || benchmarks.HSI || benchmarks.default || null
+  }
+
+  return null
+}
+
+function buildChartMeta(index, trend) {
+  const points = Array.isArray(trend) ? trend : []
+  const start = points[0]?.count
+  const end = points[points.length - 1]?.count
+  const rangePct = Number.isFinite(start) && start !== 0 && Number.isFinite(end) ? (end - start) / start : null
+  const pointCount = points.length
+  const label = index.trend_points || index.series || index.sparkline ? `真实走势 · ${pointCount} 点` : `近${pointCount}日走势`
+
+  return {
+    label,
+    pointCount,
+    rangePct,
+    hasRealTrend: Boolean(index.trend_points || index.trendPoints || index.series || index.chart_data || index.sparkline),
+  }
+}
+
+function mapTrendPoints(points) {
+  if (!Array.isArray(points)) return []
+  return points
+    .map((point, idx) => {
+      if (Array.isArray(point) && point.length >= 2) {
+        const date = String(point[0] || '').trim() || `point-${idx + 1}`
+        const count = toNumber(point[1])
+        if (!Number.isFinite(count)) return null
+        return { date, count }
+      }
+      if (point && typeof point === 'object') {
+        const date = String(point.date || point.ts || point.label || '').trim() || `point-${idx + 1}`
+        const count = toNumber(point.count ?? point.value ?? point.close ?? point.price ?? point.last)
+        if (!Number.isFinite(count)) return null
+        return { date, count }
+      }
+      const count = toNumber(point)
+      if (!Number.isFinite(count)) return null
+      return { date: `point-${idx + 1}`, count }
+    })
+    .filter(Boolean)
+}
+
+function mapDailyBarsToTrend(bars) {
+  if (!Array.isArray(bars)) return []
+  return bars
+    .map((bar, idx) => {
+      const count = toNumber(bar?.close ?? bar?.Close)
+      if (!Number.isFinite(count)) return null
+      return {
+        date: String(bar?.date || bar?.Date || `day-${idx + 1}`),
+        count,
+      }
+    })
+    .filter(Boolean)
+    .slice(-20)
 }
 
 function buildTrendSeries(last, changeRate) {
@@ -145,6 +245,21 @@ function buildTrendSeries(last, changeRate) {
     date: `2026-06-0${idx + 1}`,
     count: Number((start + (safeLast - start) * ratio).toFixed(2)),
   }))
+}
+
+function pickChangeAmount(index, last, changeRate) {
+  const explicit = toNumber(index.change_amount)
+  if (Number.isFinite(explicit)) return explicit
+  if (!Number.isFinite(last) || !Number.isFinite(changeRate)) return null
+  const prev = changeRate === -1 ? last : last / (1 + changeRate)
+  if (!Number.isFinite(prev)) return null
+  return Number((last - prev).toFixed(2))
+}
+
+function inferExchange(index) {
+  const rawCode = String(index?.code || '').trim().toUpperCase()
+  if (rawCode.startsWith('HS')) return 'HKEX'
+  return 'SSE'
 }
 
 function averageChangeRate(items) {
@@ -178,8 +293,10 @@ function formatSignedNumber(value, digits = 2) {
 }
 
 function formatTime(value) {
-  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return '--'
-  return value.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  if (!value) return '--'
+  const date = value instanceof Date ? value : new Date(value)
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '--'
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 
 function formatMarketIndexTitle(name, code) {
@@ -215,5 +332,10 @@ module.exports = {
   formatPercent,
   formatSignedNumber,
   formatTime,
+  inferExchange,
+  mapDailyBarsToTrend,
+  mapTrendPoints,
   normalizeIndex,
+  normalizeTrendSeries,
+  pickChangeAmount,
 }

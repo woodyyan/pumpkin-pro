@@ -46,10 +46,11 @@ describe('live-trading page syntax', () => {
     assert.ok(pageSource.includes('canonical" href="https://wolongtrader.top/live-trading"'))
   })
 
-  it('renders second-stage focus chart interactions', () => {
-    assert.ok(pageSource.includes('主图查看'))
-    assert.ok(pageSource.includes('FocusIndexPanel'))
-    assert.ok(pageSource.includes('onClick={() => onActivate(index.code)}'))
+  it('renders static core index cards without second-stage modules', () => {
+    assert.ok(pageSource.includes('核心指数卡片'))
+    assert.ok(!pageSource.includes('主图查看'))
+    assert.ok(!pageSource.includes('FocusIndexPanel'))
+    assert.ok(!pageSource.includes('onClick={() => onActivate(index.code)}'))
     assert.ok(pageSource.includes('真实趋势'))
     assert.ok(!pageSource.includes('占位趋势'))
   })

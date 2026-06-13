@@ -17,7 +17,6 @@ export default function LiveTradingOverviewPage() {
   const [marketOverviewHK, setMarketOverviewHK] = useState(null)
   const [hasLoaded, setHasLoaded] = useState(false)
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null)
-  const [activeIndexCode, setActiveIndexCode] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -53,18 +52,6 @@ export default function LiveTradingOverviewPage() {
   }, [])
 
   const marketState = useMemo(() => buildMarketState(marketOverviewA, marketOverviewHK), [marketOverviewA, marketOverviewHK])
-
-  useEffect(() => {
-    if (!activeIndexCode && marketState.coreIndexes.length > 0) {
-      setActiveIndexCode(marketState.coreIndexes[0].code)
-      return
-    }
-    if (activeIndexCode && !marketState.coreIndexes.some((item) => item.code === activeIndexCode)) {
-      setActiveIndexCode(marketState.coreIndexes[0]?.code || '')
-    }
-  }, [activeIndexCode, marketState.coreIndexes])
-
-  const activeIndex = marketState.coreIndexes.find((item) => item.code === activeIndexCode) || marketState.coreIndexes[0] || null
 
   return (
     <div className="space-y-6">
@@ -112,7 +99,7 @@ export default function LiveTradingOverviewPage() {
           <div>
             <div className="text-xs font-medium uppercase tracking-[0.16em] text-foreground-dim">Core Indexes</div>
             <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">核心指数卡片</h2>
-            <p className="mt-1 text-sm text-foreground-muted">首屏保留 A 股与港股各自最重要的宽基与科技主线，支持点击切换主图卡片。</p>
+            <p className="mt-1 text-sm text-foreground-muted">首屏保留 A 股与港股各自最重要的宽基与科技主线，直接展示关键指数卡片。</p>
           </div>
           <div className="text-xs text-foreground-dim">
             {lastUpdatedAt ? `最近刷新 ${formatTime(lastUpdatedAt)}` : !hasLoaded ? '加载中...' : '等待行情刷新'}
@@ -120,41 +107,9 @@ export default function LiveTradingOverviewPage() {
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {marketState.coreIndexes.map((index) => (
-            <MarketIndexCard key={index.code} index={index} active={index.code === activeIndexCode} onActivate={setActiveIndexCode} />
+            <MarketIndexCard key={index.code} index={index} />
           ))}
           {!hasLoaded && marketState.coreIndexes.length === 0 && Array.from({ length: 6 }).map((_, idx) => <MarketCardSkeleton key={idx} />)}
-        </div>
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
-        <div className="space-y-4 rounded-3xl border border-border bg-card px-5 py-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-xs font-medium uppercase tracking-[0.16em] text-foreground-dim">Focus Chart</div>
-              <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">主图查看</h2>
-              <p className="mt-1 text-sm text-foreground-muted">点击上方核心指数卡片后，这里展示更大的走势与状态说明。</p>
-            </div>
-            {activeIndex ? <span className="inline-flex rounded-full border border-border px-2.5 py-1 text-[11px] text-foreground-dim">{activeIndex.chartMeta?.label || '趋势图'}</span> : null}
-          </div>
-          {activeIndex ? <FocusIndexPanel index={activeIndex} /> : <MarketCardSkeleton />}
-        </div>
-
-        <div className="space-y-4 rounded-3xl border border-border bg-card px-5 py-5">
-          <div>
-            <div className="text-xs font-medium uppercase tracking-[0.16em] text-foreground-dim">Style Radar</div>
-            <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">扩展指数观察</h2>
-            <p className="mt-1 text-sm text-foreground-muted">补充大小盘、硬科技与权重风格，避免首页只剩宽基列表。</p>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {marketState.secondaryIndexes.map((index) => (
-              <CompactIndexCard key={index.code} index={index} />
-            ))}
-            {marketState.secondaryIndexes.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-border px-4 py-5 text-sm text-foreground-dim">
-                当前数据源暂未提供更多扩展指数，可优先补充沪深300、科创50、上证50、中证500。
-              </div>
-            )}
-          </div>
         </div>
       </section>
 
@@ -187,16 +142,14 @@ export default function LiveTradingOverviewPage() {
   )
 }
 
-function MarketIndexCard({ index, active, onActivate }) {
+function MarketIndexCard({ index }) {
   const accentClass = index.changeRate >= 0 ? 'text-negative' : 'text-positive'
   const chartColor = index.changeRate >= 0 ? '#ef4444' : '#22c55e'
   const chartAreaColor = index.changeRate >= 0 ? 'rgba(239,68,68,0.16)' : 'rgba(34,197,94,0.16)'
 
   return (
-    <button
-      type="button"
-      onClick={() => onActivate(index.code)}
-      className={`overflow-hidden rounded-3xl border bg-card px-5 py-5 text-left shadow-[0_10px_30px_rgba(15,23,42,0.08)] transition ${active ? 'border-primary ring-1 ring-primary/30' : 'border-border hover:border-primary/40'}`}
+    <article
+      className="overflow-hidden rounded-3xl border border-border bg-card px-5 py-5 text-left shadow-[0_10px_30px_rgba(15,23,42,0.08)] transition hover:border-primary/40"
       title={`${index.title} ${formatPercent(index.changeRate)}`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -235,80 +188,6 @@ function MarketIndexCard({ index, active, onActivate }) {
         <span>真实趋势</span>
         <span>{index.chartMeta?.pointCount || index.trend.length} 点</span>
       </div>
-    </button>
-  )
-}
-
-function FocusIndexPanel({ index }) {
-  const accentClass = index.changeRate >= 0 ? 'text-negative' : 'text-positive'
-  const chartColor = index.changeRate >= 0 ? '#ef4444' : '#22c55e'
-  const chartAreaColor = index.changeRate >= 0 ? 'rgba(239,68,68,0.16)' : 'rgba(34,197,94,0.16)'
-
-  return (
-    <div className="space-y-4 rounded-3xl border border-border/80 bg-[var(--color-bg-hover)] px-4 py-4">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-lg font-semibold text-foreground">{index.title}</h3>
-            <span className="inline-flex rounded-full border border-border px-2 py-0.5 text-[11px] text-foreground-dim">{index.market}</span>
-          </div>
-          <p className="mt-1 text-sm text-foreground-muted">{index.description}</p>
-        </div>
-        <div className="text-right">
-          <div className="text-3xl font-semibold tabular-nums text-foreground">{formatNumber(index.last, 2)}</div>
-          <div className={`mt-1 text-sm font-medium tabular-nums ${accentClass}`}>{formatPercent(index.changeRate)}</div>
-        </div>
-      </div>
-
-      <div className="overflow-hidden rounded-2xl border border-border bg-card px-3 py-3">
-        <MiniChart
-          data={index.trend}
-          label={index.chartMeta?.label || '趋势图'}
-          width={720}
-          height={220}
-          color={chartColor}
-          areaColor={chartAreaColor}
-        />
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-3">
-        <MetricChip label="涨跌点" value={formatSignedNumber(index.changeAmount, 2)} accentClass={accentClass} />
-        <MetricChip label="趋势类型" value="真实趋势" />
-        <MetricChip label="观察点数" value={`${index.chartMeta?.pointCount || index.trend.length} 点`} />
-      </div>
-      <div className="rounded-2xl border border-border bg-card px-4 py-4 text-sm leading-6 text-foreground-muted">
-        当前主图仅展示后端返回的真实指数趋势序列；接口未返回完整序列时，该指数不会进入展示卡片。
-      </div>
-    </div>
-  )
-}
-
-function MetricChip({ label, value, accentClass = 'text-foreground' }) {
-  return (
-    <div className="rounded-2xl border border-border bg-card px-4 py-4">
-      <div className="text-xs font-medium uppercase tracking-[0.12em] text-foreground-dim">{label}</div>
-      <div className={`mt-2 text-base font-semibold ${accentClass}`}>{value}</div>
-    </div>
-  )
-}
-
-function CompactIndexCard({ index }) {
-  const accentClass = index.changeRate >= 0 ? 'text-negative' : 'text-positive'
-
-  return (
-    <article className="rounded-2xl border border-border/80 bg-[var(--color-bg-hover)] px-4 py-4" title={`${index.title} ${formatPercent(index.changeRate)}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-foreground">{index.title}</div>
-          <div className="mt-1 text-xs text-foreground-muted">{index.description}</div>
-        </div>
-        <span className="inline-flex rounded-full border border-border px-2 py-0.5 text-[11px] text-foreground-dim">{index.market}</span>
-      </div>
-      <div className="mt-3 flex items-end justify-between gap-3">
-        <div className="text-lg font-semibold tabular-nums text-foreground">{formatNumber(index.last, 2)}</div>
-        <div className={`text-sm font-medium tabular-nums ${accentClass}`}>{formatPercent(index.changeRate)}</div>
-      </div>
-      <div className="mt-3 text-xs text-foreground-dim">真实趋势可用</div>
     </article>
   )
 }

@@ -308,7 +308,7 @@ func (c *MarketClient) FetchMarketOverview(ctx context.Context, exchange string)
 
 	indexes := make([]IndexSnapshot, 0, len(codes))
 	totalTurnover := 0.0
-	latestTS := time.Now().UTC()
+	latestTS := time.Time{}
 	for _, code := range codes {
 		raw, ok := fields[code]
 		if !ok {
@@ -323,21 +323,39 @@ func (c *MarketClient) FetchMarketOverview(ctx context.Context, exchange string)
 		}
 		totalTurnover += quote.Turnover
 
-		// Derive a short index code for the response.
+		trendPoints, trendErr := c.fetchMarketOverviewTrendPoints(ctx, code)
+		if trendErr != nil {
+			return nil, trendErr
+		}
+		if len(trendPoints) < 2 {
+			return nil, ErrDataSourceDown
+		}
+
 		indexCode := strings.ToUpper(code)
 		indexCode = strings.TrimPrefix(indexCode, "HK")
 		indexCode = strings.TrimPrefix(indexCode, "SH")
 		indexCode = strings.TrimPrefix(indexCode, "SZ")
 
+		changeAmount := 0.0
+		if quote.PrevClose > 0 {
+			changeAmount = quote.Last - quote.PrevClose
+		}
+
 		indexes = append(indexes, IndexSnapshot{
-			Code:       indexCode,
-			Name:       strings.TrimSpace(quote.Name),
-			Last:       quote.Last,
-			ChangeRate: quote.ChangePct / 100,
+			Code:         indexCode,
+			Name:         strings.TrimSpace(quote.Name),
+			Last:         quote.Last,
+			ChangeRate:   quote.ChangePct / 100,
+			ChangeAmount: changeAmount,
+			TS:           quote.TS.UTC().Format(time.RFC3339),
+			TrendPoints:  trendPoints,
 		})
 	}
 	if len(indexes) == 0 {
 		return nil, ErrDataSourceDown
+	}
+	if latestTS.IsZero() {
+		latestTS = time.Now().UTC()
 	}
 
 	return &MarketOverview{
@@ -347,6 +365,44 @@ func (c *MarketClient) FetchMarketOverview(ctx context.Context, exchange string)
 		Advancers:      0,
 		Decliners:      0,
 	}, nil
+}
+
+func (c *MarketClient) fetchMarketOverviewTrendPoints(ctx context.Context, quoteCode string) ([]TrendPoint, error) {
+	benchmarkCode := benchmarkCodeFromQuoteCode(quoteCode)
+	if benchmarkCode == "" {
+		return nil, fmt.Errorf("%w: unsupported market overview code %s", ErrInvalidArgument, quoteCode)
+	}
+	bars, err := c.FetchBenchmarkDailyBars(ctx, benchmarkCode, 20)
+	if err != nil {
+		return nil, err
+	}
+	points := make([]TrendPoint, 0, len(bars))
+	for _, bar := range bars {
+		if strings.TrimSpace(bar.Date) == "" || bar.Close <= 0 {
+			continue
+		}
+		points = append(points, TrendPoint{Date: bar.Date, Count: bar.Close})
+	}
+	return points, nil
+}
+
+func benchmarkCodeFromQuoteCode(quoteCode string) string {
+	switch strings.ToLower(strings.TrimSpace(quoteCode)) {
+	case "sh000001":
+		return "SHCI"
+	case "sz399001":
+		return "SZCI"
+	case "sz399006":
+		return "CYBZ"
+	case "hkhsi":
+		return "HSI"
+	case "hkhscei":
+		return "HSCEI"
+	case "hkhstech":
+		return "HSTECH"
+	default:
+		return ""
+	}
 }
 
 func (c *MarketClient) FetchSymbolDailyBars(ctx context.Context, symbol string, lookbackDays int) ([]DailyBar, error) {

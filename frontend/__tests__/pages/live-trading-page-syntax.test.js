@@ -10,11 +10,9 @@ const pageSource = readFileSync(new URL('../../pages/live-trading.js', import.me
 const {
   buildMarketState,
   inferExchange,
-  mapDailyBarsToTrend,
   mapTrendPoints,
   normalizeIndex,
   normalizeTrendSeries,
-  buildTrendSeries,
   formatMarketIndexTitle,
 } = pageModule
 
@@ -53,6 +51,7 @@ describe('live-trading page syntax', () => {
     assert.ok(pageSource.includes('FocusIndexPanel'))
     assert.ok(pageSource.includes('onClick={() => onActivate(index.code)}'))
     assert.ok(pageSource.includes('真实趋势'))
+    assert.ok(!pageSource.includes('占位趋势'))
   })
 
   it('maps core and secondary market indexes into cards', () => {
@@ -61,20 +60,76 @@ describe('live-trading page syntax', () => {
         ts: '2026-06-13T14:30:00Z',
         trend_summary: 'A股震荡偏强',
         indexes: [
-          { code: '000001', name: '上证指数', last: 3398.12, change_rate: 0.003, change_amount: 10.23 },
-          { code: '399001', name: '深证成指', last: 10223.88, change_rate: -0.002, change_amount: -20.11 },
-          { code: '399006', name: '创业板指', last: 2100.55, change_rate: 0.01, change_amount: 18.6 },
-          { code: '000300', name: '沪深300', last: 4022.18, change_rate: 0.004, change_amount: 15.02 },
-          { code: '000688', name: '科创50', last: 901.11, change_rate: 0.006, change_amount: 5.2 },
+          {
+            code: '000001',
+            name: '上证指数',
+            last: 3398.12,
+            change_rate: 0.003,
+            change_amount: 10.23,
+            trend_points: [['2026-06-10', 3300], ['2026-06-11', 3340], ['2026-06-12', 3398.12]],
+          },
+          {
+            code: '399001',
+            name: '深证成指',
+            last: 10223.88,
+            change_rate: -0.002,
+            change_amount: -20.11,
+            trend_points: [['2026-06-10', 10280], ['2026-06-11', 10260], ['2026-06-12', 10223.88]],
+          },
+          {
+            code: '399006',
+            name: '创业板指',
+            last: 2100.55,
+            change_rate: 0.01,
+            change_amount: 18.6,
+            trend_points: [['2026-06-10', 2060], ['2026-06-11', 2080], ['2026-06-12', 2100.55]],
+          },
+          {
+            code: '000300',
+            name: '沪深300',
+            last: 4022.18,
+            change_rate: 0.004,
+            change_amount: 15.02,
+            trend_points: [['2026-06-10', 3980], ['2026-06-11', 4002], ['2026-06-12', 4022.18]],
+          },
+          {
+            code: '000688',
+            name: '科创50',
+            last: 901.11,
+            change_rate: 0.006,
+            change_amount: 5.2,
+            trend_points: [['2026-06-10', 888], ['2026-06-11', 894], ['2026-06-12', 901.11]],
+          },
         ],
       },
       {
         ts: '2026-06-13T14:31:00Z',
         trend_summary: '港股科技更强',
         indexes: [
-          { code: 'HSI', name: 'Hang Seng Index', last: 18234.45, change_rate: 0.008, change_amount: 120.44 },
-          { code: 'HSCEI', name: 'Hang Seng China Enterprises Index', last: 6455.9, change_rate: 0.005, change_amount: 30.18 },
-          { code: 'HSTECH', name: 'Hang Seng TECH Index', last: 3801.22, change_rate: 0.012, change_amount: 42.98 },
+          {
+            code: 'HSI',
+            name: 'Hang Seng Index',
+            last: 18234.45,
+            change_rate: 0.008,
+            change_amount: 120.44,
+            trend_points: [['2026-06-10', 17980], ['2026-06-11', 18090], ['2026-06-12', 18234.45]],
+          },
+          {
+            code: 'HSCEI',
+            name: 'Hang Seng China Enterprises Index',
+            last: 6455.9,
+            change_rate: 0.005,
+            change_amount: 30.18,
+            trend_points: [['2026-06-10', 6380], ['2026-06-11', 6420], ['2026-06-12', 6455.9]],
+          },
+          {
+            code: 'HSTECH',
+            name: 'Hang Seng TECH Index',
+            last: 3801.22,
+            change_rate: 0.012,
+            change_amount: 42.98,
+            trend_points: [['2026-06-10', 3700], ['2026-06-11', 3750], ['2026-06-12', 3801.22]],
+          },
         ],
       },
     )
@@ -110,23 +165,10 @@ describe('live-trading page syntax', () => {
     assert.equal(item.trend.at(-1).count, 2500.11)
   })
 
-  it('falls back to mapped benchmark daily bars when direct trend data is absent', () => {
-    const trend = normalizeTrendSeries(
-      {
-        benchmarks: {
-          SHCI: [
-            { date: '2026-06-10', close: 3300 },
-            { date: '2026-06-11', close: 3340 },
-            { date: '2026-06-12', close: 3398.12 },
-          ],
-        },
-      },
-      { last: 3398.12, changeRate: 0.003, exchange: 'SSE', code: '000001' },
-    )
+  it('returns empty trend when upstream does not provide real series', () => {
+    const trend = normalizeTrendSeries({ code: '000001', name: '上证指数' })
 
-    assert.equal(trend.length, 3)
-    assert.equal(trend[0].count, 3300)
-    assert.equal(trend.at(-1).count, 3398.12)
+    assert.equal(trend.length, 0)
   })
 
   it('maps generic trend point shapes', () => {
@@ -142,17 +184,6 @@ describe('live-trading page syntax', () => {
     assert.equal(trend[2].count, 14)
   })
 
-  it('maps daily bars into trend points', () => {
-    const trend = mapDailyBarsToTrend([
-      { date: '2026-06-10', close: 10 },
-      { date: '2026-06-11', close: 12 },
-      { date: '2026-06-12', close: 11 },
-    ])
-
-    assert.equal(trend.length, 3)
-    assert.equal(trend[1].count, 12)
-  })
-
   it('infers exchange from index code', () => {
     assert.equal(inferExchange({ code: 'HSI' }), 'HKEX')
     assert.equal(inferExchange({ code: '399001' }), 'SSE')
@@ -165,10 +196,14 @@ describe('live-trading page syntax', () => {
     assert.equal(formatMarketIndexTitle('', '399905'), '中证500')
   })
 
-  it('builds seven-point trend placeholders when upstream lacks chart data', () => {
-    const trend = buildTrendSeries(100, 0.05)
-    assert.equal(trend.length, 7)
-    assert.equal(trend[0].date, '2026-06-01')
-    assert.equal(trend.at(-1).count, 100)
+  it('drops indexes without real trend points', () => {
+    const item = normalizeIndex({
+      code: '000001',
+      name: '上证指数',
+      last: 3398.12,
+      change_rate: 0.003,
+    })
+
+    assert.equal(item, null)
   })
 })

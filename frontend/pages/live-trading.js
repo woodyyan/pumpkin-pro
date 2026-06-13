@@ -83,7 +83,7 @@ export default function LiveTradingOverviewPage() {
               这里专注展示大盘指数。关注股票、实时卡片和进入个股详情的入口已迁移到自选股页面。
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-foreground-dim">
-              <span className="inline-flex rounded-full border border-border px-2.5 py-1">{marketState.trendSummary || '已启用真实趋势优先，缺失时自动回退占位曲线'}</span>
+              <span className="inline-flex rounded-full border border-border px-2.5 py-1">{marketState.trendSummary || '展示后端返回的真实指数趋势序列'}</span>
               {marketState.updatedAt ? <span>行情时间 {formatTime(marketState.updatedAt)}</span> : null}
             </div>
             <div className="mt-4 flex flex-wrap gap-3 text-sm">
@@ -232,7 +232,7 @@ function MarketIndexCard({ index, active, onActivate }) {
         />
       </div>
       <div className="mt-3 flex items-center justify-between text-xs text-foreground-dim">
-        <span>{index.chartMeta?.hasRealTrend ? '真实趋势' : '占位趋势'}</span>
+        <span>真实趋势</span>
         <span>{index.chartMeta?.pointCount || index.trend.length} 点</span>
       </div>
     </button>
@@ -273,11 +273,11 @@ function FocusIndexPanel({ index }) {
 
       <div className="grid gap-3 sm:grid-cols-3">
         <MetricChip label="涨跌点" value={formatSignedNumber(index.changeAmount, 2)} accentClass={accentClass} />
-        <MetricChip label="趋势类型" value={index.chartMeta?.hasRealTrend ? '真实趋势' : '占位趋势'} />
+        <MetricChip label="趋势类型" value="真实趋势" />
         <MetricChip label="观察点数" value={`${index.chartMeta?.pointCount || index.trend.length} 点`} />
       </div>
       <div className="rounded-2xl border border-border bg-card px-4 py-4 text-sm leading-6 text-foreground-muted">
-        当前卡片优先使用接口自带的趋势序列；若接口未提供，则自动回退到基于点位与涨跌幅推导的占位曲线，保证页面始终有趋势感和对比能力。
+        当前主图仅展示后端返回的真实指数趋势序列；接口未返回完整序列时，该指数不会进入展示卡片。
       </div>
     </div>
   )
@@ -308,7 +308,7 @@ function CompactIndexCard({ index }) {
         <div className="text-lg font-semibold tabular-nums text-foreground">{formatNumber(index.last, 2)}</div>
         <div className={`text-sm font-medium tabular-nums ${accentClass}`}>{formatPercent(index.changeRate)}</div>
       </div>
-      <div className="mt-3 text-xs text-foreground-dim">{index.chartMeta?.hasRealTrend ? '真实趋势可用' : '等待真实趋势，当前为占位数据'}</div>
+      <div className="mt-3 text-xs text-foreground-dim">真实趋势可用</div>
     </article>
   )
 }

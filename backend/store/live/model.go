@@ -50,11 +50,19 @@ const (
 	SessionStopped  SessionState = "stopped"
 )
 
+type TrendPoint struct {
+	Date  string  `json:"date"`
+	Count float64 `json:"count"`
+}
+
 type IndexSnapshot struct {
-	Code       string  `json:"code"`
-	Name       string  `json:"name"`
-	Last       float64 `json:"last"`
-	ChangeRate float64 `json:"change_rate"`
+	Code        string       `json:"code"`
+	Name        string       `json:"name"`
+	Last        float64      `json:"last"`
+	ChangeRate  float64      `json:"change_rate"`
+	ChangeAmount float64     `json:"change_amount"`
+	TS          string       `json:"ts"`
+	TrendPoints []TrendPoint `json:"trend_points,omitempty"`
 }
 
 type BenchmarkSnapshot struct {

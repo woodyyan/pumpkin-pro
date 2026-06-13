@@ -27,7 +27,7 @@ const INDEX_NAME_CODE_MAP = {
 
 function buildMarketState(marketOverviewA, marketOverviewHK) {
   const indexes = [...(marketOverviewA?.indexes || []), ...(marketOverviewHK?.indexes || [])]
-  const normalizedIndexes = indexes.map((index) => normalizeIndex(index, { exchange: inferExchange(index) })).filter(Boolean)
+  const normalizedIndexes = indexes.map((index) => normalizeIndex(index)).filter(Boolean)
   const byCode = new Map(normalizedIndexes.map((item) => [item.code, item]))
 
   const coreIndexes = CORE_INDEX_CODES.map((code) => byCode.get(code)).filter(Boolean)
@@ -104,7 +104,7 @@ function buildMarketInsights({ coreIndexes, secondaryIndexes, strongest, weakest
   ]
 }
 
-function normalizeIndex(index, options = {}) {
+function normalizeIndex(index) {
   if (!index || (!index.code && !index.name)) return null
   const rawCode = String(index.code || '').trim().toUpperCase()
   const mappedCode = rawCode || INDEX_NAME_CODE_MAP[String(index.name || '').trim()] || ''
@@ -121,8 +121,9 @@ function normalizeIndex(index, options = {}) {
   const last = toNumber(index.last)
   const changeRate = toNumber(index.change_rate)
   const changeAmount = pickChangeAmount(index, last, changeRate)
-  const trend = normalizeTrendSeries(index, { last, changeRate, exchange: options.exchange, code: mappedCode })
-  const chartMeta = buildChartMeta(index, trend)
+  const trend = normalizeTrendSeries(index)
+  if (trend.length < 2) return null
+  const chartMeta = buildChartMeta(trend)
 
   return {
     code: mappedCode,
@@ -141,7 +142,7 @@ function normalizeIndex(index, options = {}) {
   }
 }
 
-function normalizeTrendSeries(index, { last, changeRate, exchange, code }) {
+function normalizeTrendSeries(index) {
   const candidates = [index.trend_points, index.trendPoints, index.series, index.chart_data, index.sparkline]
   for (const candidate of candidates) {
     const normalized = mapTrendPoints(candidate)
@@ -149,50 +150,21 @@ function normalizeTrendSeries(index, { last, changeRate, exchange, code }) {
       return normalized
     }
   }
-
-  if (exchange && code) {
-    const benchmarkSeries = pickBenchmarkSeries(index, exchange, code)
-    const normalized = mapDailyBarsToTrend(benchmarkSeries)
-    if (normalized.length >= 2) {
-      return normalized
-    }
-  }
-
-  return buildTrendSeries(last, changeRate)
+  return []
 }
 
-function pickBenchmarkSeries(index, exchange, code) {
-  const benchmarks = index.benchmarks && typeof index.benchmarks === 'object' ? index.benchmarks : null
-  if (!benchmarks) return null
-  const normalizedExchange = String(exchange || '').toUpperCase()
-
-  if (normalizedExchange === 'SSE' || normalizedExchange === 'SZSE') {
-    if (code === '000001') return benchmarks.SHCI || benchmarks['000001'] || benchmarks.default || null
-    if (code === '399001') return benchmarks.SZCI || benchmarks['399001'] || benchmarks.default || null
-    if (code === '399006') return benchmarks.CYBZ || benchmarks['399006'] || benchmarks.default || null
-    return benchmarks[code] || benchmarks.default || null
-  }
-
-  if (normalizedExchange === 'HKEX') {
-    return benchmarks[code] || benchmarks.HSI || benchmarks.default || null
-  }
-
-  return null
-}
-
-function buildChartMeta(index, trend) {
+function buildChartMeta(trend) {
   const points = Array.isArray(trend) ? trend : []
   const start = points[0]?.count
   const end = points[points.length - 1]?.count
   const rangePct = Number.isFinite(start) && start !== 0 && Number.isFinite(end) ? (end - start) / start : null
   const pointCount = points.length
-  const label = index.trend_points || index.series || index.sparkline ? `真实走势 · ${pointCount} 点` : `近${pointCount}日走势`
 
   return {
-    label,
+    label: `真实走势 · ${pointCount} 点`,
     pointCount,
     rangePct,
-    hasRealTrend: Boolean(index.trend_points || index.trendPoints || index.series || index.chart_data || index.sparkline),
+    hasRealTrend: true,
   }
 }
 
@@ -217,34 +189,6 @@ function mapTrendPoints(points) {
       return { date: `point-${idx + 1}`, count }
     })
     .filter(Boolean)
-}
-
-function mapDailyBarsToTrend(bars) {
-  if (!Array.isArray(bars)) return []
-  return bars
-    .map((bar, idx) => {
-      const count = toNumber(bar?.close ?? bar?.Close)
-      if (!Number.isFinite(count)) return null
-      return {
-        date: String(bar?.date || bar?.Date || `day-${idx + 1}`),
-        count,
-      }
-    })
-    .filter(Boolean)
-    .slice(-20)
-}
-
-function buildTrendSeries(last, changeRate) {
-  const safeLast = Number.isFinite(last) ? last : 0
-  const safeRate = Number.isFinite(changeRate) ? changeRate : 0
-  const prev = safeRate === -1 ? safeLast : safeLast / (1 + safeRate)
-  const start = Number.isFinite(prev) ? prev : safeLast
-  const ratios = [0, 0.18, -0.08, 0.32, 0.12, 0.58, 1]
-
-  return ratios.map((ratio, idx) => ({
-    date: `2026-06-0${idx + 1}`,
-    count: Number((start + (safeLast - start) * ratio).toFixed(2)),
-  }))
 }
 
 function pickChangeAmount(index, last, changeRate) {
@@ -326,14 +270,12 @@ function formatMarketIndexTitle(name, code) {
 module.exports = {
   buildMarketInsights,
   buildMarketState,
-  buildTrendSeries,
   formatMarketIndexTitle,
   formatNumber,
   formatPercent,
   formatSignedNumber,
   formatTime,
   inferExchange,
-  mapDailyBarsToTrend,
   mapTrendPoints,
   normalizeIndex,
   normalizeTrendSeries,

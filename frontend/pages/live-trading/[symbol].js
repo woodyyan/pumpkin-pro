@@ -3027,26 +3027,21 @@ function AnalysisHistoryPanel({ items, expanded, onToggleExpand, onViewDetail, o
 
 // ── Chart Components ──
 
-// ColorType will be imported dynamically with lightweight-charts,
-// but we keep the theme data static so all chart components can share it.
-const CHART_CONFIG = {
-  dark: {
+function getChartThemeTokens(resolvedTheme) {
+  if (resolvedTheme === 'light') {
+    return {
+      background: 'rgba(255, 255, 255, 0.6)',
+      textColor: '#1e293b',
+      gridColor: 'rgba(100,116,139,0.1)',
+      borderColor: 'rgba(100,116,139,0.35)',
+    }
+  }
+  return {
     background: 'rgba(9, 13, 24, 0.6)',
     textColor: '#E5E7EB',
     gridColor: 'rgba(148,163,184,0.1)',
     borderColor: 'rgba(148,163,184,0.35)',
-  },
-  light: {
-    background: 'rgba(255, 255, 255, 0.6)',
-    textColor: '#1e293b',
-    gridColor: 'rgba(100,116,139,0.1)',
-    borderColor: 'rgba(100,116,139,0.35)',
-  },
-}
-
-// Helper: pick theme config based on resolvedTheme
-function pickChartTheme(resolvedTheme) {
-  return resolvedTheme === 'light' ? CHART_CONFIG.light : CHART_CONFIG.dark
+  }
 }
 
 function DailyHistoryChart({ bars }) {
@@ -3063,7 +3058,7 @@ function DailyHistoryChart({ bars }) {
         return
       }
       const { createChart, ColorType } = await import('lightweight-charts')
-      const theme = pickChartTheme(resolvedTheme)
+      const theme = getChartThemeTokens(resolvedTheme)
       if (cancelled || !containerRef.current) return
       if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
 
@@ -3146,10 +3141,10 @@ function DailyOverlayChart({ series, benchmark, symbol }) {
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth || 700,
         height: 300,
-        layout: { background: { type: ColorType.Solid, color: pickChartTheme(resolvedTheme).background }, textColor: pickChartTheme(resolvedTheme).textColor },
-        rightPriceScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
-        timeScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
-        grid: { vertLines: { color: pickChartTheme(resolvedTheme).gridColor }, horzLines: { color: pickChartTheme(resolvedTheme).gridColor } },
+        layout: { background: { type: ColorType.Solid, color: getChartThemeTokens(resolvedTheme).background }, textColor: getChartThemeTokens(resolvedTheme).textColor },
+        rightPriceScale: { borderColor: getChartThemeTokens(resolvedTheme).borderColor },
+        timeScale: { borderColor: getChartThemeTokens(resolvedTheme).borderColor },
+        grid: { vertLines: { color: getChartThemeTokens(resolvedTheme).gridColor }, horzLines: { color: getChartThemeTokens(resolvedTheme).gridColor } },
         crosshair: { mode: 0 },
       })
 
@@ -3241,10 +3236,10 @@ function OverlayIntradayChart({ series, benchmark, symbol }) {
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth || 700,
         height: 280,
-        layout: { background: { type: ColorType.Solid, color: pickChartTheme(resolvedTheme).background }, textColor: pickChartTheme(resolvedTheme).textColor },
-        rightPriceScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
+        layout: { background: { type: ColorType.Solid, color: getChartThemeTokens(resolvedTheme).background }, textColor: getChartThemeTokens(resolvedTheme).textColor },
+        rightPriceScale: { borderColor: getChartThemeTokens(resolvedTheme).borderColor },
         timeScale: { borderColor: 'rgba(148,163,184,0.35)', timeVisible: true, secondsVisible: false },
-        grid: { vertLines: { color: pickChartTheme(resolvedTheme).gridColor }, horzLines: { color: pickChartTheme(resolvedTheme).gridColor } },
+        grid: { vertLines: { color: getChartThemeTokens(resolvedTheme).gridColor }, horzLines: { color: getChartThemeTokens(resolvedTheme).gridColor } },
       })
 
       const stockLine = chart.addLineSeries({ color: '#f59e0b', lineWidth: 2, title: `${symbol}（归一化）` })
@@ -3292,10 +3287,10 @@ function PriceVolumeChart({ events }) {
 
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth || 500, height: 220,
-        layout: { background: { type: ColorType.Solid, color: pickChartTheme(resolvedTheme).background }, textColor: pickChartTheme(resolvedTheme).textColor },
-        rightPriceScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
+        layout: { background: { type: ColorType.Solid, color: getChartThemeTokens(resolvedTheme).background }, textColor: getChartThemeTokens(resolvedTheme).textColor },
+        rightPriceScale: { borderColor: getChartThemeTokens(resolvedTheme).borderColor },
         timeScale: { borderColor: 'rgba(148,163,184,0.35)', timeVisible: true, secondsVisible: false },
-        grid: { vertLines: { color: pickChartTheme(resolvedTheme).gridColor }, horzLines: { color: pickChartTheme(resolvedTheme).gridColor } },
+        grid: { vertLines: { color: getChartThemeTokens(resolvedTheme).gridColor }, horzLines: { color: getChartThemeTokens(resolvedTheme).gridColor } },
       })
 
       const byType = {}
@@ -3368,10 +3363,10 @@ function BlockFlowChart({ events }) {
 
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth || 500, height: 220,
-        layout: { background: { type: ColorType.Solid, color: pickChartTheme(resolvedTheme).background }, textColor: pickChartTheme(resolvedTheme).textColor },
-        rightPriceScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
+        layout: { background: { type: ColorType.Solid, color: getChartThemeTokens(resolvedTheme).background }, textColor: getChartThemeTokens(resolvedTheme).textColor },
+        rightPriceScale: { borderColor: getChartThemeTokens(resolvedTheme).borderColor },
         timeScale: { borderColor: 'rgba(148,163,184,0.35)', timeVisible: true, secondsVisible: false },
-        grid: { vertLines: { color: pickChartTheme(resolvedTheme).gridColor }, horzLines: { color: pickChartTheme(resolvedTheme).gridColor } },
+        grid: { vertLines: { color: getChartThemeTokens(resolvedTheme).gridColor }, horzLines: { color: getChartThemeTokens(resolvedTheme).gridColor } },
       })
 
       const histSeries = chart.addHistogramSeries({ title: '', priceLineVisible: false, lastValueVisible: false, priceFormat: { type: 'volume' } })
@@ -3469,9 +3464,9 @@ function MACDChart({ series }) {
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth || 700,
         height: 260,
-        layout: { background: { type: ColorType.Solid, color: pickChartTheme(resolvedTheme).background }, textColor: pickChartTheme(resolvedTheme).textColor },
-        rightPriceScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
-        timeScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
+        layout: { background: { type: ColorType.Solid, color: getChartThemeTokens(resolvedTheme).background }, textColor: getChartThemeTokens(resolvedTheme).textColor },
+        rightPriceScale: { borderColor: getChartThemeTokens(resolvedTheme).borderColor },
+        timeScale: { borderColor: getChartThemeTokens(resolvedTheme).borderColor },
         grid: { vertLines: { color: 'rgba(148,163,184,0.08)' }, horzLines: { color: 'rgba(148,163,184,0.08)' } },
         crosshair: { mode: 0 },
       })
@@ -3606,9 +3601,9 @@ function BollingerChart({ series }) {
       const chart = createChart(containerRef.current, {
         width: containerRef.current.clientWidth || 700,
         height: 300,
-        layout: { background: { type: ColorType.Solid, color: pickChartTheme(resolvedTheme).background }, textColor: pickChartTheme(resolvedTheme).textColor },
-        rightPriceScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
-        timeScale: { borderColor: pickChartTheme(resolvedTheme).borderColor },
+        layout: { background: { type: ColorType.Solid, color: getChartThemeTokens(resolvedTheme).background }, textColor: getChartThemeTokens(resolvedTheme).textColor },
+        rightPriceScale: { borderColor: getChartThemeTokens(resolvedTheme).borderColor },
+        timeScale: { borderColor: getChartThemeTokens(resolvedTheme).borderColor },
         grid: { vertLines: { color: 'rgba(148,163,184,0.08)' }, horzLines: { color: 'rgba(148,163,184,0.08)' } },
         crosshair: { mode: 0 },
       })

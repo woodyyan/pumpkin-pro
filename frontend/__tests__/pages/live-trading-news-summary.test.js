@@ -29,11 +29,11 @@ describe('live trading news summary integration', () => {
   it('passes news_context into AI analysis payload through the shared helper', () => {
     assert.match(helpersSource, /buildAINewsContext/)
     assert.match(helpersSource, /news_context: newsContext\.payload/)
-    assert.match(pageSource, /fetchNewsContext: fetchAIAnalysisNewsContext/)
+    assert.match(helpersSource, /export async function fetchAIAnalysisNewsContext/)
   })
 
   it('surfaces news loading state inside the AI wait panel flow', () => {
-    assert.match(pageSource, /newsContextState: 'loading'/)
+    assert.match(pageSource, /setAiNewsContextState\('loading'\)/)
     assert.match(workspaceSource, /新闻上下文暂不可用/)
     assert.match(workspaceSource, /newsState === 'error'/)
   })

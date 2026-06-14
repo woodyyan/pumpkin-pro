@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import Link from 'next/link'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { requestJson } from '../lib/api'
 import AIAnalysisReportContent from './AIAnalysisReportContent'
@@ -128,10 +129,6 @@ function isStale(isoStr) {
   return Date.now() - new Date(isoStr).getTime() > 86400000
 }
 
-function getSignalLabel(signal) {
-  return signal === 'buy' ? '看多' : signal === 'sell' ? '看空' : '观望'
-}
-
 function HistoryQualitySummary({ validation }) {
   if (!validation) return null
   const windows = Array.isArray(validation.windows) ? validation.windows.slice(0, 3) : []
@@ -155,11 +152,11 @@ function HistoryQualitySummary({ validation }) {
   )
 }
 
-function HistoryCard({ item, expanded, onToggle, detailLoading, detailData, allowDetail = true, onDelete }) {
+function HistoryCard({ item, expanded, onToggle, detailLoading, detailData, detailError = '', allowDetail = true }) {
   const signalMap = {
-    buy: { label: '看多', arrow: '↑', color: 'text-negative dark:text-negative', dot: '🔴', bg: 'bg-red-500/12', border: 'border-red-400/40' },
-    sell: { label: '看空', arrow: '↓', color: 'text-positive dark:text-positive', dot: '🟢', bg: 'bg-positive/10', border: 'border-emerald-400/40' },
-    hold: { label: '观望', arrow: '→', color: 'text-amber-700 dark:text-amber-300', dot: '🟡', bg: 'bg-amber-500/12', border: 'border-amber-400/40' },
+    buy: { label: '看多', color: 'text-negative dark:text-negative', dot: '🔴', bg: 'bg-red-500/12', border: 'border-red-400/40' },
+    sell: { label: '看空', color: 'text-positive dark:text-positive', dot: '🟢', bg: 'bg-positive/10', border: 'border-emerald-400/40' },
+    hold: { label: '观望', color: 'text-amber-700 dark:text-amber-300', dot: '🟡', bg: 'bg-amber-500/12', border: 'border-amber-400/40' },
   }
   const sig = signalMap[item.signal] || signalMap.hold
   const stale = isStale(item.created_at)
@@ -181,7 +178,13 @@ function HistoryCard({ item, expanded, onToggle, detailLoading, detailData, allo
             <span className="shrink-0 text-sm">{sig.dot}</span>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className={`text-sm font-semibold ${symbolNameClass}`}>{item.symbol_name || item.symbol}</span>
+                <Link
+                  href={`/live-trading/${encodeURIComponent(item.symbol)}`}
+                  onClick={(event) => event.stopPropagation()}
+                  className={`text-sm font-semibold underline-offset-2 transition hover:underline ${symbolNameClass}`}
+                >
+                  {item.symbol_name || item.symbol}
+                </Link>
                 <span className="font-mono text-[11px] text-foreground-dim">{item.symbol}</span>
                 <span className={`rounded-full border px-2 py-0.5 text-[10px] ${sig.border} ${sig.bg} ${sig.color}`}>{sig.label}</span>
                 <span className="text-[11px] text-foreground-dim">置信度 {item.confidence_score ?? '--'}%</span>
@@ -197,18 +200,6 @@ function HistoryCard({ item, expanded, onToggle, detailLoading, detailData, allo
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {onDelete ? (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation()
-                onDelete(item.id)
-              }}
-              className="rounded-lg border border-rose-400/25 px-2 py-1 text-[11px] text-negative/80 transition hover:bg-negative/10"
-            >
-              删除
-            </button>
-          ) : null}
           {allowDetail ? <span className={`text-foreground-dim transition-transform ${expanded ? 'rotate-180' : ''}`}>▼</span> : null}
         </div>
       </div>
@@ -216,6 +207,8 @@ function HistoryCard({ item, expanded, onToggle, detailLoading, detailData, allo
         <div className="mt-2 rounded-xl border border-border bg-[var(--color-bg-hover)] p-3.5">
           {detailLoading ? (
             <div className="text-sm text-foreground-dim">详情加载中...</div>
+          ) : detailError ? (
+            <div className="rounded-xl border border-negative/35 bg-negative/10 px-3 py-2 text-sm text-negative">{detailError}</div>
           ) : detailData?.analysis ? (
             <div className="space-y-3">
               <AIAnalysisReportContent result={detailData} allowLogicToggle={false} hidePositionHint showAnalysisTime={false} />
@@ -241,29 +234,70 @@ function HistoryCard({ item, expanded, onToggle, detailLoading, detailData, allo
   )
 }
 
-export function SymbolAIAnalysisHistorySection({ items, expanded, onToggleExpand, symbol, onDelete }) {
+function useHistoryDetailController({ buildDetailUrl, resetKeys = [] }) {
   const [expandedId, setExpandedId] = useState(null)
-  const [detailLoading, setDetailLoading] = useState(false)
-  const [detailData, setDetailData] = useState(null)
+  const [detailCache, setDetailCache] = useState({})
+  const [detailLoadingById, setDetailLoadingById] = useState({})
+  const [detailErrorById, setDetailErrorById] = useState({})
+  const requestSeqRef = useRef(0)
 
-  const handleToggleDetail = async (id) => {
+  useEffect(() => {
+    setExpandedId(null)
+    setDetailCache({})
+    setDetailLoadingById({})
+    setDetailErrorById({})
+    requestSeqRef.current += 1
+  }, resetKeys)
+
+  const handleToggleDetail = async (item) => {
+    const id = String(item?.id || '').trim()
+    if (!id) return
     if (expandedId === id) {
       setExpandedId(null)
-      setDetailData(null)
       return
     }
     setExpandedId(id)
-    setDetailLoading(true)
-    setDetailData(null)
+    if (detailCache[id] || detailLoadingById[id]) return
+
+    const requestSeq = requestSeqRef.current + 1
+    requestSeqRef.current = requestSeq
+    setDetailLoadingById((current) => ({ ...current, [id]: true }))
+    setDetailErrorById((current) => ({ ...current, [id]: '' }))
+
     try {
-      const data = await requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/analysis-history?id=${id}`)
-      setDetailData(data || null)
-    } catch {
-      setDetailData(null)
+      const data = await requestJson(buildDetailUrl(item))
+      if (requestSeqRef.current !== requestSeq) return
+      setDetailCache((current) => ({ ...current, [id]: data || null }))
+    } catch (error) {
+      if (requestSeqRef.current !== requestSeq) return
+      setDetailErrorById((current) => ({ ...current, [id]: error?.message || '详情加载失败，请稍后重试' }))
     } finally {
-      setDetailLoading(false)
+      if (requestSeqRef.current === requestSeq) {
+        setDetailLoadingById((current) => ({ ...current, [id]: false }))
+      }
     }
   }
+
+  return {
+    expandedId,
+    detailCache,
+    detailLoadingById,
+    detailErrorById,
+    handleToggleDetail,
+  }
+}
+
+export function SymbolAIAnalysisHistorySection({ items, expanded, onToggleExpand, symbol, onDelete }) {
+  const {
+    expandedId,
+    detailCache,
+    detailLoadingById,
+    detailErrorById,
+    handleToggleDetail,
+  } = useHistoryDetailController({
+    buildDetailUrl: (item) => `/api/live/symbols/${encodeURIComponent(symbol)}/analysis-history?id=${encodeURIComponent(item.id)}`,
+    resetKeys: [symbol],
+  })
 
   return (
     <section className="rounded-2xl border border-border bg-card p-4">
@@ -287,9 +321,10 @@ export function SymbolAIAnalysisHistorySection({ items, expanded, onToggleExpand
               key={item.id}
               item={item}
               expanded={expandedId === item.id}
-              onToggle={() => handleToggleDetail(item.id)}
-              detailLoading={detailLoading && expandedId === item.id}
-              detailData={expandedId === item.id ? detailData : null}
+              onToggle={() => handleToggleDetail(item)}
+              detailLoading={Boolean(detailLoadingById[item.id])}
+              detailData={detailCache[item.id] || null}
+              detailError={detailErrorById[item.id] || ''}
               onDelete={onDelete}
             />
           ))}
@@ -309,6 +344,16 @@ export function GlobalAIAnalysisHistorySection({ items, loading, error, page, pa
     const end = Math.min(page * pageSize, total)
     return `最近分析历史 ${start}-${end} / ${total}`
   }, [page, pageSize, total])
+  const {
+    expandedId,
+    detailCache,
+    detailLoadingById,
+    detailErrorById,
+    handleToggleDetail,
+  } = useHistoryDetailController({
+    buildDetailUrl: (item) => `/api/live/symbols/${encodeURIComponent(item.symbol)}/analysis-history?id=${encodeURIComponent(item.id)}`,
+    resetKeys: [page, pageSize, total],
+  })
 
   return (
     <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
@@ -325,7 +370,15 @@ export function GlobalAIAnalysisHistorySection({ items, loading, error, page, pa
       {!loading && items.length > 0 ? (
         <div className="mt-4 space-y-3">
           {items.map((item) => (
-            <HistoryCard key={item.id} item={item} expanded={false} allowDetail={false} />
+            <HistoryCard
+              key={item.id}
+              item={item}
+              expanded={expandedId === item.id}
+              onToggle={() => handleToggleDetail(item)}
+              detailLoading={Boolean(detailLoadingById[item.id])}
+              detailData={detailCache[item.id] || null}
+              detailError={detailErrorById[item.id] || ''}
+            />
           ))}
         </div>
       ) : null}

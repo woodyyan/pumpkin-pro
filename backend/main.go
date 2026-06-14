@@ -1876,6 +1876,10 @@ func (a *appServer) handleAnalysisHistorySubroutes(w http.ResponseWriter, r *htt
 				writeError(w, http.StatusInternalServerError, "查询失败")
 				return
 			}
+			if !strings.EqualFold(rec.Symbol, symbol) {
+				writeError(w, http.StatusNotFound, "记录不存在")
+				return
+			}
 			detail, err := rec.ToDetail()
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "解析数据失败")

@@ -70,6 +70,15 @@ describe('AI analysis history presentation', () => {
     assert.match(historySource, /HistoryQualitySummary/)
   })
 
+  it('supports inline detail expansion and symbol link navigation in global history cards', () => {
+    assert.match(historySource, /Link from 'next\/link'/)
+    assert.match(historySource, /onClick=\{\(event\) => event\.stopPropagation\(\)\}/)
+    assert.match(historySource, /useHistoryDetailController/)
+    assert.match(historySource, /\/api\/live\/symbols\/\$\{encodeURIComponent\(item\.symbol\)\}\/analysis-history\?id=\$\{encodeURIComponent\(item\.id\)\}/)
+    assert.match(historySource, /detailCache/)
+    assert.match(historySource, /detailErrorById/)
+  })
+
   it('matches the live-trading AI button visual style', () => {
     assert.match(workspaceSource, /title="AI 综合分析该股票"/)
     assert.match(workspaceSource, /bg-gradient-to-r from-indigo-500 to-violet-500/)

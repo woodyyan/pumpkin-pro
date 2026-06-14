@@ -22,6 +22,6 @@ describe('portfolio tracking page', () => {
     assert.match(pageSource, /quadrant\/ranking-portfolio/)
     assert.match(pageSource, /<h1 className="text-xl font-semibold tracking-tight text-foreground">组合跟踪<\/h1>/)
     assert.match(pageSource, /canonical" href="https:\/\/wolongtrader\.top\/portfolio-tracking"/)
-    assert.match(pageSource, /组合跟踪页集中展示卧龙AI精选模拟组合的收益曲线、风险指标、当前成分股与最近一次调仓/)
+    assert.match(pageSource, /这里会展示卧龙量化因子选股出来的结果，并持续跟踪他们的收益，方便大家参考。/)
   })
 })

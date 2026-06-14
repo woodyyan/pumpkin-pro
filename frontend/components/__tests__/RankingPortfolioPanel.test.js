@@ -184,7 +184,7 @@ describe('RankingPortfolioPanel source contract', () => {
   })
 
   it('renders market-grouped flat layout without exchange or variant toggles', () => {
-    assert.match(panelSource, /4 组合全量平铺/)
+    assert.match(panelSource, /卧龙AI精选模拟组合/)
     assert.match(panelSource, /A股组合追踪/)
     assert.match(panelSource, /港股组合追踪/)
     assert.match(panelSource, /MarketPortfolioSection/)
@@ -193,6 +193,8 @@ describe('RankingPortfolioPanel source contract', () => {
     assert.match(panelSource, /buildMarketSections/)
     assert.doesNotMatch(panelSource, /selectedExchange/)
     assert.doesNotMatch(panelSource, /selectedVariant/)
+    assert.doesNotMatch(panelSource, /4 组合全量平铺/)
+    assert.doesNotMatch(panelSource, /页面取消 tab 切换/)
     assert.doesNotMatch(panelSource, /模拟组合A/)
     assert.doesNotMatch(panelSource, /模拟组合B/)
   })
@@ -203,6 +205,8 @@ describe('RankingPortfolioPanel source contract', () => {
     assert.match(panelSource, /badgeClass: 'border-amber-300\/40 bg-amber-100 text-amber-800/)
     assert.match(panelSource, /badgeClass: 'border-sky-300\/45 bg-sky-100 text-sky-800/)
     assert.match(panelSource, /chartTintClass/)
+    assert.doesNotMatch(panelSource, /A股双组合统一平铺展示/)
+    assert.doesNotMatch(panelSource, /港股双组合独立成区/)
   })
 
   it('keeps B-combo metadata and compact card density', () => {
@@ -211,6 +215,8 @@ describe('RankingPortfolioPanel source contract', () => {
     assert.match(panelSource, /visibleConstituents = constituents\.slice\(0, 4\)/)
     assert.match(panelSource, /LatestRebalanceDisclosure rebalance=\{latestRebalance\} compact/)
     assert.match(panelSource, /默认收起明细/)
+    assert.doesNotMatch(panelSource, /模拟组合口径更新/)
+    assert.doesNotMatch(panelSource, /关闭公告/)
   })
 
   it('shows open-price buy basis, realtime latest price and pending-before-open state', () => {

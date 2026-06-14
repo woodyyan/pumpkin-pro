@@ -30,7 +30,6 @@ const MARKET_CONFIG = {
     key: 'ASHARE',
     label: 'A股',
     sectionTitle: 'A股组合追踪',
-    sectionDescription: 'A股双组合统一平铺展示，强化同市场横向对比，突出收益、回撤、波动与持仓变化。',
     accentClass: 'text-amber-700 dark:text-amber-200',
     badgeClass: 'border-amber-300/40 bg-amber-100 text-amber-800 dark:border-amber-300/20 dark:bg-amber-500/10 dark:text-amber-200',
     sectionClass: 'border-amber-300/40 bg-[linear-gradient(180deg,rgba(251,191,36,0.12),rgba(251,191,36,0.02))] dark:border-amber-300/20 dark:bg-[linear-gradient(180deg,rgba(245,158,11,0.14),rgba(245,158,11,0.03))]',
@@ -42,7 +41,6 @@ const MARKET_CONFIG = {
     key: 'HKEX',
     label: '港股',
     sectionTitle: '港股组合追踪',
-    sectionDescription: '港股双组合独立成区，使用冷色调强化市场识别，便于一眼区分与快速比较。',
     accentClass: 'text-sky-700 dark:text-sky-200',
     badgeClass: 'border-sky-300/45 bg-sky-100 text-sky-800 dark:border-sky-300/20 dark:bg-sky-500/10 dark:text-sky-200',
     sectionClass: 'border-sky-300/45 bg-[linear-gradient(180deg,rgba(125,211,252,0.12),rgba(125,211,252,0.03))] dark:border-sky-300/20 dark:bg-[linear-gradient(180deg,rgba(14,165,233,0.14),rgba(14,165,233,0.03))]',
@@ -418,7 +416,6 @@ function RankingPortfolioChart({ series = [], accent = 'amber' }) {
 
 export default function RankingPortfolioPanel({ data = null, loading = false }) {
   const panelRef = useRef(null)
-  const [bannerDismissed, setBannerDismissed] = useState(false)
   const portfolios = Array.isArray(data?.items) ? data.items : []
   const marketSections = useMemo(() => buildMarketSections(portfolios), [portfolios])
   const hasAnyPortfolio = marketSections.some((section) => section.hasData)
@@ -435,31 +432,10 @@ export default function RankingPortfolioPanel({ data = null, loading = false }) 
 
   return (
     <section ref={panelRef} className="rounded-2xl border border-border bg-card p-4 sm:p-5">
-      {!bannerDismissed && (
-        <div className="mb-4 flex items-start gap-3 rounded-xl border border-amber-300/40 dark:border-amber-300/20 bg-amber-100 dark:bg-amber-500/10 px-4 py-3">
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-amber-900 dark:text-amber-100">📣 模拟组合口径更新</p>
-            <p className="mt-1 text-xs leading-5 text-amber-800/80 dark:text-amber-200/70">即日起，模拟买入价从"当日收盘价"切换为"次一交易日 9:25 集合竞价开盘价"，更贴近真实交易。收益曲线和成分股涨幅已按新口径重新计算，历史数据同步更新。</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setBannerDismissed(true)}
-            className="shrink-0 rounded-lg p-1 text-amber-600 hover:bg-amber-200/50 dark:text-amber-300 dark:hover:bg-amber-500/20"
-            aria-label="关闭公告"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d="M4 4l8 8M12 4l-8 8" />
-            </svg>
-          </button>
-        </div>
-      )}
-
       <div className="flex flex-col gap-3 border-b border-border/80 pb-4">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-base font-semibold text-foreground">卧龙AI精选模拟组合</h3>
-          <span className="rounded-full border border-amber-300/40 dark:border-amber-300/20 bg-amber-100 dark:bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-200">4 组合全量平铺</span>
         </div>
-        <p className="text-xs leading-5 text-foreground-dim">页面取消 tab 切换，改为 A股 / 港股双分区平铺展示 4 个组合，让用户在同一屏内直接比较收益、回撤、波动、持仓与最近调仓。</p>
       </div>
 
       {!hasAnyPortfolio ? (
@@ -485,7 +461,6 @@ function MarketPortfolioSection({ section }) {
           <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${market.badgeClass}`}>{market.label}</span>
           <h4 className={`text-lg font-semibold tracking-tight ${market.accentClass}`}>{market.sectionTitle}</h4>
         </div>
-        <p className="max-w-3xl text-xs leading-5 text-foreground-dim">{market.sectionDescription}</p>
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-2">

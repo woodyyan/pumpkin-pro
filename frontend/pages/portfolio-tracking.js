@@ -54,7 +54,7 @@ export default function PortfolioTrackingPage() {
         <div className="max-w-3xl">
           <h1 className="text-xl font-semibold tracking-tight text-foreground">组合跟踪</h1>
           <p className="mt-2 text-sm leading-6 text-foreground-muted">
-            这里集中跟踪卧龙AI精选模拟组合的表现。页面按组合维度展示累计收益、回撤、波动、当前成分股与最近一次调仓，和市场行情页分开承载，避免看板信息过载。
+            这里会展示卧龙量化因子选股出来的结果，并持续跟踪他们的收益，方便大家参考。
           </p>
         </div>
       </section>

@@ -5,6 +5,7 @@ import (
 
 	"github.com/woodyyan/pumpkin-pro/backend/config"
 	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
+	"github.com/woodyyan/pumpkin-pro/backend/store/aipicker"
 	"github.com/woodyyan/pumpkin-pro/backend/store/analysis_history"
 	"github.com/woodyyan/pumpkin-pro/backend/store/analytics"
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
@@ -52,6 +53,7 @@ func New(cfg config.DBConfig) (*Store, error) {
 		screener.NewMigrator(),
 		analytics.NewMigrator(),
 		feedback.NewMigrator(),
+		aipicker.NewMigrator(),
 		factorlab.NewMigrator(),
 		payment.NewMigrator(),
 		fundcache.NewMigrator(),

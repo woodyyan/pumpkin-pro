@@ -7,7 +7,6 @@ const requireFromCwd = createRequire(process.cwd() + '/')
 const { parse } = requireFromCwd('next/dist/compiled/babel/parser')
 
 const placeholderPageCases = [
-  { relativePath: '../../pages/ai/picker.js', title: 'AI选股' },
   { relativePath: '../../pages/ai/backtest.js', title: 'AI回测' },
 ]
 
@@ -21,6 +20,16 @@ describe('coming soon placeholder pages', () => {
       assert.match(pageSource, new RegExp(`title=\"${pageCase.title}\"`))
     })
   }
+
+  it('renders AI选股 as a real page instead of a placeholder', () => {
+    const pageSource = readFileSync(new URL('../../pages/ai/picker.js', import.meta.url), 'utf8')
+
+    assert.doesNotThrow(() => parse(pageSource, { sourceType: 'module', plugins: ['jsx'] }))
+    assert.doesNotMatch(pageSource, /ComingSoonPage/)
+    assert.match(pageSource, /今日 AI 优选组合/)
+    assert.match(pageSource, /fetchDailyAIPicks/)
+    assert.match(pageSource, /generateAIPicks/)
+  })
 
   it('renders AI analysis as a real page instead of a placeholder', () => {
     const pageSource = readFileSync(new URL('../../pages/ai/analysis.js', import.meta.url), 'utf8')

@@ -61,3 +61,10 @@
 - `frontend/components/RankingPortfolioPanel.js` 需要引入市场配置、视图模型和 section/card 结构拆分，替换旧的选中态详情布局。
 - 组件测试需要从校验 tab 状态切换改为校验市场分区、四卡平铺与颜色语义。
 - 后续若新增市场或组合，应继续沿用“market section -> fixed card slots” 模式，而不是重新引入 tab。
+
+## 2026-06-14 AI Picker P0
+- 决策：A 股 AI 选股采用 `factorlab` 候选池 + LLM 二次决策，而不是纯 prompt 直出。
+- 原因：减少幻觉，允许理由中引用真实因子分值，并复用现有日更因子资产。
+- 替代方案：纯 prompt 选股、港股同时接入。
+- 不选原因：纯 prompt 缺乏真实数据约束；港股因子链路尚未就绪。
+- 风险与代价：结果质量仍依赖 prompt 与 post-validation；每日结果表当前只保存最终 JSON，不保存更细中间候选日志。

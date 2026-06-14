@@ -17,6 +17,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/config"
 	"github.com/woodyyan/pumpkin-pro/backend/store"
 	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
+	"github.com/woodyyan/pumpkin-pro/backend/store/aipicker"
 	"github.com/woodyyan/pumpkin-pro/backend/store/analysis_history"
 	"github.com/woodyyan/pumpkin-pro/backend/store/analytics"
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
@@ -255,6 +256,8 @@ type appServer struct {
 	adminService          *admin.Service
 	backupService         *backup.Service
 	backupWorker          *backup.Worker
+	aipickerService       *aipicker.Service
+	aipickerWorker        *aipicker.Worker
 	factorLabService      *factorlab.Service
 	factorLabWorker       *factorlab.Worker
 	backtestService       *backtest.Service
@@ -405,6 +408,18 @@ func (a *appServer) resolveScreenerAIConfig(ctx context.Context) (screener.AICon
 		return screener.AIConfig{}, err
 	}
 	return screener.AIConfig{
+		APIKey:  resolved.APIKey,
+		BaseURL: resolved.BaseURL,
+		Model:   resolved.ModelID,
+	}, nil
+}
+
+func (a *appServer) resolveAIPickerAIConfig(ctx context.Context) (aipicker.AIConfig, error) {
+	resolved, err := a.resolveRuntimeAIConfig(ctx)
+	if err != nil {
+		return aipicker.AIConfig{}, err
+	}
+	return aipicker.AIConfig{
 		APIKey:  resolved.APIKey,
 		BaseURL: resolved.BaseURL,
 		Model:   resolved.ModelID,
@@ -2837,6 +2852,84 @@ func (a *appServer) handleScreenerAIParse(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (a *appServer) handleAIPickerMeta(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	if a.aipickerService == nil {
+		writeError(w, http.StatusServiceUnavailable, "AI 选股服务未初始化")
+		return
+	}
+	market := strings.TrimSpace(r.URL.Query().Get("market"))
+	if market == "" {
+		market = aipicker.MarketAShare
+	}
+	writeJSON(w, http.StatusOK, a.aipickerService.Meta(r.Context(), market))
+}
+
+func (a *appServer) handleAIPickerDaily(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	if a.aipickerService == nil {
+		writeError(w, http.StatusServiceUnavailable, "AI 选股服务未初始化")
+		return
+	}
+	market := strings.TrimSpace(r.URL.Query().Get("market"))
+	if market == "" {
+		market = aipicker.MarketAShare
+	}
+	result, err := a.aipickerService.GetLatestDaily(r.Context(), market)
+	if err != nil {
+		if errors.Is(err, aipicker.ErrDailyResultMissing) {
+			writeError(w, http.StatusNotFound, "今日 AI 选股结果尚未生成")
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (a *appServer) handleAIPickerGenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	userID := currentUserID(r)
+	if strings.TrimSpace(userID) == "" {
+		writeError(w, http.StatusUnauthorized, "请先登录后使用 AI 选股功能")
+		return
+	}
+	if !a.aiRateLimiter.Allow(userID) {
+		writeError(w, http.StatusTooManyRequests, "本小时 AI 调用次数已达上限（20 次/小时），请稍后再试")
+		return
+	}
+	if a.aipickerService == nil {
+		writeError(w, http.StatusServiceUnavailable, "AI 选股服务未初始化")
+		return
+	}
+	var req aipicker.PickerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	cfg, err := a.resolveAIPickerAIConfig(r.Context())
+	if err != nil {
+		log.Printf("[ai-picker] resolve runtime config failed: %v", err)
+		writeError(w, http.StatusInternalServerError, "AI 配置读取失败，请联系管理员检查")
+		return
+	}
+	result, err := a.aipickerService.Generate(r.Context(), cfg, userID, req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (a *appServer) handleScreenerScan(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
@@ -3884,6 +3977,8 @@ func main() {
 
 	factorLabRepo := factorlab.NewRepository(storeInstance.DB)
 	factorLabService := factorlab.NewService(factorLabRepo)
+	aipickerRepo := aipicker.NewRepository(storeInstance.DB)
+	aipickerService := aipicker.NewService(aipickerRepo, factorLabService)
 
 	adminRepo := admin.NewRepository(storeInstance.DB)
 	adminService := admin.NewService(adminRepo, admin.ServiceConfig{
@@ -3911,6 +4006,14 @@ func main() {
 	fundCacheRepo := fundcache.NewRepository(storeInstance.DB)
 	analysisHistoryRepo := analysis_history.NewRepository(storeInstance.DB)
 	newsService := live.NewNewsService(liveRepo, cfg.QuantServiceURL)
+	aipickerWorker := aipicker.NewWorker(aipicker.WorkerConfig{Enabled: cfg.FactorLab.DailyComputeEnabled, Hour: 8, Minute: 45}, aipickerService, func(ctx context.Context) (aipicker.AIConfig, error) {
+		resolved, err := adminService.ResolveRuntimeAIConfig(ctx)
+		if err != nil {
+			return aipicker.AIConfig{}, err
+		}
+		return aipicker.AIConfig{APIKey: resolved.APIKey, BaseURL: resolved.BaseURL, Model: resolved.ModelID}, nil
+	})
+	aipickerWorker.Start(context.Background())
 
 	server := &appServer{
 		cfg:                   cfg,
@@ -3924,6 +4027,8 @@ func main() {
 		adminService:          adminService,
 		backupService:         backupService,
 		backupWorker:          backupWorker,
+		aipickerService:       aipickerService,
+		aipickerWorker:        aipickerWorker,
 		factorLabService:      factorLabService,
 		factorLabWorker:       factorLabWorker,
 		backtestService:       backtestService,
@@ -4050,6 +4155,9 @@ func main() {
 
 	mux.HandleFunc("/api/factor-lab/meta", server.withOptionalAuth(server.handleFactorLabMeta))
 	mux.HandleFunc("/api/factor-lab/screener", server.withOptionalAuth(server.handleFactorLabScreener))
+	mux.HandleFunc("/api/ai/picker/meta", server.withOptionalAuth(server.handleAIPickerMeta))
+	mux.HandleFunc("/api/ai/picker/daily", server.withOptionalAuth(server.handleAIPickerDaily))
+	mux.HandleFunc("/api/ai/picker", server.withRequiredAuth(server.handleAIPickerGenerate))
 
 	mux.HandleFunc("/api/screener/scan", server.withOptionalAuth(server.handleScreenerScan))
 	mux.HandleFunc("/api/screener/ai-parse", server.withRequiredAuth(server.handleScreenerAIParse))

@@ -183,35 +183,48 @@ describe('RankingPortfolioPanel source contract', () => {
     assert.match(panelSource, /仓位/)
   })
 
-  it('renders compact exchange and variant toggles with B-combo metadata', () => {
-    assert.match(panelSource, /A \/ B 双组合/)
-    assert.match(panelSource, /跟踪卧龙AI精选 A、B 两套组合的开盘价模拟表现：收盘后选股，次一交易日开盘价买入、当日收盘价结算，核心看累计收益、回撤、波动与日胜率。/)
-    assert.match(panelSource, /selectedExchange/)
-    assert.match(panelSource, /selectedVariant/)
-    assert.match(panelSource, /模拟组合A/)
-    assert.match(panelSource, /模拟组合B/)
-    assert.match(panelSource, /剔除科创板/)
+  it('renders market-grouped flat layout without exchange or variant toggles', () => {
+    assert.match(panelSource, /4 组合全量平铺/)
+    assert.match(panelSource, /A股组合追踪/)
+    assert.match(panelSource, /港股组合追踪/)
+    assert.match(panelSource, /MarketPortfolioSection/)
+    assert.match(panelSource, /PortfolioOverviewCard/)
+    assert.match(panelSource, /PortfolioPlaceholderCard/)
+    assert.match(panelSource, /buildMarketSections/)
+    assert.doesNotMatch(panelSource, /selectedExchange/)
+    assert.doesNotMatch(panelSource, /selectedVariant/)
+    assert.doesNotMatch(panelSource, /模拟组合A/)
+    assert.doesNotMatch(panelSource, /模拟组合B/)
+  })
+
+  it('uses explicit market color systems for ashare and hkex sections', () => {
+    assert.match(panelSource, /sectionTitle: 'A股组合追踪'/)
+    assert.match(panelSource, /sectionTitle: '港股组合追踪'/)
+    assert.match(panelSource, /badgeClass: 'border-amber-300\/40 bg-amber-100 text-amber-800/)
+    assert.match(panelSource, /badgeClass: 'border-sky-300\/45 bg-sky-100 text-sky-800/)
+    assert.match(panelSource, /chartTintClass/)
+  })
+
+  it('keeps B-combo metadata and compact card density', () => {
     assert.match(panelSource, /\$\{windowText\} 连续上榜优先/)
-    assert.match(panelSource, /榜单第\$\{item\?\.source_rank \|\| '--'\}名/)
-    assert.match(panelSource, /连续\$\{item\?\.consecutive_days \|\| '--'\}日/)
-    assert.match(panelSource, /\$\{closeDateLabel\}，\$\{effectiveDate\} 开盘生效/)
-    assert.match(panelSource, /较买入价/)
-    assert.doesNotMatch(panelSource, /每日收盘后取卧龙AI精选排行榜A、B两种规则 4 只股票/)
-    assert.doesNotMatch(panelSource, /数据日期：/)
+    assert.match(panelSource, /CompactMetricItem/)
+    assert.match(panelSource, /visibleConstituents = constituents\.slice\(0, 4\)/)
+    assert.match(panelSource, /LatestRebalanceDisclosure rebalance=\{latestRebalance\} compact/)
+    assert.match(panelSource, /默认收起明细/)
   })
 
   it('shows open-price buy basis, realtime latest price and pending-before-open state', () => {
-    // 买入价改为 T+1 开盘价；开盘前进入待开盘 pending 态，不用收盘价兜底。
     assert.match(panelSource, /entry_price_pending/)
     assert.match(panelSource, /买入价待开盘/)
     assert.match(panelSource, /待开盘/)
-    // 最新价优先使用实时价 latest_price，回退 latest_close_price。
     assert.match(panelSource, /item\?\.latest_price \|\| item\?\.latest_close_price/)
   })
 
   it('imports every React hook it uses', () => {
     assert.match(panelSource, /import \{[^}]*useEffect[^}]*\} from 'react'/)
+    assert.match(panelSource, /import \{[^}]*useMemo[^}]*\} from 'react'/)
     assert.match(panelSource, /useEffect\(/)
+    assert.match(panelSource, /useMemo\(/)
   })
 
   it('imports rebalance formatter helpers used in disclosure rows', () => {

@@ -7,9 +7,8 @@ const (
 
 	SelectionBasisFactorLab = "factor_lab"
 
-	TriggerDailyAuto   = "daily_auto"
-	TriggerManual      = "manual"
-	TriggerByDirection = "by_direction"
+	TriggerDailyAuto = "daily_auto"
+	TriggerManual    = "manual"
 
 	ConvictionHigh   = "high"
 	ConvictionMedium = "medium"
@@ -17,9 +16,8 @@ const (
 )
 
 type PickerRequest struct {
-	Market    string `json:"market"`
-	Direction string `json:"direction,omitempty"`
-	Refresh   bool   `json:"refresh,omitempty"`
+	Market  string `json:"market"`
+	Refresh bool   `json:"refresh,omitempty"`
 }
 
 type DailyResult struct {

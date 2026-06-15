@@ -17,8 +17,6 @@ export default function AIPickerPage() {
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState('')
-  const [direction, setDirection] = useState('')
-  const [showAdvanced, setShowAdvanced] = useState(false)
 
   const loadPage = useCallback(async (activeMarket) => {
     setLoading(true)
@@ -58,7 +56,7 @@ export default function AIPickerPage() {
     setGenerating(true)
     setError('')
     try {
-      const next = await generateAIPicks({ market, direction, refresh: true })
+      const next = await generateAIPicks({ market, refresh: true })
       setResult(next)
       const nextMeta = await fetchAIPickerMeta(market)
       setMeta(nextMeta)
@@ -67,7 +65,7 @@ export default function AIPickerPage() {
     } finally {
       setGenerating(false)
     }
-  }, [direction, isLoggedIn, market, openAuthModal])
+  }, [isLoggedIn, market, openAuthModal])
 
   const analysis = result?.analysis || null
   const picks = analysis?.picks || []
@@ -95,9 +93,8 @@ export default function AIPickerPage() {
         <section className="overflow-hidden rounded-[28px] border border-primary/20 bg-gradient-to-br from-primary/20 via-card to-card px-5 py-5 shadow-card sm:px-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <div className="inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">AI 选股 · P0</div>
+              <div className="inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">AI 选股</div>
               <h1 className="mt-3 text-2xl font-semibold tracking-tight">今日 AI 优选组合</h1>
-              <p className="mt-2 max-w-3xl text-sm text-foreground-dim">默认展示每日开盘前自动生成的 A 股 4 股组合；支持登录后手动重新生成，并可选输入一句话方向做增强筛选。</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {MARKETS.map((item) => (
@@ -123,35 +120,9 @@ export default function AIPickerPage() {
 
           <div className="mt-4 flex flex-wrap gap-2 text-xs text-foreground-dim">
             <span className="rounded-full border border-border bg-card px-3 py-1">市场：{market === 'ASHARE' ? 'A股' : '港股'}</span>
-            {meta?.snapshot_date ? <span className="rounded-full border border-border bg-card px-3 py-1">快照：{meta.snapshot_date}</span> : null}
             {candidatePoolSize ? <span className="rounded-full border border-border bg-card px-3 py-1">候选池：{candidatePoolSize} 只</span> : null}
-            {generatedAt ? <span className="rounded-full border border-border bg-card px-3 py-1">生成：{String(generatedAt).replace('T', ' ').replace('Z', ' UTC')}</span> : null}
+            {generatedAt ? <span className="rounded-full border border-border bg-card px-3 py-1">生成：{formatBeijingTime(generatedAt)}</span> : null}
           </div>
-        </section>
-
-        <section className="rounded-2xl border border-border bg-card p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-medium">高级模式（P1 预演）</h2>
-              <p className="mt-1 text-sm text-foreground-dim">可选输入一句话方向，当前已接入后端能力，但建议仍以每日自动优选为主。</p>
-            </div>
-            <button type="button" onClick={() => setShowAdvanced((v) => !v)} className="rounded-full border border-border px-3 py-1.5 text-xs text-foreground-dim transition hover:border-primary/30 hover:text-foreground">
-              {showAdvanced ? '收起' : '展开'}
-            </button>
-          </div>
-          {showAdvanced ? (
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-              <input
-                value={direction}
-                onChange={(e) => setDirection(e.target.value)}
-                placeholder="例如：偏成长、回避高波动、关注高质量消费龙头"
-                className="min-w-0 flex-1 rounded-2xl border border-border bg-[var(--color-bg-hover)] px-4 py-3 text-sm outline-none transition focus:border-primary/40"
-              />
-              <button type="button" onClick={handleGenerate} disabled={generating || disabled} className="rounded-2xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-primary transition hover:bg-primary/15 disabled:opacity-50">
-                按方向生成
-              </button>
-            </div>
-          ) : null}
         </section>
 
         {loading ? (
@@ -195,7 +166,7 @@ export default function AIPickerPage() {
                 <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
                   <MetricCard label="总仓位" value={formatPct(allocation?.total_position_pct)} />
                   <MetricCard label="现金预留" value={formatPct(allocation?.cash_reserve_pct)} />
-                  <MetricCard label="快照日" value={analysis.snapshot_date || '--'} />
+                  <MetricCard label="持仓数" value={picks.length ? `${picks.length} 只` : '--'} />
                   <MetricCard label="风格" value={allocation?.expected_style || '--'} />
                 </div>
                 <div className="mt-4 rounded-2xl bg-[var(--color-bg-hover)] p-3 text-sm text-foreground-dim">{allocation?.diversification_note || '保持行业分散与现金预留。'}</div>
@@ -237,16 +208,16 @@ export default function AIPickerPage() {
                     <div className="mt-4 flex flex-wrap gap-2">
                       {pick.factor_highlights.map((item) => (
                         <span key={`${pick.code}-${item.key}`} className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs text-primary">
-                          {item.label} {item.score ?? '--'}
+                          {item.label} {item.score === null || item.score === undefined ? '--' : formatScore(item.score)}
                         </span>
                       ))}
                       {pick.composite_score !== null && pick.composite_score !== undefined ? (
-                        <span className="rounded-full border border-border px-3 py-1 text-xs text-foreground-dim">综合 {pick.composite_score}</span>
+                        <span className="rounded-full border border-border px-3 py-1 text-xs text-foreground-dim">综合 {formatScore(pick.composite_score)}</span>
                       ) : null}
                     </div>
                   ) : null}
 
-                  <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">风险提示：{pick.risk_note}</div>
+                  <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">风险提示：{pick.risk_note}</div>
                 </article>
               ))}
             </section>
@@ -282,4 +253,30 @@ function MetricCard({ label, value }) {
       <div className="mt-1 text-sm font-medium text-foreground">{value || '--'}</div>
     </div>
   )
+}
+
+function formatScore(value) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '--'
+  return num.toFixed(1)
+}
+
+function formatBeijingTime(value) {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date).reduce((acc, part) => {
+    acc[part.type] = part.value
+    return acc
+  }, {})
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`
 }

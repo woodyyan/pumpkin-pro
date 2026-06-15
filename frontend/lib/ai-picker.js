@@ -8,11 +8,11 @@ export async function fetchDailyAIPicks(market = 'ASHARE') {
   return requestJson(`/api/ai/picker/daily?market=${encodeURIComponent(market)}`, undefined, '加载今日 AI 选股失败')
 }
 
-export async function generateAIPicks({ market = 'ASHARE', direction = '', refresh = true } = {}) {
+export async function generateAIPicks({ market = 'ASHARE', refresh = true } = {}) {
   return requestJson('/api/ai/picker', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ market, direction, refresh }),
+    body: JSON.stringify({ market, refresh }),
   }, '生成 AI 选股失败')
 }
 

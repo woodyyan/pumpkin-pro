@@ -126,10 +126,7 @@ func (s *Service) Generate(ctx context.Context, cfg AIConfig, userID string, req
 	}
 	candidates := buildCandidates(candidatesResp.Items)
 	trigger := TriggerManual
-	if strings.TrimSpace(req.Direction) != "" {
-		trigger = TriggerByDirection
-	}
-	userPrompt := buildUserPrompt(meta.SnapshotDate, trigger, strings.TrimSpace(req.Direction), candidates)
+	userPrompt := buildUserPrompt(meta.SnapshotDate, trigger, candidates)
 	result, err := callLLM(ctx, cfg, userID, userPrompt)
 	if err != nil {
 		return nil, err
@@ -344,12 +341,9 @@ func buildCandidates(items []factorlab.FactorScreenerItem) []Candidate {
 	return out
 }
 
-func buildUserPrompt(snapshotDate, trigger, direction string, candidates []Candidate) string {
+func buildUserPrompt(snapshotDate, trigger string, candidates []Candidate) string {
 	var sb strings.Builder
 	sb.WriteString("请基于以下候选池为 A 股生成 4 只股票的推荐组合。\n")
-	if strings.TrimSpace(direction) != "" {
-		fmt.Fprintf(&sb, "用户方向偏好：%s\n", strings.TrimSpace(direction))
-	}
 	fmt.Fprintf(&sb, "快照日期：%s\n触发方式：%s\n\n候选池如下（只能从中选择）:\n", snapshotDate, trigger)
 	for idx, c := range candidates {
 		fmt.Fprintf(&sb, "%d. code=%s, symbol=%s, name=%s, industry=%s, price=%.2f, composite=%s, value=%s, dividend=%s, growth=%s, quality=%s, momentum=%s, size=%s, low_vol=%s\n",
@@ -439,7 +433,7 @@ func validateResponse(result *PickerResponse, candidates []Candidate, snapshotDa
 	analysis.SelectionBasis = SelectionBasisFactorLab
 	analysis.SnapshotDate = snapshotDate
 	analysis.Trigger = trigger
-	analysis.Disclaimer = "本结果由 AI 基于历史数据生成，不构成投资建议"
+	analysis.Disclaimer = "本结果由 卧龙AI 基于历史数据生成，仅供学习参考，不构成投资建议"
 	analysis.DataTimestamp = time.Now().Local().Format("2006/01/02 15:04:05")
 	candidateMap := map[string]Candidate{}
 	for _, c := range candidates {

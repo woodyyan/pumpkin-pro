@@ -28,7 +28,7 @@ describe('coming soon placeholder pages', () => {
     assert.doesNotMatch(pageSource, /ComingSoonPage/)
     assert.match(pageSource, /今日 AI 优选组合/)
     assert.match(pageSource, /fetchDailyAIPicks/)
-    assert.match(pageSource, /generateAIPicks/)
+    assert.match(pageSource, /resultByMarket/)
   })
 
   it('renders AI analysis as a real page instead of a placeholder', () => {

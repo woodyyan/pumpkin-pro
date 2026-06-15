@@ -2884,7 +2884,18 @@ func (a *appServer) handleAIPickerDaily(w http.ResponseWriter, r *http.Request) 
 	result, err := a.aipickerService.GetLatestDaily(r.Context(), market)
 	if err != nil {
 		if errors.Is(err, aipicker.ErrDailyResultMissing) {
-			writeError(w, http.StatusNotFound, "今日 AI 选股结果尚未生成")
+			cfg, cfgErr := a.resolveAIPickerAIConfig(r.Context())
+			if cfgErr != nil {
+				log.Printf("[ai-picker] resolve runtime config failed: %v", cfgErr)
+				writeError(w, http.StatusInternalServerError, "AI 配置读取失败，请联系管理员检查")
+				return
+			}
+			result, err = a.aipickerService.GetLatestDailyOrGenerate(r.Context(), market, cfg)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, result)
 			return
 		}
 		writeError(w, http.StatusBadRequest, err.Error())

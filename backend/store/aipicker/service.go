@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/woodyyan/pumpkin-pro/backend/store/factorlab"
@@ -35,6 +36,8 @@ func (c AIConfig) Enabled() bool {
 type Service struct {
 	repo      *Repository
 	factorLab *factorlab.Service
+
+	dailyMu sync.Mutex
 }
 
 func NewService(repo *Repository, factorLab *factorlab.Service) *Service {
@@ -56,13 +59,11 @@ func (s *Service) Meta(ctx context.Context, market string) map[string]any {
 		result["reason"] = err.Error()
 		return result
 	}
-	result["available"] = meta.HasSnapshot && !meta.Stale
+	result["available"] = meta.HasSnapshot
 	result["snapshot_date"] = meta.SnapshotDate
 	result["stale"] = meta.Stale
 	if !meta.HasSnapshot {
 		result["reason"] = "因子快照尚未生成"
-	} else if meta.Stale {
-		result["reason"] = "因子快照已过期，请等待每日计算完成"
 	}
 	return result
 }
@@ -76,18 +77,45 @@ func (s *Service) GetLatestDaily(ctx context.Context, market string) (*PickerRes
 	}
 	record, err := s.repo.GetLatestDailyResult(ctx, market)
 	if err != nil {
-		if errors.Is(err, http.ErrMissingFile) || errors.Is(err, io.EOF) {
-			return nil, ErrDailyResultMissing
-		}
-		if errors.Is(err, errors.New("record not found")) {
-			return nil, ErrDailyResultMissing
-		}
-		if strings.Contains(strings.ToLower(err.Error()), "record not found") {
+		if isDailyResultMissing(err) {
 			return nil, ErrDailyResultMissing
 		}
 		return nil, err
 	}
 	return decodeStoredPayload(record.PayloadJSON)
+}
+
+func (s *Service) GetLatestDailyOrGenerate(ctx context.Context, market string, cfg AIConfig) (*PickerResponse, error) {
+	result, err := s.GetLatestDaily(ctx, market)
+	if err == nil || !errors.Is(err, ErrDailyResultMissing) {
+		return result, err
+	}
+	if strings.ToUpper(strings.TrimSpace(market)) != MarketAShare {
+		return nil, fmt.Errorf("%w: 港股 AI 选股即将上线", ErrUnavailable)
+	}
+	s.dailyMu.Lock()
+	defer s.dailyMu.Unlock()
+	result, err = s.GetLatestDaily(ctx, market)
+	if err == nil || !errors.Is(err, ErrDailyResultMissing) {
+		return result, err
+	}
+	if !cfg.Enabled() {
+		return nil, fmt.Errorf("%w: AI 功能未启用", ErrUnavailable)
+	}
+	return s.GenerateAndStoreDaily(ctx, cfg)
+}
+
+func isDailyResultMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, http.ErrMissingFile) || errors.Is(err, io.EOF) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "record not found") {
+		return true
+	}
+	return false
 }
 
 func (s *Service) Generate(ctx context.Context, cfg AIConfig, userID string, req PickerRequest) (*PickerResponse, error) {
@@ -108,7 +136,7 @@ func (s *Service) Generate(ctx context.Context, cfg AIConfig, userID string, req
 	if err != nil {
 		return nil, err
 	}
-	if !meta.HasSnapshot || meta.Stale {
+	if !meta.HasSnapshot {
 		return nil, fmt.Errorf("%w: 因子数据未就绪", ErrUnavailable)
 	}
 	candidatesResp, err := s.factorLab.Screen(ctx, factorlab.FactorScreenerRequest{
@@ -155,7 +183,7 @@ func (s *Service) GenerateAndStoreDaily(ctx context.Context, cfg AIConfig) (*Pic
 	}
 	tradeDate := time.Now().In(time.FixedZone("CST", 8*60*60)).Format("2006-01-02")
 	if s.repo != nil {
-		_ = s.repo.SaveDailyResult(ctx, DailyResult{
+		if err := s.repo.SaveDailyResult(ctx, DailyResult{
 			Market:         MarketAShare,
 			TradeDate:      tradeDate,
 			Trigger:        TriggerDailyAuto,
@@ -163,7 +191,9 @@ func (s *Service) GenerateAndStoreDaily(ctx context.Context, cfg AIConfig) (*Pic
 			SelectionBasis: result.Analysis.SelectionBasis,
 			Model:          cfg.Model,
 			PayloadJSON:    string(encoded),
-		})
+		}); err != nil {
+			return nil, err
+		}
 	}
 	return result, nil
 }

@@ -1,8 +1,7 @@
 import Head from 'next/head'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { useAuth } from '../../lib/auth-context'
-import { fetchAIPickerMeta, fetchDailyAIPicks, formatPct, formatPrice, generateAIPicks, convictionTone } from '../../lib/ai-picker'
+import { fetchAIPickerMeta, fetchDailyAIPicks, formatPct, formatPrice, convictionTone } from '../../lib/ai-picker'
 
 const MARKETS = [
   { key: 'ASHARE', label: 'A股' },
@@ -10,69 +9,53 @@ const MARKETS = [
 ]
 
 export default function AIPickerPage() {
-  const { isLoggedIn, openAuthModal } = useAuth()
   const [market, setMarket] = useState('ASHARE')
-  const [meta, setMeta] = useState(null)
-  const [result, setResult] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [generating, setGenerating] = useState(false)
-  const [error, setError] = useState('')
+  const [metaByMarket, setMetaByMarket] = useState({})
+  const [resultByMarket, setResultByMarket] = useState({})
+  const [loadingByMarket, setLoadingByMarket] = useState({ ASHARE: true })
+  const [errorByMarket, setErrorByMarket] = useState({})
 
   const loadPage = useCallback(async (activeMarket) => {
-    setLoading(true)
-    setError('')
+    setLoadingByMarket((prev) => ({ ...prev, [activeMarket]: true }))
+    setErrorByMarket((prev) => ({ ...prev, [activeMarket]: '' }))
     try {
       const nextMeta = await fetchAIPickerMeta(activeMarket)
-      setMeta(nextMeta)
+      setMetaByMarket((prev) => ({ ...prev, [activeMarket]: nextMeta }))
       if (activeMarket === 'ASHARE' && nextMeta?.available) {
         try {
           const daily = await fetchDailyAIPicks(activeMarket)
-          setResult(daily)
+          setResultByMarket((prev) => ({ ...prev, [activeMarket]: daily }))
         } catch (err) {
-          setResult(null)
-          setError(err.message || '今日 AI 选股尚未生成')
+          setErrorByMarket((prev) => ({ ...prev, [activeMarket]: err.message || '今日 AI 选股尚未生成' }))
         }
-      } else {
-        setResult(null)
       }
     } catch (err) {
-      setMeta(null)
-      setResult(null)
-      setError(err.message || '页面加载失败')
+      setMetaByMarket((prev) => ({ ...prev, [activeMarket]: null }))
+      setErrorByMarket((prev) => ({ ...prev, [activeMarket]: err.message || '页面加载失败' }))
     } finally {
-      setLoading(false)
+      setLoadingByMarket((prev) => ({ ...prev, [activeMarket]: false }))
     }
   }, [])
 
   useEffect(() => {
-    loadPage(market)
-  }, [loadPage, market])
-
-  const handleGenerate = useCallback(async () => {
-    if (!isLoggedIn) {
-      openAuthModal('login', '登录后可手动重新生成 AI 选股')
+    if (!metaByMarket[market]) {
+      loadPage(market)
       return
     }
-    setGenerating(true)
-    setError('')
-    try {
-      const next = await generateAIPicks({ market, refresh: true })
-      setResult(next)
-      const nextMeta = await fetchAIPickerMeta(market)
-      setMeta(nextMeta)
-    } catch (err) {
-      setError(err.message || '生成失败')
-    } finally {
-      setGenerating(false)
+    if (market === 'ASHARE' && !resultByMarket[market] && !loadingByMarket[market]) {
+      loadPage(market)
     }
-  }, [isLoggedIn, market, openAuthModal])
+  }, [loadPage, loadingByMarket, market, metaByMarket, resultByMarket])
 
+  const meta = metaByMarket[market] || null
+  const result = resultByMarket[market] || null
+  const loading = Boolean(loadingByMarket[market])
+  const error = errorByMarket[market] || ''
   const analysis = result?.analysis || null
   const picks = analysis?.picks || []
   const allocation = analysis?.portfolio_allocation || null
   const candidatePoolSize = result?.meta?.candidate_pool_size
   const generatedAt = result?.meta?.generated_at
-  const disabled = market === 'HKEX' || !meta?.available
 
   const summaryChips = useMemo(() => {
     if (!allocation) return []
@@ -87,7 +70,7 @@ export default function AIPickerPage() {
     <>
       <Head>
         <title>AI选股 - 卧龙AI</title>
-        <meta name="description" content="每日自动生成 A 股 AI 优选组合，支持手动刷新与方向增强。" />
+        <meta name="description" content="每日自动生成 A 股 AI 优选组合，默认展示全站共享的最新结果。" />
       </Head>
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
         <section className="overflow-hidden rounded-[28px] border border-primary/20 bg-gradient-to-br from-primary/20 via-card to-card px-5 py-5 shadow-card sm:px-6">
@@ -107,14 +90,6 @@ export default function AIPickerPage() {
                   {item.label}
                 </button>
               ))}
-              <button
-                type="button"
-                onClick={handleGenerate}
-                disabled={generating || disabled}
-                className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-black transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {generating ? '生成中...' : '重新生成'}
-              </button>
             </div>
           </div>
 
@@ -238,7 +213,7 @@ export default function AIPickerPage() {
           </>
         ) : (
           <section className="rounded-2xl border border-dashed border-border bg-card px-4 py-8 text-center text-sm text-foreground-dim">
-            今日 AI 选股结果尚未生成。
+            今日 AI 选股结果正在生成中，请稍后刷新查看。
           </section>
         )}
       </main>

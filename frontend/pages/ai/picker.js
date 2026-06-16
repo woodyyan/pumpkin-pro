@@ -105,7 +105,7 @@ export default function AIPickerPage() {
         ) : market === 'HKEX' ? (
           <section className="rounded-2xl border border-border bg-card p-8 text-center">
             <h2 className="text-lg font-medium text-foreground">港股 AI 选股即将上线</h2>
-            <p className="mt-2 text-sm text-foreground-dim">当前 P0 仅支持 A 股。港股因子链路预留完成，待后续数据资产就绪后接入。</p>
+
           </section>
         ) : !meta?.available ? (
           <section className="rounded-2xl border border-border bg-card p-8 text-center">

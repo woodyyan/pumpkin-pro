@@ -1,6 +1,10 @@
 package aipicker
 
-import "time"
+import (
+	"time"
+
+	"github.com/woodyyan/pumpkin-pro/backend/store/factorlab"
+)
 
 const (
 	MarketAShare = "ASHARE"
@@ -22,9 +26,9 @@ type PickerRequest struct {
 
 type DailyResult struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
-	Market         string    `gorm:"size:16;index;not null" json:"market"`
-	TradeDate      string    `gorm:"size:10;index;not null" json:"trade_date"`
-	Trigger        string    `gorm:"size:24;not null;default:'daily_auto'" json:"trigger"`
+	Market         string    `gorm:"size:16;not null;uniqueIndex:idx_aipicker_daily_market_date_trigger" json:"market"`
+	TradeDate      string    `gorm:"size:10;not null;uniqueIndex:idx_aipicker_daily_market_date_trigger" json:"trade_date"`
+	Trigger        string    `gorm:"size:24;not null;default:'daily_auto';uniqueIndex:idx_aipicker_daily_market_date_trigger" json:"trigger"`
 	SnapshotDate   string    `gorm:"size:10;not null;default:''" json:"snapshot_date"`
 	SelectionBasis string    `gorm:"size:32;not null;default:'factor_lab'" json:"selection_basis"`
 	Model          string    `gorm:"size:128;not null;default:''" json:"model"`
@@ -34,6 +38,38 @@ type DailyResult struct {
 }
 
 func (DailyResult) TableName() string { return "ai_picker_daily_results" }
+
+const (
+	GenerateLogStatusSuccess = "success"
+	GenerateLogStatusFailed  = "failed"
+)
+
+type GenerateLogRecord struct {
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	TradeDate        string    `gorm:"size:10;index;not null" json:"trade_date"`
+	Trigger          string    `gorm:"size:24;index;not null" json:"trigger"`
+	Status           string    `gorm:"size:16;index;not null" json:"status"`
+	SnapshotDate     string    `gorm:"size:10;not null;default:''" json:"snapshot_date"`
+	CandidatePool    int       `gorm:"not null;default:0" json:"candidate_pool"`
+	Model            string    `gorm:"size:128;not null;default:''" json:"model"`
+	Message          string    `gorm:"type:text;not null;default:''" json:"message"`
+	UserID           string    `gorm:"size:64;not null;default:''" json:"user_id"`
+	// LLM 调用可观测字段（provider 无 max_tokens 时的监控依据）
+	FinishReason     string    `gorm:"size:32;not null;default:''" json:"finish_reason"`
+	PromptChars      int       `gorm:"not null;default:0" json:"prompt_chars"`
+	CompletionTokens int       `gorm:"not null;default:0" json:"completion_tokens"`
+	TimeoutSeconds   int       `gorm:"not null;default:0" json:"timeout_seconds"`
+	ResponseMS       int       `gorm:"not null;default:0" json:"response_ms"`
+	CreatedAt        time.Time `gorm:"not null;index" json:"created_at"`
+}
+
+func (GenerateLogRecord) TableName() string { return "ai_picker_generate_logs" }
+
+type AdminGenerateStatus struct {
+	LatestResult *DailyResult         `json:"latest_result,omitempty"`
+	LatestLog    *GenerateLogRecord   `json:"latest_log,omitempty"`
+	Logs         []GenerateLogRecord  `json:"logs"`
+}
 
 type PickerResponse struct {
 	Analysis *AnalysisPayload `json:"analysis"`
@@ -101,17 +137,32 @@ type PricePoint struct {
 }
 
 type Candidate struct {
-	Code               string
-	Symbol             string
-	Name               string
-	Industry           string
-	ClosePrice         float64
-	CompositeScore     *float64
-	ValueScore         *float64
-	DividendYieldScore *float64
-	GrowthScore        *float64
-	QualityScore       *float64
-	MomentumScore      *float64
-	SizeScore          *float64
-	LowVolatilityScore *float64
+	Code                  string
+	Symbol                string
+	Name                  string
+	Industry              string
+	ClosePrice            float64
+	CompositeScore        *float64
+	ValueScore            *float64
+	DividendYieldScore    *float64
+	GrowthScore           *float64
+	QualityScore          *float64
+	MomentumScore         *float64
+	SizeScore             *float64
+	LowVolatilityScore    *float64
+	HitFactors            []string
+	FactorTags            []string
+	TechnicalTags         []string
+	ChangePct20D          *float64
+	DistanceToMA20Pct     *float64
+	DistanceToMA60Pct     *float64
+	RSI14                 *float64
+	Volatility20D         *float64
+	VolumeMA5ToMA20       *float64
+	TechnicalDataComplete bool
+}
+
+type FactorCandidate struct {
+	factorlab.FactorScreenerItem
+	HitFactors map[string]struct{}
 }

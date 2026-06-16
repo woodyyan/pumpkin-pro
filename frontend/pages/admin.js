@@ -962,7 +962,10 @@ function AdminDashboard({ session, onLogout }) {
             {/* Panel 8: Factor Lab Pipeline */}
             <FactorLabPipelinePanel onUnauthorized={onLogout} />
 
-            {/* Panel 9: Quadrant Overview + Compute History (enhanced) */}
+            {/* Panel 9: AI 选股手动生成 */}
+            <AIPickerAdminPanel onUnauthorized={onLogout} />
+
+            {/* Panel 10: Quadrant Overview + Compute History (enhanced) */}
             <QuadrantAdminPanel onUnauthorized={onLogout} />
 
             {/* Panel 9: User Feedback */}
@@ -1569,6 +1572,115 @@ function formatDurationSeconds(value) {
   if (!Number.isFinite(seconds) || seconds <= 0) return '--'
   if (seconds < 60) return `${Math.round(seconds)}秒`
   return `${Math.floor(seconds / 60)}分${Math.round(seconds % 60)}秒`
+}
+
+function AIPickerAdminPanel({ onUnauthorized }) {
+  const [generating, setGenerating] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const [actionSuccess, setActionSuccess] = useState('')
+  const resource = useAdminResource({
+    key: 'admin:ai-picker',
+    request: () => adminFetch('/api/admin/ai-picker/status'),
+    staleMs: 5_000,
+    minIntervalMs: 3_000,
+    onUnauthorized,
+    errorMessage: '加载 AI 选股状态失败',
+  })
+  const data = resource.data || {}
+  const latestResult = data.latest_result || null
+  const latestLog = data.latest_log || null
+  const logs = data.logs || []
+
+  const handleGenerate = async () => {
+    if (!window.confirm('确认立即手动生成一份 AI 优选组合吗？这会直接覆盖今日展示结果。')) return
+    setGenerating(true)
+    setActionError('')
+    setActionSuccess('')
+    try {
+      await adminFetch('/api/admin/ai-picker/generate', { method: 'POST' })
+      setActionSuccess('已手动生成今日 AI 优选组合')
+      await resource.refresh({ force: true, preferCache: false })
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '手动生成 AI 选股失败')
+      if (message) setActionError(message)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground-muted">🪄 AI 选股手动生成</h2>
+          <p className="mt-1 text-xs text-foreground-dim">当每日自动结果缺失或异常时，可在这里手动重生一份共享组合，并查看最近错误日志。</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={generating}
+          className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-foreground transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {generating ? '生成中...' : '立即手动生成'}
+        </button>
+      </div>
+      {(resource.error || actionError) ? <div className="mb-3 rounded-xl border border-rose-400/20 bg-negative/10 px-4 py-2 text-xs text-negative">{actionError || resource.error}</div> : null}
+      {actionSuccess ? <div className="mb-3 rounded-xl border border-emerald-400/20 bg-positive/10 px-4 py-2 text-xs text-positive">{actionSuccess}</div> : null}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard label="最近交易日" value={latestResult?.trade_date || '--'} sub={latestResult?.trigger || '--'} />
+        <StatCard label="最近快照" value={latestResult?.snapshot_date || latestLog?.snapshot_date || '--'} />
+        <StatCard label="最近候选池" value={latestLog?.candidate_pool != null ? formatNumber(latestLog.candidate_pool) : '--'} sub={latestLog?.model || '--'} />
+        <StatCard label="最近状态" value={latestLog?.status || '--'} sub={formatAdminDateTime(latestLog?.created_at)} />
+      </div>
+      <div className="mt-4 rounded-xl border border-border bg-card p-4">
+        <div className="mb-3 text-xs text-foreground-dim">最近结果</div>
+        {!latestResult ? (
+          <p className="text-xs text-foreground-disabled">暂无已保存结果。</p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-3 text-xs text-foreground-dim">
+            <div>触发方式：<span className="text-foreground-muted">{latestResult.trigger || '--'}</span></div>
+            <div>模型：<span className="text-foreground-muted">{latestResult.model || '--'}</span></div>
+            <div>更新时间：<span className="text-foreground-muted">{formatAdminDateTime(latestResult.updated_at)}</span></div>
+          </div>
+        )}
+      </div>
+      <div className="mt-4 rounded-xl border border-border bg-card p-4">
+        <div className="mb-3 text-xs text-foreground-dim">最近 {logs.length || 0} 条生成日志</div>
+        {logs.length === 0 ? (
+          <p className="text-xs text-foreground-disabled">暂无生成日志。</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-border text-foreground-dim">
+                  <th className="pb-2 pr-3">时间</th>
+                  <th className="pb-2 pr-3">状态</th>
+                  <th className="pb-2 pr-3">触发</th>
+                  <th className="pb-2 pr-3">快照</th>
+                  <th className="pb-2 pr-3">候选池</th>
+                  <th className="pb-2 pr-3">模型</th>
+                  <th className="pb-2">日志</th>
+                </tr>
+              </thead>
+              <tbody className="text-foreground-muted">
+                {logs.map((item) => (
+                  <tr key={item.id} className="border-b border-border last:border-0 align-top">
+                    <td className="py-2 pr-3 whitespace-nowrap">{formatAdminDateTime(item.created_at)}</td>
+                    <td className={`py-2 pr-3 ${item.status === 'failed' ? 'text-negative' : 'text-positive'}`}>{item.status}</td>
+                    <td className="py-2 pr-3">{item.trigger || '--'}</td>
+                    <td className="py-2 pr-3">{item.snapshot_date || '--'}</td>
+                    <td className="py-2 pr-3">{item.candidate_pool ? formatNumber(item.candidate_pool) : '--'}</td>
+                    <td className="py-2 pr-3">{item.model || '--'}</td>
+                    <td className="py-2 break-words whitespace-pre-wrap text-foreground-dim">{item.message || '--'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
+  )
 }
 
 function QuadrantAdminPanel({ onUnauthorized }) {

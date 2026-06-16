@@ -35,11 +35,50 @@ func (r *Repository) SaveDailyResult(ctx context.Context, record DailyResult) er
 
 func (r *Repository) GetLatestDailyResult(ctx context.Context, market string) (*DailyResult, error) {
 	var item DailyResult
+	normalizedMarket := strings.TrimSpace(strings.ToUpper(market))
 	err := r.db.WithContext(ctx).
-		Where("market = ? AND trigger = ?", strings.TrimSpace(strings.ToUpper(market)), TriggerDailyAuto).
+		Where("market = ?", normalizedMarket).
+		Order(clause.Expr{SQL: "CASE WHEN trigger = ? THEN 0 ELSE 1 END", Vars: []any{TriggerDailyAuto}}).
 		Order("trade_date desc, updated_at desc").
 		First(&item).Error
 	if err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func (r *Repository) SaveGenerateLog(ctx context.Context, record GenerateLogRecord) error {
+	record.TradeDate = strings.TrimSpace(record.TradeDate)
+	record.Trigger = strings.TrimSpace(record.Trigger)
+	record.Status = strings.TrimSpace(record.Status)
+	record.SnapshotDate = strings.TrimSpace(record.SnapshotDate)
+	record.Model = strings.TrimSpace(record.Model)
+	record.UserID = strings.TrimSpace(record.UserID)
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = time.Now().UTC()
+	}
+	return r.db.WithContext(ctx).Create(&record).Error
+}
+
+func (r *Repository) ListGenerateLogs(ctx context.Context, limit int) ([]GenerateLogRecord, error) {
+	if limit <= 0 {
+		limit = maxGenerateErrorLogs
+	}
+	var items []GenerateLogRecord
+	if err := r.db.WithContext(ctx).
+		Order("created_at desc, id desc").
+		Limit(limit).
+		Find(&items).Error; err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *Repository) GetLatestGenerateLog(ctx context.Context) (*GenerateLogRecord, error) {
+	var item GenerateLogRecord
+	if err := r.db.WithContext(ctx).
+		Order("created_at desc, id desc").
+		First(&item).Error; err != nil {
 		return nil, err
 	}
 	return &item, nil

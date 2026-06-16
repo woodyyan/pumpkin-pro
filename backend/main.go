@@ -3853,6 +3853,46 @@ func (a *appServer) handleAdminQuadrantOverview(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, overview)
 }
 
+func (a *appServer) handleAdminAIPickerStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	if a.aipickerService == nil {
+		writeError(w, http.StatusServiceUnavailable, "AI 选股服务未初始化")
+		return
+	}
+	status, err := a.aipickerService.AdminGenerateStatus(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (a *appServer) handleAdminAIPickerGenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	if a.aipickerService == nil {
+		writeError(w, http.StatusServiceUnavailable, "AI 选股服务未初始化")
+		return
+	}
+	cfg, err := a.resolveAIPickerAIConfig(r.Context())
+	if err != nil {
+		log.Printf("[ai-picker-admin] resolve runtime config failed: %v", err)
+		writeError(w, http.StatusInternalServerError, "AI 配置读取失败，请联系管理员检查")
+		return
+	}
+	result, err := a.aipickerService.GenerateAndStoreManual(r.Context(), cfg, "admin")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func main() {
 	cfg := config.Load()
 	storeInstance, err := store.New(cfg.DB)
@@ -3989,7 +4029,8 @@ func main() {
 	factorLabRepo := factorlab.NewRepository(storeInstance.DB)
 	factorLabService := factorlab.NewService(factorLabRepo)
 	aipickerRepo := aipicker.NewRepository(storeInstance.DB)
-	aipickerService := aipicker.NewService(aipickerRepo, factorLabService)
+	aipickerTechnicalRepo := aipicker.NewTechnicalSnapshotRepository(storeInstance.DB)
+	aipickerService := aipicker.NewService(aipickerRepo, factorLabService, aipickerTechnicalRepo)
 
 	adminRepo := admin.NewRepository(storeInstance.DB)
 	adminService := admin.NewService(adminRepo, admin.ServiceConfig{
@@ -4138,6 +4179,8 @@ func main() {
 
 	mux.HandleFunc("/api/admin/quadrant-logs", server.withSuperAdminAuth(server.handleAdminQuadrantLogs))
 	mux.HandleFunc("/api/admin/quadrant-overview", server.withSuperAdminAuth(server.handleAdminQuadrantOverview))
+	mux.HandleFunc("/api/admin/ai-picker/status", server.withSuperAdminAuth(server.handleAdminAIPickerStatus))
+	mux.HandleFunc("/api/admin/ai-picker/generate", server.withSuperAdminAuth(server.handleAdminAIPickerGenerate))
 	mux.HandleFunc("/api/admin/ranking-portfolio-status", server.withSuperAdminAuth(server.handleAdminRankingPortfolioStatus))
 	mux.HandleFunc("/api/admin/ranking-portfolio-repair", server.withSuperAdminAuth(server.handleAdminRankingPortfolioRepair))
 	mux.HandleFunc("/api/admin/company-profiles", server.withSuperAdminAuth(server.handleAdminCompanyProfiles))

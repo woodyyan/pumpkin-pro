@@ -34,14 +34,22 @@ func (c AIConfig) Enabled() bool {
 }
 
 type Service struct {
-	repo      *Repository
-	factorLab *factorlab.Service
+	repo          *Repository
+	factorLab     *factorlab.Service
+	technicalRepo *TechnicalSnapshotRepository
+	technicalSvc  *TechnicalSnapshotService
 
 	dailyMu sync.Mutex
 }
 
-func NewService(repo *Repository, factorLab *factorlab.Service) *Service {
-	return &Service{repo: repo, factorLab: factorLab}
+const maxGenerateErrorLogs = 20
+
+func beijingNow() time.Time {
+	return time.Now().In(time.FixedZone("CST", 8*60*60))
+}
+
+func NewService(repo *Repository, factorLab *factorlab.Service, technicalRepo *TechnicalSnapshotRepository) *Service {
+	return &Service{repo: repo, factorLab: factorLab, technicalRepo: technicalRepo, technicalSvc: NewTechnicalSnapshotService(technicalRepo)}
 }
 
 func (s *Service) Meta(ctx context.Context, market string) map[string]any {
@@ -118,48 +126,35 @@ func isDailyResultMissing(err error) bool {
 	return false
 }
 
-func (s *Service) Generate(ctx context.Context, cfg AIConfig, userID string, req PickerRequest) (*PickerResponse, error) {
-	market := strings.ToUpper(strings.TrimSpace(req.Market))
-	if market == "" {
-		market = MarketAShare
-	}
-	if market != MarketAShare {
-		return nil, fmt.Errorf("%w: 港股 AI 选股即将上线", ErrUnavailable)
-	}
+// generateCore 执行核心选股逻辑，返回结果与 LLM 调用元信息。
+// trigger 参数决定 prompt 中的触发方式标注（daily_auto / manual）。
+func (s *Service) generateCore(ctx context.Context, cfg AIConfig, userID, trigger string) (*PickerResponse, *llmCallMeta, error) {
 	if !cfg.Enabled() {
-		return nil, fmt.Errorf("%w: AI 功能未启用", ErrUnavailable)
+		return nil, nil, fmt.Errorf("%w: AI 功能未启用", ErrUnavailable)
 	}
 	if s.factorLab == nil {
-		return nil, fmt.Errorf("%w: 因子实验室服务未初始化", ErrUnavailable)
+		return nil, nil, fmt.Errorf("%w: 因子实验室服务未初始化", ErrUnavailable)
 	}
-	meta, err := s.factorLab.Meta(ctx)
+	factorMeta, err := s.factorLab.Meta(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if !meta.HasSnapshot {
-		return nil, fmt.Errorf("%w: 因子数据未就绪", ErrUnavailable)
+	if !factorMeta.HasSnapshot {
+		return nil, nil, fmt.Errorf("%w: 因子数据未就绪", ErrUnavailable)
 	}
-	candidatesResp, err := s.factorLab.Screen(ctx, factorlab.FactorScreenerRequest{
-		SnapshotDate: meta.SnapshotDate,
-		SortBy:       "composite_score",
-		SortOrder:    "desc",
-		Page:         1,
-		PageSize:     24,
-	})
+	candidates, marketSummary, techStats, err := s.buildCandidatePool(ctx, factorMeta.SnapshotDate)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if len(candidatesResp.Items) == 0 {
-		return nil, fmt.Errorf("%w: 候选池为空", ErrUnavailable)
+	if len(candidates) == 0 {
+		return nil, nil, fmt.Errorf("%w: 候选池为空", ErrUnavailable)
 	}
-	candidates := buildCandidates(candidatesResp.Items)
-	trigger := TriggerManual
-	userPrompt := buildUserPrompt(meta.SnapshotDate, trigger, candidates)
-	result, err := callLLM(ctx, cfg, userID, userPrompt)
+	userPrompt := buildUserPrompt(factorMeta.SnapshotDate, trigger, marketSummary, techStats, candidates)
+	result, callMeta, err := callLLM(ctx, cfg, userID, userPrompt)
 	if err != nil {
-		return nil, err
+		return nil, callMeta, err
 	}
-	warnings := validateResponse(result, candidates, meta.SnapshotDate, trigger, cfg.Model)
+	warnings := validateResponse(result, candidates, factorMeta.SnapshotDate, trigger, cfg.Model)
 	if result.Meta == nil {
 		result.Meta = map[string]any{}
 	}
@@ -169,33 +164,120 @@ func (s *Service) Generate(ctx context.Context, cfg AIConfig, userID string, req
 	result.Meta["cached"] = false
 	result.Meta["model"] = cfg.Model
 	result.Meta["generated_at"] = time.Now().UTC().Format(time.RFC3339)
-	return result, nil
+	if callMeta != nil {
+		result.Meta["finish_reason"] = callMeta.FinishReason
+		result.Meta["completion_tokens"] = callMeta.CompletionTokens
+		result.Meta["prompt_chars"] = callMeta.PromptChars
+		result.Meta["response_ms"] = callMeta.ResponseMS
+	}
+	return result, callMeta, nil
+}
+
+// Generate 是对外暴露的一次性生成接口（不持久化），trigger 固定为 manual。
+func (s *Service) Generate(ctx context.Context, cfg AIConfig, userID string, req PickerRequest) (*PickerResponse, error) {
+	market := strings.ToUpper(strings.TrimSpace(req.Market))
+	if market == "" {
+		market = MarketAShare
+	}
+	if market != MarketAShare {
+		return nil, fmt.Errorf("%w: 港股 AI 选股即将上线", ErrUnavailable)
+	}
+	result, _, err := s.generateCore(ctx, cfg, userID, TriggerManual)
+	return result, err
 }
 
 func (s *Service) GenerateAndStoreDaily(ctx context.Context, cfg AIConfig) (*PickerResponse, error) {
-	result, err := s.Generate(ctx, cfg, "system", PickerRequest{Market: MarketAShare})
+	return s.generateAndStore(ctx, cfg, TriggerDailyAuto, "system")
+}
+
+func (s *Service) GenerateAndStoreManual(ctx context.Context, cfg AIConfig, userID string) (*PickerResponse, error) {
+	actor := strings.TrimSpace(userID)
+	if actor == "" {
+		actor = "admin"
+	}
+	return s.generateAndStore(ctx, cfg, TriggerManual, actor)
+}
+
+func (s *Service) generateAndStore(ctx context.Context, cfg AIConfig, trigger, userID string) (*PickerResponse, error) {
+	result, callMeta, err := s.generateCore(ctx, cfg, userID, trigger)
+	tradeDate := beijingNow().Format("2006-01-02")
 	if err != nil {
+		log := GenerateLogRecord{
+			TradeDate: tradeDate,
+			Trigger:   trigger,
+			Status:    GenerateLogStatusFailed,
+			Message:   err.Error(),
+			UserID:    userID,
+		}
+		if callMeta != nil {
+			log.FinishReason = callMeta.FinishReason
+			log.PromptChars = callMeta.PromptChars
+			log.CompletionTokens = callMeta.CompletionTokens
+			log.TimeoutSeconds = 240
+			log.ResponseMS = callMeta.ResponseMS
+		}
+		s.recordGenerateLog(ctx, log)
 		return nil, err
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
+		s.recordGenerateLog(ctx, GenerateLogRecord{
+			TradeDate: tradeDate,
+			Trigger:   trigger,
+			Status:    GenerateLogStatusFailed,
+			Message:   err.Error(),
+			UserID:    userID,
+		})
 		return nil, err
 	}
-	tradeDate := time.Now().In(time.FixedZone("CST", 8*60*60)).Format("2006-01-02")
 	if s.repo != nil {
 		if err := s.repo.SaveDailyResult(ctx, DailyResult{
 			Market:         MarketAShare,
 			TradeDate:      tradeDate,
-			Trigger:        TriggerDailyAuto,
+			Trigger:        trigger,
 			SnapshotDate:   result.Analysis.SnapshotDate,
 			SelectionBasis: result.Analysis.SelectionBasis,
 			Model:          cfg.Model,
 			PayloadJSON:    string(encoded),
 		}); err != nil {
+			s.recordGenerateLog(ctx, GenerateLogRecord{
+				TradeDate: tradeDate,
+				Trigger:   trigger,
+				Status:    GenerateLogStatusFailed,
+				Message:   err.Error(),
+				UserID:    userID,
+			})
 			return nil, err
 		}
 	}
+	successLog := GenerateLogRecord{
+		TradeDate:     tradeDate,
+		Trigger:       trigger,
+		Status:        GenerateLogStatusSuccess,
+		SnapshotDate:  result.Analysis.SnapshotDate,
+		CandidatePool: toInt(result.Meta["candidate_pool_size"]),
+		Model:         strings.TrimSpace(cfg.Model),
+		Message:       "ok",
+		UserID:        userID,
+		TimeoutSeconds: 240,
+	}
+	if callMeta != nil {
+		successLog.FinishReason = callMeta.FinishReason
+		successLog.PromptChars = callMeta.PromptChars
+		successLog.CompletionTokens = callMeta.CompletionTokens
+		successLog.ResponseMS = callMeta.ResponseMS
+	}
+	s.recordGenerateLog(ctx, successLog)
 	return result, nil
+}
+
+func (s *Service) recordGenerateLog(ctx context.Context, record GenerateLogRecord) {
+	if s.repo == nil {
+		return
+	}
+	if err := s.repo.SaveGenerateLog(ctx, record); err != nil {
+		fmt.Printf("[ai-picker] save generate log failed: %v\n", err)
+	}
 }
 
 type aiChatMessage struct {
@@ -207,8 +289,9 @@ type aiChatRequest struct {
 	Model          string          `json:"model"`
 	Messages       []aiChatMessage `json:"messages"`
 	Temperature    float64         `json:"temperature"`
-	MaxTokens      int             `json:"max_tokens,omitempty"`
 	ResponseFormat *aiResponseFmt  `json:"response_format,omitempty"`
+	// MaxTokens は意図的に省略：provider のデフォルト上限に委ねることで、
+	// 長い JSON 出力が finish_reason=length で打ち切られる問題を回避する。
 }
 
 type aiResponseFmt struct {
@@ -226,7 +309,21 @@ type aiChatResponse struct {
 	} `json:"error,omitempty"`
 }
 
-func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*PickerResponse, error) {
+// llmCallMeta 记录一次 LLM 调用的关键可观测信息，供上层日志使用。
+type llmCallMeta struct {
+	PromptChars      int
+	PromptTokens     int
+	CompletionTokens int
+	FinishReason     string
+	ResponseMS       int
+}
+
+// callLLM 调用 LLM 并返回解析后的结果与调用元信息。
+//
+// MaxTokens 故意不设置：将输出 token 上限交给 provider 默认策略，
+// 避免在长 JSON schema + 中文长文本场景下被 finish_reason=length 截断。
+// 对应地，HTTP timeout 设置为 240 秒以承受更长的推理耗时。
+func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*PickerResponse, *llmCallMeta, error) {
 	body := aiChatRequest{
 		Model: cfg.Model,
 		Messages: []aiChatMessage{
@@ -234,36 +331,51 @@ func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*Pic
 			{Role: "user", Content: userPrompt},
 		},
 		Temperature:    0.2,
-		MaxTokens:      4096,
 		ResponseFormat: &aiResponseFmt{Type: "json_object"},
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	endpoint := strings.TrimRight(cfg.BaseURL, "/") + "/chat/completions"
 
+	// 允许重试一次处理瞬时网络抖动；finish_reason=length 例外（直接失败，重试无意义）。
 	const maxRetries = 1
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return nil, nil, ctx.Err()
 			case <-time.After(2 * time.Second):
 			}
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-		client := &http.Client{Timeout: 90 * time.Second}
-		logEntry := strategy.AILogEntry{UserID: userID, FeatureKey: "ai_picker", FeatureName: "AI 选股", Model: cfg.Model, ExtraMeta: map[string]any{"attempt": attempt + 1}}
+		// timeout 提升至 240s：不设 max_tokens 后模型可自由输出完整 JSON，
+		// 推理时间相应变长，短超时会造成 EOF / context deadline exceeded 替换旧报错。
+		client := &http.Client{Timeout: 240 * time.Second}
+		meta := &llmCallMeta{PromptChars: len(userPrompt)}
+		logEntry := strategy.AILogEntry{
+			UserID:      userID,
+			FeatureKey:  "ai_picker",
+			FeatureName: "AI 选股",
+			Model:       cfg.Model,
+			ExtraMeta: map[string]any{
+				"attempt":       attempt + 1,
+				"prompt_chars":  len(userPrompt),
+				"max_tokens":    "unlimited",
+				"timeout_secs":  240,
+			},
+		}
 		start := time.Now()
 		resp, err := client.Do(req)
-		logEntry.ResponseMS = int(time.Since(start).Milliseconds())
+		meta.ResponseMS = int(time.Since(start).Milliseconds())
+		logEntry.ResponseMS = meta.ResponseMS
 		if err != nil {
 			logEntry.Status = "error"
 			logEntry.ErrorMessage = err.Error()
@@ -277,7 +389,7 @@ func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*Pic
 			logEntry.Status = "error"
 			logEntry.ErrorMessage = readErr.Error()
 			strategy.LogAICall(logEntry)
-			return nil, readErr
+			return nil, nil, readErr
 		}
 		if resp.StatusCode != http.StatusOK {
 			logEntry.Status = "error"
@@ -291,30 +403,42 @@ func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*Pic
 			logEntry.Status = "error"
 			logEntry.ErrorMessage = err.Error()
 			strategy.LogAICall(logEntry)
-			return nil, err
+			return nil, nil, err
 		}
 		logEntry.ApplyUsage(parsed.Usage)
+		meta.PromptTokens = parsed.Usage.PromptTokens
+		meta.CompletionTokens = parsed.Usage.CompletionTokens
 		if parsed.Error != nil {
 			logEntry.Status = "error"
 			logEntry.ErrorMessage = parsed.Error.Message
 			strategy.LogAICall(logEntry)
-			return nil, fmt.Errorf(parsed.Error.Message)
+			return nil, nil, fmt.Errorf("%s", parsed.Error.Message)
 		}
 		if len(parsed.Choices) == 0 {
 			logEntry.Status = "error"
 			logEntry.ErrorMessage = "empty choices"
 			strategy.LogAICall(logEntry)
-			return nil, fmt.Errorf("AI 未返回有效结果")
+			return nil, nil, fmt.Errorf("AI 未返回有效结果")
 		}
 		choice := parsed.Choices[0]
+		meta.FinishReason = choice.FinishReason
+		logEntry.ExtraMeta["finish_reason"] = choice.FinishReason
+		logEntry.ExtraMeta["completion_tokens"] = parsed.Usage.CompletionTokens
 		raw := strings.TrimSpace(choice.Message.Content)
-		// 输出被 token 上限截断时，JSON 必然不完整，直接重试或明确报错
+
+		// finish_reason=length：即使去掉了 max_tokens，provider 仍可能有自身默认上限，
+		// 此时 JSON 必然不完整。直接失败，不重试（重试同样会被截断）。
 		if choice.FinishReason == "length" {
 			logEntry.Status = "error"
-			logEntry.ErrorMessage = "output truncated (finish_reason=length)"
+			logEntry.ErrorMessage = fmt.Sprintf(
+				"output truncated (finish_reason=length, completion_tokens=%d, prompt_chars=%d); provider 仍有默认 token 上限",
+				parsed.Usage.CompletionTokens, len(userPrompt),
+			)
 			strategy.LogAICall(logEntry)
-			lastErr = fmt.Errorf("AI 输出超长被截断，请稍后重试")
-			continue
+			return nil, meta, fmt.Errorf(
+				"AI 输出被 provider 截断 (finish_reason=length, completion_tokens=%d)，请联系管理员确认 provider 默认上限",
+				parsed.Usage.CompletionTokens,
+			)
 		}
 		if raw == "" {
 			logEntry.Status = "error"
@@ -341,12 +465,12 @@ func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*Pic
 		}
 		logEntry.Status = "success"
 		strategy.LogAICall(logEntry)
-		return &result, nil
+		return &result, meta, nil
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("AI 选股调用失败")
 	}
-	return nil, lastErr
+	return nil, nil, lastErr
 }
 
 func buildCandidates(items []factorlab.FactorScreenerItem) []Candidate {
@@ -371,14 +495,20 @@ func buildCandidates(items []factorlab.FactorScreenerItem) []Candidate {
 	return out
 }
 
-func buildUserPrompt(snapshotDate, trigger string, candidates []Candidate) string {
+func buildUserPrompt(snapshotDate, trigger, marketSummary string, techStats technicalCoverageStats, candidates []Candidate) string {
 	var sb strings.Builder
 	sb.WriteString("请基于以下候选池为 A 股生成 4 只股票的推荐组合。\n")
-	fmt.Fprintf(&sb, "快照日期：%s\n触发方式：%s\n\n候选池如下（只能从中选择）:\n", snapshotDate, trigger)
+	fmt.Fprintf(&sb, "快照日期：%s\n触发方式：%s\n市场摘要：%s\n", snapshotDate, trigger, strings.TrimSpace(marketSummary))
+	if techStats.HasPartialMissing() {
+		fmt.Fprintf(&sb, "技术增强提示：部分技术指标缺失（已覆盖 %d/%d 只），缺失股票仍可基于因子质量纳入推荐，但理由里要明确说明技术面信息不足。\n", techStats.WithTechnicalData, techStats.Total)
+	} else {
+		fmt.Fprintf(&sb, "技术增强提示：候选池技术指标覆盖完整（%d/%d）。\n", techStats.WithTechnicalData, techStats.Total)
+	}
+	sb.WriteString("\n候选池如下（只能从中选择）:\n")
 	for idx, c := range candidates {
-		fmt.Fprintf(&sb, "%d. code=%s, symbol=%s, name=%s, industry=%s, price=%.2f, composite=%s, value=%s, dividend=%s, growth=%s, quality=%s, momentum=%s, size=%s, low_vol=%s\n",
+		fmt.Fprintf(&sb, "%d. code=%s, symbol=%s, name=%s, industry=%s, price=%.2f, composite=%s, hit_factors=%s, factor_tags=%s, technical_status=%s, technical_tags=%s, value=%s, dividend=%s, growth=%s, quality=%s, momentum=%s, size=%s, low_vol=%s, ret20=%s, ma20_gap=%s, ma60_gap=%s, rsi14=%s, vol20=%s, volume_ratio=%s\n",
 			idx+1, c.Code, c.Symbol, c.Name, c.Industry, c.ClosePrice,
-			fmtScore(c.CompositeScore), fmtScore(c.ValueScore), fmtScore(c.DividendYieldScore), fmtScore(c.GrowthScore), fmtScore(c.QualityScore), fmtScore(c.MomentumScore), fmtScore(c.SizeScore), fmtScore(c.LowVolatilityScore))
+			fmtScore(c.CompositeScore), strings.Join(c.HitFactors, "/"), strings.Join(c.FactorTags, "/"), technicalStatusLabel(c.TechnicalDataComplete), strings.Join(c.TechnicalTags, "/"), fmtScore(c.ValueScore), fmtScore(c.DividendYieldScore), fmtScore(c.GrowthScore), fmtScore(c.QualityScore), fmtScore(c.MomentumScore), fmtScore(c.SizeScore), fmtScore(c.LowVolatilityScore), fmtNullableFloat(c.ChangePct20D), fmtNullableFloat(c.DistanceToMA20Pct), fmtNullableFloat(c.DistanceToMA60Pct), fmtNullableFloat(c.RSI14), fmtNullableFloat(c.Volatility20D), fmtNullableFloat(c.VolumeMA5ToMA20))
 	}
 	sb.WriteString("\n请严格按 system prompt 要求输出 JSON。")
 	return sb.String()
@@ -389,6 +519,20 @@ func fmtScore(v *float64) string {
 		return "null"
 	}
 	return fmt.Sprintf("%.1f", *v)
+}
+
+func fmtNullableFloat(v *float64) string {
+	if v == nil {
+		return "null"
+	}
+	return fmt.Sprintf("%.2f", *v)
+}
+
+func technicalStatusLabel(complete bool) string {
+	if complete {
+		return "complete"
+	}
+	return "missing"
 }
 
 func stripCodeFence(s string) string {
@@ -685,4 +829,306 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+type technicalCoverageStats struct {
+	Total             int
+	WithTechnicalData int
+}
+
+func (s technicalCoverageStats) HasPartialMissing() bool {
+	return s.Total > 0 && s.WithTechnicalData < s.Total
+}
+
+func (s *Service) buildCandidatePool(ctx context.Context, snapshotDate string) ([]Candidate, string, technicalCoverageStats, error) {
+	resp, err := s.factorLab.Screen(ctx, factorlab.FactorScreenerRequest{SnapshotDate: snapshotDate, Page: 1, PageSize: 5000})
+	if err != nil {
+		return nil, "", technicalCoverageStats{}, err
+	}
+	investable := make([]factorlab.FactorScreenerItem, 0, len(resp.Items))
+	composites := make([]float64, 0, len(resp.Items))
+	for _, item := range resp.Items {
+		if !isInvestable(item) || item.CompositeScore == nil {
+			continue
+		}
+		investable = append(investable, item)
+		composites = append(composites, *item.CompositeScore)
+	}
+	if len(investable) == 0 {
+		return nil, "", technicalCoverageStats{}, fmt.Errorf("%w: 无可投资股票", ErrUnavailable)
+	}
+	threshold := percentile(composites, 0.50)
+	pool := s.recallCandidates(investable, threshold, 10, 8)
+	if len(pool) < 12 {
+		threshold = percentile(composites, 0.45)
+		pool = s.recallCandidates(investable, threshold, 15, 12)
+	}
+	tradeDate := snapshotDate
+	if s.technicalSvc != nil {
+		if err := s.technicalSvc.EnsureForCandidates(ctx, tradeDate, pool); err != nil {
+			fmt.Printf("[ai-picker] ensure technical snapshots failed: %v\n", err)
+		}
+	}
+	techMap := map[string]TechnicalSnapshot{}
+	if s.technicalRepo != nil {
+		codes := make([]string, 0, len(pool))
+		for _, item := range pool {
+			codes = append(codes, item.Code)
+		}
+		techItems, err := s.technicalRepo.GetByTradeDateAndCodes(ctx, tradeDate, codes)
+		if err != nil {
+			fmt.Printf("[ai-picker] load technical snapshots failed: %v\n", err)
+		} else {
+			for _, item := range techItems {
+				techMap[item.Code] = item
+			}
+		}
+	}
+	stats := technicalCoverageStats{Total: len(pool), WithTechnicalData: len(techMap)}
+	candidates := make([]Candidate, 0, len(pool))
+	for _, item := range pool {
+		tech, ok := techMap[item.Code]
+		candidates = append(candidates, buildCandidate(item, tech, ok))
+	}
+	return candidates, buildMarketSummary(candidates, stats), stats, nil
+}
+
+func (s *Service) recallCandidates(items []factorlab.FactorScreenerItem, minComposite float64, topN, industryCap int) []FactorCandidate {
+	factorExtractors := []struct {
+		key   string
+		score func(factorlab.FactorScreenerItem) *float64
+	}{
+		{"value", func(i factorlab.FactorScreenerItem) *float64 { return i.ValueScore }},
+		{"dividend_yield", func(i factorlab.FactorScreenerItem) *float64 { return i.DividendYieldScore }},
+		{"growth", func(i factorlab.FactorScreenerItem) *float64 { return i.GrowthScore }},
+		{"quality", func(i factorlab.FactorScreenerItem) *float64 { return i.QualityScore }},
+		{"momentum", func(i factorlab.FactorScreenerItem) *float64 { return i.MomentumScore }},
+		{"size", func(i factorlab.FactorScreenerItem) *float64 { return i.SizeScore }},
+		{"low_volatility", func(i factorlab.FactorScreenerItem) *float64 { return i.LowVolatilityScore }},
+	}
+	merged := map[string]FactorCandidate{}
+	for _, extractor := range factorExtractors {
+		filtered := make([]factorlab.FactorScreenerItem, 0, len(items))
+		for _, item := range items {
+			score := extractor.score(item)
+			if score == nil || item.CompositeScore == nil || *item.CompositeScore < minComposite {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		sort.Slice(filtered, func(i, j int) bool { return deref(extractor.score(filtered[i])) > deref(extractor.score(filtered[j])) })
+		if len(filtered) > topN {
+			filtered = filtered[:topN]
+		}
+		for _, item := range filtered {
+			existing, ok := merged[item.Code]
+			if !ok {
+				existing = FactorCandidate{FactorScreenerItem: item, HitFactors: map[string]struct{}{}}
+			}
+			existing.HitFactors[extractor.key] = struct{}{}
+			merged[item.Code] = existing
+		}
+	}
+	byIndustry := map[string][]FactorCandidate{}
+	for _, item := range merged {
+		byIndustry[item.Industry] = append(byIndustry[item.Industry], item)
+	}
+	out := make([]FactorCandidate, 0, len(merged))
+	for _, items := range byIndustry {
+		sort.Slice(items, func(i, j int) bool {
+			if len(items[i].HitFactors) != len(items[j].HitFactors) {
+				return len(items[i].HitFactors) > len(items[j].HitFactors)
+			}
+			if deref(items[i].CompositeScore) != deref(items[j].CompositeScore) {
+				return deref(items[i].CompositeScore) > deref(items[j].CompositeScore)
+			}
+			if deref(items[i].QualityScore) != deref(items[j].QualityScore) {
+				return deref(items[i].QualityScore) > deref(items[j].QualityScore)
+			}
+			return deref(items[i].MomentumScore) > deref(items[j].MomentumScore)
+		})
+		if len(items) > industryCap {
+			items = items[:industryCap]
+		}
+		out = append(out, items...)
+	}
+	return out
+}
+
+func isInvestable(item factorlab.FactorScreenerItem) bool {
+	if item.IsNewStock || strings.TrimSpace(item.Industry) == "" {
+		return false
+	}
+	code := strings.TrimSpace(item.Code)
+	if strings.HasPrefix(code, "8") || strings.HasPrefix(code, "4") {
+		return false
+	}
+	if strings.HasPrefix(code, "688") || strings.HasPrefix(code, "300") {
+		return false
+	}
+	name := strings.ToUpper(strings.TrimSpace(item.Name))
+	if strings.Contains(name, "ST") {
+		return false
+	}
+	return true
+}
+
+func buildCandidate(item FactorCandidate, tech TechnicalSnapshot, hasTech bool) Candidate {
+	hitFactors := make([]string, 0, len(item.HitFactors))
+	for key := range item.HitFactors {
+		hitFactors = append(hitFactors, key)
+	}
+	sort.Strings(hitFactors)
+	candidate := Candidate{Code: item.Code, Symbol: item.Symbol, Name: item.Name, Industry: item.Industry, ClosePrice: item.ClosePrice, CompositeScore: item.CompositeScore, ValueScore: item.ValueScore, DividendYieldScore: item.DividendYieldScore, GrowthScore: item.GrowthScore, QualityScore: item.QualityScore, MomentumScore: item.MomentumScore, SizeScore: item.SizeScore, LowVolatilityScore: item.LowVolatilityScore, HitFactors: hitFactors, FactorTags: buildFactorTags(item.FactorScreenerItem), TechnicalDataComplete: hasTech}
+	if !hasTech {
+		return candidate
+	}
+	candidate.TechnicalTags = decodeTechTags(tech.TechTagsJSON)
+	candidate.ChangePct20D = float64Ptr(tech.ChangePct20D)
+	candidate.DistanceToMA20Pct = float64Ptr(tech.DistanceToMA20Pct)
+	candidate.DistanceToMA60Pct = float64Ptr(tech.DistanceToMA60Pct)
+	candidate.RSI14 = float64Ptr(tech.RSI14)
+	candidate.Volatility20D = float64Ptr(tech.Volatility20D)
+	candidate.VolumeMA5ToMA20 = float64Ptr(tech.VolumeMA5ToMA20)
+	return candidate
+}
+
+func buildFactorTags(item factorlab.FactorScreenerItem) []string {
+	tags := make([]string, 0, 4)
+	if deref(item.QualityScore) >= 80 {
+		tags = append(tags, "高质量")
+	}
+	if deref(item.GrowthScore) >= 80 {
+		tags = append(tags, "高成长")
+	}
+	if deref(item.ValueScore) >= 80 {
+		tags = append(tags, "高价值")
+	}
+	if deref(item.DividendYieldScore) >= 80 {
+		tags = append(tags, "高股息")
+	}
+	if deref(item.LowVolatilityScore) >= 80 {
+		tags = append(tags, "低波稳健")
+	}
+	if deref(item.MomentumScore) >= 80 {
+		tags = append(tags, "趋势偏强")
+	}
+	if len(tags) > 4 {
+		tags = tags[:4]
+	}
+	return tags
+}
+
+func buildMarketSummary(candidates []Candidate, techStats technicalCoverageStats) string {
+	if len(candidates) == 0 {
+		return "当前候选池为空"
+	}
+	styleCount := map[string]int{}
+	industryCount := map[string]int{}
+	for _, c := range candidates {
+		for _, tag := range c.FactorTags {
+			styleCount[tag]++
+		}
+		industryCount[c.Industry]++
+	}
+	summary := fmt.Sprintf("当前候选池共%d只，风格以%s为主，行业集中在%s。", len(candidates), topKeys(styleCount, 3), topKeys(industryCount, 3))
+	if techStats.HasPartialMissing() {
+		summary += fmt.Sprintf(" 其中 %d 只缺少技术快照，需以因子与行业分散度为主进行判断。", techStats.Total-techStats.WithTechnicalData)
+	}
+	return summary
+}
+
+func topKeys(m map[string]int, n int) string {
+	type kv struct {
+		K string
+		V int
+	}
+	items := make([]kv, 0, len(m))
+	for k, v := range m {
+		if strings.TrimSpace(k) != "" {
+			items = append(items, kv{k, v})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].V > items[j].V })
+	if len(items) > n {
+		items = items[:n]
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.K)
+	}
+	if len(out) == 0 {
+		return "无明显集中"
+	}
+	return strings.Join(out, "、")
+}
+
+func deref(v *float64) float64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
+func float64Ptr(v float64) *float64 {
+	value := v
+	return &value
+}
+
+func fmtFloat(v float64) string { return fmt.Sprintf("%.2f", v) }
+
+func percentile(values []float64, q float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sort.Float64s(values)
+	idx := int(float64(len(values)-1) * q)
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(values) {
+		idx = len(values) - 1
+	}
+	return values[idx]
+}
+
+func toInt(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+func (s *Service) AdminGenerateStatus(ctx context.Context) (*AdminGenerateStatus, error) {
+	if s.repo == nil {
+		return nil, ErrUnavailable
+	}
+	result, err := s.repo.GetLatestDailyResult(ctx, MarketAShare)
+	if err != nil && !isDailyResultMissing(err) {
+		return nil, err
+	}
+	latestLog, err := s.repo.GetLatestGenerateLog(ctx)
+	if err != nil && !isDailyResultMissing(err) {
+		return nil, err
+	}
+	logs, err := s.repo.ListGenerateLogs(ctx, maxGenerateErrorLogs)
+	if err != nil {
+		return nil, err
+	}
+	payload := &AdminGenerateStatus{Logs: logs}
+	if result != nil {
+		payload.LatestResult = result
+	}
+	if latestLog != nil {
+		payload.LatestLog = latestLog
+	}
+	return payload, nil
 }

@@ -52,7 +52,10 @@ frontend/
 | `/portfolio` | `portfolio.js` | 持仓管理 |
 | `/factor-lab` | `factor-lab.js` | 因子实验室 |
 | `/settings` | `settings.js` | 用户设置 |
-| `/admin` | `admin.js` | 管理后台 (独立布局) |
+| `/admin` | `admin.js` | 管理后台总览页（独立布局） |
+| `/admin/data` | `admin/data.js` | 管理后台数据作业页（公司资料、因子流水线、四象限） |
+| `/admin/ai` | `admin/ai.js` | 管理后台 AI 管理页（模型配置、AI 调用、AI 选股） |
+| `/admin/ops` | `admin/ops.js` | 管理后台运维与支持页（支付、备份、系统健康、反馈） |
 | `/changelog` | `changelog.js` | 更新日志 |
 | `/share/ai-analysis-preview` | `share/ai-analysis-preview.js` | AI分析分享图预览 (独立布局) |
 
@@ -84,6 +87,19 @@ frontend/
 - `PortfolioAttributionSection.js`: 持仓归因分析
 - `AIAnalysisReportContent.js`: AI分析报告内容
 - `MiniChart.js`: 轻量 canvas 迷你图，目前已复用于 admin 面板和市场行情页卡片
+
+### Admin 页面架构（2026-06-16）
+- 管理后台不再由单个超长 `frontend/pages/admin.js` 承载所有面板，而是拆为：
+  - `frontend/components/admin/AdminShell.js`: 统一壳层，负责 session 校验、退出登录、PC 左侧导航、移动端抽屉导航、旧 `?tab=` 参数兼容跳转。
+  - `frontend/components/admin/AdminSections.js`: 各 admin 面板与分组页面组件。
+  - `frontend/components/admin/navigation.js`: admin 分组导航配置与旧 tab 到新路由的映射。
+  - `frontend/pages/admin.js` / `frontend/pages/admin/data.js` / `frontend/pages/admin/ai.js` / `frontend/pages/admin/ops.js`: 路由入口。
+- `_app.js` 对 admin 路由的独立布局判断已从“仅 `/admin`”扩展为“所有 `/admin*` 路径”，避免嵌套路由误套主站导航。
+- admin 数据改为页面级按需拉取：
+  - 总览页只拉用户/流量/设备/漏斗相关接口。
+  - 数据作业页只拉公司资料、因子流水线、四象限相关接口。
+  - AI 管理页只拉 AI 配置、AI 使用统计、AI 选股相关接口。
+  - 运维与支持页只拉支付、备份、系统健康、反馈相关接口。
 
 ## 后端持仓快照架构补充（2026-06-02）
 

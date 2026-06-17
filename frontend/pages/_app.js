@@ -468,7 +468,7 @@ function MobileSearchInner({ onSelect }) {
 }
 
 export default function MyApp({ Component, pageProps, router }) {
-  if (router.pathname === '/admin' || router.pathname === '/share/ai-analysis-preview') {
+  if (router.pathname.startsWith('/admin') || router.pathname === '/share/ai-analysis-preview') {
     return <Component {...pageProps} />
   }
 

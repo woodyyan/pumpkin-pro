@@ -98,7 +98,7 @@ frontend/
 - admin 数据改为页面级按需拉取：
   - 总览页只拉用户/流量/设备/漏斗相关接口。
   - 数据作业页只拉公司资料、因子流水线、四象限相关接口。
-  - AI 管理页只拉 AI 配置、AI 使用统计、AI 选股相关接口。
+  - AI 管理页只拉 AI 配置、AI 使用统计、AI 选股相关接口；其中 AI Picker 运维面板会并行请求 `/api/admin/ai-picker/status` 与 `/api/admin/ai-picker/latest-run`，分别承载“最近 10 条日志/最近结果摘要”和“最近一次完整 LLM 交互详情（system prompt、user prompt、provider reasoning、原始返回）”。
   - 运维与支持页只拉支付、备份、系统健康、反馈相关接口。
 
 ## 后端持仓快照架构补充（2026-06-02）

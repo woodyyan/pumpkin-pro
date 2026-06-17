@@ -27,6 +27,7 @@ describe('admin ai config panel integration', () => {
     assert.match(sectionsSource, /useAdminResource\(\{/)
     assert.match(sectionsSource, /adminFetch\('\/api\/admin\/ai-config'/)
     assert.match(sectionsSource, /adminFetch\('\/api\/admin\/ai-config\/test'/)
+    assert.match(sectionsSource, /adminFetch\('\/api\/admin\/ai-picker\/latest-run'/)
     assert.match(sectionsSource, /handleAdminActionError/)
     assert.match(sectionsSource, /恢复已保存值/)
     assert.match(sectionsSource, /留空表示保持当前 key/)
@@ -54,5 +55,15 @@ describe('admin ai config panel integration', () => {
     assert.match(sectionsSource, /当前生效模型：/)
     assert.match(sectionsSource, /当前状态/)
     assert.match(sectionsSource, /最近测试/)
+  })
+
+  it('renders latest AI picker prompt and reasoning detail blocks', () => {
+    assert.match(sectionsSource, /最近一场生成详情/)
+    assert.match(sectionsSource, /System Prompt/)
+    assert.match(sectionsSource, /User Prompt/)
+    assert.match(sectionsSource, /AI 思考 \/ 推理过程/)
+    assert.match(sectionsSource, /AI 原始返回内容/)
+    assert.match(sectionsSource, /最近 10 条生成日志（北京时间）/)
+    assert.match(sectionsSource, /更新时间（北京时间）：/)
   })
 })

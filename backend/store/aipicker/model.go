@@ -45,15 +45,15 @@ const (
 )
 
 type GenerateLogRecord struct {
-	ID               uint      `gorm:"primaryKey" json:"id"`
-	TradeDate        string    `gorm:"size:10;index;not null" json:"trade_date"`
-	Trigger          string    `gorm:"size:24;index;not null" json:"trigger"`
-	Status           string    `gorm:"size:16;index;not null" json:"status"`
-	SnapshotDate     string    `gorm:"size:10;not null;default:''" json:"snapshot_date"`
-	CandidatePool    int       `gorm:"not null;default:0" json:"candidate_pool"`
-	Model            string    `gorm:"size:128;not null;default:''" json:"model"`
-	Message          string    `gorm:"type:text;not null;default:''" json:"message"`
-	UserID           string    `gorm:"size:64;not null;default:''" json:"user_id"`
+	ID            uint   `gorm:"primaryKey" json:"id"`
+	TradeDate     string `gorm:"size:10;index;not null" json:"trade_date"`
+	Trigger       string `gorm:"size:24;index;not null" json:"trigger"`
+	Status        string `gorm:"size:16;index;not null" json:"status"`
+	SnapshotDate  string `gorm:"size:10;not null;default:''" json:"snapshot_date"`
+	CandidatePool int    `gorm:"not null;default:0" json:"candidate_pool"`
+	Model         string `gorm:"size:128;not null;default:''" json:"model"`
+	Message       string `gorm:"type:text;not null;default:''" json:"message"`
+	UserID        string `gorm:"size:64;not null;default:''" json:"user_id"`
 	// LLM 调用可观测字段（provider 无 max_tokens 时的监控依据）
 	FinishReason     string    `gorm:"size:32;not null;default:''" json:"finish_reason"`
 	PromptChars      int       `gorm:"not null;default:0" json:"prompt_chars"`
@@ -65,10 +65,27 @@ type GenerateLogRecord struct {
 
 func (GenerateLogRecord) TableName() string { return "ai_picker_generate_logs" }
 
+type GenerateTraceRecord struct {
+	ID                 uint      `gorm:"primaryKey" json:"id"`
+	GenerateLogID      uint      `gorm:"not null;uniqueIndex" json:"generate_log_id"`
+	SystemPrompt       string    `gorm:"type:text;not null;default:''" json:"system_prompt"`
+	UserPrompt         string    `gorm:"type:text;not null;default:''" json:"user_prompt"`
+	AssistantReasoning string    `gorm:"type:text;not null;default:''" json:"assistant_reasoning"`
+	AssistantContent   string    `gorm:"type:text;not null;default:''" json:"assistant_content"`
+	CreatedAt          time.Time `gorm:"not null;index" json:"created_at"`
+}
+
+func (GenerateTraceRecord) TableName() string { return "ai_picker_generate_traces" }
+
 type AdminGenerateStatus struct {
-	LatestResult *DailyResult         `json:"latest_result,omitempty"`
-	LatestLog    *GenerateLogRecord   `json:"latest_log,omitempty"`
-	Logs         []GenerateLogRecord  `json:"logs"`
+	LatestResult *DailyResult        `json:"latest_result,omitempty"`
+	LatestLog    *GenerateLogRecord  `json:"latest_log,omitempty"`
+	Logs         []GenerateLogRecord `json:"logs"`
+}
+
+type AdminLatestGenerateRun struct {
+	LatestLog *GenerateLogRecord   `json:"latest_log,omitempty"`
+	Trace     *GenerateTraceRecord `json:"trace,omitempty"`
 }
 
 type PickerResponse struct {

@@ -23,6 +23,7 @@ export function resolveAdminSectionApis(section) {
       '/api/admin/stats',
       '/api/admin/ai-usage',
       '/api/admin/ai-picker/status',
+      '/api/admin/ai-picker/latest-run',
     ]
   }
   if (section === 'ops') {

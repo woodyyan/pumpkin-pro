@@ -3870,6 +3870,23 @@ func (a *appServer) handleAdminAIPickerStatus(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, status)
 }
 
+func (a *appServer) handleAdminAIPickerLatestRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	if a.aipickerService == nil {
+		writeError(w, http.StatusServiceUnavailable, "AI 选股服务未初始化")
+		return
+	}
+	run, err := a.aipickerService.AdminLatestGenerateRun(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
+}
+
 func (a *appServer) handleAdminAIPickerGenerate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
@@ -4180,6 +4197,7 @@ func main() {
 	mux.HandleFunc("/api/admin/quadrant-logs", server.withSuperAdminAuth(server.handleAdminQuadrantLogs))
 	mux.HandleFunc("/api/admin/quadrant-overview", server.withSuperAdminAuth(server.handleAdminQuadrantOverview))
 	mux.HandleFunc("/api/admin/ai-picker/status", server.withSuperAdminAuth(server.handleAdminAIPickerStatus))
+	mux.HandleFunc("/api/admin/ai-picker/latest-run", server.withSuperAdminAuth(server.handleAdminAIPickerLatestRun))
 	mux.HandleFunc("/api/admin/ai-picker/generate", server.withSuperAdminAuth(server.handleAdminAIPickerGenerate))
 	mux.HandleFunc("/api/admin/ranking-portfolio-status", server.withSuperAdminAuth(server.handleAdminRankingPortfolioStatus))
 	mux.HandleFunc("/api/admin/ranking-portfolio-repair", server.withSuperAdminAuth(server.handleAdminRankingPortfolioRepair))

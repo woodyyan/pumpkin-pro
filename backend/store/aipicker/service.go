@@ -42,7 +42,7 @@ type Service struct {
 	dailyMu sync.Mutex
 }
 
-const maxGenerateErrorLogs = 20
+const maxGenerateLogs = 10
 
 func beijingNow() time.Time {
 	return time.Now().In(time.FixedZone("CST", 8*60*60))
@@ -126,33 +126,33 @@ func isDailyResultMissing(err error) bool {
 	return false
 }
 
-// generateCore 执行核心选股逻辑，返回结果与 LLM 调用元信息。
+// generateCore 执行核心选股逻辑，返回结果、LLM 调用元信息与最近一次完整交互详情。
 // trigger 参数决定 prompt 中的触发方式标注（daily_auto / manual）。
-func (s *Service) generateCore(ctx context.Context, cfg AIConfig, userID, trigger string) (*PickerResponse, *llmCallMeta, error) {
+func (s *Service) generateCore(ctx context.Context, cfg AIConfig, userID, trigger string) (*PickerResponse, *llmCallMeta, *GenerateTraceRecord, error) {
 	if !cfg.Enabled() {
-		return nil, nil, fmt.Errorf("%w: AI 功能未启用", ErrUnavailable)
+		return nil, nil, nil, fmt.Errorf("%w: AI 功能未启用", ErrUnavailable)
 	}
 	if s.factorLab == nil {
-		return nil, nil, fmt.Errorf("%w: 因子实验室服务未初始化", ErrUnavailable)
+		return nil, nil, nil, fmt.Errorf("%w: 因子实验室服务未初始化", ErrUnavailable)
 	}
 	factorMeta, err := s.factorLab.Meta(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if !factorMeta.HasSnapshot {
-		return nil, nil, fmt.Errorf("%w: 因子数据未就绪", ErrUnavailable)
+		return nil, nil, nil, fmt.Errorf("%w: 因子数据未就绪", ErrUnavailable)
 	}
 	candidates, marketSummary, techStats, err := s.buildCandidatePool(ctx, factorMeta.SnapshotDate)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if len(candidates) == 0 {
-		return nil, nil, fmt.Errorf("%w: 候选池为空", ErrUnavailable)
+		return nil, nil, nil, fmt.Errorf("%w: 候选池为空", ErrUnavailable)
 	}
 	userPrompt := buildUserPrompt(factorMeta.SnapshotDate, trigger, marketSummary, techStats, candidates)
-	result, callMeta, err := callLLM(ctx, cfg, userID, userPrompt)
+	result, callMeta, trace, err := callLLM(ctx, cfg, userID, userPrompt)
 	if err != nil {
-		return nil, callMeta, err
+		return nil, callMeta, trace, err
 	}
 	warnings := validateResponse(result, candidates, factorMeta.SnapshotDate, trigger, cfg.Model)
 	if result.Meta == nil {
@@ -170,7 +170,7 @@ func (s *Service) generateCore(ctx context.Context, cfg AIConfig, userID, trigge
 		result.Meta["prompt_chars"] = callMeta.PromptChars
 		result.Meta["response_ms"] = callMeta.ResponseMS
 	}
-	return result, callMeta, nil
+	return result, callMeta, trace, nil
 }
 
 // Generate 是对外暴露的一次性生成接口（不持久化），trigger 固定为 manual。
@@ -182,7 +182,7 @@ func (s *Service) Generate(ctx context.Context, cfg AIConfig, userID string, req
 	if market != MarketAShare {
 		return nil, fmt.Errorf("%w: 港股 AI 选股即将上线", ErrUnavailable)
 	}
-	result, _, err := s.generateCore(ctx, cfg, userID, TriggerManual)
+	result, _, _, err := s.generateCore(ctx, cfg, userID, TriggerManual)
 	return result, err
 }
 
@@ -199,7 +199,7 @@ func (s *Service) GenerateAndStoreManual(ctx context.Context, cfg AIConfig, user
 }
 
 func (s *Service) generateAndStore(ctx context.Context, cfg AIConfig, trigger, userID string) (*PickerResponse, error) {
-	result, callMeta, err := s.generateCore(ctx, cfg, userID, trigger)
+	result, callMeta, trace, err := s.generateCore(ctx, cfg, userID, trigger)
 	tradeDate := beijingNow().Format("2006-01-02")
 	if err != nil {
 		log := GenerateLogRecord{
@@ -216,18 +216,18 @@ func (s *Service) generateAndStore(ctx context.Context, cfg AIConfig, trigger, u
 			log.TimeoutSeconds = 240
 			log.ResponseMS = callMeta.ResponseMS
 		}
-		s.recordGenerateLog(ctx, log)
+		s.recordGenerateRun(ctx, log, trace)
 		return nil, err
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
-		s.recordGenerateLog(ctx, GenerateLogRecord{
+		s.recordGenerateRun(ctx, GenerateLogRecord{
 			TradeDate: tradeDate,
 			Trigger:   trigger,
 			Status:    GenerateLogStatusFailed,
 			Message:   err.Error(),
 			UserID:    userID,
-		})
+		}, trace)
 		return nil, err
 	}
 	if s.repo != nil {
@@ -240,25 +240,25 @@ func (s *Service) generateAndStore(ctx context.Context, cfg AIConfig, trigger, u
 			Model:          cfg.Model,
 			PayloadJSON:    string(encoded),
 		}); err != nil {
-			s.recordGenerateLog(ctx, GenerateLogRecord{
+			s.recordGenerateRun(ctx, GenerateLogRecord{
 				TradeDate: tradeDate,
 				Trigger:   trigger,
 				Status:    GenerateLogStatusFailed,
 				Message:   err.Error(),
 				UserID:    userID,
-			})
+			}, trace)
 			return nil, err
 		}
 	}
 	successLog := GenerateLogRecord{
-		TradeDate:     tradeDate,
-		Trigger:       trigger,
-		Status:        GenerateLogStatusSuccess,
-		SnapshotDate:  result.Analysis.SnapshotDate,
-		CandidatePool: toInt(result.Meta["candidate_pool_size"]),
-		Model:         strings.TrimSpace(cfg.Model),
-		Message:       "ok",
-		UserID:        userID,
+		TradeDate:      tradeDate,
+		Trigger:        trigger,
+		Status:         GenerateLogStatusSuccess,
+		SnapshotDate:   result.Analysis.SnapshotDate,
+		CandidatePool:  toInt(result.Meta["candidate_pool_size"]),
+		Model:          strings.TrimSpace(cfg.Model),
+		Message:        "ok",
+		UserID:         userID,
 		TimeoutSeconds: 240,
 	}
 	if callMeta != nil {
@@ -267,29 +267,38 @@ func (s *Service) generateAndStore(ctx context.Context, cfg AIConfig, trigger, u
 		successLog.CompletionTokens = callMeta.CompletionTokens
 		successLog.ResponseMS = callMeta.ResponseMS
 	}
-	s.recordGenerateLog(ctx, successLog)
+	s.recordGenerateRun(ctx, successLog, trace)
 	return result, nil
 }
 
-func (s *Service) recordGenerateLog(ctx context.Context, record GenerateLogRecord) {
+func (s *Service) recordGenerateRun(ctx context.Context, record GenerateLogRecord, trace *GenerateTraceRecord) {
 	if s.repo == nil {
 		return
 	}
-	if err := s.repo.SaveGenerateLog(ctx, record); err != nil {
+	saved, err := s.repo.CreateGenerateLog(ctx, record)
+	if err != nil {
 		fmt.Printf("[ai-picker] save generate log failed: %v\n", err)
+		return
+	}
+	if trace == nil || saved == nil || saved.ID == 0 {
+		return
+	}
+	trace.GenerateLogID = saved.ID
+	if err := s.repo.SaveGenerateTrace(ctx, *trace); err != nil {
+		fmt.Printf("[ai-picker] save generate trace failed: %v\n", err)
 	}
 }
 
-type aiChatMessage struct {
+type aiChatRequestMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
 type aiChatRequest struct {
-	Model          string          `json:"model"`
-	Messages       []aiChatMessage `json:"messages"`
-	Temperature    float64         `json:"temperature"`
-	ResponseFormat *aiResponseFmt  `json:"response_format,omitempty"`
+	Model          string                 `json:"model"`
+	Messages       []aiChatRequestMessage `json:"messages"`
+	Temperature    float64                `json:"temperature"`
+	ResponseFormat *aiResponseFmt         `json:"response_format,omitempty"`
 	// MaxTokens は意図的に省略：provider のデフォルト上限に委ねることで、
 	// 長い JSON 出力が finish_reason=length で打ち切られる問題を回避する。
 }
@@ -298,10 +307,17 @@ type aiResponseFmt struct {
 	Type string `json:"type"`
 }
 
+type aiChatChoiceMessage struct {
+	Role             string `json:"role"`
+	Content          any    `json:"content"`
+	ReasoningContent any    `json:"reasoning_content,omitempty"`
+	Reasoning        any    `json:"reasoning,omitempty"`
+}
+
 type aiChatResponse struct {
 	Choices []struct {
-		Message      aiChatMessage `json:"message"`
-		FinishReason string        `json:"finish_reason"`
+		Message      aiChatChoiceMessage `json:"message"`
+		FinishReason string              `json:"finish_reason"`
 	} `json:"choices"`
 	Usage strategy.AIUsage `json:"usage"`
 	Error *struct {
@@ -323,10 +339,14 @@ type llmCallMeta struct {
 // MaxTokens 故意不设置：将输出 token 上限交给 provider 默认策略，
 // 避免在长 JSON schema + 中文长文本场景下被 finish_reason=length 截断。
 // 对应地，HTTP timeout 设置为 240 秒以承受更长的推理耗时。
-func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*PickerResponse, *llmCallMeta, error) {
+func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*PickerResponse, *llmCallMeta, *GenerateTraceRecord, error) {
+	trace := &GenerateTraceRecord{
+		SystemPrompt: aShareSystemPrompt,
+		UserPrompt:   userPrompt,
+	}
 	body := aiChatRequest{
 		Model: cfg.Model,
-		Messages: []aiChatMessage{
+		Messages: []aiChatRequestMessage{
 			{Role: "system", Content: aShareSystemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
@@ -335,7 +355,7 @@ func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*Pic
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, trace, err
 	}
 	endpoint := strings.TrimRight(cfg.BaseURL, "/") + "/chat/completions"
 
@@ -346,13 +366,13 @@ func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*Pic
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
-				return nil, nil, ctx.Err()
+				return nil, nil, trace, ctx.Err()
 			case <-time.After(2 * time.Second):
 			}
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, trace, err
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
@@ -366,10 +386,10 @@ func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*Pic
 			FeatureName: "AI 选股",
 			Model:       cfg.Model,
 			ExtraMeta: map[string]any{
-				"attempt":       attempt + 1,
-				"prompt_chars":  len(userPrompt),
-				"max_tokens":    "unlimited",
-				"timeout_secs":  240,
+				"attempt":      attempt + 1,
+				"prompt_chars": len(userPrompt),
+				"max_tokens":   "unlimited",
+				"timeout_secs": 240,
 			},
 		}
 		start := time.Now()
@@ -389,7 +409,7 @@ func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*Pic
 			logEntry.Status = "error"
 			logEntry.ErrorMessage = readErr.Error()
 			strategy.LogAICall(logEntry)
-			return nil, nil, readErr
+			return nil, nil, trace, readErr
 		}
 		if resp.StatusCode != http.StatusOK {
 			logEntry.Status = "error"
@@ -403,7 +423,7 @@ func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*Pic
 			logEntry.Status = "error"
 			logEntry.ErrorMessage = err.Error()
 			strategy.LogAICall(logEntry)
-			return nil, nil, err
+			return nil, nil, trace, err
 		}
 		logEntry.ApplyUsage(parsed.Usage)
 		meta.PromptTokens = parsed.Usage.PromptTokens
@@ -412,19 +432,24 @@ func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*Pic
 			logEntry.Status = "error"
 			logEntry.ErrorMessage = parsed.Error.Message
 			strategy.LogAICall(logEntry)
-			return nil, nil, fmt.Errorf("%s", parsed.Error.Message)
+			return nil, nil, trace, fmt.Errorf("%s", parsed.Error.Message)
 		}
 		if len(parsed.Choices) == 0 {
 			logEntry.Status = "error"
 			logEntry.ErrorMessage = "empty choices"
 			strategy.LogAICall(logEntry)
-			return nil, nil, fmt.Errorf("AI 未返回有效结果")
+			return nil, nil, trace, fmt.Errorf("AI 未返回有效结果")
 		}
 		choice := parsed.Choices[0]
 		meta.FinishReason = choice.FinishReason
 		logEntry.ExtraMeta["finish_reason"] = choice.FinishReason
 		logEntry.ExtraMeta["completion_tokens"] = parsed.Usage.CompletionTokens
-		raw := strings.TrimSpace(choice.Message.Content)
+		trace.AssistantReasoning = flattenAIMessageField(choice.Message.ReasoningContent)
+		if strings.TrimSpace(trace.AssistantReasoning) == "" {
+			trace.AssistantReasoning = flattenAIMessageField(choice.Message.Reasoning)
+		}
+		trace.AssistantContent = flattenAIMessageField(choice.Message.Content)
+		raw := strings.TrimSpace(trace.AssistantContent)
 
 		// finish_reason=length：即使去掉了 max_tokens，provider 仍可能有自身默认上限，
 		// 此时 JSON 必然不完整。直接失败，不重试（重试同样会被截断）。
@@ -434,8 +459,11 @@ func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*Pic
 				"output truncated (finish_reason=length, completion_tokens=%d, prompt_chars=%d); provider 仍有默认 token 上限",
 				parsed.Usage.CompletionTokens, len(userPrompt),
 			)
+			if strings.TrimSpace(trace.AssistantContent) == "" {
+				trace.AssistantContent = strings.TrimSpace(string(respBody))
+			}
 			strategy.LogAICall(logEntry)
-			return nil, meta, fmt.Errorf(
+			return nil, meta, trace, fmt.Errorf(
 				"AI 输出被 provider 截断 (finish_reason=length, completion_tokens=%d)，请联系管理员确认 provider 默认上限",
 				parsed.Usage.CompletionTokens,
 			)
@@ -465,12 +493,46 @@ func callLLM(ctx context.Context, cfg AIConfig, userID, userPrompt string) (*Pic
 		}
 		logEntry.Status = "success"
 		strategy.LogAICall(logEntry)
-		return &result, meta, nil
+		return &result, meta, trace, nil
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("AI 选股调用失败")
 	}
-	return nil, nil, lastErr
+	return nil, nil, trace, lastErr
+}
+
+func flattenAIMessageField(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			part := strings.TrimSpace(flattenAIMessageField(item))
+			if part != "" {
+				parts = append(parts, part)
+			}
+		}
+		return strings.Join(parts, "\n\n")
+	case map[string]any:
+		for _, key := range []string{"text", "content", "reasoning_content", "reasoning", "output_text"} {
+			if nested, ok := v[key]; ok {
+				flattened := strings.TrimSpace(flattenAIMessageField(nested))
+				if flattened != "" {
+					return flattened
+				}
+			}
+		}
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprintf("%v", v)
+		}
+		return string(encoded)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
 
 func buildCandidates(items []factorlab.FactorScreenerItem) []Candidate {
@@ -1119,7 +1181,7 @@ func (s *Service) AdminGenerateStatus(ctx context.Context) (*AdminGenerateStatus
 	if err != nil && !isDailyResultMissing(err) {
 		return nil, err
 	}
-	logs, err := s.repo.ListGenerateLogs(ctx, maxGenerateErrorLogs)
+	logs, err := s.repo.ListGenerateLogs(ctx, maxGenerateLogs)
 	if err != nil {
 		return nil, err
 	}
@@ -1130,5 +1192,28 @@ func (s *Service) AdminGenerateStatus(ctx context.Context) (*AdminGenerateStatus
 	if latestLog != nil {
 		payload.LatestLog = latestLog
 	}
+	return payload, nil
+}
+
+func (s *Service) AdminLatestGenerateRun(ctx context.Context) (*AdminLatestGenerateRun, error) {
+	if s.repo == nil {
+		return nil, ErrUnavailable
+	}
+	latestLog, err := s.repo.GetLatestGenerateLog(ctx)
+	if err != nil {
+		if isDailyResultMissing(err) {
+			return &AdminLatestGenerateRun{}, nil
+		}
+		return nil, err
+	}
+	payload := &AdminLatestGenerateRun{LatestLog: latestLog}
+	trace, err := s.repo.GetGenerateTraceByLogID(ctx, latestLog.ID)
+	if err != nil {
+		if isDailyResultMissing(err) {
+			return payload, nil
+		}
+		return nil, err
+	}
+	payload.Trace = trace
 	return payload, nil
 }

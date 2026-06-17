@@ -270,6 +270,8 @@ function formatAdminDateTime(value) {
   if (!value) return '--'
   try {
     return new Date(value).toLocaleString('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      hour12: false,
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
@@ -1537,22 +1539,48 @@ function formatDurationSeconds(value) {
   return `${Math.floor(seconds / 60)}分${Math.round(seconds % 60)}秒`
 }
 
+function AIPickerTraceBlock({ label, value, emptyText = '暂无内容。' }) {
+  return (
+    <div className="rounded-xl border border-border bg-background-alt p-3">
+      <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.12em] text-foreground-dim">{label}</div>
+      {value ? (
+        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs leading-6 text-foreground-muted">{value}</pre>
+      ) : (
+        <p className="text-xs text-foreground-disabled">{emptyText}</p>
+      )}
+    </div>
+  )
+}
+
 export function AIPickerAdminPanel({ onUnauthorized }) {
   const [generating, setGenerating] = useState(false)
   const [actionError, setActionError] = useState('')
   const [actionSuccess, setActionSuccess] = useState('')
   const resource = useAdminResource({
     key: 'admin:ai-picker',
-    request: () => adminFetch('/api/admin/ai-picker/status'),
+    request: async () => {
+      const [status, latestRun] = await Promise.all([
+        adminFetch('/api/admin/ai-picker/status'),
+        adminFetch('/api/admin/ai-picker/latest-run'),
+      ])
+      return {
+        status,
+        latest_run: latestRun,
+      }
+    },
     staleMs: 5_000,
     minIntervalMs: 3_000,
     onUnauthorized,
     errorMessage: '加载 AI 选股状态失败',
   })
   const data = resource.data || {}
-  const latestResult = data.latest_result || null
-  const latestLog = data.latest_log || null
-  const logs = data.logs || []
+  const statusData = data.status || {}
+  const latestRun = data.latest_run || null
+  const latestResult = statusData.latest_result || null
+  const latestLog = statusData.latest_log || null
+  const latestRunLog = latestRun?.latest_log || latestLog
+  const latestTrace = latestRun?.trace || null
+  const logs = statusData.logs || []
 
   const handleGenerate = async () => {
     if (!window.confirm('确认立即手动生成一份 AI 优选组合吗？这会直接覆盖今日展示结果。')) return
@@ -1603,12 +1631,42 @@ export function AIPickerAdminPanel({ onUnauthorized }) {
           <div className="grid gap-3 md:grid-cols-3 text-xs text-foreground-dim">
             <div>触发方式：<span className="text-foreground-muted">{latestResult.trigger || '--'}</span></div>
             <div>模型：<span className="text-foreground-muted">{latestResult.model || '--'}</span></div>
-            <div>更新时间：<span className="text-foreground-muted">{formatAdminDateTime(latestResult.updated_at)}</span></div>
+            <div>更新时间（北京时间）：<span className="text-foreground-muted">{formatAdminDateTime(latestResult.updated_at)}</span></div>
           </div>
         )}
       </div>
       <div className="mt-4 rounded-xl border border-border bg-card p-4">
-        <div className="mb-3 text-xs text-foreground-dim">最近 {logs.length || 0} 条生成日志</div>
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-xs text-foreground-dim">最近一场生成详情</div>
+            <p className="mt-1 text-xs text-foreground-disabled">展示最近一次实际发送给 AI 的完整 prompt、provider 返回的 reasoning 字段，以及 AI 原始返回内容。时间均按北京时间展示。</p>
+          </div>
+          <div className="text-right text-xs text-foreground-dim">
+            <div>最近生成：<span className="text-foreground-muted">{formatAdminDateTime(latestRunLog?.created_at)}</span></div>
+            <div className="mt-1">状态：<span className={latestRunLog?.status === 'failed' ? 'text-negative' : 'text-positive'}>{latestRunLog?.status || '--'}</span></div>
+          </div>
+        </div>
+        {!latestRunLog ? (
+          <p className="text-xs text-foreground-disabled">暂无最近一次生成记录。</p>
+        ) : (
+          <>
+            <div className="mb-4 grid gap-3 text-xs text-foreground-dim md:grid-cols-4">
+              <div>触发方式：<span className="text-foreground-muted">{latestRunLog.trigger || '--'}</span></div>
+              <div>快照日期：<span className="text-foreground-muted">{latestRunLog.snapshot_date || '--'}</span></div>
+              <div>模型：<span className="text-foreground-muted">{latestRunLog.model || '--'}</span></div>
+              <div>完成原因：<span className="text-foreground-muted">{latestRunLog.finish_reason || '--'}</span></div>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              <AIPickerTraceBlock label="System Prompt" value={latestTrace?.system_prompt} emptyText="未记录 system prompt。" />
+              <AIPickerTraceBlock label="User Prompt" value={latestTrace?.user_prompt} emptyText="未记录 user prompt。" />
+              <AIPickerTraceBlock label="AI 思考 / 推理过程" value={latestTrace?.assistant_reasoning} emptyText="当前 provider 未返回 reasoning 字段。" />
+              <AIPickerTraceBlock label="AI 原始返回内容" value={latestTrace?.assistant_content} emptyText="未记录 AI 原始返回内容。" />
+            </div>
+          </>
+        )}
+      </div>
+      <div className="mt-4 rounded-xl border border-border bg-card p-4">
+        <div className="mb-3 text-xs text-foreground-dim">最近 10 条生成日志（北京时间）</div>
         {logs.length === 0 ? (
           <p className="text-xs text-foreground-disabled">暂无生成日志。</p>
         ) : (

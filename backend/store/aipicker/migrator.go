@@ -23,7 +23,7 @@ func (Migrator) AutoMigrate(db *gorm.DB) error {
 	if err := dedupeDailyResults(db); err != nil {
 		return err
 	}
-	if err := db.AutoMigrate(&DailyResult{}, &TechnicalSnapshot{}, &GenerateLogRecord{}); err != nil {
+	if err := db.AutoMigrate(&DailyResult{}, &TechnicalSnapshot{}, &GenerateLogRecord{}, &GenerateTraceRecord{}); err != nil {
 		return err
 	}
 	// 兜底：极少数情况下 AutoMigrate 不会补建索引（如某些驱动行为差异），

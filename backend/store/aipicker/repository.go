@@ -60,9 +60,35 @@ func (r *Repository) SaveGenerateLog(ctx context.Context, record GenerateLogReco
 	return r.db.WithContext(ctx).Create(&record).Error
 }
 
+func (r *Repository) CreateGenerateLog(ctx context.Context, record GenerateLogRecord) (*GenerateLogRecord, error) {
+	record.TradeDate = strings.TrimSpace(record.TradeDate)
+	record.Trigger = strings.TrimSpace(record.Trigger)
+	record.Status = strings.TrimSpace(record.Status)
+	record.SnapshotDate = strings.TrimSpace(record.SnapshotDate)
+	record.Model = strings.TrimSpace(record.Model)
+	record.UserID = strings.TrimSpace(record.UserID)
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = time.Now().UTC()
+	}
+	if err := r.db.WithContext(ctx).Create(&record).Error; err != nil {
+		return nil, err
+	}
+	return &record, nil
+}
+
+func (r *Repository) SaveGenerateTrace(ctx context.Context, record GenerateTraceRecord) error {
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = time.Now().UTC()
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "generate_log_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"system_prompt", "user_prompt", "assistant_reasoning", "assistant_content", "created_at"}),
+	}).Create(&record).Error
+}
+
 func (r *Repository) ListGenerateLogs(ctx context.Context, limit int) ([]GenerateLogRecord, error) {
 	if limit <= 0 {
-		limit = maxGenerateErrorLogs
+		limit = maxGenerateLogs
 	}
 	var items []GenerateLogRecord
 	if err := r.db.WithContext(ctx).
@@ -78,6 +104,19 @@ func (r *Repository) GetLatestGenerateLog(ctx context.Context) (*GenerateLogReco
 	var item GenerateLogRecord
 	if err := r.db.WithContext(ctx).
 		Order("created_at desc, id desc").
+		First(&item).Error; err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func (r *Repository) GetGenerateTraceByLogID(ctx context.Context, generateLogID uint) (*GenerateTraceRecord, error) {
+	if generateLogID == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var item GenerateTraceRecord
+	if err := r.db.WithContext(ctx).
+		Where("generate_log_id = ?", generateLogID).
 		First(&item).Error; err != nil {
 		return nil, err
 	}

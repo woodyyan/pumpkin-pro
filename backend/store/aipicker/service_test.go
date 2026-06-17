@@ -152,7 +152,7 @@ func TestAdminGenerateStatusReturnsLogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&DailyResult{}, &GenerateLogRecord{}); err != nil {
+	if err := db.AutoMigrate(&DailyResult{}, &GenerateLogRecord{}, &GenerateTraceRecord{}); err != nil {
 		t.Fatalf("migrate db: %v", err)
 	}
 	repo := NewRepository(db)
@@ -179,6 +179,71 @@ func TestAdminGenerateStatusReturnsLogs(t *testing.T) {
 	}
 }
 
+func TestAdminGenerateStatusLimitsToTenLogs(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file::memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&DailyResult{}, &GenerateLogRecord{}, &GenerateTraceRecord{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+	repo := NewRepository(db)
+	service := &Service{repo: repo}
+	ctx := context.Background()
+	for i := 0; i < 12; i++ {
+		record := GenerateLogRecord{
+			TradeDate: fmt.Sprintf("2026-06-%02d", i+1),
+			Trigger:   TriggerManual,
+			Status:    GenerateLogStatusSuccess,
+			Message:   fmt.Sprintf("log-%d", i),
+			Model:     "manual",
+		}
+		if _, err := repo.CreateGenerateLog(ctx, record); err != nil {
+			t.Fatalf("create log %d: %v", i, err)
+		}
+	}
+	status, err := service.AdminGenerateStatus(ctx)
+	if err != nil {
+		t.Fatalf("admin status: %v", err)
+	}
+	if len(status.Logs) != 10 {
+		t.Fatalf("expected 10 logs, got %d", len(status.Logs))
+	}
+	if status.Logs[0].Message != "log-11" {
+		t.Fatalf("expected latest log to be log-11, got %q", status.Logs[0].Message)
+	}
+}
+
+func TestAdminLatestGenerateRunReturnsTrace(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file::memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&DailyResult{}, &GenerateLogRecord{}, &GenerateTraceRecord{}); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+	repo := NewRepository(db)
+	service := &Service{repo: repo}
+	ctx := context.Background()
+	logRecord, err := repo.CreateGenerateLog(ctx, GenerateLogRecord{TradeDate: "2026-06-16", Trigger: TriggerManual, Status: GenerateLogStatusSuccess, Message: "ok", Model: "manual"})
+	if err != nil {
+		t.Fatalf("create log: %v", err)
+	}
+	if err := repo.SaveGenerateTrace(ctx, GenerateTraceRecord{GenerateLogID: logRecord.ID, SystemPrompt: "system", UserPrompt: "user", AssistantReasoning: "reasoning", AssistantContent: "content"}); err != nil {
+		t.Fatalf("save trace: %v", err)
+	}
+	run, err := service.AdminLatestGenerateRun(ctx)
+	if err != nil {
+		t.Fatalf("latest run: %v", err)
+	}
+	if run.LatestLog == nil || run.LatestLog.ID != logRecord.ID {
+		t.Fatalf("expected latest log %d, got %+v", logRecord.ID, run.LatestLog)
+	}
+	if run.Trace == nil || run.Trace.AssistantContent != "content" {
+		t.Fatalf("expected trace content, got %+v", run.Trace)
+	}
+}
+
 // TestCallLLMNoMaxTokensInRequest 验证请求体中不含 max_tokens 字段。
 func TestCallLLMNoMaxTokensInRequest(t *testing.T) {
 	var capturedBody []byte
@@ -194,7 +259,7 @@ func TestCallLLMNoMaxTokensInRequest(t *testing.T) {
 	defer srv.Close()
 
 	cfg := AIConfig{APIKey: "test", BaseURL: srv.URL, Model: "test-model"}
-	_, meta, err := callLLM(context.Background(), cfg, "user1", "test prompt")
+	_, meta, _, err := callLLM(context.Background(), cfg, "user1", "test prompt")
 	if err != nil && !strings.Contains(err.Error(), "JSON") {
 		// 允许 JSON 解析失败（picks 为空会触发 validate 错误），此处只关心请求结构
 		t.Logf("callLLM returned (expected for minimal payload): %v", err)
@@ -225,7 +290,7 @@ func TestCallLLMFinishReasonLengthFails(t *testing.T) {
 	defer srv.Close()
 
 	cfg := AIConfig{APIKey: "test", BaseURL: srv.URL, Model: "test-model"}
-	_, meta, err := callLLM(context.Background(), cfg, "user1", "test prompt")
+	_, meta, trace, err := callLLM(context.Background(), cfg, "user1", "test prompt")
 
 	if err == nil {
 		t.Fatal("expected error for finish_reason=length, got nil")
@@ -247,6 +312,9 @@ func TestCallLLMFinishReasonLengthFails(t *testing.T) {
 	if meta.CompletionTokens != 4096 {
 		t.Fatalf("expected meta.CompletionTokens=4096, got %d", meta.CompletionTokens)
 	}
+	if trace == nil || !strings.Contains(trace.AssistantContent, `{"analysis":`) {
+		t.Fatalf("expected trace content to be captured, got %+v", trace)
+	}
 }
 
 // TestCallLLMTransientErrorRetries 验证瞬时网络错误（5xx）仍会重试一次。
@@ -266,7 +334,7 @@ func TestCallLLMTransientErrorRetries(t *testing.T) {
 	defer srv.Close()
 
 	cfg := AIConfig{APIKey: "test", BaseURL: srv.URL, Model: "test-model"}
-	_, _, _ = callLLM(context.Background(), cfg, "user1", "test prompt")
+	_, _, _, _ = callLLM(context.Background(), cfg, "user1", "test prompt")
 
 	if callCount < 2 {
 		t.Fatalf("expected retry on 5xx, got only %d call(s)", callCount)
@@ -279,7 +347,7 @@ func TestGenerateLogRecordContainsLLMFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&DailyResult{}, &GenerateLogRecord{}); err != nil {
+	if err := db.AutoMigrate(&DailyResult{}, &GenerateLogRecord{}, &GenerateTraceRecord{}); err != nil {
 		t.Fatalf("migrate db: %v", err)
 	}
 	repo := NewRepository(db)
@@ -317,5 +385,37 @@ func TestGenerateLogRecordContainsLLMFields(t *testing.T) {
 	}
 	if got.ResponseMS != 35000 {
 		t.Errorf("expected ResponseMS=35000, got %d", got.ResponseMS)
+	}
+}
+
+func TestFlattenAIMessageField(t *testing.T) {
+	value := []any{
+		map[string]any{"text": "first"},
+		map[string]any{"content": []any{map[string]any{"text": "second"}}},
+	}
+	got := flattenAIMessageField(value)
+	if got != "first\n\nsecond" {
+		t.Fatalf("unexpected flattened content: %q", got)
+	}
+}
+
+func TestCallLLMCapturesReasoningField(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := `{"choices":[{"message":{"role":"assistant","content":"{\"analysis\":{\"picks\":[]}}","reasoning_content":[{"text":"step-1"},{"text":"step-2"}]},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":200,"total_tokens":300}}`
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, resp)
+	}))
+	defer srv.Close()
+
+	cfg := AIConfig{APIKey: "test", BaseURL: srv.URL, Model: "test-model"}
+	_, _, trace, err := callLLM(context.Background(), cfg, "user1", "test prompt")
+	if err != nil && !strings.Contains(err.Error(), "JSON") {
+		t.Fatalf("callLLM returned unexpected error: %v", err)
+	}
+	if trace == nil {
+		t.Fatal("expected non-nil trace")
+	}
+	if trace.AssistantReasoning != "step-1\n\nstep-2" {
+		t.Fatalf("expected reasoning to be flattened, got %q", trace.AssistantReasoning)
 	}
 }

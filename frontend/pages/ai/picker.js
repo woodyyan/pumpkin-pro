@@ -2,6 +2,7 @@ import Head from 'next/head'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { fetchAIPickerMeta, fetchDailyAIPicks, formatPct, formatPrice, convictionTone } from '../../lib/ai-picker'
+import { markMarketLoadAttempted, shouldAutoLoadAIPickerMarket } from '../../lib/ai-picker-page-state'
 
 const MARKETS = [
   { key: 'ASHARE', label: 'A股' },
@@ -10,12 +11,14 @@ const MARKETS = [
 
 export default function AIPickerPage() {
   const [market, setMarket] = useState('ASHARE')
+  const [attemptedByMarket, setAttemptedByMarket] = useState({})
   const [metaByMarket, setMetaByMarket] = useState({})
   const [resultByMarket, setResultByMarket] = useState({})
-  const [loadingByMarket, setLoadingByMarket] = useState({ ASHARE: true })
+  const [loadingByMarket, setLoadingByMarket] = useState({})
   const [errorByMarket, setErrorByMarket] = useState({})
 
   const loadPage = useCallback(async (activeMarket) => {
+    setAttemptedByMarket((prev) => markMarketLoadAttempted(prev, activeMarket))
     setLoadingByMarket((prev) => ({ ...prev, [activeMarket]: true }))
     setErrorByMarket((prev) => ({ ...prev, [activeMarket]: '' }))
     try {
@@ -38,18 +41,14 @@ export default function AIPickerPage() {
   }, [])
 
   useEffect(() => {
-    if (!metaByMarket[market]) {
-      loadPage(market)
-      return
-    }
-    if (market === 'ASHARE' && !resultByMarket[market] && !loadingByMarket[market]) {
+    if (shouldAutoLoadAIPickerMarket({ market, attemptedByMarket, loadingByMarket })) {
       loadPage(market)
     }
-  }, [loadPage, loadingByMarket, market, metaByMarket, resultByMarket])
+  }, [attemptedByMarket, loadPage, loadingByMarket, market])
 
   const meta = metaByMarket[market] || null
   const result = resultByMarket[market] || null
-  const loading = Boolean(loadingByMarket[market])
+  const loading = !attemptedByMarket[market] || Boolean(loadingByMarket[market])
   const error = errorByMarket[market] || ''
   const analysis = result?.analysis || null
   const picks = analysis?.picks || []
@@ -115,7 +114,6 @@ export default function AIPickerPage() {
         ) : error && !analysis ? (
           <section className="rounded-2xl border border-negative/35 bg-negative/10 px-4 py-4 text-sm text-negative">
             <div>{error}</div>
-            <button type="button" onClick={() => loadPage(market)} className="mt-3 rounded-lg border border-negative/30 px-3 py-1.5 text-xs transition hover:bg-negative/10">重试加载</button>
           </section>
         ) : analysis ? (
           <>

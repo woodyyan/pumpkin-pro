@@ -13,7 +13,7 @@ export const NAV_GROUPS = [
     label: '看板',
     items: [
       { key: 'market-overview', href: '/live-trading', label: '市场行情', matchNested: true },
-      { key: 'quadrant', href: '/quadrant', label: '四象限', matchNested: true },
+      { key: 'quadrant', href: '/quadrant', label: '市场全景', matchNested: true },
     ],
   },
   {

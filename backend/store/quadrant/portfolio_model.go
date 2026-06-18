@@ -268,16 +268,23 @@ type RankingPortfolioConstituentItem struct {
 }
 
 type RankingPortfolioRebalanceItem struct {
-	Action             string  `json:"action"`
-	Code               string  `json:"code"`
-	Name               string  `json:"name"`
-	Exchange           string  `json:"exchange"`
-	Board              string  `json:"board,omitempty"`
-	FromWeight         float64 `json:"from_weight"`
-	ToWeight           float64 `json:"to_weight"`
-	ReferencePrice     float64 `json:"reference_price"`
-	ReferenceCostPrice float64 `json:"reference_cost_price"`
-	PriceTradeDate     string  `json:"price_trade_date,omitempty"`
+	Action             string   `json:"action"`
+	Code               string   `json:"code"`
+	Name               string   `json:"name"`
+	Exchange           string   `json:"exchange"`
+	Board              string   `json:"board,omitempty"`
+	FromWeight         float64  `json:"from_weight"`
+	ToWeight           float64  `json:"to_weight"`
+	ReferencePrice     float64  `json:"reference_price"`
+	ReferenceCostPrice float64  `json:"reference_cost_price"`
+	PriceTradeDate     string   `json:"price_trade_date,omitempty"`
+	// EntryOpenPrice is the T+1 call-auction open price from the most recent
+	// time this stock was bought into the portfolio. Only populated for sell items.
+	EntryOpenPrice float64  `json:"entry_open_price,omitempty"`
+	// SoldReturnPct is the holding-period return from EntryOpenPrice to the
+	// sell reference price (net of single-sided sell cost). Nil when data is
+	// unavailable. Only populated for sell items.
+	SoldReturnPct  *float64 `json:"sold_return_pct,omitempty"`
 }
 
 type RankingPortfolioLatestRebalance struct {

@@ -1499,6 +1499,7 @@ func buildRankingPortfolioLatestRebalance(
 	current []RankingPortfolioConstituentItem,
 	previous []RankingPortfolioConstituentItem,
 	priceByKey map[string]RankingPortfolioMarketPrice,
+	latestEntryOpenPriceByKey map[string]float64,
 ) *RankingPortfolioLatestRebalance {
 	currentByKey := make(map[string]RankingPortfolioConstituentItem, len(current))
 	for _, item := range current {
@@ -1565,7 +1566,7 @@ func buildRankingPortfolioLatestRebalance(
 			referenceCostPrice = roundRankingPortfolioFloat(referencePrice * costMultiplier)
 		}
 
-		items = append(items, RankingPortfolioRebalanceItem{
+		rebalanceItem := RankingPortfolioRebalanceItem{
 			Action:             action,
 			Code:               baseItem.Code,
 			Name:               baseItem.Name,
@@ -1576,7 +1577,23 @@ func buildRankingPortfolioLatestRebalance(
 			ReferencePrice:     referencePrice,
 			ReferenceCostPrice: referenceCostPrice,
 			PriceTradeDate:     referenceTradeDate,
-		})
+		}
+
+		// For sell items, compute holding-period return using the most recent
+		// entry open price (the price at which this stock was last bought into
+		// the portfolio). Net sell proceeds = referencePrice * (1 - costRate).
+		// Earlier entry prices from prior holding periods are excluded by the
+		// caller, which supplies only the latest valid entry open price per key.
+		if action == "sell" {
+			if entryOpen, ok := latestEntryOpenPriceByKey[key]; ok && entryOpen > 0 && referencePrice > 0 {
+				sellNet := referencePrice * (1 - definition.TradeCostRate)
+				pct := roundRankingPortfolioPct((sellNet/entryOpen - 1) * 100)
+				rebalanceItem.EntryOpenPrice = roundRankingPortfolioFloat(entryOpen)
+				rebalanceItem.SoldReturnPct = &pct
+			}
+		}
+
+		items = append(items, rebalanceItem)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].Action != items[j].Action {
@@ -1723,7 +1740,24 @@ func buildRankingPortfolioResult(tx *gorm.DB, definition RankingPortfolioDefinit
 		}
 		latestPriceByKey[snapshotPriceHintKey(row.Code, row.Exchange)] = row
 	}
-	latestRebalanceJSON := mustMarshal(buildRankingPortfolioLatestRebalance(definition, latestSnapshot, latestConstituents, previousConstituents, latestPriceByKey))
+
+	// Build a map of the most-recent entry open price per symbol across all
+	// historical snapshots. This is used to compute holding-period return for
+	// sold stocks. We walk priceRows in DESC order of entry_trade_date (already
+	// loaded ASC above, so we reverse) and keep only the first valid hit per key.
+	latestEntryOpenPriceByKey := map[string]float64{}
+	for i := len(priceRows) - 1; i >= 0; i-- {
+		row := priceRows[i]
+		if row.OpenPrice <= 0 || row.EntryTradeDate == "" {
+			continue
+		}
+		k := snapshotPriceHintKey(row.Code, row.Exchange)
+		if _, exists := latestEntryOpenPriceByKey[k]; !exists {
+			latestEntryOpenPriceByKey[k] = row.OpenPrice
+		}
+	}
+
+	latestRebalanceJSON := mustMarshal(buildRankingPortfolioLatestRebalance(definition, latestSnapshot, latestConstituents, previousConstituents, latestPriceByKey, latestEntryOpenPriceByKey))
 
 	return &RankingPortfolioResult{
 		DefinitionID:            definition.ID,

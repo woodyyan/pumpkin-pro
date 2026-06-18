@@ -557,8 +557,14 @@ function PortfolioOverviewCard({ card }) {
         </div>
 
         <div className="rounded-2xl border border-border/70 bg-[var(--color-bg-hover)] p-3.5">
-          <div className="text-sm font-medium text-foreground">最近一次调仓</div>
-          <div className="mt-1 text-[11px] leading-5 text-foreground/56 dark:text-foreground/42">默认收起明细，先展示时间与变更项，减少四卡并排时的视觉噪音。</div>
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-medium text-foreground">最近一次调仓</div>
+            {latestRebalance ? (
+              <span className="rounded-full bg-[var(--color-bg-secondary)] px-1.5 py-0.5 text-[10px] text-foreground-dim">
+                {Number(latestRebalance.change_count || (Array.isArray(latestRebalance.items) ? latestRebalance.items.length : 0) || 0)}项
+              </span>
+            ) : null}
+          </div>
           <LatestRebalanceDisclosure rebalance={latestRebalance} compact />
         </div>
       </div>
@@ -685,37 +691,29 @@ function LatestRebalanceDisclosure({ rebalance, compact = false }) {
   }
 
   const items = Array.isArray(rebalance?.items) ? rebalance.items : []
-  const changeCount = Number(rebalance?.change_count || items.length || 0)
   const effectiveTime = formatRankingPortfolioDateTime(rebalance?.effective_time)
   const tradeCostRate = Number(rebalance?.trade_cost_rate || 0)
 
   return (
-    <details className="mt-3">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-full border border-border bg-card/80 px-2.5 py-1 text-[11px] text-foreground-disabled2 transition hover:border-white/18 hover:text-foreground/72 marker:hidden">
-        <span>最近一次调仓</span>
-        <span className="rounded-full bg-[var(--color-bg-secondary)] px-1.5 py-0.5 text-[10px] text-foreground-dim">{changeCount}项</span>
-      </summary>
-
-      <div className="mt-2 rounded-xl border border-border bg-card/80 px-3 py-3">
-        <div className="text-[11px] leading-5 text-foreground/42">
-          生效时间：{effectiveTime}
-          {tradeCostRate > 0 ? ` · 含 ${formatRankingPortfolioPercent(tradeCostRate * 100, 2)} 交易成本` : ''}
-        </div>
-
-        {items.length ? (
-          <div className="mt-3 space-y-2">
-            {(compact ? items.slice(0, 4) : items).map((item) => (
-              <LatestRebalanceRow key={`${item.exchange}-${item.code}-${item.action}`} item={item} />
-            ))}
-            {compact && items.length > 4 ? <div className="text-[11px] text-foreground-dim">已折叠其余 {items.length - 4} 项，展开可查看全部调仓明细。</div> : null}
-          </div>
-        ) : (
-          <div className="mt-3 rounded-xl border border-dashed border-border/70 px-3 py-4 text-center text-sm text-foreground-dim">
-            本次未发生调仓
-          </div>
-        )}
+    <div className="mt-2 rounded-xl border border-border bg-card/80 px-3 py-3">
+      <div className="text-[11px] leading-5 text-foreground/42">
+        生效时间：{effectiveTime}
+        {tradeCostRate > 0 ? ` · 含 ${formatRankingPortfolioPercent(tradeCostRate * 100, 2)} 交易成本` : ''}
       </div>
-    </details>
+
+      {items.length ? (
+        <div className="mt-3 space-y-2">
+          {(compact ? items.slice(0, 4) : items).map((item) => (
+            <LatestRebalanceRow key={`${item.exchange}-${item.code}-${item.action}`} item={item} />
+          ))}
+          {compact && items.length > 4 ? <div className="text-[11px] text-foreground-dim">已折叠其余 {items.length - 4} 项</div> : null}
+        </div>
+      ) : (
+        <div className="mt-3 rounded-xl border border-dashed border-border/70 px-3 py-4 text-center text-sm text-foreground-dim">
+          本次未发生调仓
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -724,6 +722,15 @@ function LatestRebalanceRow({ item }) {
   const badgeClass = isSell
     ? 'border-emerald-400/35 bg-emerald-100 text-emerald-700 dark:border-positive/20 dark:bg-positive/10 dark:text-positive'
     : 'border-amber-400/40 bg-amber-100 text-amber-700 dark:border-amber-300/20 dark:bg-amber-500/10 dark:text-amber-200'
+
+  const hasSoldReturn = isSell && item?.sold_return_pct !== null && item?.sold_return_pct !== undefined
+  const soldReturnValue = hasSoldReturn ? item.sold_return_pct : null
+  const soldReturnClass = soldReturnValue !== null
+    ? getRankingPortfolioPerformanceClass(soldReturnValue)
+    : 'text-foreground-dim'
+  const soldReturnLabel = soldReturnValue !== null
+    ? formatRankingPortfolioPercent(soldReturnValue)
+    : '--'
 
   return (
     <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-2.5">
@@ -739,6 +746,11 @@ function LatestRebalanceRow({ item }) {
         <div className="text-right text-[11px] text-foreground/42">
           <div>仓位 {formatRankingPortfolioWeightChange(item?.from_weight, item?.to_weight, 0)}</div>
           <div className="mt-1">参考成本价 {formatRankingPortfolioReferencePrice(item?.reference_cost_price, item?.exchange)}</div>
+          {isSell ? (
+            <div className={`mt-1 ${soldReturnClass}`} title="从最近一次买入开盘价起算，含单边卖出成本">
+              回报率 {soldReturnValue !== null ? `${soldReturnLabel}（参考）` : '--'}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

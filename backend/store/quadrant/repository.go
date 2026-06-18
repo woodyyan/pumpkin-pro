@@ -880,3 +880,62 @@ func (r *Repository) FillRankingPortfolioEntryOpenPrice(ctx context.Context, sco
 	}
 	return nil
 }
+
+// GetRankingPortfolioLatestEntryOpenPriceBatch returns the most recent T+1
+// call-auction open price for each requested symbol within a portfolio
+// definition. It is used to compute the holding-period return for stocks that
+// are being sold in the latest rebalance.
+//
+// "Most recent" means the row with the largest entry_trade_date (DESC, then id
+// DESC) among rows where open_price > 0. This correctly handles stocks that
+// have entered and exited the portfolio multiple times: earlier entry prices
+// belong to already-closed positions and must not be used.
+//
+// The result map is keyed by snapshotPriceHintKey(code, exchange).
+// Keys with no valid open_price record are omitted from the map (caller must
+// treat missing keys as unavailable data, i.e. return nil for SoldReturnPct).
+func (r *Repository) GetRankingPortfolioLatestEntryOpenPriceBatch(
+	ctx context.Context,
+	definitionID string,
+	keys []struct{ Code, Exchange string },
+) (map[string]float64, error) {
+	if len(keys) == 0 {
+		return map[string]float64{}, nil
+	}
+
+	// Collect unique codes for the IN clause. Exchange is handled post-fetch
+	// via the result map key to avoid cross-exchange collisions.
+	codes := make([]string, 0, len(keys))
+	keySet := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		codes = append(codes, strings.TrimSpace(k.Code))
+		keySet[snapshotPriceHintKey(strings.TrimSpace(k.Code), strings.ToUpper(strings.TrimSpace(k.Exchange)))] = struct{}{}
+	}
+
+	var rows []RankingPortfolioMarketPrice
+	if err := r.db.WithContext(ctx).
+		Model(&RankingPortfolioMarketPrice{}).
+		Select("code, exchange, open_price, entry_trade_date").
+		Where("definition_id = ? AND code IN ? AND open_price > ? AND entry_trade_date != ''", definitionID, codes, 0).
+		Order("entry_trade_date DESC, id DESC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	// Walk rows (already DESC-sorted) and keep only the first (most recent)
+	// occurrence per key. This avoids window functions for DB portability.
+	result := make(map[string]float64, len(keys))
+	for _, row := range rows {
+		k := snapshotPriceHintKey(row.Code, row.Exchange)
+		// Skip keys not requested (guards against codes shared across exchanges).
+		if _, requested := keySet[k]; !requested {
+			continue
+		}
+		// Only keep the first (most-recent) entry per key.
+		if _, exists := result[k]; exists {
+			continue
+		}
+		result[k] = row.OpenPrice
+	}
+	return result, nil
+}

@@ -28,3 +28,4 @@ output/
 .agent/memory/
 .agent/logs/
 .agent/cache/
+.box-desens/

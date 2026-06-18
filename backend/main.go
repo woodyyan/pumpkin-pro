@@ -3959,6 +3959,15 @@ func main() {
 
 	portfolioRepo := portfolio.NewRepository(storeInstance.DB)
 	portfolioService := portfolio.NewService(portfolioRepo)
+	portfolioWorker := portfolio.NewWorker(portfolioService, portfolio.WorkerConfig{
+		Enabled:      cfg.PortfolioSnapshot.DailyComputeEnabled,
+		AShareHour:   cfg.PortfolioSnapshot.AShareHour,
+		AShareMinute: cfg.PortfolioSnapshot.AShareMinute,
+		HKHour:       cfg.PortfolioSnapshot.HKHour,
+		HKMinute:     cfg.PortfolioSnapshot.HKMinute,
+		RunTimeout:   time.Duration(cfg.PortfolioSnapshot.TimeoutMinutes) * time.Minute,
+	})
+	portfolioWorker.Start(context.Background())
 
 	companyProfileRepo := companyprofile.NewRepository(storeInstance.DB)
 	companyProfileService := companyprofile.NewService(companyProfileRepo)
@@ -4091,6 +4100,7 @@ func main() {
 		liveService:           liveService,
 		signalService:         signalService,
 		portfolioService:      portfolioService,
+		portfolioWorker:       portfolioWorker,
 		companyProfileService: companyProfileService,
 		quadrantService:       quadrantService,
 		adminService:          adminService,

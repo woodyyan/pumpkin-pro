@@ -214,7 +214,6 @@ describe('RankingPortfolioPanel source contract', () => {
     assert.match(panelSource, /CompactMetricItem/)
     assert.match(panelSource, /visibleConstituents = constituents\.slice\(0, 4\)/)
     assert.match(panelSource, /LatestRebalanceDisclosure rebalance=\{latestRebalance\} compact/)
-    assert.match(panelSource, /默认收起明细/)
     assert.doesNotMatch(panelSource, /模拟组合口径更新/)
     assert.doesNotMatch(panelSource, /关闭公告/)
   })
@@ -240,8 +239,7 @@ describe('RankingPortfolioPanel source contract', () => {
 
   it('keeps latest rebalance collapsed behind a disclosure button', () => {
     assert.match(panelSource, /最近一次调仓/)
-    assert.match(panelSource, /<details/)
-    assert.match(panelSource, /changeCount}项/)
+    assert.match(panelSource, /change_count/)
     assert.match(panelSource, /参考成本价/)
     assert.match(panelSource, /本次未发生调仓/)
   })

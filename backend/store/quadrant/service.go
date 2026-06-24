@@ -1258,6 +1258,101 @@ func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*
 	return s.buildRankingResponse(ctx, exchange, limit)
 }
 
+// VerifyAllRankingPortfolioResults replays the NAV series for every definition
+// and compares it against the stored series_json. Returns a list of per-definition
+// results; no data is written.
+func (s *Service) VerifyAllRankingPortfolioResults(ctx context.Context) (*RankingPortfolioVerifyAllResult, error) {
+	definitions := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())
+	items := make([]RankingPortfolioVerifyResult, 0, len(definitions))
+	anyDiff := false
+	for _, def := range definitions {
+		res, err := VerifyRankingPortfolioResult(s.repo.db.WithContext(ctx), def)
+		if err != nil {
+			return nil, fmt.Errorf("verify definition %s: %w", def.ID, err)
+		}
+		items = append(items, *res)
+		if res.HasDiff {
+			anyDiff = true
+		}
+	}
+	return &RankingPortfolioVerifyAllResult{
+		Items:     items,
+		HasDiff:   anyDiff,
+		CheckedAt: time.Now().UTC().Format(time.RFC3339),
+	}, nil
+}
+
+// FixVerifiedRankingPortfolioResults rebuilds the series_json for every
+// definition that had diffs in the verify run identified by verifyToken.
+// The token must be valid (< 10 min old) and will be consumed on first use.
+// Definitions are repaired serially to avoid DB lock contention.
+func (s *Service) FixVerifiedRankingPortfolioResults(ctx context.Context, verifyToken string) error {
+	verifyToken = strings.TrimSpace(verifyToken)
+	if verifyToken == "" {
+		return fmt.Errorf("verify_token is required")
+	}
+	stored := ConsumeVerifyToken(verifyToken)
+	if stored == nil {
+		return fmt.Errorf("verify_token 无效或已过期，请重新执行验证")
+	}
+	if !stored.HasDiff {
+		return nil // nothing to fix
+	}
+	// Repair each definition that had diffs.
+	now := time.Now().UTC()
+	definitions := defaultRankingPortfolioDefinitionRecords(now)
+	defByID := make(map[string]RankingPortfolioDefinition, len(definitions))
+	for _, def := range definitions {
+		defByID[def.ID] = def
+	}
+
+	// The verify result was produced for the single definition that matched the
+	// stored token. Repair only that definition.
+	def, ok := defByID[stored.DefinitionID]
+	if !ok {
+		return fmt.Errorf("unknown definition_id in verify token: %s", stored.DefinitionID)
+	}
+	if err := s.rebuildRankingPortfolioResultForSnapshot(ctx, def, ""); err != nil {
+		return fmt.Errorf("fix definition %s: %w", def.ID, err)
+	}
+	return nil
+}
+
+// FixAllVerifiedRankingPortfolioResults re-runs verify across all definitions
+// and immediately repairs every definition that has diffs. The verify-token
+// flow is bypassed because this variant discovers diffs itself.
+func (s *Service) FixAllVerifiedRankingPortfolioResults(ctx context.Context, verifyToken string) error {
+	verifyToken = strings.TrimSpace(verifyToken)
+	if verifyToken == "" {
+		return fmt.Errorf("verify_token is required")
+	}
+	// We only need the token to be valid — we re-run verify to get fresh diffs.
+	stored := ConsumeVerifyToken(verifyToken)
+	if stored == nil {
+		return fmt.Errorf("verify_token 无效或已过期，请重新执行验证")
+	}
+
+	definitions := defaultRankingPortfolioDefinitionRecords(time.Now().UTC())
+	taskLogID := rankingPortfolioRepairTaskLogID(time.Now().UTC())
+	for _, def := range definitions {
+		// Re-verify inline to get current diff status.
+		res, err := VerifyRankingPortfolioResult(s.repo.db.WithContext(ctx), def)
+		if err != nil {
+			log.Printf("[ranking-portfolio-fix] verify failed for %s: %v", def.ID, err)
+			continue
+		}
+		if !res.HasDiff {
+			continue
+		}
+		if err := s.rebuildLaggingRankingPortfolioResultForDefinition(ctx, def, taskLogID, false); err != nil {
+			log.Printf("[ranking-portfolio-fix] rebuild failed for %s: %v", def.ID, err)
+			return fmt.Errorf("fix definition %s: %w", def.ID, err)
+		}
+		log.Printf("[ranking-portfolio-fix] repaired %s: %d diffs fixed", def.ID, res.DiffCount)
+	}
+	return nil
+}
+
 // exchangeAccum is an internal accumulator for per-exchange stats.
 type exchangeAccum struct {
 	key          string

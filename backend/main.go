@@ -4211,6 +4211,8 @@ func main() {
 	mux.HandleFunc("/api/admin/ai-picker/generate", server.withSuperAdminAuth(server.handleAdminAIPickerGenerate))
 	mux.HandleFunc("/api/admin/ranking-portfolio-status", server.withSuperAdminAuth(server.handleAdminRankingPortfolioStatus))
 	mux.HandleFunc("/api/admin/ranking-portfolio-repair", server.withSuperAdminAuth(server.handleAdminRankingPortfolioRepair))
+	mux.HandleFunc("/api/admin/ranking-portfolio-verify", server.withSuperAdminAuth(server.handleAdminRankingPortfolioVerify))
+	mux.HandleFunc("/api/admin/ranking-portfolio-fix", server.withSuperAdminAuth(server.handleAdminRankingPortfolioFix))
 	mux.HandleFunc("/api/admin/company-profiles", server.withSuperAdminAuth(server.handleAdminCompanyProfiles))
 	mux.HandleFunc("/api/admin/company-profiles/refresh", server.withSuperAdminAuth(server.handleAdminCompanyProfileRefresh))
 	mux.HandleFunc("/api/admin/company-profiles/refresh-status", server.withSuperAdminAuth(server.handleAdminCompanyProfileRefreshStatus))

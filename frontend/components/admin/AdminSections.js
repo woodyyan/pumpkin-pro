@@ -1710,6 +1710,12 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
   const [repairing, setRepairing] = useState(false)
   const [repairConfirming, setRepairConfirming] = useState(false)
   const [repairSummary, setRepairSummary] = useState(null)
+  // ── verify / fix state ──
+  const [verifying, setVerifying] = useState(false)
+  const [verifyResult, setVerifyResult] = useState(null)      // RankingPortfolioVerifyAllResult
+  const [fixing, setFixing] = useState(false)
+  const [fixConfirming, setFixConfirming] = useState(false)
+  const [fixDone, setFixDone] = useState(false)
   const [actionError, setActionError] = useState('')
   const resource = useAdminResource({
     key: 'admin:quadrant',
@@ -1784,6 +1790,56 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
       }
     } finally {
       setRepairing(false)
+    }
+  }
+
+  // ── verify handler ──
+  const handleRankingPortfolioVerify = async () => {
+    setVerifying(true)
+    setVerifyResult(null)
+    setFixConfirming(false)
+    setFixDone(false)
+    setActionError('')
+    try {
+      const resp = await adminFetch('/api/admin/ranking-portfolio-verify', { method: 'POST' })
+      setVerifyResult(resp)
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '验证收益曲线失败')
+      if (message) setActionError(message)
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  // ── fix handler ──
+  const handleRankingPortfolioFix = async () => {
+    if (!fixConfirming) {
+      setFixConfirming(true)
+      return
+    }
+    setFixConfirming(false)
+    // Collect first valid verify_token across all items.
+    const token = verifyResult?.items?.find((it) => it.verify_token)?.verify_token
+    if (!token) {
+      setActionError('未找到有效的 verify_token，请重新验证')
+      return
+    }
+    setFixing(true)
+    setActionError('')
+    try {
+      await adminFetch('/api/admin/ranking-portfolio-fix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verify_token: token }),
+      })
+      setFixDone(true)
+      setVerifyResult(null)
+      await resource.refresh()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '修复收益曲线失败')
+      if (message) setActionError(message)
+    } finally {
+      setFixing(false)
     }
   }
 
@@ -1898,6 +1954,59 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
             )}
           </div>
           <div className="flex flex-col items-end gap-1.5">
+            {/* ── verify / fix buttons ── */}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                onClick={handleRankingPortfolioVerify}
+                disabled={verifying || repairing}
+                className="rounded-lg border border-sky-400/30 bg-sky-500/10 px-3 py-1.5 text-xs font-medium text-sky-200 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {verifying ? '验证中…' : '🔍 验证收益曲线'}
+              </button>
+              {verifyResult && verifyResult.has_diff && !fixDone && (
+                fixConfirming ? (
+                  <>
+                    <span className="text-xs text-rose-400">确认修复所有差异点？</span>
+                    <button
+                      onClick={handleRankingPortfolioFix}
+                      disabled={fixing}
+                      className="rounded-lg border border-rose-500/50 bg-rose-500/20 px-3 py-1.5 text-xs font-medium text-rose-200 transition hover:bg-rose-500/30 disabled:opacity-60"
+                    >
+                      确认修复
+                    </button>
+                    <button
+                      onClick={() => setFixConfirming(false)}
+                      className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground-dim hover:bg-background-alt"
+                    >
+                      取消
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={handleRankingPortfolioFix}
+                    disabled={fixing}
+                    className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-300 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {fixing ? '修复中…' : '🛠 修复差异数据'}
+                  </button>
+                )
+              )}
+            </div>
+            {/* verify result banner */}
+            {verifyResult && (
+              <div className={`mt-1 text-right text-[11px] ${verifyResult.has_diff ? 'text-rose-400' : 'text-positive'}`}>
+                {verifyResult.has_diff
+                  ? verifyResult.items?.map((it) =>
+                      it.has_diff ? `${it.definition_name}：${it.diff_count} 个差异点 ` : null
+                    )
+                  : `✅ 所有组合均一致（${verifyResult.checked_at ? formatAdminDateTime(verifyResult.checked_at) : ''}）`
+                }
+              </div>
+            )}
+            {fixDone && (
+              <div className="text-right text-[11px] text-positive">✅ 修复完成，已刷新状态</div>
+            )}
+            {/* ── original repair button ── */}
             {repairConfirming ? (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-amber-400">确认补齐开盘价并重算曲线（仅上线日后）？</span>
@@ -1983,6 +2092,60 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        {/* ── verify diff detail ── */}
+        {verifyResult && verifyResult.has_diff && (
+          <div className="mt-4 space-y-3">
+            {verifyResult.items?.filter((it) => it.has_diff).map((it) => (
+              <div key={it.definition_id} className="rounded-lg border border-rose-400/20 bg-rose-500/[0.06] p-3">
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-rose-300">
+                  <span>{it.definition_name}</span>
+                  <span className="text-foreground-dim font-normal">·</span>
+                  <span className="text-foreground-dim font-normal">{it.diff_count} 个差异点（共 {it.total_points} 点）</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[11px] text-left">
+                    <thead>
+                      <tr className="border-b border-rose-400/15 text-foreground-dim">
+                        <th className="pb-1.5 pr-3 font-medium">日期</th>
+                        <th className="pb-1.5 pr-3 font-medium text-right">已存 NAV</th>
+                        <th className="pb-1.5 pr-3 font-medium text-right">重算 NAV</th>
+                        <th className="pb-1.5 pr-3 font-medium text-right">偏差</th>
+                        <th className="pb-1.5 pr-3 font-medium text-right">已存日收益</th>
+                        <th className="pb-1.5 font-medium text-right">重算日收益</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {it.diffs?.slice(0, 20).map((d) => (
+                        <tr key={d.date} className="border-b border-rose-400/10 last:border-0">
+                          <td className="py-1 pr-3 tabular-nums text-foreground-muted">{d.date}</td>
+                          <td className="py-1 pr-3 tabular-nums text-right">{d.stored_nav?.toFixed(6)}</td>
+                          <td className="py-1 pr-3 tabular-nums text-right">{d.recomputed_nav?.toFixed(6)}</td>
+                          <td className={`py-1 pr-3 tabular-nums text-right font-medium ${d.nav_delta > 0 ? 'text-positive' : 'text-negative'}`}>
+                            {d.nav_delta > 0 ? '+' : ''}{d.nav_delta?.toFixed(6)}
+                          </td>
+                          <td className="py-1 pr-3 tabular-nums text-right text-foreground-dim">{d.stored_daily_pct?.toFixed(4)}%</td>
+                          <td className="py-1 tabular-nums text-right text-foreground-dim">{d.recomputed_daily_pct?.toFixed(4)}%</td>
+                        </tr>
+                      ))}
+                      {it.diffs?.length > 20 && (
+                        <tr>
+                          <td colSpan={6} className="pt-1 text-center text-foreground-disabled">
+                            … 还有 {it.diffs.length - 20} 个差异点未展示
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {verifyResult && !verifyResult.has_diff && (
+          <div className="mt-3 rounded-lg border border-positive/20 bg-positive/[0.06] px-3 py-2 text-xs text-positive">
+            ✅ {verifyResult.items?.map((it) => it.message).join(' · ')}
           </div>
         )}
       </div>

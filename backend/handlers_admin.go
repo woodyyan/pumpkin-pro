@@ -378,6 +378,53 @@ func (a *appServer) handleAdminQuadrantTrigger(w http.ResponseWriter, r *http.Re
 	})
 }
 
+// handleAdminRankingPortfolioVerify runs a read-only replay of the NAV series
+// for all definitions and returns per-definition diff reports.
+// POST /api/admin/ranking-portfolio-verify
+func (a *appServer) handleAdminRankingPortfolioVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	result, err := a.quadrantService.VerifyAllRankingPortfolioResults(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "验证收益曲线失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleAdminRankingPortfolioFix repairs definitions whose series differ from
+// the recomputed values.  Requires a valid verify_token issued by the verify
+// endpoint (expires in 10 min, single-use).
+// POST /api/admin/ranking-portfolio-fix
+func (a *appServer) handleAdminRankingPortfolioFix(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	var req struct {
+		VerifyToken string `json:"verify_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	if strings.TrimSpace(req.VerifyToken) == "" {
+		writeError(w, http.StatusBadRequest, "verify_token 不能为空，请先执行验证")
+		return
+	}
+	if err := a.quadrantService.FixAllVerifiedRankingPortfolioResults(r.Context(), req.VerifyToken); err != nil {
+		writeError(w, http.StatusBadRequest, "修复失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"message": "已完成收益曲线修复，请刷新状态确认。",
+	})
+}
+
+// handleAdminRankingPortfolioStatus returns per-definition admin status.
 func (a *appServer) handleAdminRankingPortfolioStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")

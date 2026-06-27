@@ -18,6 +18,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store"
 	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
 	"github.com/woodyyan/pumpkin-pro/backend/store/aipicker"
+	"github.com/woodyyan/pumpkin-pro/backend/store/aireport"
 	"github.com/woodyyan/pumpkin-pro/backend/store/analysis_history"
 	"github.com/woodyyan/pumpkin-pro/backend/store/analytics"
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
@@ -258,6 +259,7 @@ type appServer struct {
 	backupWorker          *backup.Worker
 	aipickerService       *aipicker.Service
 	aipickerWorker        *aipicker.Worker
+	aiReportService       *aireport.Service
 	factorLabService      *factorlab.Service
 	factorLabWorker       *factorlab.Worker
 	backtestService       *backtest.Service
@@ -4057,6 +4059,8 @@ func main() {
 	aipickerRepo := aipicker.NewRepository(storeInstance.DB)
 	aipickerTechnicalRepo := aipicker.NewTechnicalSnapshotRepository(storeInstance.DB)
 	aipickerService := aipicker.NewService(aipickerRepo, factorLabService, aipickerTechnicalRepo)
+	aiReportRepo := aireport.NewRepository(storeInstance.DB)
+	aiReportService := aireport.NewService(aiReportRepo, aireport.ServiceConfig{COSBucket: cfg.Backup.COSBucket, COSRegion: cfg.Backup.COSRegion})
 
 	adminRepo := admin.NewRepository(storeInstance.DB)
 	adminService := admin.NewService(adminRepo, admin.ServiceConfig{
@@ -4108,6 +4112,7 @@ func main() {
 		backupWorker:          backupWorker,
 		aipickerService:       aipickerService,
 		aipickerWorker:        aipickerWorker,
+		aiReportService:       aiReportService,
 		factorLabService:      factorLabService,
 		factorLabWorker:       factorLabWorker,
 		backtestService:       backtestService,
@@ -4175,6 +4180,9 @@ func main() {
 	mux.HandleFunc("/api/live/watchlist/", server.withRequiredAuth(server.handleLiveWatchlistSubroutes))
 	mux.HandleFunc("/api/live/market/overview", server.handleLiveMarketOverview)
 	mux.HandleFunc("/api/live/symbols/", server.withOptionalAuth(server.handleLiveSymbolsSubroutes))
+	mux.HandleFunc("/api/ai/reports", server.withOptionalAuth(server.handleAIReports))
+	mux.HandleFunc("/api/ai/reports/", server.withRequiredAuth(server.handleAIReportSubroutes))
+	mux.HandleFunc("/api/ai/report-service-config", server.handleAIReportServiceConfig)
 
 	mux.HandleFunc("/api/admin/login", server.handleAdminLogin)
 	mux.HandleFunc("/api/admin/logout", server.handleAdminLogout)
@@ -4188,6 +4196,9 @@ func main() {
 	mux.HandleFunc("/api/admin/ai-config", server.withSuperAdminAuth(server.handleAdminAIConfig))
 	mux.HandleFunc("/api/admin/ai-config/test", server.withSuperAdminAuth(server.handleAdminAIConfigTest))
 	mux.HandleFunc("/api/admin/ai-usage", server.withSuperAdminAuth(server.handleAdminAITokenUsage))
+	mux.HandleFunc("/api/admin/ai-reports", server.withSuperAdminAuth(server.handleAdminAIReports))
+	mux.HandleFunc("/api/admin/ai-reports/", server.withSuperAdminAuth(server.handleAdminAIReportSubroutes))
+	mux.HandleFunc("/api/admin/ai-report-service-config", server.withSuperAdminAuth(server.handleAdminAIReportServiceConfig))
 
 	mux.HandleFunc("/api/admin/device-analytics", server.withSuperAdminAuth(server.handleAdminDeviceAnalytics))
 	mux.HandleFunc("/api/admin/factor-lab/pipeline/status", server.withSuperAdminAuth(server.handleAdminFactorLabPipelineStatus))

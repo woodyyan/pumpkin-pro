@@ -8,12 +8,19 @@ describe('navigation config', () => {
     const hrefs = NAV_GROUPS.flatMap((group) => group.items.map((item) => item.href))
 
     assert.ok(hrefs.includes('/ai/analysis'))
+    assert.ok(hrefs.includes('/ai/reports'))
     assert.ok(hrefs.includes('/ai/picker'))
     assert.ok(hrefs.includes('/ai/backtest'))
     assert.ok(hrefs.includes('/quadrant'))
     assert.ok(hrefs.includes('/watchlist'))
     assert.ok(hrefs.includes('/portfolio-tracking'))
     assert.ok(hrefs.includes('/live-trading'))
+  })
+
+  it('places AI reports between AI analysis and AI picker', () => {
+    const aiItems = NAV_GROUPS.find((group) => group.key === 'wolong-ai').items
+
+    assert.deepEqual(aiItems.map((item) => item.href).slice(0, 3), ['/ai/analysis', '/ai/reports', '/ai/picker'])
   })
 
   it('does not duplicate hrefs across navigation items', () => {

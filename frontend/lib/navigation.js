@@ -4,6 +4,7 @@ export const NAV_GROUPS = [
     label: '卧龙AI',
     items: [
       { key: 'ai-analysis', href: '/ai/analysis', label: 'AI分析', matchNested: true },
+      { key: 'ai-reports', href: '/ai/reports', label: 'AI研报', matchNested: true },
       { key: 'ai-picker', href: '/ai/picker', label: 'AI选股', matchNested: true },
       { key: 'ai-backtest', href: '/ai/backtest', label: 'AI回测', matchNested: true },
     ],

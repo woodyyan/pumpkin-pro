@@ -22,6 +22,8 @@ export function resolveAdminSectionApis(section) {
       '/api/admin/ai-config',
       '/api/admin/stats',
       '/api/admin/ai-usage',
+      '/api/admin/ai-reports',
+      '/api/admin/ai-report-service-config',
       '/api/admin/ai-picker/status',
       '/api/admin/ai-picker/latest-run',
     ]

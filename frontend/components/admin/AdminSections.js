@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import MiniChart from '../MiniChart'
+import AIReportsAdminPanel from './AIReportsAdminPanel'
 import {
   BACKUP_STATUS_COLORS,
   BACKUP_TRIGGER_LABELS,
@@ -3302,6 +3303,7 @@ export function AdminAIPage({ onUnauthorized }) {
     <div className="space-y-8">
       <AIProviderConfigPanel onUnauthorized={onUnauthorized} />
       <AIUsageAdminPanel onUnauthorized={onUnauthorized} />
+      <AIReportsAdminPanel onUnauthorized={onUnauthorized} />
       <AIPickerAdminPanel onUnauthorized={onUnauthorized} />
     </div>
   )

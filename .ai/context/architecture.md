@@ -42,6 +42,7 @@ frontend/
 | `/live-trading` | `live-trading.js` | 市场行情页（导航归属「看板」）；当前实现为 `Hero + 核心指数卡片 + 扩展指数 + 市场摘要` 的 dashboard，总览 A/H 股指数 |
 | `/live-trading/[symbol]` | `live-trading/[symbol].js` | 个股详情页 (194KB)，active 仍归属「看板 / 市场行情」 |
 | `/ai/analysis` | `ai/analysis.js` | AI分析占位页（一期「敬请期待」） |
+| `/ai/reports` | `ai/reports.js` | AI研报页面：A 股/中国香港股票个股研报介绍、缩略图样例、登录后弹窗预览、微信定制转化与合规风险提示 |
 | `/ai/picker` | `ai/picker.js` | AI选股占位页（一期「敬请期待」） |
 | `/ai/backtest` | `ai/backtest.js` | AI回测占位页（一期「敬请期待」） |
 | `/quadrant` | `quadrant.js` | 四象限独立占位页（一期「敬请期待」） |
@@ -63,6 +64,7 @@ frontend/
 - 主站导航不再在 `_app.js` 内硬编码多套数组，而是统一收敛到 `frontend/lib/navigation.js`。
 - PC 端导航由 `components/DesktopNavMenu.js` + `components/NavDropdown.js` 渲染：hover 展开下拉，点击一级导航只负责展开/收起，不做跳转。
 - 移动端导航由 `components/MobileNavMenu.js` 渲染：保留汉堡入口，菜单内部按「卧龙AI / 看板 / 跟踪 / 选股 / 更多」分组折叠，一次只展开一个分组。
+- 「卧龙AI」分组当前顺序为「AI分析 / AI研报 / AI选股 / AI回测」。
 - 占位页统一复用 `components/ComingSoonPage.js`，文案固定为标题 + 「敬请期待」，避免散落多个空白实现。
 
 ### 页面模式补充（2026-06-13）
@@ -98,7 +100,7 @@ frontend/
 - admin 数据改为页面级按需拉取：
   - 总览页只拉用户/流量/设备/漏斗相关接口。
   - 数据作业页只拉公司资料、因子流水线、四象限相关接口。
-  - AI 管理页只拉 AI 配置、AI 使用统计、AI 选股相关接口；其中 AI Picker 运维面板会并行请求 `/api/admin/ai-picker/status` 与 `/api/admin/ai-picker/latest-run`，分别承载“最近 10 条日志/最近结果摘要”和“最近一次完整 LLM 交互详情（system prompt、user prompt、provider reasoning、原始返回）”。
+  - AI 管理页只拉 AI 配置、AI 使用统计、AI研报、AI 选股相关接口；其中 AI研报管理使用 `/api/admin/ai-reports` 和 `/api/admin/ai-report-service-config` 管理 COS 图片 key 与微信服务配置；AI Picker 运维面板会并行请求 `/api/admin/ai-picker/status` 与 `/api/admin/ai-picker/latest-run`，分别承载“最近 10 条日志/最近结果摘要”和“最近一次完整 LLM 交互详情（system prompt、user prompt、provider reasoning、原始返回）”。
   - 运维与支持页只拉支付、备份、系统健康、反馈相关接口。
 
 ## 后端持仓快照架构补充（2026-06-02）

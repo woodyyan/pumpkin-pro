@@ -47,6 +47,7 @@ const FEATURE_CARDS = [
 const SERVICE_STEPS = [
   ['添加企业微信', '备注 AI研报。'],
   ['确认需求', '工作人员确认股票、市场和分析侧重点。'],
+  ['企业微信付款', '确认套餐和费用后，通过企业微信完成付款。'],
   ['生成研报', '分析师框架、卧龙AI模型与市场数据共同生成。'],
   ['企业微信交付', '大部分情况下 1 小时内完成交付。'],
 ]
@@ -234,7 +235,7 @@ export default function AIReportsPage() {
             <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-5xl">AI研报，面向个股的深度投资研究报告</h1>
             <p className="mt-5 max-w-3xl text-base leading-8 text-foreground-muted">结合专业股票分析师框架、卧龙AI模型与市场数据，围绕技术面、基本面、资金面、宏观环境、财报与事件变化，生成包含操作建议、目标位、止损位与风险提示的个股研报。</p>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-              <a href="#samples" className="rounded-xl bg-primary px-5 py-3 text-center text-sm font-semibold text-black transition hover:bg-primary/90">查看研报样例</a>
+              <a href="#samples" className="rounded-xl bg-primary px-5 py-3 text-center text-sm font-semibold text-black transition hover:bg-primary/90">查看过往研报</a>
               <a href="#wechat" className="rounded-xl border border-border px-5 py-3 text-center text-sm font-semibold text-foreground transition hover:border-primary hover:text-primary">添加企业微信定制</a>
             </div>
           </div>
@@ -254,7 +255,7 @@ export default function AIReportsPage() {
         <section id="samples" className="mt-12">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-foreground">研报样例</h2>
+              <h2 className="text-2xl font-bold text-foreground">过往研报</h2>
             </div>
             {!ready || isLoggedIn ? null : <button type="button" onClick={() => openAuthModal('login', '登录后可预览完整 AI研报样例。')} className="rounded-xl border border-border px-4 py-2 text-sm font-semibold text-foreground hover:border-primary hover:text-primary">登录后预览</button>}
           </div>
@@ -304,7 +305,7 @@ export default function AIReportsPage() {
           <p className="mt-3 text-sm leading-7 text-foreground-muted">{riskText}</p>
         </section>
 
-        <section className="mt-12 grid gap-4 md:grid-cols-4">
+        <section className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-5">
           {SERVICE_STEPS.map(([title, desc], index) => (
             <div key={title} className="rounded-2xl border border-border bg-card p-5">
               <div className="text-xs text-primary">步骤 {index + 1}</div>

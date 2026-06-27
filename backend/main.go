@@ -4061,6 +4061,12 @@ func main() {
 	aipickerService := aipicker.NewService(aipickerRepo, factorLabService, aipickerTechnicalRepo)
 	aiReportRepo := aireport.NewRepository(storeInstance.DB)
 	aiReportService := aireport.NewService(aiReportRepo, aireport.ServiceConfig{COSBucket: cfg.Backup.COSBucket, COSRegion: cfg.Backup.COSRegion})
+	// 复用数据备份板块的 COS 密钥配置，为 AI 研报图片生成带签名的临时访问 URL。
+	if strings.TrimSpace(cfg.Backup.COSBucket) != "" && strings.TrimSpace(cfg.Backup.COSRegion) != "" &&
+		strings.TrimSpace(cfg.Backup.COSSecretID) != "" && strings.TrimSpace(cfg.Backup.COSSecretKey) != "" {
+		aiReportCOSClient := backup.NewCOSCloudStorageClient(cfg.Backup.COSBucket, cfg.Backup.COSRegion, cfg.Backup.COSSecretID, cfg.Backup.COSSecretKey)
+		aiReportService = aiReportService.WithImageURLSigner(aiReportCOSClient)
+	}
 
 	adminRepo := admin.NewRepository(storeInstance.DB)
 	adminService := admin.NewService(adminRepo, admin.ServiceConfig{

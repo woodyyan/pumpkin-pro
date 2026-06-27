@@ -16,19 +16,39 @@ const (
 	DefaultRiskDisclaimer   = "AI研报内容包含对个股的研究分析和投资建议，仅供投资研究参考，不构成收益承诺。证券市场存在风险，投资者应结合自身风险承受能力独立判断并审慎决策。"
 )
 
+// DefaultPreviewURLTTL 为预览/缩略图签名 URL 的默认有效期。
+const DefaultPreviewURLTTL = 15 * time.Minute
+
+// ImageURLSigner 生成 COS 对象的带签名临时 GET URL。
+// 由上层（main.go）使用现有 COS 密钥配置注入具体实现，避免本包直接依赖 backup 包。
+type ImageURLSigner interface {
+	PresignGetURL(objectKey string, expire time.Duration) (string, error)
+}
+
 type ServiceConfig struct {
-	COSBucket string
-	COSRegion string
+	COSBucket     string
+	COSRegion     string
+	PreviewURLTTL time.Duration
 }
 
 type Service struct {
-	repo *Repository
-	cfg  ServiceConfig
-	now  func() time.Time
+	repo   *Repository
+	cfg    ServiceConfig
+	signer ImageURLSigner
+	now    func() time.Time
 }
 
 func NewService(repo *Repository, cfg ServiceConfig) *Service {
+	if cfg.PreviewURLTTL <= 0 {
+		cfg.PreviewURLTTL = DefaultPreviewURLTTL
+	}
 	return &Service{repo: repo, cfg: cfg, now: time.Now}
+}
+
+// WithImageURLSigner 注入 COS 预签名器。注入后，纯对象 Key 会被解析为带签名的临时 URL。
+func (s *Service) WithImageURLSigner(signer ImageURLSigner) *Service {
+	s.signer = signer
+	return s
 }
 
 func (s *Service) ListPublicReports(ctx context.Context) ([]ReportListItem, error) {
@@ -213,18 +233,26 @@ func (s *Service) resolveImageURL(key string) string {
 	if text == "" {
 		return ""
 	}
+	// 已经是完整 URL（运营手填的外链）或站内绝对路径时原样返回。
 	if parsed, err := url.Parse(text); err == nil && parsed.Scheme != "" && parsed.Host != "" {
 		return text
 	}
 	if strings.HasPrefix(text, "/") {
 		return text
 	}
+	objectKey := strings.TrimLeft(text, "/")
+	// 优先生成带签名的临时 URL；失败时回退到未签名公开直链，保证旧行为不被破坏。
+	if s.signer != nil {
+		if signed, err := s.signer.PresignGetURL(objectKey, s.cfg.PreviewURLTTL); err == nil && signed != "" {
+			return signed
+		}
+	}
 	bucket := strings.TrimSpace(s.cfg.COSBucket)
 	region := strings.TrimSpace(s.cfg.COSRegion)
 	if bucket == "" || region == "" {
 		return text
 	}
-	return "https://" + bucket + ".cos." + region + ".myqcloud.com/" + strings.TrimLeft(text, "/")
+	return "https://" + bucket + ".cos." + region + ".myqcloud.com/" + objectKey
 }
 
 var tradeDatePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)

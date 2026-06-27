@@ -107,3 +107,100 @@ func TestServiceConfigDefaultsAndSave(t *testing.T) {
 		t.Fatalf("expected default texts to be preserved: %+v", saved)
 	}
 }
+
+type fakeSigner struct {
+	expire   time.Duration
+	lastKey  string
+	failOn   string
+	callKeys []string
+}
+
+func (f *fakeSigner) PresignGetURL(objectKey string, expire time.Duration) (string, error) {
+	f.lastKey = objectKey
+	f.expire = expire
+	f.callKeys = append(f.callKeys, objectKey)
+	if f.failOn != "" && objectKey == f.failOn {
+		return "", errors.New("forced signer failure")
+	}
+	return "https://signed.example.com/" + objectKey + "?q-signature=test", nil
+}
+
+func TestPreviewUsesSignedURLWhenSignerPresent(t *testing.T) {
+	svc := newTestService(t)
+	signer := &fakeSigner{}
+	svc.WithImageURLSigner(signer)
+
+	item, err := svc.CreateReport(context.Background(), SaveReportInput{
+		StockName:         "宁德时代",
+		Symbol:            "300750",
+		Exchange:          "SZSE",
+		SourceTradeDate:   "2026-06-26",
+		ImageOriginalKey:  "ai-reports/original/2026/catl.png",
+		ImagePreviewKey:   "ai-reports/preview/2026/catl.webp",
+		ImageThumbnailKey: "ai-reports/thumb/2026/catl.webp",
+	})
+	if err != nil {
+		t.Fatalf("create report: %v", err)
+	}
+
+	preview, err := svc.GetPreview(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("get preview: %v", err)
+	}
+	want := "https://signed.example.com/ai-reports/preview/2026/catl.webp?q-signature=test"
+	if preview.PreviewURL != want {
+		t.Fatalf("expected signed preview url, got %s", preview.PreviewURL)
+	}
+	if signer.expire != DefaultPreviewURLTTL {
+		t.Fatalf("expected default ttl %v, got %v", DefaultPreviewURLTTL, signer.expire)
+	}
+
+	publicItems, err := svc.ListPublicReports(context.Background())
+	if err != nil {
+		t.Fatalf("list public: %v", err)
+	}
+	if len(publicItems) != 1 || publicItems[0].ThumbnailURL != "https://signed.example.com/ai-reports/thumb/2026/catl.webp?q-signature=test" {
+		t.Fatalf("expected signed thumbnail url, got %+v", publicItems)
+	}
+}
+
+func TestPreviewFallsBackToPublicURLWhenSignerFails(t *testing.T) {
+	svc := newTestService(t)
+	signer := &fakeSigner{failOn: "ai-reports/preview/2026/catl.webp"}
+	svc.WithImageURLSigner(signer)
+
+	item, err := svc.CreateReport(context.Background(), SaveReportInput{
+		StockName:         "宁德时代",
+		Symbol:            "300750",
+		Exchange:          "SZSE",
+		SourceTradeDate:   "2026-06-26",
+		ImageOriginalKey:  "ai-reports/original/2026/catl.png",
+		ImagePreviewKey:   "ai-reports/preview/2026/catl.webp",
+		ImageThumbnailKey: "ai-reports/thumb/2026/catl.webp",
+	})
+	if err != nil {
+		t.Fatalf("create report: %v", err)
+	}
+
+	preview, err := svc.GetPreview(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("get preview: %v", err)
+	}
+	want := "https://bucket-123.cos.ap-guangzhou.myqcloud.com/ai-reports/preview/2026/catl.webp"
+	if preview.PreviewURL != want {
+		t.Fatalf("expected fallback public url, got %s", preview.PreviewURL)
+	}
+}
+
+func TestResolveImageURLKeepsFullURLAndEmpty(t *testing.T) {
+	svc := newTestService(t)
+	svc.WithImageURLSigner(&fakeSigner{})
+
+	if got := svc.resolveImageURL(""); got != "" {
+		t.Fatalf("expected empty url for empty key, got %q", got)
+	}
+	full := "https://cdn.example.com/a/b.png"
+	if got := svc.resolveImageURL(full); got != full {
+		t.Fatalf("expected full url returned as-is, got %q", got)
+	}
+}

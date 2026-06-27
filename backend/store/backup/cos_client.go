@@ -177,6 +177,49 @@ func (c *COSCloudStorageClient) resolveObjectURL(objectKey string) *url.URL {
 	return &resolved
 }
 
+// PresignGetURL 为指定对象生成带签名的临时 GET 访问 URL。
+// 签名参数附加在 query 上，调用方可直接把返回值作为 <img src> 使用。
+// expire 为有效期，<=0 时使用默认 15 分钟。
+func (c *COSCloudStorageClient) PresignGetURL(objectKey string, expire time.Duration) (string, error) {
+	if c.baseURL == nil {
+		return "", errors.New("cos client base url is not configured")
+	}
+	if strings.TrimSpace(c.secretID) == "" || strings.TrimSpace(c.secretKey) == "" {
+		return "", errors.New("cos client credentials are not configured")
+	}
+	if expire <= 0 {
+		expire = 15 * time.Minute
+	}
+
+	target := c.resolveObjectURL(objectKey)
+
+	now := c.now()
+	start := now.Add(-time.Minute).Unix()
+	end := now.Add(expire).Unix()
+	keyTime := fmt.Sprintf("%d;%d", start, end)
+
+	// 预签名 GET：header-list 只签 host，query-param-list 为空。
+	headerPairs := "host=" + cosEscape(target.Host)
+	headerNames := []string{"host"}
+
+	httpString := "get\n" + canonicalPath(target) + "\n\n" + headerPairs + "\n"
+	stringToSign := "sha1\n" + keyTime + "\n" + sha1Hex(httpString) + "\n"
+	signKey := hmacSHA1Hex(c.secretKey, keyTime)
+	signature := hmacSHA1Hex(signKey, stringToSign)
+
+	query := target.Query()
+	query.Set("q-sign-algorithm", "sha1")
+	query.Set("q-ak", c.secretID)
+	query.Set("q-sign-time", keyTime)
+	query.Set("q-key-time", keyTime)
+	query.Set("q-header-list", strings.Join(headerNames, ";"))
+	query.Set("q-url-param-list", "")
+	query.Set("q-signature", signature)
+	target.RawQuery = query.Encode()
+
+	return target.String(), nil
+}
+
 func (c *COSCloudStorageClient) signRequest(req *http.Request) {
 	keyTime := c.signatureTimeWindow()
 	headerPairs, headerNames := canonicalHeaderPairs(req)

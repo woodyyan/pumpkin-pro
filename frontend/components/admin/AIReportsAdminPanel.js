@@ -147,7 +147,7 @@ export default function AIReportsAdminPanel({ onUnauthorized }) {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-base font-semibold text-foreground-muted">AI研报管理</h2>
-          <p className="mt-1 text-xs text-foreground-dim">第一阶段管理 COS 对象 Key / URL：未登录用户只看缩略图，登录用户弹窗预览，不提供原图下载。</p>
+          <p className="mt-1 text-xs text-foreground-dim">只需填 COS 对象 Key（如 ai-reports/preview/2026/xxx.webp），无需填完整 URL。系统会用后台 COS 密钥生成带签名的临时访问链接：未登录只看缩略图，登录用户弹窗预览，不提供原图下载。</p>
         </div>
         <button type="button" onClick={() => reportsResource.refresh()} className="rounded-xl border border-border px-3 py-2 text-xs font-medium text-foreground-muted hover:border-primary hover:text-primary">刷新</button>
       </div>
@@ -211,9 +211,9 @@ export default function AIReportsAdminPanel({ onUnauthorized }) {
               <AdminField label="市场"><select className={inputClass()} value={form.exchange} onChange={(e) => updateForm('exchange', e.target.value)}>{AI_REPORT_MARKET_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></AdminField>
             </div>
             <AdminField label="数据截至交易日"><input type="date" className={inputClass()} value={form.source_trade_date} onChange={(e) => updateForm('source_trade_date', e.target.value)} /></AdminField>
-            <AdminField label="原图 COS Key / URL" hint="仅后台管理和人工交付使用，用户侧不返回原图地址。"><input className={inputClass()} value={form.image_original_key} onChange={(e) => updateForm('image_original_key', e.target.value)} placeholder="ai-reports/original/2026/xxx.png" /></AdminField>
-            <AdminField label="预览图 COS Key / URL"><input className={inputClass()} value={form.image_preview_key} onChange={(e) => updateForm('image_preview_key', e.target.value)} placeholder="ai-reports/preview/2026/xxx.webp" /></AdminField>
-            <AdminField label="缩略图 COS Key / URL"><input className={inputClass()} value={form.image_thumbnail_key} onChange={(e) => updateForm('image_thumbnail_key', e.target.value)} placeholder="ai-reports/thumb/2026/xxx.webp" /></AdminField>
+            <AdminField label="原图 COS Key" hint="仅后台管理和人工交付使用，用户侧不返回原图地址。填 COS 对象 Key 即可，无需完整 URL。"><input className={inputClass()} value={form.image_original_key} onChange={(e) => updateForm('image_original_key', e.target.value)} placeholder="ai-reports/original/2026/xxx.png" /></AdminField>
+            <AdminField label="预览图 COS Key" hint="填 COS 对象 Key 即可，无需完整 URL。"><input className={inputClass()} value={form.image_preview_key} onChange={(e) => updateForm('image_preview_key', e.target.value)} placeholder="ai-reports/preview/2026/xxx.webp" /></AdminField>
+            <AdminField label="缩略图 COS Key" hint="填 COS 对象 Key 即可，无需完整 URL。"><input className={inputClass()} value={form.image_thumbnail_key} onChange={(e) => updateForm('image_thumbnail_key', e.target.value)} placeholder="ai-reports/thumb/2026/xxx.webp" /></AdminField>
           </div>
           {reportError && <div className="mt-3 rounded-xl bg-negative/10 px-3 py-2 text-xs text-negative">{reportError}</div>}
           <button type="submit" disabled={reportSaving} className="mt-4 w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-black hover:bg-primary/90 disabled:opacity-60">{reportSaving ? '保存中...' : editingId ? '保存修改' : '新增研报'}</button>
@@ -225,7 +225,7 @@ export default function AIReportsAdminPanel({ onUnauthorized }) {
         <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_180px]">
           <div className="space-y-3">
             <AdminField label="工作人员微信号"><input className={inputClass()} value={configDraft.wechat_id} onChange={(e) => updateConfig('wechat_id', e.target.value)} placeholder="请输入微信号" /></AdminField>
-            <AdminField label="微信二维码 COS Key / URL"><input className={inputClass()} value={configDraft.wechat_qr_image_key} onChange={(e) => updateConfig('wechat_qr_image_key', e.target.value)} placeholder="ai-reports/service/wechat-qr.png" /></AdminField>
+            <AdminField label="微信二维码 COS Key" hint="填 COS 对象 Key 即可，无需完整 URL。"><input className={inputClass()} value={configDraft.wechat_qr_image_key} onChange={(e) => updateConfig('wechat_qr_image_key', e.target.value)} placeholder="ai-reports/service/wechat-qr.png" /></AdminField>
             <AdminField label="交付时效说明"><textarea className={textareaClass()} value={configDraft.delivery_time_text} onChange={(e) => updateConfig('delivery_time_text', e.target.value)} /></AdminField>
             <AdminField label="风险提示与免责声明"><textarea className={textareaClass()} value={configDraft.risk_disclaimer} onChange={(e) => updateConfig('risk_disclaimer', e.target.value)} /></AdminField>
           </div>

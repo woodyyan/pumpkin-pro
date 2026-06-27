@@ -16,7 +16,6 @@ export const AI_REPORT_PRICING_PLANS = [
     reportType: '标准 PDF 报告',
     description: '适合批量查看自选股，单份成本更低。',
     highlights: ['5 份标准 PDF 报告', '覆盖多只自选股', '适合初步筛选机会'],
-    badge: '推荐入门',
   },
   {
     key: 'investment',
@@ -27,7 +26,8 @@ export const AI_REPORT_PRICING_PLANS = [
     description: '适合结合个人持仓和具体问题做更有针对性的分析。',
     highlights: ['10 份 AI研报', '可定制投资周期：短线 / 波段 / 长线', '支持结合用户持仓情况分析', '支持自定义分析问题'],
     examples: ['我的成本 42 元，要不要止损？', '未来一年最大的风险是什么？', '为什么该股票近一个月一直跌？', '现在该股票还能加仓吗？'],
-    badge: '增值服务',
+    badge: '推荐',
+    featured: true,
   },
   {
     key: 'professional',

@@ -84,9 +84,13 @@ function ReportCard({ report, isLoggedIn, onPreview }) {
 }
 
 function PricingCard({ plan }) {
+  const cardClassName = plan.featured
+    ? 'relative flex h-full flex-col rounded-3xl border border-primary/60 bg-primary/10 p-5 transition hover:border-primary hover:bg-primary/15'
+    : 'relative flex h-full flex-col rounded-3xl border border-border bg-card p-5 transition hover:border-primary/40 hover:bg-[var(--color-bg-hover)]'
+
   return (
-    <article className="relative flex h-full flex-col rounded-3xl border border-border bg-card p-5 transition hover:border-primary/40 hover:bg-[var(--color-bg-hover)]">
-      {plan.badge && <span className="absolute right-4 top-4 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">{plan.badge}</span>}
+    <article className={cardClassName}>
+      {plan.badge && <span className="absolute right-4 top-4 rounded-full bg-primary px-2.5 py-1 text-xs font-medium text-black">{plan.badge}</span>}
       <div className="pr-20">
         <h3 className="text-lg font-semibold text-foreground">{plan.name}</h3>
         <div className="mt-2 text-xs text-foreground-dim">{plan.reportType}</div>
@@ -239,7 +243,6 @@ export default function AIReportsPage() {
           {FEATURE_CARDS.map((card, index) => (
             <article key={card.title} className="group relative overflow-hidden rounded-3xl border border-border bg-card p-5 transition hover:border-primary/40 hover:bg-[var(--color-bg-hover)]">
               <div className="absolute right-5 top-5 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">0{index + 1}</div>
-              <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-sm font-semibold text-primary">AI</div>
               <h2 className="pr-12 text-lg font-semibold text-foreground">{card.title}</h2>
               <p className="mt-3 text-sm leading-6 text-foreground-muted">{card.desc}</p>
               <div className="mt-5 rounded-2xl border border-border bg-background px-4 py-3 text-xs leading-5 text-foreground-dim">{card.detail}</div>
@@ -267,7 +270,7 @@ export default function AIReportsPage() {
           )}
         </section>
 
-        <section className="mt-12 grid gap-6 lg:grid-cols-[1fr_0.8fr]">
+        <section className="mt-12">
           <div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
@@ -279,10 +282,10 @@ export default function AIReportsPage() {
               {AI_REPORT_PRICING_PLANS.map((plan) => <PricingCard key={plan.key} plan={plan} />)}
             </div>
           </div>
-          <div id="wechat" className="rounded-3xl border border-border bg-card p-6">
+          <div id="wechat" className="mt-6 rounded-3xl border border-border bg-card p-6">
             <h2 className="text-2xl font-bold text-foreground">添加工作人员企业微信</h2>
             <p className="mt-3 text-sm leading-6 text-foreground-muted">添加时请备注：AI研报。工作人员会确认需求、付款方式和预计交付时间。</p>
-            <div className="mt-5 grid gap-5 sm:grid-cols-[180px_1fr] sm:items-center lg:grid-cols-1">
+            <div className="mt-5 grid gap-5 sm:grid-cols-[180px_1fr] sm:items-center">
               <div className="flex aspect-square items-center justify-center rounded-2xl border border-border bg-background p-3">
                 {serviceConfig?.wechat_qr_image_url ? <img src={serviceConfig.wechat_qr_image_url} alt="工作人员企业微信二维码" className="h-full w-full rounded-xl object-contain" /> : <span className="text-center text-sm text-foreground-dim">后台暂未配置二维码</span>}
               </div>

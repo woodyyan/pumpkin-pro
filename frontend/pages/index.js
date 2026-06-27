@@ -1,252 +1,31 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import Head from 'next/head'
+
 import { useAuth } from '../lib/auth-context'
+import {
+  CORE_SELLING_POINTS,
+  FEATURE_CATEGORIES,
+  HOME_HERO,
+  QUICK_START_PATHS,
+  TUTORIAL_GROUPS,
+} from '../data/homepage'
 
-// ── Data ──
+function ArrowIcon() {
+  return <span className="ml-1 transition-transform group-hover:translate-x-1">→</span>
+}
 
-const HIGHLIGHTS = [
-  { value: 'A 股 + 港股', desc: '双市场支持' },
-  { value: '卧龙AI投研模型', desc: 'AI 辅助分析决策' },
-  { value: '100+', desc: '指标与独家模型' },
-]
+function Badge({ children, tone = 'default' }) {
+  const toneClassName = tone === 'primary'
+    ? 'border-primary/25 bg-primary/10 text-primary'
+    : 'border-border bg-[var(--color-bg-hover)] text-foreground-dim'
 
-const FEATURES = [
-  {
-    icon: '🤖', title: '卧龙投研AI模型', href: '/live-trading',
-    points: ['AI 个股智能决策', 'AI 自然语言选股', 'AI 策略智能生成', 'AI 回测自动优化'],
-    cta: '体验 AI',
-  },
-  {
-    icon: '📊', title: '行情看板', href: '/live-trading',
-    points: ['实时 / 延迟行情数据展示', '均线 / MACD / 布林带等技术指标', '支撑位与阻力位分析', '基本面数据（PE / PB / PEG 等）', '持仓记录与实时盈亏计算'],
-    cta: '进入看板',
-  },
-  {
-    icon: '🔍', title: '选股器', href: '/stock-picker',
-    points: ['多维条件筛选（行业 + 财务 + 技术面）', '全市场 A 股扫描', '支持排序与分页', '自选表保存与加载'],
-    cta: '去选股',
-  },
-  {
-    icon: '🔬', title: '策略回测', href: '/backtest',
-    points: ['基于历史数据验证策略表现', '收益率 / 最大回撤 / 胜率等指标', '可视化收益曲线与交易记录', '支持自定义策略参数', '历史运行记录自动保存'],
-    cta: '开始回测',
-  },
-  {
-    icon: '🔔', title: '信号推送', href: '/settings',
-    points: ['策略自动评估（每 15 分钟）', 'Webhook 推送至企微 / 钉钉 / 飞书', '冷却时间 + 按交易日去重', '非交易时段自动暂停', '支持多只股票独立配置'],
-    cta: '配置信号',
-  },
-  {
-    icon: '🗺️', title: '风险全景', href: '/quadrant',
-    points: ['四象限模型（机会 / 拥挤 / 泡沫 / 防御）', 'A 股 + 港股双市场切换', '卧龙AI精选榜单联动查看', '登录后高亮关注股票', '每日收盘后自动更新'],
-    cta: '查看全景',
-  },
-]
-
-
-const SCENARIOS = [
-  {
-    icon: '📊',
-    title: '我想研究一只股票',
-    href: '/watchlist',
-    cta: '去研究股票',
-    value: '🎯 30 秒获得 AI 专业级诊断报告',
-    recommended: true,
-    steps: [
-      '进入「自选股」页面，添加你想研究的股票（输入代码或名称）',
-      '点击卡片进入详情页，浏览实时行情和技术指标',
-      '点击顶部「✨AI分析」按钮，等待 AI 综合诊断报告',
-    ],
-    aiPreview: [
-      { icon: '🟢', text: '建议：观望', color: 'text-positive', highlight: true },
-      { text: '置信度：72%（中高）', color: 'text-foreground/60' },
-      { icon: '⚠️', text: '风险提示：短期波动较大', color: 'text-amber-300/80' },
-    ],
-  },
-  {
-    icon: '🔍',
-    title: '我想选股',
-    href: '/stock-picker',
-    cta: '去 AI 选股',
-    value: '🎯 不懂指标？用说话就能从全市场筛选',
-    recommended: false,
-    steps: [
-      '进入「选股器」页面',
-      '在搜索框中用自然语言描述你的选股条件，如：「低估值绩优股，高增长小盘股，科技行业龙头」',
-      'AI 自动解析条件并全市场扫描，展示匹配结果列表',
-    ],
-    aiPreview: [
-      { icon: '📋', text: '找到 12 只匹配标的', color: 'text-foreground', highlight: true },
-      { text: '已按收益率排序，可逐个查看详情', color: 'text-foreground/55' },
-    ],
-  },
-  {
-    icon: '⚙️',
-    title: '我想验证策略',
-    href: '/backtest',
-    cta: '去验证策略',
-    value: '🎯 用历史数据说话，不靠直觉猜',
-    recommended: false,
-    steps: [
-      '进入「回测引擎」页面',
-      '选择预设策略或使用「AI 生成策略」自动定制',
-      '设置参数后运行回测，查看收益曲线和关键指标',
-    ],
-    aiPreview: [
-      { icon: '📈', text: '年化 +23.4%', color: 'text-negative', highlight: true },
-      { text: '夏普比率 1.82 · 最大回撤 12%', color: 'text-foreground/60' },
-    ],
-  },
-  {
-    icon: '🌌',
-    title: '我想抄作业',
-    href: '/quadrant',
-    cta: '去看全景',
-    recommended: false,
-    value: '🎯 先看全市场机会，再缩小到卧龙AI精选名单',
-    steps: [
-      '进入「四象限」页面，先看风险机会全景图',
-      '查看四象限分布，优先关注机会区和高亮标的',
-      '继续查看下方「卧龙AI精选」，打开感兴趣股票的详情页',
-    ],
-    aiPreview: [
-      { icon: '★', text: '卧龙AI精选：机会区 Top 标的', color: 'text-foreground', highlight: true },
-      { text: '先看全景，再看精选，效率更高', color: 'text-foreground/55' },
-    ],
-  },
-  {
-    icon: '💼',
-    title: '我想管理持仓',
-    href: '/portfolio',
-    cta: '去管持仓',
-    recommended: false,
-    value: '🎯 把分散在个股里的仓位变化集中看清楚',
-    steps: [
-      '进入「持仓管理」页面，查看组合总览和资产曲线',
-      '按股票维度浏览当前持仓、市值、盈亏和最近交易',
-      '需要调整时，直接进入对应个股详情页继续维护持仓',
-    ],
-    aiPreview: [
-      { icon: '📦', text: '组合视角查看持仓和盈亏', color: 'text-foreground', highlight: true },
-      { text: '适合日常复盘和仓位检查', color: 'text-foreground/55' },
-    ],
-  },
-  {
-    icon: '🔔',
-    title: '我想配置交易信号',
-    href: '/live-trading',
-    cta: '去配信号',
-    recommended: false,
-    value: '🎯 让系统按策略自动盯盘，到点推送提醒',
-    steps: [
-      '进入「行情看板」，打开任意股票详情页中的信号配置区域',
-      '选择策略、评估频率和阈值，保存当前股票的信号设置',
-      '前往「设置」页面配置 Webhook，验证送达后开始接收提醒',
-    ],
-    aiPreview: [
-      { icon: '⚡', text: '策略触发后自动推送', color: 'text-foreground', highlight: true },
-      { text: '适合盘中盯信号，不必一直盯盘', color: 'text-foreground/55' },
-    ],
-  },
-]
-
-const TUTORIALS = [
-  {
-    q: '如何添加股票到关注池？',
-    steps: [
-      '进入「自选股」页面',
-      '在页面上方的「添加关注股票」区域输入代码或名称',
-      '输入股票代码（如 600519）或名称关键字',
-      '可选填自定义名称（如「茅台」）',
-      '点击确认，股票会出现在关注池卡片列表中',
-      '点击任意卡片可进入个股详情页，查看完整分析',
-    ],
-    tip: '支持 A 股（沪深）和港股代码（如 00700.HK）。',
-  },
-  {
-    q: '如何创建自定义策略？',
-    steps: [
-      '进入「策略库」页面',
-      '点击右上角「新建策略」按钮',
-      '填写策略名称和说明',
-      '选择策略类型（如趋势策略、均线交叉等）',
-      '配置策略参数（每个参数都有单位标注）',
-      '点击「保存」，策略会出现在你的策略列表中',
-    ],
-    tip: '系统也提供了多条预设策略模板，可以直接使用或基于它们修改。',
-  },
-  {
-    q: '如何配置 Webhook 接收信号？',
-    steps: [
-      '进入「设置」页面',
-      '找到「Webhook 配置」区域',
-      '填入你的推送地址（支持企业微信、钉钉、飞书等）',
-      '可选填签名密钥（用于验证消息来源）',
-      '点击「保存」，然后点击「验证送达」测试是否连通',
-      '返回行情看板个股详情页，开启信号开关并选择策略',
-    ],
-    tip: <>信号会以文本消息格式推送，包含股票代码、方向（买/卖）、策略名称和触发时间。不知道如何获取 Webhook 地址？可参考<a href="https://open.work.weixin.qq.com/help2/pc/14931" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 font-medium hover:text-primary">企业微信 Webhook 配置教程</a>。</>,
-  },
-  {
-    q: '如何使用 AI 智能选股？',
-    steps: [
-      '进入「选股器」页面',
-      '在顶部搜索框中用自然语言描述你的选股条件',
-      '例如：「市盈率低于 20，净利润增长率大于 30% 的医药行业股票」',
-      'AI 会自动解析条件并执行筛选',
-      '结果以表格形式展示，支持排序和翻页',
-    ],
-    tip: '也可以使用手动筛选：选择行业 + 设置各指标范围。',
-  },
-  {
-    q: '如何查看历史回测结果？',
-    steps: [
-      '进入「回测引擎」页面',
-      '选择一只股票和一条策略',
-      '设置回测时间范围和初始资金',
-      '点击「开始回测」',
-      '等待计算完成后，页面会展示收益曲线、交易记录、关键指标',
-      '历史运行记录保存在页面下方「历史运行」面板中，可随时查看',
-    ],
-    tip: '单用户最多保存 100 条回测记录。',
-  },
-  {
-    q: '如何查看个股技术指标？',
-    steps: [
-      '进入「行情看板」，点击任意关注股票卡片进入详情页',
-      '页面中部「技术指标」区域展示了均线（MA5/MA10/MA20/MA60）数值和趋势',
-      '向下滚动可看到 MACD 图表（DIF 线、信号线、红绿柱状图，自动标注金叉/死叉）',
-      '继续向下是布林带图表（上轨/中轨/下轨通道 + 收盘价 + 触轨标记）',
-      '支撑位和阻力位区域展示了近期的关键价格位',
-    ],
-    tip: '技术指标数据每 60 秒自动刷新（交易时段），基于最近 120-240 个交易日的日线计算。',
-  },
-  {
-    q: '如何记录和跟踪持仓？',
-    steps: [
-      '进入行情看板中任意个股的详情页',
-      '找到「我的持仓」区域（需登录）',
-      '填写持仓数量、买入均价、买入日期',
-      '系统会自动计算持仓市值和浮动盈亏',
-      '盈亏会根据实时价格动态更新（红色为盈利，绿色为亏损）',
-    ],
-    tip: '你也可以在「设置」页面配置投资画像（风险偏好、投资目标等）。',
-  },
-  {
-    q: '交易信号是怎么触发的？',
-    steps: [
-      '系统每 15 分钟自动扫描所有已开启信号的股票',
-      '根据你选择的策略和参数，评估当前行情是否触发买入/卖出条件',
-      '触发后，信号会通过你配置的 Webhook 推送到你的消息工具',
-      '同一只股票同一方向，每个交易日最多触发一次（防重复）',
-      '非交易时段（收盘后、周末）不会触发信号',
-    ],
-    tip: '冷却时间可在信号配置中自定义（10 秒 ~ 24 小时）。',
-  },
-]
-
-// ── Components ──
+  return (
+    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${toneClassName}`}>
+      {children}
+    </span>
+  )
+}
 
 function Accordion({ items }) {
   const [openIdx, setOpenIdx] = useState(-1)
@@ -255,26 +34,31 @@ function Accordion({ items }) {
       {items.map((item, i) => {
         const isOpen = openIdx === i
         return (
-          <div key={i} className="rounded-xl border border-border bg-card overflow-hidden">
+          <div key={item.q} className="overflow-hidden rounded-xl border border-border bg-card">
             <button
               type="button"
               onClick={() => setOpenIdx(isOpen ? -1 : i)}
-              className="w-full flex items-center justify-between px-5 py-4 text-left text-sm font-medium text-foreground hover:bg-[var(--color-bg-hover)] transition"
+              className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left text-sm font-medium text-foreground transition hover:bg-[var(--color-bg-hover)]"
             >
               <span>{item.q}</span>
               <span className={`text-foreground-dim transition-transform ${isOpen ? 'rotate-90' : ''}`}>▸</span>
             </button>
             <div className={`grid transition-all duration-300 ease-in-out ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
               <div className="overflow-hidden">
-                <div className="px-5 pb-4 space-y-3">
-                  <ol className="list-decimal pl-5 space-y-1.5 text-sm text-foreground-muted leading-6">
-                    {item.steps.map((s, j) => <li key={j}>{s}</li>)}
+                <div className="space-y-3 px-5 pb-5">
+                  <ol className="list-decimal space-y-1.5 pl-5 text-sm leading-6 text-foreground-muted">
+                    {item.steps.map((step) => <li key={step}>{step}</li>)}
                   </ol>
-                  {item.tip && (
-                    <div className="rounded-lg bg-primary/8 border border-primary/15 px-3 py-2 text-xs text-primary/90">
-                      💡 {item.tip}
+                  {item.tip ? (
+                    <div className="rounded-lg border border-primary/15 bg-primary/10 px-3 py-2 text-xs leading-5 text-primary/90">
+                      提示：{item.tip}
                     </div>
-                  )}
+                  ) : null}
+                  {item.href && item.cta ? (
+                    <Link href={item.href} className="group inline-flex items-center text-sm font-medium text-primary transition hover:text-primary/80">
+                      {item.cta}<ArrowIcon />
+                    </Link>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -285,14 +69,89 @@ function Accordion({ items }) {
   )
 }
 
-// ── Page ──
+function CoreSellingPointCard({ item }) {
+  return (
+    <Link href={item.href} className="group flex h-full flex-col rounded-2xl border border-border bg-card p-6 transition hover:-translate-y-1 hover:border-primary/45 hover:shadow-card">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-medium text-primary">{item.label}</span>
+        <Badge tone="primary">{item.status}</Badge>
+      </div>
+      <h3 className="mt-4 text-xl font-semibold tracking-tight text-foreground">{item.title}</h3>
+      <p className="mt-3 flex-1 text-sm leading-7 text-foreground-muted">{item.summary}</p>
+      <div className="mt-5 flex flex-wrap gap-2">
+        {item.capabilities.map((capability) => <Badge key={capability}>{capability}</Badge>)}
+      </div>
+      <span className="mt-6 inline-flex items-center text-sm font-medium text-primary">
+        {item.cta}<ArrowIcon />
+      </span>
+    </Link>
+  )
+}
+
+function QuickStartCard({ item }) {
+  return (
+    <Link
+      href={item.href}
+      className={`group relative flex h-full flex-col rounded-2xl border bg-card p-6 transition hover:-translate-y-1 hover:shadow-card ${
+        item.recommended ? 'border-primary/45' : 'border-border hover:border-primary/35'
+      }`}
+    >
+      {item.recommended ? <span className="absolute right-4 top-4 rounded-full bg-primary px-2.5 py-1 text-xs font-medium text-black">推荐</span> : null}
+      <h3 className="pr-12 text-lg font-semibold text-foreground">{item.title}</h3>
+      <p className="mt-2 text-sm leading-6 text-foreground-muted">{item.value}</p>
+      <div className="mt-5 space-y-2.5">
+        {item.steps.map((step, index) => (
+          <div key={step} className="flex items-start gap-2.5">
+            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">{index + 1}</span>
+            <span className="text-sm leading-6 text-foreground-muted">{step}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-5 rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-3">
+        <p className="text-xs leading-5 text-foreground-muted">{item.output}</p>
+        <p className="mt-1 text-xs leading-5 text-foreground-dim">{item.nextAction}</p>
+      </div>
+      <span className="mt-5 inline-flex items-center text-sm font-medium text-primary">
+        {item.cta}<ArrowIcon />
+      </span>
+    </Link>
+  )
+}
+
+function FeatureCategory({ category }) {
+  return (
+    <section className="rounded-3xl border border-border bg-card p-5 md:p-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h3 className="text-xl font-semibold tracking-tight text-foreground">{category.title}</h3>
+          <p className="mt-2 text-sm leading-6 text-foreground-muted">{category.description}</p>
+        </div>
+        <Badge>{category.items.length} 项能力</Badge>
+      </div>
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {category.items.map((feature) => (
+          <Link key={`${category.key}-${feature.title}`} href={feature.href} className="group rounded-2xl border border-border bg-background px-4 py-4 transition hover:border-primary/35 hover:bg-[var(--color-bg-hover)]">
+            <div className="flex items-start justify-between gap-3">
+              <h4 className="text-base font-semibold text-foreground">{feature.title}</h4>
+              <span className="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">{feature.status}</span>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-foreground-muted">{feature.summary}</p>
+            <span className="mt-4 inline-flex items-center text-xs font-medium text-primary">
+              进入功能<ArrowIcon />
+            </span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  )
+}
 
 export default function HomePage() {
   const { isLoggedIn, openAuthModal } = useAuth()
 
   const handleCTA = () => {
     if (isLoggedIn) {
-      window.location.href = '/live-trading'
+      window.location.href = HOME_HERO.primaryHref
     } else {
       openAuthModal('register')
     }
@@ -301,170 +160,110 @@ export default function HomePage() {
   return (
     <div className="space-y-0">
       <Head>
-        <title>卧龙AI量化交易台 — AI驱动的量化分析平台</title>
-        <meta name="description" content="卧龙AI量化交易台（Wolong Pro）— 面向个人投资者的 AI 量化分析平台。支持 A 股+港股，AI 个股诊断、四象限风险全景、卧龙AI精选、策略回测与信号推送。" />
+        <title>卧龙AI量化交易台 — AI投研、因子选股与组合跟踪工作台</title>
+        <meta name="description" content="卧龙AI量化交易台（Wolong Pro）面向个人投资者，提供 AI分析、AI研报、AI选股、因子实验室、组合跟踪、持仓管理、市场行情、回测引擎与交易信号能力，覆盖 A 股与中国香港股票投研场景。" />
         <link rel="canonical" href="https://wolongtrader.top/" />
       </Head>
 
-      {/* ── Section 1: Hero ── */}
-      <section className="relative flex flex-col items-center text-center px-4 pt-8 pb-16 md:pt-16 md:pb-24">
-        {/* Subtle radial gradient */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(230,126,34,0.06)_0%,transparent_70%)] pointer-events-none" />
+      <section className="relative overflow-hidden px-4 pt-10 pb-16 text-center md:pt-16 md:pb-24">
+        <div className="pointer-events-none absolute inset-x-0 top-0 mx-auto h-64 max-w-4xl rounded-full bg-primary/8" />
+        <div className="relative mx-auto flex max-w-5xl flex-col items-center">
+          <img src="/logo.png" alt="卧龙" width={100} height={100} className="mb-6 rounded-xl md:h-[120px] md:w-[120px]" />
+          <Badge tone="primary">{HOME_HERO.eyebrow}</Badge>
+          <h1 className="mt-5 text-3xl font-bold tracking-tight text-foreground md:text-5xl">
+            {HOME_HERO.title}
+          </h1>
+          <p className="mt-4 text-base font-medium text-primary md:text-lg">
+            {HOME_HERO.subtitle}
+          </p>
+          <p className="mt-4 max-w-3xl text-sm leading-7 text-foreground-muted md:text-base md:leading-8">
+            {HOME_HERO.description}
+          </p>
 
-        <img src="/logo.png" alt="卧龙" width={100} height={100} className="rounded-xl mb-6 relative md:w-[120px] md:h-[120px]" />
+          <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={handleCTA}
+              className="rounded-xl bg-primary px-7 py-3 text-sm font-semibold text-black shadow-card transition hover:bg-primary/90"
+            >
+              {HOME_HERO.primaryCta}
+            </button>
+            <Link href={HOME_HERO.secondaryHref} className="rounded-xl border border-border px-6 py-3 text-sm font-semibold text-foreground-muted transition hover:border-primary hover:text-primary">
+              {HOME_HERO.secondaryCta}
+            </Link>
+            <a href={HOME_HERO.supportHref} className="rounded-xl border border-transparent px-5 py-3 text-sm font-medium text-foreground-dim transition hover:text-foreground">
+              {HOME_HERO.supportCta}
+            </a>
+          </div>
 
-        <h1 className="relative text-3xl md:text-5xl font-bold tracking-tight bg-gradient-to-r from-amber-200 via-primary to-amber-500 bg-clip-text text-transparent">
-          卧龙 AI 量化交易台
-        </h1>
-        <p className="relative mt-3 text-base md:text-lg text-foreground/50 font-medium">
-          智能分析 · 行情看板 · 信号推送
-        </p>
-        <p className="relative mt-4 max-w-xl text-sm md:text-base text-foreground-dim leading-7">
-          面向个人投资者的 AI 量化分析平台，帮你用数据和策略看清市场，做出更理性的投资决策。
-        </p>
-
-        <div className="relative flex flex-col sm:flex-row items-center gap-3 mt-8">
-          <button
-            type="button"
-            onClick={handleCTA}
-            className="rounded-xl bg-gradient-to-r from-amber-500 to-primary px-7 py-3 text-sm font-semibold text-black shadow-lg shadow-primary/20 transition hover:opacity-90"
-          >
-            免费开始使用
-          </button>
-          <a
-            href="#features"
-            className="rounded-xl border border-border px-6 py-3 text-sm text-foreground-muted transition hover:border-border-strong hover:text-foreground"
-          >
-            查看功能介绍 ↓
-          </a>
-        </div>
-
-        <div className="relative grid grid-cols-1 sm:grid-cols-3 gap-4 mt-12 w-full max-w-2xl">
-          {HIGHLIGHTS.map((h, i) => (
-            <div key={i} className="rounded-xl border border-border bg-[var(--color-bg-hover)] backdrop-blur-sm px-5 py-4 text-center">
-              <div className="text-xl md:text-2xl font-bold bg-gradient-to-r from-amber-300 to-primary bg-clip-text text-transparent">
-                {h.value}
-              </div>
-              <div className="mt-1 text-xs text-foreground-dim">{h.desc}</div>
-            </div>
-          ))}
+          <div className="mt-8 flex max-w-3xl flex-wrap justify-center gap-2">
+            {HOME_HERO.chips.map((chip) => <Badge key={chip}>{chip}</Badge>)}
+          </div>
         </div>
       </section>
 
-      {/* ── Section 2: 场景化快速上手 ── */}
-      <section className="px-4 py-16 md:py-24 max-w-5xl mx-auto">
-        <div className="text-center mb-12">
-          <h2 className="text-2xl md:text-3xl font-bold tracking-tight">🚀 快速上手</h2>
-          <p className="mt-3 text-sm text-foreground-dim">选择你的使用场景，3 步开始体验，共 6 条路径</p>
+      <section className="mx-auto max-w-6xl px-4 py-14 md:py-20">
+        <div className="mb-10 text-center">
+          <h2 className="text-2xl font-bold tracking-tight md:text-3xl">三个核心卖点</h2>
+          <p className="mt-3 text-sm text-foreground-dim">从旧的市场覆盖和指标数量，升级为完整的 AI 投研与组合复盘闭环。</p>
         </div>
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+          {CORE_SELLING_POINTS.map((item) => <CoreSellingPointCard key={item.key} item={item} />)}
+        </div>
+      </section>
 
+      <section className="mx-auto max-w-6xl px-4 py-14 md:py-20">
+        <div className="mb-10 text-center">
+          <h2 className="text-2xl font-bold tracking-tight md:text-3xl">快速上手</h2>
+          <p className="mt-3 text-sm text-foreground-dim">按你当前要完成的投研任务选择入口，3 步开始使用。</p>
+        </div>
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {SCENARIOS.map((s, i) => (
-            <Link
-              key={i}
-              href={s.href}
-              className={`group relative rounded-2xl border bg-card p-6 transition hover:-translate-y-1 hover:shadow-lg ${
-                s.recommended
-                  ? 'border-primary/40 shadow-primary/[0.04]'
-                  : 'border-border hover:border-border-strong'
-              }`}
-            >
-              {s.recommended && (
-                <span className="absolute right-4 top-4 rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-medium text-primary">推荐</span>
-              )}
+          {QUICK_START_PATHS.map((item) => <QuickStartCard key={item.key} item={item} />)}
+        </div>
+      </section>
 
-              <div className="flex items-center gap-2.5 mb-4">
-                <span className="text-2xl">{s.icon}</span>
-                <h3 className="text-lg font-semibold text-foreground">{s.title}</h3>
+      <section id="features" className="mx-auto max-w-7xl px-4 py-14 md:py-20">
+        <div className="mb-10 text-center">
+          <h2 className="text-2xl font-bold tracking-tight md:text-3xl">我们提供什么</h2>
+          <p className="mt-3 text-sm text-foreground-dim">按「AI投研、市场机会、选股策略、跟踪组合、账户服务」分类展示全站能力。</p>
+        </div>
+        <div className="space-y-5">
+          {FEATURE_CATEGORIES.map((category) => <FeatureCategory key={category.key} category={category} />)}
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-5xl px-4 py-14 md:py-20">
+        <div className="mb-10 text-center">
+          <h2 className="text-2xl font-bold tracking-tight md:text-3xl">使用教程</h2>
+          <p className="mt-3 text-sm text-foreground-dim">覆盖 AI分析、AI研报、AI选股、因子实验室、组合跟踪、持仓管理和信号配置。</p>
+        </div>
+        <div className="space-y-6">
+          {TUTORIAL_GROUPS.map((group) => (
+            <section key={group.key} className="rounded-3xl border border-border bg-card p-5 md:p-6">
+              <h3 className="text-lg font-semibold text-foreground">{group.title}</h3>
+              <div className="mt-4">
+                <Accordion items={group.items} />
               </div>
-
-              {/* Steps */}
-              <div className="space-y-2 mb-5">
-                {s.steps.map((step, j) => (
-                  <div key={j} className="flex items-start gap-2.5">
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">{j + 1}</span>
-                    <span className="text-[13px] leading-relaxed text-foreground-muted">{step}</span>
-                  </div>
-                ))}
-              </div>
-
-              {/* AI Preview */}
-              {s.aiPreview && (
-                <div className="rounded-xl bg-gradient-to-r from-primary/[0.07] to-transparent border border-primary/12 p-3.5 mb-4">
-                  <div className="space-y-1.5">
-                    {s.aiPreview.map((line, k) => (
-                      <div key={k} className={`text-[13px] ${line.highlight ? 'font-semibold text-foreground' : line.color || 'text-foreground/55'}`}>
-                        {line.icon && <span className="mr-1.5">{line.icon}</span>}
-                        {line.text}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Value tag */}
-              <p className="mb-4 text-xs text-foreground/35 italic">{s.value}</p>
-
-              {/* CTA */}
-              <span className="inline-flex items-center text-sm font-medium text-primary group-hover:text-primary transition">
-                {s.cta} <span className="ml-1 transition-transform group-hover:translate-x-1">→</span>
-              </span>
-            </Link>
+            </section>
           ))}
         </div>
       </section>
 
-      {/* ── Section 3: Features ── */}
-      <section id="features" className="px-4 py-16 md:py-24 max-w-6xl mx-auto">
-        <div className="text-center mb-12">
-          <h2 className="text-2xl md:text-3xl font-bold tracking-tight">我们提供什么</h2>
-          <p className="mt-3 text-sm text-foreground-dim">一站式量化分析工具，覆盖投研全流程</p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {FEATURES.map((f, i) => (
-            <Link
-              key={i}
-              href={f.href}
-              className="group rounded-2xl border border-border bg-card p-6 transition hover:-translate-y-1 hover:border-border-strong hover:shadow-lg"
-            >
-              <div className="text-4xl mb-4">{f.icon}</div>
-              <h3 className="text-lg font-semibold text-foreground mb-3">{f.title}</h3>
-              <ul className="space-y-1.5 text-sm text-foreground/50 leading-6 mb-4">
-                {f.points.map((p, j) => <li key={j} className="flex items-start gap-2"><span className="text-primary/60 mt-0.5">•</span>{p}</li>)}
-              </ul>
-              <span className="inline-flex items-center text-sm text-primary/80 font-medium group-hover:text-primary transition">
-                {f.cta} <span className="ml-1 transition-transform group-hover:translate-x-1">→</span>
-              </span>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Section 5: Tutorials ── */}
-      <section className="px-4 py-16 md:py-24 max-w-3xl mx-auto">
-        <div className="text-center mb-10">
-          <h2 className="text-2xl md:text-3xl font-bold tracking-tight">使用教程</h2>
-          <p className="mt-3 text-sm text-foreground-dim">点击展开查看详细操作步骤</p>
-        </div>
-        <Accordion items={TUTORIALS} />
-      </section>
-
-      {/* ── Section 6: Risk Disclaimer + CTA ── */}
-      <section className="px-4 py-16 md:py-20 max-w-3xl mx-auto text-center">
-        <div className="rounded-2xl border border-amber-600/30 dark:border-amber-400/15 bg-amber-100/60 dark:bg-amber-500/[0.04] px-6 py-5 mb-10">
-          <p className="text-sm text-amber-800 dark:text-amber-200/70 leading-6">
-            <strong className="text-amber-900 dark:text-amber-200/90">⚠️ 风险提示：</strong>本平台仅提供数据分析和策略回测工具，不构成任何投资建议。股票市场有风险，投资需谨慎。详见
-            <Link href="/disclaimer" className="underline underline-offset-2 text-amber-700 hover:text-amber-900 dark:text-amber-200/70 dark:hover:text-amber-100 mx-0.5">《免责声明》</Link>
+      <section className="mx-auto max-w-4xl px-4 py-14 text-center md:py-20">
+        <div className="mb-10 rounded-2xl border border-negative/25 bg-negative/10 px-6 py-5 text-left">
+          <p className="text-sm leading-7 text-foreground-muted">
+            <strong className="text-negative">风险提示：</strong>
+            本平台提供的数据分析、AI分析、AI研报、AI选股、因子排序、策略回测、模拟组合和交易信号仅用于辅助研究，不构成任何投资建议或收益承诺。股票市场有风险，投资需谨慎。详见
+            <Link href="/disclaimer" className="mx-0.5 text-primary underline underline-offset-2 hover:text-primary/80">《免责声明》</Link>
           </p>
         </div>
 
         <button
           type="button"
           onClick={handleCTA}
-          className="rounded-xl bg-gradient-to-r from-amber-500 to-primary px-8 py-3.5 text-base font-semibold text-black shadow-lg shadow-primary/20 transition hover:opacity-90"
+          className="rounded-xl bg-primary px-8 py-3.5 text-base font-semibold text-black shadow-card transition hover:bg-primary/90"
         >
-          免费开始使用
+          从 AI分析开始
         </button>
       </section>
     </div>

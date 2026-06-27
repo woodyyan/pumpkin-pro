@@ -38,7 +38,7 @@ frontend/
 ### 路由页面
 | 路径 | 文件 | 说明 |
 |---|---|---|
-| `/` | `index.js` | 首页/落地页 |
+| `/` | `index.js` | 首页/落地页；内容配置集中在 `frontend/data/homepage.js`，主叙事为 AI投研工作台，包含 Hero、三大卖点、快速上手、功能分类、教程和风险提示 |
 | `/live-trading` | `live-trading.js` | 市场行情页（导航归属「看板」）；当前实现为 `Hero + 核心指数卡片 + 扩展指数 + 市场摘要` 的 dashboard，总览 A/H 股指数 |
 | `/live-trading/[symbol]` | `live-trading/[symbol].js` | 个股详情页 (194KB)，active 仍归属「看板 / 市场行情」 |
 | `/ai/analysis` | `ai/analysis.js` | AI分析占位页（一期「敬请期待」） |
@@ -66,6 +66,13 @@ frontend/
 - 移动端导航由 `components/MobileNavMenu.js` 渲染：保留汉堡入口，菜单内部按「卧龙AI / 看板 / 跟踪 / 选股 / 更多」分组折叠，一次只展开一个分组。
 - 「卧龙AI」分组当前顺序为「AI分析 / AI研报 / AI选股 / AI回测」。
 - 占位页统一复用 `components/ComingSoonPage.js`，文案固定为标题 + 「敬请期待」，避免散落多个空白实现。
+
+### 首页内容架构（2026-06-27）
+- 首页内容不再直接散落在 `frontend/pages/index.js`，而是集中维护在 `frontend/data/homepage.js`。
+- 首页核心卖点固定为「AI 投研闭环 / 因子驱动选股 / 组合跟踪与复盘」。
+- 快速上手采用任务型路径：AI分析、AI研报、AI选股、因子实验室、组合跟踪、持仓管理。
+- 功能总览按「AI投研 / 市场与机会发现 / 选股与策略研究 / 跟踪与组合管理 / 账户服务」分类展示，功能项需带状态标签。
+- AI分析、AI研报、AI选股、因子排序、策略回测、模拟组合、交易信号相关首页文案必须保留风险提示，不得暗示收益承诺。
 
 ### 页面模式补充（2026-06-13）
 - `frontend/pages/live-trading.js` 已从单行指数文本列表升级为 dashboard 页面，内部自行完成：

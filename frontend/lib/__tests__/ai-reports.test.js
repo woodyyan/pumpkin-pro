@@ -5,8 +5,21 @@ import { AI_REPORT_PRICING_PLANS, getAIReportMarketLabel, normalizeAIReportItems
 
 describe('ai report helpers', () => {
   it('keeps first phase pricing static', () => {
-    assert.deepEqual(AI_REPORT_PRICING_PLANS.map((plan) => plan.price), ['9.9 元', '39 元', '69 元'])
-    assert.deepEqual(AI_REPORT_PRICING_PLANS.map((plan) => plan.quota), ['1 份', '5 份', '10 份'])
+    assert.deepEqual(AI_REPORT_PRICING_PLANS.map((plan) => plan.name), ['体验版', '入门版', '投资版', '专业版'])
+    assert.deepEqual(AI_REPORT_PRICING_PLANS.map((plan) => plan.price), ['9.9 元', '39 元', '69 元', '199 元'])
+    assert.deepEqual(AI_REPORT_PRICING_PLANS.map((plan) => plan.quota), ['1 份', '5 份', '10 份', '50 份'])
+    assert.equal(AI_REPORT_PRICING_PLANS[0].reportType, '标准 PDF 报告')
+    assert.ok(AI_REPORT_PRICING_PLANS[2].highlights.includes('支持自定义分析问题'))
+    assert.ok(AI_REPORT_PRICING_PLANS[3].highlights.includes('多股票对比分析'))
+  })
+
+  it('keeps custom question and multi-stock comparison examples', () => {
+    const investmentPlan = AI_REPORT_PRICING_PLANS.find((plan) => plan.key === 'investment')
+    const professionalPlan = AI_REPORT_PRICING_PLANS.find((plan) => plan.key === 'professional')
+
+    assert.ok(investmentPlan.examples.includes('我的成本 42 元，要不要止损？'))
+    assert.ok(investmentPlan.examples.includes('为什么该股票近一个月一直跌？'))
+    assert.ok(professionalPlan.examples.includes('帮我比较小米 vs 比亚迪 vs 宁德时代的股票'))
   })
 
   it('formats supported market labels', () => {

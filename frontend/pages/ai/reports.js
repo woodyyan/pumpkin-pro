@@ -12,19 +12,43 @@ import {
 } from '../../lib/ai-reports'
 
 const FEATURE_CARDS = [
-  ['覆盖 A 股与中国香港股票', '支持主流 A 股与中国香港股票个股研报定制。'],
-  ['专业深度研报', '结合专业股票分析师框架、卧龙AI模型与市场数据生成。'],
-  ['明确投资建议', '覆盖买入、卖出、观望、短线、长线等判断。'],
-  ['多维度分析', '包含技术面、基本面、资金面、宏观市场等分析。'],
-  ['目标位与止损位', '给出关键观察位、目标区间和风险控制参考。'],
-  ['财报与事件解读', '解读财报、新闻、政策、产业事件对个股的影响。'],
+  {
+    title: '覆盖 A 股与港股股票',
+    desc: '支持主流 A 股与港股股票个股研报定制。',
+    detail: '按市场差异呈现数据口径与交易背景',
+  },
+  {
+    title: '专业深度研报',
+    desc: '结合专业股票分析师框架、卧龙AI模型与市场数据生成。',
+    detail: '从结论、逻辑、数据和风险四层组织内容',
+  },
+  {
+    title: '明确投资建议',
+    desc: '覆盖买入、卖出、观望、短线、波段、长线等判断。',
+    detail: '帮助用户把复杂分析转化为行动参考',
+  },
+  {
+    title: '多维度分析',
+    desc: '包含技术面、基本面、资金面、宏观市场等分析。',
+    detail: '避免只看单一指标导致判断失真',
+  },
+  {
+    title: '目标位与止损位',
+    desc: '给出关键观察位、目标区间和风险控制参考。',
+    detail: '让研报不只说明观点，也说明执行边界',
+  },
+  {
+    title: '财报与事件解读',
+    desc: '解读财报、新闻、政策、产业事件对个股的影响。',
+    detail: '把短期事件放回基本面和市场预期中判断',
+  },
 ]
 
 const SERVICE_STEPS = [
-  ['添加微信', '备注 AI研报 + 股票名称 / 代码。'],
+  ['添加企业微信', '备注 AI研报。'],
   ['确认需求', '工作人员确认股票、市场和分析侧重点。'],
   ['生成研报', '分析师框架、卧龙AI模型与市场数据共同生成。'],
-  ['微信交付', '大部分情况下 1 小时内完成交付。'],
+  ['企业微信交付', '大部分情况下 1 小时内完成交付。'],
 ]
 
 function ReportCard({ report, isLoggedIn, onPreview }) {
@@ -59,6 +83,40 @@ function ReportCard({ report, isLoggedIn, onPreview }) {
   )
 }
 
+function PricingCard({ plan }) {
+  return (
+    <article className="relative flex h-full flex-col rounded-3xl border border-border bg-card p-5 transition hover:border-primary/40 hover:bg-[var(--color-bg-hover)]">
+      {plan.badge && <span className="absolute right-4 top-4 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">{plan.badge}</span>}
+      <div className="pr-20">
+        <h3 className="text-lg font-semibold text-foreground">{plan.name}</h3>
+        <div className="mt-2 text-xs text-foreground-dim">{plan.reportType}</div>
+      </div>
+      <div className="mt-5 flex items-end gap-2">
+        <span className="text-4xl font-bold text-foreground">{plan.price}</span>
+        <span className="pb-1 text-sm text-foreground-muted">/ {plan.quota}</span>
+      </div>
+      <p className="mt-3 text-sm leading-6 text-foreground-muted">{plan.description}</p>
+      <ul className="mt-5 flex-1 space-y-2">
+        {plan.highlights.map((item) => (
+          <li key={item} className="flex gap-2 text-sm leading-6 text-foreground-muted">
+            <span className="mt-2 h-1.5 w-1.5 flex-none rounded-full bg-primary" />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+      {plan.examples?.length ? (
+        <div className="mt-5 rounded-2xl border border-border bg-background px-3 py-3">
+          <div className="text-xs font-medium text-foreground">示例</div>
+          <div className="mt-2 space-y-1 text-xs leading-5 text-foreground-dim">
+            {plan.examples.map((item) => <div key={item}>“{item}”</div>)}
+          </div>
+        </div>
+      ) : null}
+      <a href="#wechat" className="mt-5 block rounded-xl bg-primary px-4 py-2.5 text-center text-sm font-semibold text-black hover:bg-primary/90">添加企业微信购买</a>
+    </article>
+  )
+}
+
 function ReportPreviewModal({ report, preview, loading, error, riskText, serviceConfig, onClose }) {
   if (!report) return null
   return (
@@ -86,8 +144,8 @@ function ReportPreviewModal({ report, preview, loading, error, riskText, service
           <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
             <p className="text-xs leading-5 text-foreground-dim">{riskText || DEFAULT_AI_REPORT_RISK_DISCLAIMER}</p>
             <div className="flex flex-col gap-1 text-sm text-foreground-muted md:text-right">
-              <span>添加微信定制研报</span>
-              <span className="font-semibold text-primary">{serviceConfig?.wechat_id || '请查看页面微信二维码'}</span>
+              <span>添加企业微信定制研报</span>
+              <span className="font-semibold text-primary">{serviceConfig?.wechat_id || '请查看页面企业微信二维码'}</span>
             </div>
           </div>
         </footer>
@@ -161,40 +219,31 @@ export default function AIReportsPage() {
     <>
       <Head>
         <title>AI研报 - 卧龙AI量化交易台</title>
-        <meta name="description" content="AI研报覆盖 A 股与中国香港股票，结合专业股票分析师框架、卧龙AI模型与市场数据，生成个股深度研究报告。" />
+        <meta name="description" content="AI研报覆盖 A 股与港股股票，结合专业股票分析师框架、卧龙AI模型与市场数据，生成个股深度研究报告。" />
       </Head>
 
       <main className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-        <section className="grid gap-8 rounded-3xl border border-border bg-card p-6 sm:p-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
-          <div>
-            <div className="mb-4 inline-flex rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">覆盖 A 股与中国香港股票</div>
+        <section className="rounded-3xl border border-border bg-card p-6 sm:p-8 lg:p-10">
+          <div className="max-w-4xl">
+            <div className="mb-4 inline-flex rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">覆盖 A 股与港股股票</div>
             <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-5xl">AI研报，面向个股的深度投资研究报告</h1>
             <p className="mt-5 max-w-3xl text-base leading-8 text-foreground-muted">结合专业股票分析师框架、卧龙AI模型与市场数据，围绕技术面、基本面、资金面、宏观环境、财报与事件变化，生成包含操作建议、目标位、止损位与风险提示的个股研报。</p>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <a href="#samples" className="rounded-xl bg-primary px-5 py-3 text-center text-sm font-semibold text-black transition hover:bg-primary/90">查看研报样例</a>
-              <a href="#wechat" className="rounded-xl border border-border px-5 py-3 text-center text-sm font-semibold text-foreground transition hover:border-primary hover:text-primary">添加微信定制</a>
-            </div>
-            <p className="mt-4 text-xs leading-5 text-foreground-dim">研报内容可能包含投资建议，仅供研究参考，不构成收益承诺。市场有风险，投资需谨慎。</p>
-          </div>
-          <div className="rounded-3xl border border-border bg-background p-4">
-            <div className="rounded-2xl border border-border bg-card p-4">
-              <div className="text-sm font-semibold text-foreground">交付时效</div>
-              <div className="mt-3 text-3xl font-bold text-primary">多数 1 小时内</div>
-              <p className="mt-3 text-sm leading-6 text-foreground-muted">{deliveryText}</p>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-2xl border border-border bg-card p-4"><div className="text-foreground-dim">最快</div><div className="mt-1 font-semibold text-foreground">10 分钟</div></div>
-              <div className="rounded-2xl border border-border bg-card p-4"><div className="text-foreground-dim">复杂情况</div><div className="mt-1 font-semibold text-foreground">24 小时内</div></div>
+              <a href="#wechat" className="rounded-xl border border-border px-5 py-3 text-center text-sm font-semibold text-foreground transition hover:border-primary hover:text-primary">添加企业微信定制</a>
             </div>
           </div>
         </section>
 
         <section className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {FEATURE_CARDS.map(([title, desc]) => (
-            <div key={title} className="rounded-2xl border border-border bg-card p-5">
-              <h2 className="text-base font-semibold text-foreground">{title}</h2>
-              <p className="mt-2 text-sm leading-6 text-foreground-muted">{desc}</p>
-            </div>
+          {FEATURE_CARDS.map((card, index) => (
+            <article key={card.title} className="group relative overflow-hidden rounded-3xl border border-border bg-card p-5 transition hover:border-primary/40 hover:bg-[var(--color-bg-hover)]">
+              <div className="absolute right-5 top-5 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">0{index + 1}</div>
+              <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-sm font-semibold text-primary">AI</div>
+              <h2 className="pr-12 text-lg font-semibold text-foreground">{card.title}</h2>
+              <p className="mt-3 text-sm leading-6 text-foreground-muted">{card.desc}</p>
+              <div className="mt-5 rounded-2xl border border-border bg-background px-4 py-3 text-xs leading-5 text-foreground-dim">{card.detail}</div>
+            </article>
           ))}
         </section>
 
@@ -202,7 +251,6 @@ export default function AIReportsPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h2 className="text-2xl font-bold text-foreground">研报样例</h2>
-              <p className="mt-2 text-sm text-foreground-muted">未登录用户可查看缩略图；登录后可弹窗预览完整研报样例，不默认提供原图下载。</p>
             </div>
             {!ready || isLoggedIn ? null : <button type="button" onClick={() => openAuthModal('login', '登录后可预览完整 AI研报样例。')} className="rounded-xl border border-border px-4 py-2 text-sm font-semibold text-foreground hover:border-primary hover:text-primary">登录后预览</button>}
           </div>
@@ -211,7 +259,7 @@ export default function AIReportsPage() {
           ) : error ? (
             <div className="mt-6 rounded-2xl border border-negative/25 bg-negative/10 p-4 text-sm text-negative">{error}</div>
           ) : featuredReports.length === 0 ? (
-            <div className="mt-6 rounded-2xl border border-border bg-card p-8 text-center text-sm text-foreground-muted">研报样例正在整理中，可先添加工作人员微信查看最新案例。</div>
+            <div className="mt-6 rounded-2xl border border-border bg-card p-8 text-center text-sm text-foreground-muted">研报样例正在整理中，可先添加工作人员企业微信查看最新案例。</div>
           ) : (
             <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {featuredReports.map((report) => <ReportCard key={report.id} report={report} isLoggedIn={isLoggedIn} onPreview={handlePreview} />)}
@@ -219,33 +267,29 @@ export default function AIReportsPage() {
           )}
         </section>
 
-        <section className="mt-12 grid gap-6 lg:grid-cols-[1fr_0.9fr]">
+        <section className="mt-12 grid gap-6 lg:grid-cols-[1fr_0.8fr]">
           <div>
-            <h2 className="text-2xl font-bold text-foreground">套餐价格</h2>
-            <div className="mt-5 grid gap-4 md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
-              {AI_REPORT_PRICING_PLANS.map((plan) => (
-                <article key={plan.key} className="relative rounded-2xl border border-border bg-card p-5">
-                  {plan.badge && <span className="absolute right-4 top-4 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">{plan.badge}</span>}
-                  <h3 className="text-base font-semibold text-foreground">{plan.name}</h3>
-                  <div className="mt-4 text-3xl font-bold text-foreground">{plan.price}</div>
-                  <div className="mt-2 text-sm text-foreground-muted">{plan.quota} · {plan.unitPrice}</div>
-                  <p className="mt-3 text-sm leading-6 text-foreground-dim">{plan.description}</p>
-                  <a href="#wechat" className="mt-5 block rounded-xl bg-primary px-4 py-2.5 text-center text-sm font-semibold text-black hover:bg-primary/90">添加微信购买</a>
-                </article>
-              ))}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-foreground">套餐价格</h2>
+                <p className="mt-2 text-sm text-foreground-muted">从标准 PDF 报告到专业跟踪服务，按你的研究深度选择。</p>
+              </div>
+            </div>
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {AI_REPORT_PRICING_PLANS.map((plan) => <PricingCard key={plan.key} plan={plan} />)}
             </div>
           </div>
           <div id="wechat" className="rounded-3xl border border-border bg-card p-6">
-            <h2 className="text-2xl font-bold text-foreground">添加工作人员微信</h2>
-            <p className="mt-3 text-sm leading-6 text-foreground-muted">添加时请备注：AI研报 + 股票名称 / 代码。工作人员会确认需求、付款方式和预计交付时间。</p>
-            <div className="mt-5 grid gap-5 sm:grid-cols-[180px_1fr] sm:items-center">
+            <h2 className="text-2xl font-bold text-foreground">添加工作人员企业微信</h2>
+            <p className="mt-3 text-sm leading-6 text-foreground-muted">添加时请备注：AI研报。工作人员会确认需求、付款方式和预计交付时间。</p>
+            <div className="mt-5 grid gap-5 sm:grid-cols-[180px_1fr] sm:items-center lg:grid-cols-1">
               <div className="flex aspect-square items-center justify-center rounded-2xl border border-border bg-background p-3">
-                {serviceConfig?.wechat_qr_image_url ? <img src={serviceConfig.wechat_qr_image_url} alt="工作人员微信二维码" className="h-full w-full rounded-xl object-contain" /> : <span className="text-center text-sm text-foreground-dim">后台暂未配置二维码</span>}
+                {serviceConfig?.wechat_qr_image_url ? <img src={serviceConfig.wechat_qr_image_url} alt="工作人员企业微信二维码" className="h-full w-full rounded-xl object-contain" /> : <span className="text-center text-sm text-foreground-dim">后台暂未配置二维码</span>}
               </div>
               <div className="space-y-3 text-sm text-foreground-muted">
-                <div>微信号：<span className="font-semibold text-primary">{serviceConfig?.wechat_id || '后台暂未配置'}</span></div>
+                <div>企业微信号：<span className="font-semibold text-primary">{serviceConfig?.wechat_id || '后台暂未配置'}</span></div>
                 <div>交付时效：{deliveryText}</div>
-                <div>服务方式：微信人工确认、人工交付。</div>
+                <div>服务方式：企业微信人工确认、人工交付。</div>
               </div>
             </div>
           </div>

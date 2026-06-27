@@ -95,9 +95,10 @@ function PricingCard({ plan }) {
         <h3 className="text-lg font-semibold text-foreground">{plan.name}</h3>
         <div className="mt-2 text-xs text-foreground-dim">{plan.reportType}</div>
       </div>
-      <div className="mt-5 flex items-end gap-2">
+      <div className="mt-5 flex flex-wrap items-end gap-2">
         <span className="text-4xl font-bold text-foreground">{plan.price}</span>
         <span className="pb-1 text-sm text-foreground-muted">/ {plan.quota}</span>
+        <span className="mb-0.5 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">单份 {plan.unitPrice}</span>
       </div>
       <p className="mt-3 text-sm leading-6 text-foreground-muted">{plan.description}</p>
       <ul className="mt-5 flex-1 space-y-2">
@@ -275,7 +276,7 @@ export default function AIReportsPage() {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 className="text-2xl font-bold text-foreground">套餐价格</h2>
-                <p className="mt-2 text-sm text-foreground-muted">从标准 PDF 报告到专业跟踪服务，按你的研究深度选择。</p>
+                <p className="mt-2 text-sm text-foreground-muted">从标准 PDF 报告到专业跟踪服务，按你的研究深度选择。每份报告只包含一只股票的分析结果。</p>
               </div>
             </div>
             <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">

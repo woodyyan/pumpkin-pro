@@ -3,6 +3,7 @@ package aireport
 import (
 	"context"
 	"errors"
+	"net/url"
 	"testing"
 	"time"
 
@@ -40,8 +41,14 @@ func TestCreateAndPreviewReport(t *testing.T) {
 	if item.Exchange != "HKEX" || item.Symbol != "00700" {
 		t.Fatalf("unexpected normalized fields: %+v", item)
 	}
-	if item.PreviewURL != "https://bucket-123.cos.ap-guangzhou.myqcloud.com/ai-reports/preview/2026/tencent.webp" {
+	if item.PreviewURL != "https://bucket-123.cos.ap-guangzhou.myqcloud.com/ai-reports/preview/2026/tencent.webp?imageMogr2/format/webp" {
 		t.Fatalf("unexpected preview url: %s", item.PreviewURL)
+	}
+	if item.ThumbnailURL != "https://bucket-123.cos.ap-guangzhou.myqcloud.com/ai-reports/thumb/2026/tencent.webp?imageMogr2/thumbnail/!30p" {
+		t.Fatalf("unexpected thumbnail url: %s", item.ThumbnailURL)
+	}
+	if item.OriginalURL != "https://bucket-123.cos.ap-guangzhou.myqcloud.com/ai-reports/original/2026/tencent.png" {
+		t.Fatalf("unexpected original url (should have no process params): %s", item.OriginalURL)
 	}
 
 	publicItems, err := svc.ListPublicReports(context.Background())
@@ -109,20 +116,26 @@ func TestServiceConfigDefaultsAndSave(t *testing.T) {
 }
 
 type fakeSigner struct {
-	expire   time.Duration
-	lastKey  string
-	failOn   string
-	callKeys []string
+	expire     time.Duration
+	lastKey    string
+	failOn     string
+	callKeys   []string
+	lastParams url.Values
 }
 
-func (f *fakeSigner) PresignGetURL(objectKey string, expire time.Duration) (string, error) {
+func (f *fakeSigner) PresignGetURLWithParams(objectKey string, expire time.Duration, params url.Values) (string, error) {
 	f.lastKey = objectKey
 	f.expire = expire
+	f.lastParams = params
 	f.callKeys = append(f.callKeys, objectKey)
 	if f.failOn != "" && objectKey == f.failOn {
 		return "", errors.New("forced signer failure")
 	}
-	return "https://signed.example.com/" + objectKey + "?q-signature=test", nil
+	signed := "https://signed.example.com/" + objectKey + "?q-signature=test"
+	if raw := encodeProcessParams(params); raw != "" {
+		signed += "&" + raw
+	}
+	return signed, nil
 }
 
 func TestPreviewUsesSignedURLWhenSignerPresent(t *testing.T) {
@@ -147,22 +160,28 @@ func TestPreviewUsesSignedURLWhenSignerPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get preview: %v", err)
 	}
-	want := "https://signed.example.com/ai-reports/preview/2026/catl.webp?q-signature=test"
+	want := "https://signed.example.com/ai-reports/preview/2026/catl.webp?q-signature=test&imageMogr2/format/webp"
 	if preview.PreviewURL != want {
-		t.Fatalf("expected signed preview url, got %s", preview.PreviewURL)
+		t.Fatalf("expected signed preview url with webp param, got %s", preview.PreviewURL)
 	}
 	if signer.expire != DefaultPreviewURLTTL {
 		t.Fatalf("expected default ttl %v, got %v", DefaultPreviewURLTTL, signer.expire)
+	}
+	// 预览必须把图片处理参数透传给签名器（参与签名）。
+	if _, ok := signer.lastParams[previewImageProcess]; !ok {
+		t.Fatalf("expected %s in signed params, got %v", previewImageProcess, signer.lastParams)
 	}
 
 	publicItems, err := svc.ListPublicReports(context.Background())
 	if err != nil {
 		t.Fatalf("list public: %v", err)
 	}
-	if len(publicItems) != 1 || publicItems[0].ThumbnailURL != "https://signed.example.com/ai-reports/thumb/2026/catl.webp?q-signature=test" {
-		t.Fatalf("expected signed thumbnail url, got %+v", publicItems)
+	wantThumb := "https://signed.example.com/ai-reports/thumb/2026/catl.webp?q-signature=test&imageMogr2/thumbnail/!30p"
+	if len(publicItems) != 1 || publicItems[0].ThumbnailURL != wantThumb {
+		t.Fatalf("expected signed thumbnail url with thumbnail param, got %+v", publicItems)
 	}
 }
+
 
 func TestPreviewFallsBackToPublicURLWhenSignerFails(t *testing.T) {
 	svc := newTestService(t)
@@ -186,9 +205,9 @@ func TestPreviewFallsBackToPublicURLWhenSignerFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get preview: %v", err)
 	}
-	want := "https://bucket-123.cos.ap-guangzhou.myqcloud.com/ai-reports/preview/2026/catl.webp"
+	want := "https://bucket-123.cos.ap-guangzhou.myqcloud.com/ai-reports/preview/2026/catl.webp?imageMogr2/format/webp"
 	if preview.PreviewURL != want {
-		t.Fatalf("expected fallback public url, got %s", preview.PreviewURL)
+		t.Fatalf("expected fallback public url with process param, got %s", preview.PreviewURL)
 	}
 }
 
@@ -196,11 +215,12 @@ func TestResolveImageURLKeepsFullURLAndEmpty(t *testing.T) {
 	svc := newTestService(t)
 	svc.WithImageURLSigner(&fakeSigner{})
 
-	if got := svc.resolveImageURL(""); got != "" {
+	if got := svc.resolveImageURL("", variantPreview); got != "" {
 		t.Fatalf("expected empty url for empty key, got %q", got)
 	}
+	// 已是完整 URL 时原样返回，不追加处理参数。
 	full := "https://cdn.example.com/a/b.png"
-	if got := svc.resolveImageURL(full); got != full {
+	if got := svc.resolveImageURL(full, variantThumbnail); got != full {
 		t.Fatalf("expected full url returned as-is, got %q", got)
 	}
 }

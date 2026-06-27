@@ -19,10 +19,38 @@ const (
 // DefaultPreviewURLTTL 为预览/缩略图签名 URL 的默认有效期。
 const DefaultPreviewURLTTL = 15 * time.Minute
 
+// 数据万象（CI）图片处理参数：预览图转 webp，缩略图缩放到 30% 并转 webp。
+// 这些参数会作为 query 附加到 COS 对象 URL 上，并纳入签名计算。
+const (
+	previewImageProcess   = "imageMogr2/format/webp"
+	thumbnailImageProcess = "imageMogr2/thumbnail/!30p"
+)
+
 // ImageURLSigner 生成 COS 对象的带签名临时 GET URL。
 // 由上层（main.go）使用现有 COS 密钥配置注入具体实现，避免本包直接依赖 backup 包。
+// params 为需要参与签名的业务 query 参数（如数据万象图片处理参数）。
 type ImageURLSigner interface {
-	PresignGetURL(objectKey string, expire time.Duration) (string, error)
+	PresignGetURLWithParams(objectKey string, expire time.Duration, params url.Values) (string, error)
+}
+
+// imageVariant 表示一类图片用途，决定附加的数据万象处理参数。
+type imageVariant int
+
+const (
+	variantOriginal imageVariant = iota
+	variantPreview
+	variantThumbnail
+)
+
+func (v imageVariant) processParams() url.Values {
+	switch v {
+	case variantPreview:
+		return url.Values{previewImageProcess: []string{""}}
+	case variantThumbnail:
+		return url.Values{thumbnailImageProcess: []string{""}}
+	default:
+		return nil
+	}
 }
 
 type ServiceConfig struct {
@@ -64,7 +92,7 @@ func (s *Service) ListPublicReports(ctx context.Context) ([]ReportListItem, erro
 			Symbol:          record.Symbol,
 			Exchange:        record.Exchange,
 			SourceTradeDate: record.SourceTradeDate,
-			ThumbnailURL:    s.resolveImageURL(record.ImageThumbnailKey),
+			ThumbnailURL:    s.resolveImageURL(record.ImageThumbnailKey, variantThumbnail),
 		})
 	}
 	return items, nil
@@ -81,7 +109,7 @@ func (s *Service) GetPreview(ctx context.Context, id string) (*ReportPreview, er
 		Symbol:          record.Symbol,
 		Exchange:        record.Exchange,
 		SourceTradeDate: record.SourceTradeDate,
-		PreviewURL:      s.resolveImageURL(record.ImagePreviewKey),
+		PreviewURL:      s.resolveImageURL(record.ImagePreviewKey, variantPreview),
 	}, nil
 }
 
@@ -202,9 +230,9 @@ func (s *Service) adminView(record ResearchReportRecord) AdminReportItem {
 		ImageOriginalKey:  record.ImageOriginalKey,
 		ImagePreviewKey:   record.ImagePreviewKey,
 		ImageThumbnailKey: record.ImageThumbnailKey,
-		OriginalURL:       s.resolveImageURL(record.ImageOriginalKey),
-		PreviewURL:        s.resolveImageURL(record.ImagePreviewKey),
-		ThumbnailURL:      s.resolveImageURL(record.ImageThumbnailKey),
+		OriginalURL:       s.resolveImageURL(record.ImageOriginalKey, variantOriginal),
+		PreviewURL:        s.resolveImageURL(record.ImagePreviewKey, variantPreview),
+		ThumbnailURL:      s.resolveImageURL(record.ImageThumbnailKey, variantThumbnail),
 		CreatedAt:         formatTime(record.CreatedAt),
 		UpdatedAt:         formatTime(record.UpdatedAt),
 	}
@@ -221,19 +249,19 @@ func (s *Service) serviceConfigView(record ServiceConfigRecord) *ServiceConfigVi
 	return &ServiceConfigView{
 		WechatID:         record.WechatID,
 		WechatQRImageKey: record.WechatQRImageKey,
-		WechatQRImageURL: s.resolveImageURL(record.WechatQRImageKey),
+		WechatQRImageURL: s.resolveImageURL(record.WechatQRImageKey, variantOriginal),
 		DeliveryTimeText: record.DeliveryTimeText,
 		RiskDisclaimer:   record.RiskDisclaimer,
 		UpdatedAt:        formatTime(record.UpdatedAt),
 	}
 }
 
-func (s *Service) resolveImageURL(key string) string {
+func (s *Service) resolveImageURL(key string, variant imageVariant) string {
 	text := strings.TrimSpace(key)
 	if text == "" {
 		return ""
 	}
-	// 已经是完整 URL（运营手填的外链）或站内绝对路径时原样返回。
+	// 已经是完整 URL（运营手填的外链）或站内绝对路径时原样返回，不再追加处理参数。
 	if parsed, err := url.Parse(text); err == nil && parsed.Scheme != "" && parsed.Host != "" {
 		return text
 	}
@@ -241,9 +269,10 @@ func (s *Service) resolveImageURL(key string) string {
 		return text
 	}
 	objectKey := strings.TrimLeft(text, "/")
+	params := variant.processParams()
 	// 优先生成带签名的临时 URL；失败时回退到未签名公开直链，保证旧行为不被破坏。
 	if s.signer != nil {
-		if signed, err := s.signer.PresignGetURL(objectKey, s.cfg.PreviewURLTTL); err == nil && signed != "" {
+		if signed, err := s.signer.PresignGetURLWithParams(objectKey, s.cfg.PreviewURLTTL, params); err == nil && signed != "" {
 			return signed
 		}
 	}
@@ -252,7 +281,29 @@ func (s *Service) resolveImageURL(key string) string {
 	if bucket == "" || region == "" {
 		return text
 	}
-	return "https://" + bucket + ".cos." + region + ".myqcloud.com/" + objectKey
+	publicURL := "https://" + bucket + ".cos." + region + ".myqcloud.com/" + objectKey
+	if rawParams := encodeProcessParams(params); rawParams != "" {
+		publicURL += "?" + rawParams
+	}
+	return publicURL
+}
+
+// encodeProcessParams 将数据万象处理参数编码为 query 字符串（无值参数仅保留 key）。
+func encodeProcessParams(params url.Values) string {
+	if len(params) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(params))
+	for name, values := range params {
+		if len(values) == 0 || (len(values) == 1 && values[0] == "") {
+			parts = append(parts, name)
+			continue
+		}
+		for _, value := range values {
+			parts = append(parts, name+"="+value)
+		}
+	}
+	return strings.Join(parts, "&")
 }
 
 var tradeDatePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)

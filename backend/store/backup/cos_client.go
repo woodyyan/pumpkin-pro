@@ -181,6 +181,16 @@ func (c *COSCloudStorageClient) resolveObjectURL(objectKey string) *url.URL {
 // 签名参数附加在 query 上，调用方可直接把返回值作为 <img src> 使用。
 // expire 为有效期，<=0 时使用默认 15 分钟。
 func (c *COSCloudStorageClient) PresignGetURL(objectKey string, expire time.Duration) (string, error) {
+	return c.PresignGetURLWithParams(objectKey, expire, nil)
+}
+
+// PresignGetURLWithParams 在 PresignGetURL 基础上支持附加 query 参数（如数据万象图片处理
+// imageMogr2/format/webp、imageMogr2/thumbnail/!30p）。这些参数会被纳入签名计算并声明进
+// q-url-param-list，无论存储桶是否开启严格参数校验都不会触发 403。
+//
+// params 的 key 为参数名、value 为参数值；对于 imageMogr2 这类无值的"路径式"参数，
+// 传入 key="imageMogr2/format/webp"、value="" 即可。
+func (c *COSCloudStorageClient) PresignGetURLWithParams(objectKey string, expire time.Duration, params url.Values) (string, error) {
 	if c.baseURL == nil {
 		return "", errors.New("cos client base url is not configured")
 	}
@@ -193,27 +203,36 @@ func (c *COSCloudStorageClient) PresignGetURL(objectKey string, expire time.Dura
 
 	target := c.resolveObjectURL(objectKey)
 
+	// 业务 query（图片处理参数）参与签名。
+	signedQuery := url.Values{}
+	for name, values := range params {
+		for _, value := range values {
+			signedQuery.Add(name, value)
+		}
+	}
+	queryPairs, queryNames := canonicalQueryPairs(signedQuery)
+
 	now := c.now()
 	start := now.Add(-time.Minute).Unix()
 	end := now.Add(expire).Unix()
 	keyTime := fmt.Sprintf("%d;%d", start, end)
 
-	// 预签名 GET：header-list 只签 host，query-param-list 为空。
+	// 预签名 GET：header-list 只签 host，query-param-list 为参与签名的业务参数。
 	headerPairs := "host=" + cosEscape(target.Host)
 	headerNames := []string{"host"}
 
-	httpString := "get\n" + canonicalPath(target) + "\n\n" + headerPairs + "\n"
+	httpString := "get\n" + canonicalPath(target) + "\n" + queryPairs + "\n" + headerPairs + "\n"
 	stringToSign := "sha1\n" + keyTime + "\n" + sha1Hex(httpString) + "\n"
 	signKey := hmacSHA1Hex(c.secretKey, keyTime)
 	signature := hmacSHA1Hex(signKey, stringToSign)
 
-	query := target.Query()
+	query := signedQuery
 	query.Set("q-sign-algorithm", "sha1")
 	query.Set("q-ak", c.secretID)
 	query.Set("q-sign-time", keyTime)
 	query.Set("q-key-time", keyTime)
 	query.Set("q-header-list", strings.Join(headerNames, ";"))
-	query.Set("q-url-param-list", "")
+	query.Set("q-url-param-list", strings.Join(queryNames, ";"))
 	query.Set("q-signature", signature)
 	target.RawQuery = query.Encode()
 
@@ -275,15 +294,20 @@ func canonicalQueryPairs(values url.Values) (string, []string) {
 		return "", nil
 	}
 
+	// 按 COS 规范：参数名转小写后排序，签名值用 lowerName=escape(value)。
+	// 用 lowerName -> originalName 映射回原始 key 以正确取值（如 imageMogr2 含大写）。
+	lowerToOriginal := make(map[string]string, len(values))
 	names := make([]string, 0, len(values))
 	for name := range values {
-		names = append(names, strings.ToLower(name))
+		lower := strings.ToLower(name)
+		lowerToOriginal[lower] = name
+		names = append(names, lower)
 	}
 	sort.Strings(names)
 
 	parts := make([]string, 0)
 	for _, name := range names {
-		originalValues := values[name]
+		originalValues := values[lowerToOriginal[name]]
 		if len(originalValues) == 0 {
 			parts = append(parts, name+"=")
 			continue

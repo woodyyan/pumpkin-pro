@@ -3,7 +3,7 @@ package aireport
 import (
 	"context"
 	"errors"
-	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,7 +41,7 @@ func TestCreateAndPreviewReport(t *testing.T) {
 	if item.Exchange != "HKEX" || item.Symbol != "00700" {
 		t.Fatalf("unexpected normalized fields: %+v", item)
 	}
-	if item.PreviewURL != "https://bucket-123.cos.ap-guangzhou.myqcloud.com/ai-reports/preview/2026/tencent.webp?imageMogr2/format/webp" {
+	if item.PreviewURL != "https://bucket-123.cos.ap-guangzhou.myqcloud.com/ai-reports/preview/2026/tencent.webp?imageSlim" {
 		t.Fatalf("unexpected preview url: %s", item.PreviewURL)
 	}
 	if item.ThumbnailURL != "https://bucket-123.cos.ap-guangzhou.myqcloud.com/ai-reports/thumb/2026/tencent.webp?imageMogr2/thumbnail/!30p" {
@@ -116,24 +116,24 @@ func TestServiceConfigDefaultsAndSave(t *testing.T) {
 }
 
 type fakeSigner struct {
-	expire     time.Duration
-	lastKey    string
-	failOn     string
-	callKeys   []string
-	lastParams url.Values
+	expire      time.Duration
+	lastKey     string
+	failOn      string
+	callKeys    []string
+	lastProcess string
 }
 
-func (f *fakeSigner) PresignGetURLWithParams(objectKey string, expire time.Duration, params url.Values) (string, error) {
+func (f *fakeSigner) PresignGetURLWithProcess(objectKey string, expire time.Duration, process string) (string, error) {
 	f.lastKey = objectKey
 	f.expire = expire
-	f.lastParams = params
+	f.lastProcess = process
 	f.callKeys = append(f.callKeys, objectKey)
 	if f.failOn != "" && objectKey == f.failOn {
 		return "", errors.New("forced signer failure")
 	}
 	signed := "https://signed.example.com/" + objectKey + "?q-signature=test"
-	if raw := encodeProcessParams(params); raw != "" {
-		signed += "&" + raw
+	if strings.TrimSpace(process) != "" {
+		signed += "&" + process
 	}
 	return signed, nil
 }
@@ -160,16 +160,16 @@ func TestPreviewUsesSignedURLWhenSignerPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get preview: %v", err)
 	}
-	want := "https://signed.example.com/ai-reports/preview/2026/catl.webp?q-signature=test&imageMogr2/format/webp"
+	want := "https://signed.example.com/ai-reports/preview/2026/catl.webp?q-signature=test&imageSlim"
 	if preview.PreviewURL != want {
-		t.Fatalf("expected signed preview url with webp param, got %s", preview.PreviewURL)
+		t.Fatalf("expected signed preview url with imageSlim param, got %s", preview.PreviewURL)
 	}
 	if signer.expire != DefaultPreviewURLTTL {
 		t.Fatalf("expected default ttl %v, got %v", DefaultPreviewURLTTL, signer.expire)
 	}
-	// 预览必须把图片处理参数透传给签名器（参与签名）。
-	if _, ok := signer.lastParams[previewImageProcess]; !ok {
-		t.Fatalf("expected %s in signed params, got %v", previewImageProcess, signer.lastParams)
+	// 预览必须把图片处理参数透传给签名器。
+	if signer.lastProcess != previewImageProcess {
+		t.Fatalf("expected process %s passed to signer, got %q", previewImageProcess, signer.lastProcess)
 	}
 
 	publicItems, err := svc.ListPublicReports(context.Background())
@@ -205,7 +205,7 @@ func TestPreviewFallsBackToPublicURLWhenSignerFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get preview: %v", err)
 	}
-	want := "https://bucket-123.cos.ap-guangzhou.myqcloud.com/ai-reports/preview/2026/catl.webp?imageMogr2/format/webp"
+	want := "https://bucket-123.cos.ap-guangzhou.myqcloud.com/ai-reports/preview/2026/catl.webp?imageSlim"
 	if preview.PreviewURL != want {
 		t.Fatalf("expected fallback public url with process param, got %s", preview.PreviewURL)
 	}

@@ -181,16 +181,20 @@ func (c *COSCloudStorageClient) resolveObjectURL(objectKey string) *url.URL {
 // 签名参数附加在 query 上，调用方可直接把返回值作为 <img src> 使用。
 // expire 为有效期，<=0 时使用默认 15 分钟。
 func (c *COSCloudStorageClient) PresignGetURL(objectKey string, expire time.Duration) (string, error) {
-	return c.PresignGetURLWithParams(objectKey, expire, nil)
+	return c.PresignGetURLWithProcess(objectKey, expire, "")
 }
 
-// PresignGetURLWithParams 在 PresignGetURL 基础上支持附加 query 参数（如数据万象图片处理
-// imageMogr2/format/webp、imageMogr2/thumbnail/!30p）。这些参数会被纳入签名计算并声明进
-// q-url-param-list，无论存储桶是否开启严格参数校验都不会触发 403。
+// PresignGetURLWithProcess 在 PresignGetURL 基础上支持附加数据万象图片处理参数
+// （如 imageMogr2/format/webp、imageMogr2/thumbnail/!30p）。
 //
-// params 的 key 为参数名、value 为参数值；对于 imageMogr2 这类无值的"路径式"参数，
-// 传入 key="imageMogr2/format/webp"、value="" 即可。
-func (c *COSCloudStorageClient) PresignGetURLWithParams(objectKey string, expire time.Duration, params url.Values) (string, error) {
+// 重要：imageMogr2 是一个"路径式无值参数"，在 URL 中必须保持原样（斜杠/叹号不转义），
+// 且 COS 下载时处理 **不要求** 该参数参与签名 —— 因此签名仍只覆盖 host，
+// q-url-param-list 为空，处理参数以原始字符串直接拼到最终 query 末尾。
+// 这样可避免 url.Values.Encode() 把 "imageMogr2/.../!30p" 转义成 "imageMogr2%2F...%2130p"
+// 而导致 URL 与签名串编码不一致引发的 SignatureDoesNotMatch。
+//
+// process 形如 "imageMogr2/format/webp"，为空则等价于普通预签名 URL。
+func (c *COSCloudStorageClient) PresignGetURLWithProcess(objectKey string, expire time.Duration, process string) (string, error) {
 	if c.baseURL == nil {
 		return "", errors.New("cos client base url is not configured")
 	}
@@ -203,38 +207,36 @@ func (c *COSCloudStorageClient) PresignGetURLWithParams(objectKey string, expire
 
 	target := c.resolveObjectURL(objectKey)
 
-	// 业务 query（图片处理参数）参与签名。
-	signedQuery := url.Values{}
-	for name, values := range params {
-		for _, value := range values {
-			signedQuery.Add(name, value)
-		}
-	}
-	queryPairs, queryNames := canonicalQueryPairs(signedQuery)
-
 	now := c.now()
 	start := now.Add(-time.Minute).Unix()
 	end := now.Add(expire).Unix()
 	keyTime := fmt.Sprintf("%d;%d", start, end)
 
-	// 预签名 GET：header-list 只签 host，query-param-list 为参与签名的业务参数。
+	// 预签名 GET：header-list 只签 host，query-param-list 为空（处理参数不参与签名）。
 	headerPairs := "host=" + cosEscape(target.Host)
 	headerNames := []string{"host"}
 
-	httpString := "get\n" + canonicalPath(target) + "\n" + queryPairs + "\n" + headerPairs + "\n"
+	httpString := "get\n" + canonicalPath(target) + "\n\n" + headerPairs + "\n"
 	stringToSign := "sha1\n" + keyTime + "\n" + sha1Hex(httpString) + "\n"
 	signKey := hmacSHA1Hex(c.secretKey, keyTime)
 	signature := hmacSHA1Hex(signKey, stringToSign)
 
-	query := signedQuery
-	query.Set("q-sign-algorithm", "sha1")
-	query.Set("q-ak", c.secretID)
-	query.Set("q-sign-time", keyTime)
-	query.Set("q-key-time", keyTime)
-	query.Set("q-header-list", strings.Join(headerNames, ";"))
-	query.Set("q-url-param-list", strings.Join(queryNames, ";"))
-	query.Set("q-signature", signature)
-	target.RawQuery = query.Encode()
+	// 用 url.Values 仅承载签名参数，保证它们被正确编码。
+	signQuery := url.Values{}
+	signQuery.Set("q-sign-algorithm", "sha1")
+	signQuery.Set("q-ak", c.secretID)
+	signQuery.Set("q-sign-time", keyTime)
+	signQuery.Set("q-key-time", keyTime)
+	signQuery.Set("q-header-list", strings.Join(headerNames, ";"))
+	signQuery.Set("q-url-param-list", "")
+	signQuery.Set("q-signature", signature)
+
+	rawQuery := signQuery.Encode()
+	// 图片处理参数作为原始无值参数前置拼接，保持斜杠/叹号不被转义。
+	if p := strings.TrimSpace(process); p != "" {
+		rawQuery = strings.TrimLeft(p, "?") + "&" + rawQuery
+	}
+	target.RawQuery = rawQuery
 
 	return target.String(), nil
 }

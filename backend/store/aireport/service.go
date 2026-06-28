@@ -19,18 +19,18 @@ const (
 // DefaultPreviewURLTTL 为预览/缩略图签名 URL 的默认有效期。
 const DefaultPreviewURLTTL = 15 * time.Minute
 
-// 数据万象（CI）图片处理参数：预览图转 webp，缩略图缩放到 30% 并转 webp。
-// 这些参数会作为 query 附加到 COS 对象 URL 上，并纳入签名计算。
+// 数据万象（CI）图片处理参数：预览图走极智压缩 imageSlim（保持原格式、仅压缩体积），
+// 缩略图缩放到 30%。这些参数会作为 query 原样附加到 COS 对象 URL 上。
 const (
-	previewImageProcess   = "imageMogr2/format/webp"
+	previewImageProcess   = "imageSlim"
 	thumbnailImageProcess = "imageMogr2/thumbnail/!30p"
 )
 
 // ImageURLSigner 生成 COS 对象的带签名临时 GET URL。
 // 由上层（main.go）使用现有 COS 密钥配置注入具体实现，避免本包直接依赖 backup 包。
-// params 为需要参与签名的业务 query 参数（如数据万象图片处理参数）。
+// process 为数据万象图片处理参数（如 imageMogr2/format/webp），空字符串表示不处理。
 type ImageURLSigner interface {
-	PresignGetURLWithParams(objectKey string, expire time.Duration, params url.Values) (string, error)
+	PresignGetURLWithProcess(objectKey string, expire time.Duration, process string) (string, error)
 }
 
 // imageVariant 表示一类图片用途，决定附加的数据万象处理参数。
@@ -42,14 +42,15 @@ const (
 	variantThumbnail
 )
 
-func (v imageVariant) processParams() url.Values {
+// processParam 返回该图片用途对应的数据万象处理参数（无则返回空串）。
+func (v imageVariant) processParam() string {
 	switch v {
 	case variantPreview:
-		return url.Values{previewImageProcess: []string{""}}
+		return previewImageProcess
 	case variantThumbnail:
-		return url.Values{thumbnailImageProcess: []string{""}}
+		return thumbnailImageProcess
 	default:
-		return nil
+		return ""
 	}
 }
 
@@ -269,10 +270,10 @@ func (s *Service) resolveImageURL(key string, variant imageVariant) string {
 		return text
 	}
 	objectKey := strings.TrimLeft(text, "/")
-	params := variant.processParams()
+	process := variant.processParam()
 	// 优先生成带签名的临时 URL；失败时回退到未签名公开直链，保证旧行为不被破坏。
 	if s.signer != nil {
-		if signed, err := s.signer.PresignGetURLWithParams(objectKey, s.cfg.PreviewURLTTL, params); err == nil && signed != "" {
+		if signed, err := s.signer.PresignGetURLWithProcess(objectKey, s.cfg.PreviewURLTTL, process); err == nil && signed != "" {
 			return signed
 		}
 	}
@@ -282,28 +283,10 @@ func (s *Service) resolveImageURL(key string, variant imageVariant) string {
 		return text
 	}
 	publicURL := "https://" + bucket + ".cos." + region + ".myqcloud.com/" + objectKey
-	if rawParams := encodeProcessParams(params); rawParams != "" {
-		publicURL += "?" + rawParams
+	if process != "" {
+		publicURL += "?" + process
 	}
 	return publicURL
-}
-
-// encodeProcessParams 将数据万象处理参数编码为 query 字符串（无值参数仅保留 key）。
-func encodeProcessParams(params url.Values) string {
-	if len(params) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(params))
-	for name, values := range params {
-		if len(values) == 0 || (len(values) == 1 && values[0] == "") {
-			parts = append(parts, name)
-			continue
-		}
-		for _, value := range values {
-			parts = append(parts, name+"="+value)
-		}
-	}
-	return strings.Join(parts, "&")
 }
 
 var tradeDatePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)

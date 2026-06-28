@@ -45,8 +45,9 @@ frontend/
 | `/ai/reports` | `ai/reports.js` | AI研报页面：A 股/中国香港股票个股研报介绍、缩略图样例、登录后弹窗预览、微信定制转化与合规风险提示 |
 | `/ai/picker` | `ai/picker.js` | AI选股占位页（一期「敬请期待」） |
 | `/ai/backtest` | `ai/backtest.js` | AI回测占位页（一期「敬请期待」） |
-| `/quadrant` | `quadrant.js` | 四象限独立占位页（一期「敬请期待」） |
-| `/watchlist` | `watchlist.js` | 自选股占位页（一期「敬请期待」） |
+| `/quadrant` | `quadrant.js` | 四象限与卧龙AI精选页面（导航归属「看板 / 市场全景」），展示风险机会分布和精选榜单 |
+| `/capital-map` | `capital-map.js` | 资金星图页面（导航归属「看板 / 资金星图」），基于 A 股东方财富公开行情样本展示 PE、成交额、板块资金流和 PoC 估值锚；前端 60 秒刷新，后端 30 秒内存缓存 |
+| `/watchlist` | `watchlist.js` | 自选股页面 |
 | `/stock-picker` | `stock-picker.js` | 选股器 |
 | `/backtest` | `backtest.js` | 回测引擎 |
 | `/strategies` | `strategies.js` | 策略库 |
@@ -65,6 +66,7 @@ frontend/
 - PC 端导航由 `components/DesktopNavMenu.js` + `components/NavDropdown.js` 渲染：hover 展开下拉，点击一级导航只负责展开/收起，不做跳转。
 - 移动端导航由 `components/MobileNavMenu.js` 渲染：保留汉堡入口，菜单内部按「卧龙AI / 看板 / 跟踪 / 选股 / 更多」分组折叠，一次只展开一个分组。
 - 「卧龙AI」分组当前顺序为「AI分析 / AI研报 / AI选股 / AI回测」。
+- 「看板」分组当前顺序为「市场行情 / 市场全景 / 资金星图」。其中资金星图路由固定为 `/capital-map`，首期仅支持 A 股。
 - 占位页统一复用 `components/ComingSoonPage.js`，文案固定为标题 + 「敬请期待」，避免散落多个空白实现。
 
 ### 首页内容架构（2026-06-27）
@@ -92,6 +94,7 @@ frontend/
 - `NavDropdown.js`: 桌面端二级导航下拉面板
 - `ComingSoonPage.js`: 占位页通用组件
 - `QuadrantChart.js`: 四象限风险图表
+- `CapitalMapDashboard.js`: 资金星图页面主组件，负责 A 股 PE×成交额星图、板块资金图、PoC 分布、60 秒刷新和浅色/深色图表配色
 - `RankingPanel.js` / `RankingPortfolioPanel.js`: 排行榜
 - `PortfolioAttributionSection.js`: 持仓归因分析
 - `AIAnalysisReportContent.js`: AI分析报告内容

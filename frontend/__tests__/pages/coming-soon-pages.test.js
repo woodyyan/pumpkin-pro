@@ -58,6 +58,15 @@ describe('coming soon placeholder pages', () => {
     assert.match(pageSource, /canonical" href="https:\/\/wolongtrader\.top\/quadrant"/)
   })
 
+  it('renders capital map as a real page instead of a placeholder', () => {
+    const pageSource = readFileSync(new URL('../../pages/capital-map.js', import.meta.url), 'utf8')
+
+    assert.doesNotThrow(() => parse(pageSource, { sourceType: 'module', plugins: ['jsx'] }))
+    assert.doesNotMatch(pageSource, /ComingSoonPage/)
+    assert.match(pageSource, /CapitalMapDashboard/)
+    assert.match(pageSource, /canonical" href="https:\/\/wolongtrader\.top\/capital-map"/)
+  })
+
   it('renders watchlist as a real page instead of a placeholder', () => {
     const pageSource = readFileSync(new URL('../../pages/watchlist.js', import.meta.url), 'utf8')
 

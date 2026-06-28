@@ -15,6 +15,7 @@ export const NAV_GROUPS = [
     items: [
       { key: 'market-overview', href: '/live-trading', label: '市场行情', matchNested: true },
       { key: 'quadrant', href: '/quadrant', label: '市场全景', matchNested: true },
+      { key: 'capital-map', href: '/capital-map', label: '资金星图', matchNested: true },
     ],
   },
   {

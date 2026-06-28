@@ -128,6 +128,7 @@ export const FEATURE_CATEGORIES = [
     items: [
       { title: '市场行情', href: '/live-trading', status: '已上线', summary: '卡片化查看 A 股与中国香港股票主要指数和市场摘要。' },
       { title: '市场全景', href: '/quadrant', status: '已上线', summary: '通过四象限观察机会、拥挤、泡沫和防御区域。' },
+      { title: '资金星图', href: '/capital-map', status: '已上线', summary: '观察 A 股高流动性样本的 PE、成交额、板块资金流和 PoC 估值锚。' },
       { title: '卧龙AI精选', href: '/quadrant', status: '已上线', summary: '从全市场评分结果中查看连续上榜和表现突出的标的。' },
       { title: '个股详情', href: '/live-trading', status: '已上线', summary: '查看行情、技术指标、基本面、支撑阻力、持仓和信号配置。' },
     ],

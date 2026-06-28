@@ -24,6 +24,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/auth"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backup"
+	"github.com/woodyyan/pumpkin-pro/backend/store/capitalmap"
 	"github.com/woodyyan/pumpkin-pro/backend/store/companyprofile"
 	"github.com/woodyyan/pumpkin-pro/backend/store/factorlab"
 	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
@@ -253,6 +254,7 @@ type appServer struct {
 	portfolioService      *portfolio.Service
 	portfolioWorker       *portfolio.Worker
 	companyProfileService *companyprofile.Service
+	capitalMapService     *capitalmap.Service
 	quadrantService       *quadrant.Service
 	adminService          *admin.Service
 	backupService         *backup.Service
@@ -1579,6 +1581,28 @@ func (a *appServer) handleLiveMarketOverview(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeLiveJSON(w, http.StatusOK, overview)
+}
+
+func (a *appServer) handleCapitalMap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	if a.capitalMapService == nil {
+		writeError(w, http.StatusServiceUnavailable, "资金星图服务暂不可用")
+		return
+	}
+	payload, err := a.capitalMapService.GetPayload(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"error":   "CAPITAL_MAP_SOURCE_UNAVAILABLE",
+			"message": err.Error(),
+			"source":  "东方财富公开行情接口",
+		})
+		return
+	}
+	w.Header().Set("Cache-Control", "s-maxage=30, stale-while-revalidate=90")
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Request) {
@@ -3952,6 +3976,7 @@ func main() {
 	liveRepo := live.NewRepository(storeInstance.DB)
 	liveService := live.NewService(liveRepo)
 	liveMarketClient := live.NewMarketClient()
+	capitalMapService := capitalmap.NewService(nil, capitalmap.DefaultCacheTTL)
 
 	signalRepo := signal.NewRepository(storeInstance.DB)
 	signalService := signal.NewService(signalRepo, signal.ServiceConfig{
@@ -4112,6 +4137,7 @@ func main() {
 		portfolioService:      portfolioService,
 		portfolioWorker:       portfolioWorker,
 		companyProfileService: companyProfileService,
+		capitalMapService:     capitalMapService,
 		quadrantService:       quadrantService,
 		adminService:          adminService,
 		backupService:         backupService,
@@ -4185,6 +4211,7 @@ func main() {
 	mux.HandleFunc("/api/live/watchlist/snapshots", server.withRequiredAuth(server.handleLiveWatchlistSnapshots))
 	mux.HandleFunc("/api/live/watchlist/", server.withRequiredAuth(server.handleLiveWatchlistSubroutes))
 	mux.HandleFunc("/api/live/market/overview", server.handleLiveMarketOverview)
+	mux.HandleFunc("/api/capital-map", server.handleCapitalMap)
 	mux.HandleFunc("/api/live/symbols/", server.withOptionalAuth(server.handleLiveSymbolsSubroutes))
 	mux.HandleFunc("/api/ai/reports", server.withOptionalAuth(server.handleAIReports))
 	mux.HandleFunc("/api/ai/reports/", server.withRequiredAuth(server.handleAIReportSubroutes))

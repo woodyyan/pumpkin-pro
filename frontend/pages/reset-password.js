@@ -6,8 +6,8 @@ import { requestJson } from '../lib/api'
 import { broadcastAuthSessionCleared, clearAuthSession } from '../lib/auth-storage'
 
 const PAGE_THEME = {
-  shell: 'min-h-screen bg-[radial-gradient(circle_at_top,#28475f,transparent_42%),linear-gradient(180deg,#0c1520,#101c29_52%,#173247)] px-4 py-10 text-foreground',
-  card: 'mx-auto w-full max-w-[30rem] rounded-[2rem] border border-border bg-[#0e1721]/90 p-6 shadow-[0_30px_80px_rgba(0,0,0,0.32)] backdrop-blur',
+  shell: 'min-h-screen bg-[radial-gradient(circle_at_top,var(--color-radial-accent),transparent_42%)] bg-background px-4 py-10 text-foreground',
+  card: 'mx-auto w-full max-w-[30rem] rounded-[2rem] border border-border bg-card p-6 shadow-[0_30px_80px_rgba(0,0,0,0.12)] backdrop-blur',
   input: 'w-full rounded-2xl border border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-foreground-dim focus:border-primary focus:bg-[var(--color-bg-hover)]',
   button: 'w-full rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-black transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60',
 }

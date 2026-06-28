@@ -150,7 +150,7 @@ func BuildMarketPayload(stocks []Stock, sectors []Sector, meta SnapshotResult, n
 
 	return &Payload{
 		Source:             "东方财富公开行情接口",
-		SourceNote:         "公开网页接口，适合市场观察与产品验证；生产商用前需确认数据授权与稳定性。当前按成交额排序抓取高流动性样本，避免免费接口分页过多导致请求超时。",
+		SourceNote:         "当前按成交额排序抓取高流动性样本。主力净流入属于平台算法口径，不等同于交易所逐笔资金流。本页仅用于市场观察和产品验证，不构成投资建议。",
 		UpdatedAt:          now.UTC().Format(time.RFC3339),
 		RefreshHintSeconds: DefaultRefreshHintSeconds,
 		SampleScope:        sampleScope,

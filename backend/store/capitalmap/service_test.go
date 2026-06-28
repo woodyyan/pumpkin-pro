@@ -75,6 +75,9 @@ func TestBuildMarketPayloadSummarizesSampleAndSectors(t *testing.T) {
 	if payload.UpdatedAt != "2026-06-28T12:00:00Z" {
 		t.Fatalf("unexpected updatedAt %s", payload.UpdatedAt)
 	}
+	if payload.SourceNote != "当前按成交额排序抓取高流动性样本。主力净流入属于平台算法口径，不等同于交易所逐笔资金流。本页仅用于市场观察和产品验证，不构成投资建议。" {
+		t.Fatalf("unexpected source note %q", payload.SourceNote)
+	}
 	if payload.Market.StockCount != 5000 || payload.Market.SampleCount != 3 || payload.Market.PositivePECount != 2 {
 		t.Fatalf("unexpected market summary %+v", payload.Market)
 	}

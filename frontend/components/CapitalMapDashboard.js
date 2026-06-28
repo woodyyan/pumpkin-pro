@@ -72,19 +72,14 @@ function StatCard({ label, value, helper, accent = 'default' }) {
   )
 }
 
-function EmptyState({ loading, error, onRetry }) {
+function EmptyState({ loading }) {
   return (
     <section className="rounded-3xl border border-border bg-card px-5 py-10 text-center md:px-8">
       <div className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-dim">A-share capital map</div>
       <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground md:text-3xl">资金星图正在接入行情源</h1>
       <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-foreground-muted">
-        {loading ? '正在请求东方财富公开行情接口，并计算高流动性样本 PE 分布、板块成交额占比和 PoC 估值锚。' : error || '暂无可展示数据。'}
+        {loading ? '正在计算高流动性样本 PE 分布、板块成交额占比和 PoC 估值锚。' : '暂无可展示数据，请稍后自动重试。'}
       </p>
-      {!loading && (
-        <button type="button" onClick={onRetry} className="mt-6 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-black transition hover:opacity-90">
-          重新获取数据
-        </button>
-      )}
     </section>
   )
 }
@@ -105,8 +100,6 @@ export default function CapitalMapDashboard() {
   const palette = useMemo(() => chartPalette(resolvedTheme), [resolvedTheme])
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState(null)
   const [lastLoadedAt, setLastLoadedAt] = useState(null)
 
   const galaxyRef = useRef(null)
@@ -114,22 +107,16 @@ export default function CapitalMapDashboard() {
   const pocRef = useRef(null)
 
   const loadData = useCallback(async (silent = false) => {
-    if (silent) setRefreshing(true)
     if (!silent) setLoading(true)
-    setError(null)
 
     try {
       const payload = await requestJson(buildCapitalMapUrl(), { cache: 'no-store' }, '资金星图数据加载失败')
       setData(payload)
       setLastLoadedAt(new Date().toISOString())
-      if (payload?.cacheStatus === 'stale') {
-        setError(payload.lastError ? `行情源刷新失败，当前展示最近成功快照：${payload.lastError}` : '行情源刷新失败，当前展示最近成功快照')
-      }
-    } catch (nextError) {
-      setError(nextError?.message || '资金星图数据加载失败')
+    } catch {
+      // 刷新失败由后端记录日志；前端保留已有快照，不打扰用户。
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }, [])
 
@@ -333,8 +320,8 @@ export default function CapitalMapDashboard() {
     return data.stocks.slice().sort((a, b) => Number(b.amountYi || 0) - Number(a.amountYi || 0)).slice(0, 10)
   }, [data])
 
-  if (!data && (loading || error)) {
-    return <EmptyState loading={loading} error={error} onRetry={() => loadData(false)} />
+  if (!data) {
+    return <EmptyState loading={loading} />
   }
 
   return (
@@ -348,18 +335,14 @@ export default function CapitalMapDashboard() {
               横轴为 PE，纵轴为成交额，颜色遵循 A 股红涨绿跌，并实时计算高流动性样本内的板块成交额占比与 PoC 估值锚。
             </p>
             <div className="mt-4 flex flex-wrap gap-2 text-xs text-foreground-dim">
-              <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-3 py-1.5">数据源：{data?.source || '东方财富公开行情接口'}</span>
               <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-3 py-1.5">样本：{data?.sampleScope || '--'}</span>
               <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-3 py-1.5">刷新：{data?.refreshHintSeconds || 60} 秒</span>
               <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-3 py-1.5">快照：{formatBeijingTime(data?.updatedAt)}</span>
             </div>
           </div>
-          <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] px-4 py-4 text-sm text-foreground-muted lg:min-w-[260px]">
-            <button type="button" onClick={() => loadData(true)} disabled={refreshing} className="w-full rounded-xl bg-primary px-4 py-2 font-medium text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">
-              {refreshing ? '刷新中' : '手动刷新'}
-            </button>
-            <div className="mt-3 text-xs leading-5 text-foreground-dim">最近加载：{formatBeijingTime(lastLoadedAt)}</div>
-            {error && <div className="mt-2 rounded-xl border border-border bg-card px-3 py-2 text-xs leading-5 text-negative">{error}</div>}
+          <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] px-4 py-4 text-sm text-foreground-muted lg:min-w-[220px]">
+            <div className="text-xs font-medium uppercase tracking-[0.16em] text-foreground-dim">Last loaded</div>
+            <div className="mt-2 text-sm leading-6 text-foreground-muted">{formatBeijingTime(lastLoadedAt)}</div>
           </div>
         </div>
       </section>
@@ -456,7 +439,7 @@ export default function CapitalMapDashboard() {
 
       <section className="rounded-3xl border border-border bg-card px-5 py-5 text-sm leading-7 text-foreground-muted">
         <strong className="font-medium text-foreground">数据口径说明：</strong>
-        {data?.sourceNote || '实时行情、PE、板块资金流来自东方财富公开网页接口。'} 主力净流入属于平台算法口径，不等同于交易所逐笔资金流。本页仅用于市场观察和产品验证，不构成投资建议。
+        {data?.sourceNote || '当前按成交额排序抓取高流动性样本。主力净流入属于平台算法口径，不等同于交易所逐笔资金流。本页仅用于市场观察和产品验证，不构成投资建议。'}
       </section>
     </div>
   )

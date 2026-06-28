@@ -1594,12 +1594,15 @@ func (a *appServer) handleCapitalMap(w http.ResponseWriter, r *http.Request) {
 	}
 	payload, err := a.capitalMapService.GetPayload(r.Context())
 	if err != nil {
+		log.Printf("capital map refresh failed: %v", err)
 		writeJSON(w, http.StatusBadGateway, map[string]any{
 			"error":   "CAPITAL_MAP_SOURCE_UNAVAILABLE",
-			"message": err.Error(),
-			"source":  "东方财富公开行情接口",
+			"message": "资金星图数据暂不可用",
 		})
 		return
+	}
+	if payload.CacheStatus == "stale" && strings.TrimSpace(payload.LastError) != "" {
+		log.Printf("capital map served stale snapshot after refresh failure: %s", payload.LastError)
 	}
 	w.Header().Set("Cache-Control", "s-maxage=30, stale-while-revalidate=90")
 	writeJSON(w, http.StatusOK, payload)

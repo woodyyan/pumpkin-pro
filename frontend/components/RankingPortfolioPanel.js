@@ -1,3 +1,5 @@
+// Legacy ranking-portfolio panel kept for historical audit. The new /portfolio-tracking
+// page now uses PortfolioTrackingDashboard and the /api/portfolio-tracking/* endpoints.
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useTheme } from '../lib/theme-context'

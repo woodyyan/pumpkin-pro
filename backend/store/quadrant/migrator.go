@@ -21,5 +21,9 @@ func (Migrator) AutoMigrate(db *gorm.DB) error {
 		&RankingPortfolioRealtimePrice{},
 		&RankingPortfolioResult{},
 		&RankingPortfolioJobStatus{},
+		&SimPortfolioDaily{},
+		&SimPortfolioPosition{},
+		&SimPortfolioTrade{},
+		&SimPortfolioMetrics{},
 	)
 }

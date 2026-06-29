@@ -1,3 +1,5 @@
+// Legacy ranking-portfolio helpers retained for the deprecated JSON materialized
+// result endpoint. New portfolio-tracking pages should use lib/portfolio-tracking.js.
 export function formatRankingPortfolioPercent(value, digits = 2) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
   const num = Number(value)

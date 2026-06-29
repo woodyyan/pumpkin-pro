@@ -22,6 +22,10 @@ func setupQuadrantTest(t *testing.T) (*Repository, func()) {
 		&RankingPortfolioRealtimePrice{},
 		&RankingPortfolioResult{},
 		&RankingPortfolioJobStatus{},
+		&SimPortfolioDaily{},
+		&SimPortfolioPosition{},
+		&SimPortfolioTrade{},
+		&SimPortfolioMetrics{},
 	)
 	return NewRepository(db), func() {}
 }

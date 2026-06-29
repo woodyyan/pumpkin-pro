@@ -17,11 +17,12 @@ describe('portfolio tracking page', () => {
     })
   })
 
-  it('renders the ranking portfolio panel as the dedicated page content', () => {
-    assert.match(pageSource, /RankingPortfolioPanel/)
-    assert.match(pageSource, /quadrant\/ranking-portfolio/)
-    assert.match(pageSource, /<h1 className="text-xl font-semibold tracking-tight text-foreground">组合跟踪<\/h1>/)
+  it('loads the new portfolio tracking overview and detail endpoints', () => {
+    assert.match(pageSource, /PortfolioTrackingDashboard/)
+    assert.match(pageSource, /\/api\/portfolio-tracking\/overview/)
+    assert.match(pageSource, /\/api\/portfolio-tracking\/\$\{encodeURIComponent\(portfolioId\)\}\/daily/)
+    assert.match(pageSource, /URLSearchParams/)
+    assert.match(pageSource, /新的模拟组合事实表口径/)
     assert.match(pageSource, /canonical" href="https:\/\/wolongtrader\.top\/portfolio-tracking"/)
-    assert.match(pageSource, /这里会展示卧龙量化因子选股出来的结果，并持续跟踪他们的收益，方便大家参考。/)
   })
 })

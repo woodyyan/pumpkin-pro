@@ -1,5 +1,9 @@
 package quadrant
 
+// Legacy ranking-portfolio materialization pipeline retained only for historical
+// audit and compatibility. The new /portfolio-tracking experience uses the
+// sim_portfolio_* fact-table chain instead of extending this JSON-result path.
+
 import (
 	"context"
 	"encoding/json"

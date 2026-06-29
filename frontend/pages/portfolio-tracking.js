@@ -1,43 +1,106 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import dynamic from 'next/dynamic'
 import Head from 'next/head'
 
 import { requestJson } from '../lib/api'
 
-const RankingPortfolioPanel = dynamic(() => import('../components/RankingPortfolioPanel'), { ssr: false })
+const PortfolioTrackingDashboard = dynamic(() => import('../components/PortfolioTrackingDashboard'), { ssr: false })
+
+function buildPortfolioTrackingUrl(pathname, params = {}) {
+  const searchParams = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === '') return
+    searchParams.set(key, value)
+  })
+  const query = searchParams.toString()
+  return query ? `${pathname}?${query}` : pathname
+}
 
 export default function PortfolioTrackingPage() {
-  const [rankingPortfolioData, setRankingPortfolioData] = useState(null)
-  const [rankingPortfolioLoading, setRankingPortfolioLoading] = useState(false)
+  const [overview, setOverview] = useState(null)
+  const [overviewLoading, setOverviewLoading] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [selectedPortfolioId, setSelectedPortfolioId] = useState('')
+  const [daily, setDaily] = useState(null)
+  const [positions, setPositions] = useState(null)
+  const [trades, setTrades] = useState(null)
+  const [metrics, setMetrics] = useState(null)
 
   useEffect(() => {
     let cancelled = false
-
-    const loadRankingPortfolio = async () => {
+    const loadOverview = async () => {
       try {
-        setRankingPortfolioLoading(true)
-        const data = await requestJson('/api/quadrant/ranking-portfolio')
-        if (!cancelled) {
-          setRankingPortfolioData(data)
-        }
+        setOverviewLoading(true)
+        const data = await requestJson('/api/portfolio-tracking/overview')
+        if (cancelled) return
+        setOverview(data)
+        const firstPortfolioId = Array.isArray(data?.items) && data.items.length ? data.items[0].portfolio_id : ''
+        setSelectedPortfolioId((current) => current || firstPortfolioId)
       } catch {
         if (!cancelled) {
-          setRankingPortfolioData(null)
+          setOverview(null)
         }
       } finally {
         if (!cancelled) {
-          setRankingPortfolioLoading(false)
+          setOverviewLoading(false)
         }
       }
     }
-
-    loadRankingPortfolio()
-
+    loadOverview()
     return () => {
       cancelled = true
     }
   }, [])
+
+  const selectedItem = useMemo(() => {
+    const items = Array.isArray(overview?.items) ? overview.items : []
+    return items.find((item) => item.portfolio_id === selectedPortfolioId) || items[0] || null
+  }, [overview, selectedPortfolioId])
+
+  useEffect(() => {
+    if (!selectedItem?.portfolio_id) {
+      setDaily(null)
+      setPositions(null)
+      setTrades(null)
+      setMetrics(null)
+      return undefined
+    }
+    let cancelled = false
+    const loadDetail = async () => {
+      try {
+        setDetailLoading(true)
+        const latestTradeDate = selectedItem.latest_trade_date || ''
+        const portfolioId = selectedItem.portfolio_id
+        const [dailyData, positionsData, tradesData, metricsData] = await Promise.all([
+          requestJson(buildPortfolioTrackingUrl(`/api/portfolio-tracking/${encodeURIComponent(portfolioId)}/daily`)),
+          requestJson(buildPortfolioTrackingUrl(`/api/portfolio-tracking/${encodeURIComponent(portfolioId)}/positions`, { trade_date: latestTradeDate })),
+          requestJson(buildPortfolioTrackingUrl(`/api/portfolio-tracking/${encodeURIComponent(portfolioId)}/trades`)),
+          requestJson(buildPortfolioTrackingUrl(`/api/portfolio-tracking/${encodeURIComponent(portfolioId)}/metrics`)),
+        ])
+        if (cancelled) return
+        setDaily(dailyData)
+        setPositions(positionsData)
+        setTrades(tradesData)
+        setMetrics(metricsData)
+      } catch {
+        if (!cancelled) {
+          setDaily(null)
+          setPositions(null)
+          setTrades(null)
+          setMetrics(null)
+        }
+      } finally {
+        if (!cancelled) {
+          setDetailLoading(false)
+        }
+      }
+    }
+    loadDetail()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedItem])
 
   return (
     <div className="space-y-6">
@@ -45,21 +108,22 @@ export default function PortfolioTrackingPage() {
         <title>组合跟踪 — 卧龙AI量化交易台</title>
         <meta
           name="description"
-          content="组合跟踪页集中展示卧龙AI精选模拟组合的收益曲线、风险指标、当前成分股与最近一次调仓。"
+          content="组合跟踪页展示新的模拟组合事实表口径：每日净值、当前持仓、实际理论成交与绩效指标。"
         />
         <link rel="canonical" href="https://wolongtrader.top/portfolio-tracking" />
       </Head>
 
-      <section className="rounded-2xl border border-border bg-card px-5 py-5">
-        <div className="max-w-3xl">
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">组合跟踪</h1>
-          <p className="mt-2 text-sm leading-6 text-foreground-muted">
-            这里会展示卧龙量化因子选股出来的结果，并持续跟踪他们的收益，方便大家参考。
-          </p>
-        </div>
-      </section>
-
-      <RankingPortfolioPanel data={rankingPortfolioData} loading={rankingPortfolioLoading} />
+      <PortfolioTrackingDashboard
+        overview={overview}
+        overviewLoading={overviewLoading}
+        detailLoading={detailLoading}
+        selectedPortfolioId={selectedItem?.portfolio_id || ''}
+        onSelectPortfolio={setSelectedPortfolioId}
+        daily={daily}
+        positions={positions}
+        trades={trades}
+        metrics={metrics}
+      />
     </div>
   )
 }

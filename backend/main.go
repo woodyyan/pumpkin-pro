@@ -3647,6 +3647,9 @@ func (a *appServer) handleQuadrantRanking(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleQuadrantRankingPortfolio keeps the legacy JSON-materialized ranking portfolio
+// endpoint for historical audit only. New /portfolio-tracking pages should call the
+// dedicated /api/portfolio-tracking/* endpoints.
 func (a *appServer) handleQuadrantRankingPortfolio(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
@@ -4265,6 +4268,8 @@ func main() {
 	mux.HandleFunc("/api/quadrant/status", server.handleQuadrantStatus)
 	mux.HandleFunc("/api/quadrant/ranking", server.handleQuadrantRanking)
 	mux.HandleFunc("/api/quadrant/ranking-portfolio", server.handleQuadrantRankingPortfolio)
+	mux.HandleFunc("/api/portfolio-tracking/overview", server.handlePortfolioTrackingOverview)
+	mux.HandleFunc("/api/portfolio-tracking/", server.handlePortfolioTrackingSubroutes)
 
 	mux.HandleFunc("/api/search", server.withOptionalAuth(server.handleSearchStocks))
 	mux.HandleFunc("/api/ai-analysis/history", server.withRequiredAuth(server.handleGlobalAIAnalysisHistory))
@@ -4278,6 +4283,10 @@ func main() {
 	mux.HandleFunc("/api/admin/ranking-portfolio-repair", server.withSuperAdminAuth(server.handleAdminRankingPortfolioRepair))
 	mux.HandleFunc("/api/admin/ranking-portfolio-verify", server.withSuperAdminAuth(server.handleAdminRankingPortfolioVerify))
 	mux.HandleFunc("/api/admin/ranking-portfolio-fix", server.withSuperAdminAuth(server.handleAdminRankingPortfolioFix))
+	mux.HandleFunc("/api/admin/portfolio-tracking/status", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingStatus))
+	mux.HandleFunc("/api/admin/portfolio-tracking/verify", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingVerify))
+	mux.HandleFunc("/api/admin/portfolio-tracking/recompute", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingRecompute))
+	mux.HandleFunc("/api/admin/portfolio-tracking/reset", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingReset))
 	mux.HandleFunc("/api/admin/company-profiles", server.withSuperAdminAuth(server.handleAdminCompanyProfiles))
 	mux.HandleFunc("/api/admin/company-profiles/refresh", server.withSuperAdminAuth(server.handleAdminCompanyProfileRefresh))
 	mux.HandleFunc("/api/admin/company-profiles/refresh-status", server.withSuperAdminAuth(server.handleAdminCompanyProfileRefreshStatus))

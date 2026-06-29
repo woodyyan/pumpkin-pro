@@ -3604,6 +3604,17 @@ func (a *appServer) handleQuadrantBulkSave(w http.ResponseWriter, r *http.Reques
 	}
 	log.Printf("[quadrant] bulk-save: wrote %d scores in %v", count, elapsed)
 	writeJSON(w, http.StatusOK, map[string]any{"saved": count})
+	if a.quadrantService != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			if err := a.quadrantService.SyncSimPortfolios(ctx); err != nil {
+				log.Printf("[portfolio-tracking] auto sync after quadrant bulk-save failed: %v", err)
+				return
+			}
+			log.Printf("[portfolio-tracking] auto sync after quadrant bulk-save completed")
+		}()
+	}
 }
 
 func (a *appServer) handleQuadrantStatus(w http.ResponseWriter, r *http.Request) {
@@ -4285,6 +4296,7 @@ func main() {
 	mux.HandleFunc("/api/admin/ranking-portfolio-fix", server.withSuperAdminAuth(server.handleAdminRankingPortfolioFix))
 	mux.HandleFunc("/api/admin/portfolio-tracking/status", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingStatus))
 	mux.HandleFunc("/api/admin/portfolio-tracking/verify", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingVerify))
+	mux.HandleFunc("/api/admin/portfolio-tracking/sync", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingSync))
 	mux.HandleFunc("/api/admin/portfolio-tracking/recompute", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingRecompute))
 	mux.HandleFunc("/api/admin/portfolio-tracking/reset", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingReset))
 	mux.HandleFunc("/api/admin/company-profiles", server.withSuperAdminAuth(server.handleAdminCompanyProfiles))

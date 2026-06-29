@@ -1708,30 +1708,27 @@ export function AIPickerAdminPanel({ onUnauthorized }) {
 export function QuadrantAdminPanel({ onUnauthorized }) {
   const [expandedLog, setExpandedLog] = useState(null)
   const [triggering, setTriggering] = useState(false)
-  const [repairing, setRepairing] = useState(false)
-  const [repairConfirming, setRepairConfirming] = useState(false)
-  const [repairSummary, setRepairSummary] = useState(null)
-  // ── verify / fix state ──
-  const [verifying, setVerifying] = useState(false)
-  const [verifyResult, setVerifyResult] = useState(null)      // RankingPortfolioVerifyAllResult
-  const [fixing, setFixing] = useState(false)
-  const [fixConfirming, setFixConfirming] = useState(false)
-  const [fixDone, setFixDone] = useState(false)
+  const [syncingPortfolio, setSyncingPortfolio] = useState(false)
+  const [verifyingPortfolio, setVerifyingPortfolio] = useState(false)
+  const [verifyPortfolioResult, setVerifyPortfolioResult] = useState(null)
+  const [recomputingPortfolio, setRecomputingPortfolio] = useState(false)
+  const [recomputeConfirming, setRecomputeConfirming] = useState(false)
+  const [portfolioActionNotice, setPortfolioActionNotice] = useState('')
   const [actionError, setActionError] = useState('')
   const resource = useAdminResource({
     key: 'admin:quadrant',
     request: async () => {
-      const [overview, logsPayload, progress, rankingPortfolioStatus] = await Promise.all([
+      const [overview, logsPayload, progress, portfolioTrackingStatus] = await Promise.all([
         adminFetch('/api/admin/quadrant-overview').catch(() => null),
         adminFetch('/api/admin/quadrant-logs').catch(() => ({ items: [] })),
         adminFetch('/api/admin/compute-status').catch(() => null),
-        adminFetch('/api/admin/ranking-portfolio-status').catch(() => ({ items: [] })),
+        adminFetch('/api/admin/portfolio-tracking/status').catch(() => ({ items: [] })),
       ])
       return {
         overview,
         logs: logsPayload?.items || [],
         progress,
-        rankingPortfolioStatus: rankingPortfolioStatus?.items || [],
+        portfolioTrackingStatus: portfolioTrackingStatus?.items || [],
       }
     },
     staleMs: 5_000,
@@ -1746,7 +1743,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
   const overview = resource.data?.overview || null
   const logs = resource.data?.logs || null
   const progress = resource.data?.progress || null
-  const rankingPortfolioStatus = resource.data?.rankingPortfolioStatus || []
+  const portfolioTrackingStatus = resource.data?.portfolioTrackingStatus || []
 
   // ── Manual trigger ──
   const handleTrigger = async (exchange) => {
@@ -1769,78 +1766,64 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
     }
   }
 
-  const handleRankingPortfolioRepair = async () => {
-    if (!repairConfirming) {
-      setRepairConfirming(true)
-      return
-    }
-    setRepairConfirming(false)
-    setRepairing(true)
-    setRepairSummary(null)
+  const handlePortfolioTrackingSync = async () => {
+    setSyncingPortfolio(true)
     setActionError('')
+    setPortfolioActionNotice('')
     try {
-      const resp = await adminFetch('/api/admin/ranking-portfolio-repair', {
-        method: 'POST',
-      })
-      if (resp?.summary) setRepairSummary(resp.summary)
+      const resp = await adminFetch('/api/admin/portfolio-tracking/sync', { method: 'POST' })
+      setVerifyPortfolioResult(null)
+      setPortfolioActionNotice(resp?.message || '模拟组合事实表已同步最新信号。')
       await resource.refresh()
     } catch (err) {
-      const message = handleAdminActionError(err, onUnauthorized, '触发开盘价补齐与曲线重算失败')
-      if (message) {
-        setActionError(message)
-      }
-    } finally {
-      setRepairing(false)
-    }
-  }
-
-  // ── verify handler ──
-  const handleRankingPortfolioVerify = async () => {
-    setVerifying(true)
-    setVerifyResult(null)
-    setFixConfirming(false)
-    setFixDone(false)
-    setActionError('')
-    try {
-      const resp = await adminFetch('/api/admin/ranking-portfolio-verify', { method: 'POST' })
-      setVerifyResult(resp)
-    } catch (err) {
-      const message = handleAdminActionError(err, onUnauthorized, '验证收益曲线失败')
+      const message = handleAdminActionError(err, onUnauthorized, '同步模拟组合事实表失败')
       if (message) setActionError(message)
     } finally {
-      setVerifying(false)
+      setSyncingPortfolio(false)
     }
   }
 
-  // ── fix handler ──
-  const handleRankingPortfolioFix = async () => {
-    if (!fixConfirming) {
-      setFixConfirming(true)
-      return
-    }
-    setFixConfirming(false)
-    // Collect first valid verify_token across all items.
-    const token = verifyResult?.items?.find((it) => it.verify_token)?.verify_token
-    if (!token) {
-      setActionError('未找到有效的 verify_token，请重新验证')
-      return
-    }
-    setFixing(true)
+  const handlePortfolioTrackingVerify = async () => {
+    setVerifyingPortfolio(true)
     setActionError('')
+    setPortfolioActionNotice('')
     try {
-      await adminFetch('/api/admin/ranking-portfolio-fix', {
+      const resp = await adminFetch('/api/admin/portfolio-tracking/verify', { method: 'POST' })
+      setVerifyPortfolioResult(resp)
+      const diffCount = Array.isArray(resp?.items) ? resp.items.filter((item) => item.status !== 'ok').length : 0
+      setPortfolioActionNotice(diffCount > 0 ? `发现 ${diffCount} 条需要人工核查的事实表记录。` : '所有事实表记录校验通过。')
+      await resource.refresh()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '验证模拟组合事实表失败')
+      if (message) setActionError(message)
+    } finally {
+      setVerifyingPortfolio(false)
+    }
+  }
+
+  const handlePortfolioTrackingRecompute = async () => {
+    if (!recomputeConfirming) {
+      setRecomputeConfirming(true)
+      return
+    }
+    setRecomputeConfirming(false)
+    setRecomputingPortfolio(true)
+    setActionError('')
+    setPortfolioActionNotice('')
+    try {
+      const resp = await adminFetch('/api/admin/portfolio-tracking/recompute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verify_token: token }),
+        body: JSON.stringify({ reset: true }),
       })
-      setFixDone(true)
-      setVerifyResult(null)
+      setVerifyPortfolioResult(null)
+      setPortfolioActionNotice(resp?.message || '模拟组合已从头重算。')
       await resource.refresh()
     } catch (err) {
-      const message = handleAdminActionError(err, onUnauthorized, '修复收益曲线失败')
+      const message = handleAdminActionError(err, onUnauthorized, '从头重算模拟组合失败')
       if (message) setActionError(message)
     } finally {
-      setFixing(false)
+      setRecomputingPortfolio(false)
     }
   }
 
@@ -1901,6 +1884,25 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
     )
   }
 
+  const portfolioVerifyDiffs = Array.isArray(verifyPortfolioResult?.items)
+    ? verifyPortfolioResult.items.filter((item) => item.status !== 'ok')
+    : []
+  const getPortfolioTrackingStatusClass = (status) => {
+    switch (status) {
+      case 'completed':
+        return 'text-positive'
+      case 'pending_open_price':
+      case 'pending_close_price':
+      case 'seeded':
+        return 'text-amber-700'
+      case 'shortfall':
+      case 'failed':
+        return 'text-negative'
+      default:
+        return 'text-foreground-muted'
+    }
+  }
+
   if (!overview && !logs) return null
 
   return (
@@ -1947,84 +1949,40 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
         </div>
       )}
 
-      {/* 模拟组合收益曲线状态 */}
+      {/* 新口径模拟组合管理 */}
       <div className="mb-5 rounded-xl border border-border bg-card p-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-foreground-muted">模拟组合收益曲线状态</h3>
-            <p className="mt-1 text-xs text-foreground-dim">仅在管理后台展示每日状态、失败原因与滞后情况。</p>
-            {rankingPortfolioStatus.length > 0 && rankingPortfolioStatus[0]?.cutover_date && (
-              <p className="mt-0.5 text-xs text-foreground-disabled">
-                仅补齐 {rankingPortfolioStatus[0].cutover_date} 之后缺失的开盘价，不会修复上线前历史曲线。
-              </p>
-            )}
+            <h3 className="text-sm font-semibold text-foreground-muted">新口径模拟组合管理</h3>
+            <p className="mt-1 text-xs text-foreground-dim">`/portfolio-tracking` 已切到事实表链路。自动同步挂在四象限 daily bulk-save 成功之后，读取接口不再承担写库职责。</p>
           </div>
-          <div className="flex flex-col items-end gap-1.5">
-            {/* ── verify / fix buttons ── */}
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <button
-                onClick={handleRankingPortfolioVerify}
-                disabled={verifying || repairing}
-                className="rounded-lg border border-sky-400/30 bg-sky-500/10 px-3 py-1.5 text-xs font-medium text-sky-200 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {verifying ? '验证中…' : '🔍 验证收益曲线'}
-              </button>
-              {verifyResult && verifyResult.has_diff && !fixDone && (
-                fixConfirming ? (
-                  <>
-                    <span className="text-xs text-rose-400">确认修复所有差异点？</span>
-                    <button
-                      onClick={handleRankingPortfolioFix}
-                      disabled={fixing}
-                      className="rounded-lg border border-rose-500/50 bg-rose-500/20 px-3 py-1.5 text-xs font-medium text-rose-200 transition hover:bg-rose-500/30 disabled:opacity-60"
-                    >
-                      确认修复
-                    </button>
-                    <button
-                      onClick={() => setFixConfirming(false)}
-                      className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground-dim hover:bg-background-alt"
-                    >
-                      取消
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    onClick={handleRankingPortfolioFix}
-                    disabled={fixing}
-                    className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-300 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {fixing ? '修复中…' : '🛠 修复差异数据'}
-                  </button>
-                )
-              )}
-            </div>
-            {/* verify result banner */}
-            {verifyResult && (
-              <div className={`mt-1 text-right text-[11px] ${verifyResult.has_diff ? 'text-rose-400' : 'text-positive'}`}>
-                {verifyResult.has_diff
-                  ? verifyResult.items?.map((it) =>
-                      it.has_diff ? `${it.definition_name}：${it.diff_count} 个差异点 ` : null
-                    )
-                  : `✅ 所有组合均一致（${verifyResult.checked_at ? formatAdminDateTime(verifyResult.checked_at) : ''}）`
-                }
-              </div>
-            )}
-            {fixDone && (
-              <div className="text-right text-[11px] text-positive">✅ 修复完成，已刷新状态</div>
-            )}
-            {/* ── original repair button ── */}
-            {repairConfirming ? (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-amber-400">确认补齐开盘价并重算曲线（仅上线日后）？</span>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              onClick={handlePortfolioTrackingSync}
+              disabled={syncingPortfolio || recomputingPortfolio}
+              className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {syncingPortfolio ? '同步中…' : '同步最新事实表'}
+            </button>
+            <button
+              onClick={handlePortfolioTrackingVerify}
+              disabled={verifyingPortfolio || syncingPortfolio || recomputingPortfolio}
+              className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {verifyingPortfolio ? '验证中…' : '验证事实表一致性'}
+            </button>
+            {recomputeConfirming ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-amber-700">确认从头重算全部新口径组合？</span>
                 <button
-                  onClick={handleRankingPortfolioRepair}
-                  disabled={repairing}
-                  className="rounded-lg border border-amber-500/50 bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-200 transition hover:bg-amber-500/30 disabled:opacity-60"
+                  onClick={handlePortfolioTrackingRecompute}
+                  disabled={recomputingPortfolio}
+                  className="rounded-lg border border-amber-500/40 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  确认执行
+                  确认重算
                 </button>
                 <button
-                  onClick={() => setRepairConfirming(false)}
+                  onClick={() => setRecomputeConfirming(false)}
                   className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground-dim hover:bg-background-alt"
                 >
                   取消
@@ -2032,25 +1990,29 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
               </div>
             ) : (
               <button
-                onClick={handleRankingPortfolioRepair}
-                disabled={repairing}
-                className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/50 dark:bg-amber-500/30 dark:text-amber-100 dark:hover:bg-amber-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={handlePortfolioTrackingRecompute}
+                disabled={recomputingPortfolio || syncingPortfolio}
+                className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {repairing ? '补齐中…' : '补齐开盘价并重算曲线（仅上线日后）'}
+                {recomputingPortfolio ? '重算中…' : '从头重算全部组合'}
               </button>
-            )}
-            {repairSummary && !repairing && (
-              <div className="text-right text-[11px] text-foreground-dim">
-                上次补齐：回填 {repairSummary.backfill_filled ?? 0} 条
-                {repairSummary.backfill_still_pending > 0 && (
-                  <span className="ml-1 text-amber-400">· 仍待确认 {repairSummary.backfill_still_pending} 条</span>
-                )}
-              </div>
             )}
           </div>
         </div>
-        {rankingPortfolioStatus.length === 0 ? (
-          <p className="text-xs text-foreground-dim">暂无模拟组合任务状态。</p>
+
+        <div className="mb-3 rounded-xl border border-dashed border-border bg-background px-4 py-3 text-xs leading-6 text-foreground-muted">
+          旧版「补齐开盘价并重算曲线（仅上线日后）」与「验证收益曲线」只服务 legacy JSON 结果表。
+          当前主站页面已不再依赖那套结果，管理后台不再展示旧按钮；相关后端接口暂时保留，仅用于历史核查。
+        </div>
+
+        {portfolioActionNotice ? (
+          <div className="mb-3 rounded-lg border border-positive/20 bg-positive/10 px-3 py-2 text-xs text-positive">
+            {portfolioActionNotice}
+          </div>
+        ) : null}
+
+        {portfolioTrackingStatus.length === 0 ? (
+          <p className="text-xs text-foreground-dim">暂无新口径模拟组合状态。</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
@@ -2058,102 +2020,67 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
                 <tr className="border-b border-border text-foreground-dim">
                   <th className="pb-2 pr-4 font-medium">组合</th>
                   <th className="pb-2 pr-4 font-medium">市场</th>
-                  <th className="pb-2 pr-4 font-medium">最新榜单</th>
-                  <th className="pb-2 pr-4 font-medium">最新收益曲线</th>
-                  <th className="pb-2 pr-4 font-medium">开盘价缺口</th>
-                  <th className="pb-2 pr-4 font-medium">状态</th>
-                  <th className="pb-2 pr-4 font-medium">自动补偿</th>
-                  <th className="pb-2 pr-4 font-medium">失败原因</th>
-                  <th className="pb-2 font-medium">更新时间</th>
+                  <th className="pb-2 pr-4 font-medium">最新信号日</th>
+                  <th className="pb-2 pr-4 font-medium">待执行信号</th>
+                  <th className="pb-2 pr-4 font-medium">下一次开盘</th>
+                  <th className="pb-2 pr-4 font-medium">最新估值日</th>
+                  <th className="pb-2 font-medium">状态</th>
                 </tr>
               </thead>
               <tbody className="text-foreground-muted">
-                {rankingPortfolioStatus.map((item) => {
-                  const isLagging = Number(item.lag_days || 0) > 0
-                  const statusText = item.status === 'failed' ? '失败' : item.status === 'lagging' || isLagging ? `滞后 ${item.lag_days} 天` : '正常'
-                  const statusClass = item.status === 'failed'
-                    ? 'text-negative'
-                    : item.status === 'lagging' || isLagging
-                      ? 'text-amber-300'
-                      : 'text-positive'
-                  const pendingOpen = Number(item.pending_open_price_count || 0)
-                  return (
-                    <tr key={item.definition_id} className="border-b border-border last:border-0 align-top">
-                      <td className="py-2 pr-4">
-                        <div className="font-medium text-foreground-muted">{item.definition_name}</div>
-                        <div className="text-[11px] text-foreground-disabled">{item.definition_code}</div>
-                      </td>
-                      <td className="py-2 pr-4">{item.exchange}</td>
-                      <td className="py-2 pr-4 tabular-nums">{item.latest_ranking_date || '--'}</td>
-                      <td className="py-2 pr-4 tabular-nums">{item.latest_portfolio_date || '--'}</td>
-                      <td className={`py-2 pr-4 tabular-nums font-medium ${pendingOpen > 0 ? 'text-amber-400' : 'text-positive'}`}>
-                        {pendingOpen > 0 ? `缺 ${pendingOpen} 条` : '已补全'}
-                      </td>
-                      <td className={`py-2 pr-4 font-medium ${statusClass}`}>{statusText}</td>
-                      <td className="py-2 pr-4">{item.auto_repair_status || item.auto_repair_message || '--'}</td>
-                      <td className="py-2 pr-4 max-w-[320px] break-words">{item.failure_reason || item.failure_stage || '--'}</td>
-                      <td className="py-2 tabular-nums">{item.updated_at ? formatAdminDateTime(item.updated_at) : '--'}</td>
-                    </tr>
-                  )
-                })}
+                {portfolioTrackingStatus.map((item) => (
+                  <tr key={item.portfolio_id} className="border-b border-border last:border-0 align-top">
+                    <td className="py-2 pr-4 font-medium text-foreground">{item.name}</td>
+                    <td className="py-2 pr-4">{item.exchange === 'HKEX' ? '中国香港' : 'A股'}</td>
+                    <td className="py-2 pr-4 tabular-nums">{item.latest_signal_date || '--'}</td>
+                    <td className="py-2 pr-4 tabular-nums">{item.pending_signal_date || '--'}</td>
+                    <td className="py-2 pr-4 tabular-nums">{item.next_entry_trade_date || '--'}</td>
+                    <td className="py-2 pr-4 tabular-nums">{item.latest_trade_date || '--'}</td>
+                    <td className={`py-2 font-medium ${getPortfolioTrackingStatusClass(item.status)}`}>{item.status_text || item.status || '--'}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         )}
-        {/* ── verify diff detail ── */}
-        {verifyResult && verifyResult.has_diff && (
-          <div className="mt-4 space-y-3">
-            {verifyResult.items?.filter((it) => it.has_diff).map((it) => (
-              <div key={it.definition_id} className="rounded-lg border border-rose-400/20 bg-rose-500/[0.06] p-3">
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-rose-300">
-                  <span>{it.definition_name}</span>
-                  <span className="text-foreground-dim font-normal">·</span>
-                  <span className="text-foreground-dim font-normal">{it.diff_count} 个差异点（共 {it.total_points} 点）</span>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-[11px] text-left">
-                    <thead>
-                      <tr className="border-b border-rose-400/15 text-foreground-dim">
-                        <th className="pb-1.5 pr-3 font-medium">日期</th>
-                        <th className="pb-1.5 pr-3 font-medium text-right">已存 NAV</th>
-                        <th className="pb-1.5 pr-3 font-medium text-right">重算 NAV</th>
-                        <th className="pb-1.5 pr-3 font-medium text-right">偏差</th>
-                        <th className="pb-1.5 pr-3 font-medium text-right">已存日收益</th>
-                        <th className="pb-1.5 font-medium text-right">重算日收益</th>
+
+        {verifyPortfolioResult ? (
+          portfolioVerifyDiffs.length > 0 ? (
+            <div className="mt-4 rounded-xl border border-negative/20 bg-negative/10 px-4 py-3">
+              <div className="text-xs font-medium text-negative">发现 {portfolioVerifyDiffs.length} 条异常记录</div>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-[11px] text-left">
+                  <thead>
+                    <tr className="border-b border-border text-foreground-dim">
+                      <th className="pb-2 pr-3 font-medium">组合</th>
+                      <th className="pb-2 pr-3 font-medium">日期</th>
+                      <th className="pb-2 pr-3 font-medium">状态</th>
+                      <th className="pb-2 pr-3 font-medium text-right">总资产</th>
+                      <th className="pb-2 pr-3 font-medium text-right">持仓汇总</th>
+                      <th className="pb-2 font-medium">说明</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-foreground-muted">
+                    {portfolioVerifyDiffs.map((item) => (
+                      <tr key={`${item.portfolio_id}-${item.trade_date}-${item.status}`} className="border-b border-border last:border-0">
+                        <td className="py-2 pr-3">{item.portfolio_id}</td>
+                        <td className="py-2 pr-3 tabular-nums">{item.trade_date}</td>
+                        <td className="py-2 pr-3 font-medium text-negative">{item.status}</td>
+                        <td className="py-2 pr-3 text-right tabular-nums">{item.total_assets?.toFixed?.(2) || '--'}</td>
+                        <td className="py-2 pr-3 text-right tabular-nums">{item.position_assets?.toFixed?.(2) || '--'}</td>
+                        <td className="py-2">{item.message || '--'}</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {it.diffs?.slice(0, 20).map((d) => (
-                        <tr key={d.date} className="border-b border-rose-400/10 last:border-0">
-                          <td className="py-1 pr-3 tabular-nums text-foreground-muted">{d.date}</td>
-                          <td className="py-1 pr-3 tabular-nums text-right">{d.stored_nav?.toFixed(6)}</td>
-                          <td className="py-1 pr-3 tabular-nums text-right">{d.recomputed_nav?.toFixed(6)}</td>
-                          <td className={`py-1 pr-3 tabular-nums text-right font-medium ${d.nav_delta > 0 ? 'text-positive' : 'text-negative'}`}>
-                            {d.nav_delta > 0 ? '+' : ''}{d.nav_delta?.toFixed(6)}
-                          </td>
-                          <td className="py-1 pr-3 tabular-nums text-right text-foreground-dim">{d.stored_daily_pct?.toFixed(4)}%</td>
-                          <td className="py-1 tabular-nums text-right text-foreground-dim">{d.recomputed_daily_pct?.toFixed(4)}%</td>
-                        </tr>
-                      ))}
-                      {it.diffs?.length > 20 && (
-                        <tr>
-                          <td colSpan={6} className="pt-1 text-center text-foreground-disabled">
-                            … 还有 {it.diffs.length - 20} 个差异点未展示
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ))}
-          </div>
-        )}
-        {verifyResult && !verifyResult.has_diff && (
-          <div className="mt-3 rounded-lg border border-positive/20 bg-positive/[0.06] px-3 py-2 text-xs text-positive">
-            ✅ {verifyResult.items?.map((it) => it.message).join(' · ')}
-          </div>
-        )}
+            </div>
+          ) : (
+            <div className="mt-3 rounded-lg border border-positive/20 bg-positive/10 px-3 py-2 text-xs text-positive">
+              ✅ 所有事实表记录一致。
+            </div>
+          )
+        ) : null}
       </div>
 
       {/* Overview Cards */}

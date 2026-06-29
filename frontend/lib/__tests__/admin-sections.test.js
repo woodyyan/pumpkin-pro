@@ -20,7 +20,7 @@ describe('resolveAdminSectionApis()', () => {
       '/api/admin/quadrant-overview',
       '/api/admin/quadrant-logs',
       '/api/admin/compute-status',
-      '/api/admin/ranking-portfolio-status',
+      '/api/admin/portfolio-tracking/status',
     ])
   })
 

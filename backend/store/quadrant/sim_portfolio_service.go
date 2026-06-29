@@ -628,6 +628,12 @@ func (s *Service) syncSimPortfolios(ctx context.Context) error {
 	return nil
 }
 
+func (s *Service) SyncSimPortfolios(ctx context.Context) error {
+	s.simPortfolioMu.Lock()
+	defer s.simPortfolioMu.Unlock()
+	return s.syncSimPortfolios(ctx)
+}
+
 func buildSimPortfolioStatusText(status string) string {
 	switch status {
 	case "pending_open_price":
@@ -742,9 +748,6 @@ func toSimPortfolioTradeItems(rows []SimPortfolioTrade) []SimPortfolioTradeItem 
 }
 
 func (s *Service) GetSimPortfolioOverview(ctx context.Context) (*SimPortfolioOverviewResponse, error) {
-	if err := s.syncSimPortfolios(ctx); err != nil {
-		return nil, err
-	}
 	definitions, err := s.repo.ListActiveRankingPortfolioDefinitions(ctx)
 	if err != nil {
 		return nil, err
@@ -901,9 +904,6 @@ func (s *Service) GetSimPortfolioMetrics(ctx context.Context, portfolioID string
 }
 
 func (s *Service) GetSimPortfolioAdminStatus(ctx context.Context) (*SimPortfolioAdminStatusResponse, error) {
-	if err := s.syncSimPortfolios(ctx); err != nil {
-		return nil, err
-	}
 	definitions, err := s.repo.ListActiveRankingPortfolioDefinitions(ctx)
 	if err != nil {
 		return nil, err
@@ -985,6 +985,8 @@ func (s *Service) VerifySimPortfolios(ctx context.Context, portfolioID string) (
 }
 
 func (s *Service) RecomputeSimPortfolios(ctx context.Context, portfolioID string, fromDate string, toDate string, reset bool) error {
+	s.simPortfolioMu.Lock()
+	defer s.simPortfolioMu.Unlock()
 	definitions, err := s.repo.ListActiveRankingPortfolioDefinitions(ctx)
 	if err != nil {
 		return err
@@ -1001,6 +1003,8 @@ func (s *Service) RecomputeSimPortfolios(ctx context.Context, portfolioID string
 }
 
 func (s *Service) ResetSimPortfolios(ctx context.Context, portfolioID string) error {
+	s.simPortfolioMu.Lock()
+	defer s.simPortfolioMu.Unlock()
 	return s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, model := range []any{&SimPortfolioPosition{}, &SimPortfolioTrade{}, &SimPortfolioMetrics{}, &SimPortfolioDaily{}} {
 			query := tx

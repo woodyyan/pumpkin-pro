@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -34,6 +35,7 @@ type Service struct {
 	worker              *Worker           // optional, injected for manual trigger
 	repairHook          func(context.Context) error
 	portfolioRepairHook func(context.Context) error
+	simPortfolioMu      sync.Mutex
 }
 
 func NewService(repo *Repository) *Service {

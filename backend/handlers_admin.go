@@ -378,8 +378,8 @@ func (a *appServer) handleAdminQuadrantTrigger(w http.ResponseWriter, r *http.Re
 	})
 }
 
-// handleAdminRankingPortfolioVerify runs a read-only replay of the NAV series
-// for all definitions and returns per-definition diff reports.
+// LEGACY: handleAdminRankingPortfolioVerify runs a read-only replay of the old
+// JSON NAV series and returns per-definition diff reports.
 // POST /api/admin/ranking-portfolio-verify
 func (a *appServer) handleAdminRankingPortfolioVerify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -394,9 +394,9 @@ func (a *appServer) handleAdminRankingPortfolioVerify(w http.ResponseWriter, r *
 	writeJSON(w, http.StatusOK, result)
 }
 
-// handleAdminRankingPortfolioFix repairs definitions whose series differ from
-// the recomputed values.  Requires a valid verify_token issued by the verify
-// endpoint (expires in 10 min, single-use).
+// LEGACY: handleAdminRankingPortfolioFix repairs the old JSON result series.
+// It requires a valid verify_token issued by the legacy verify endpoint
+// (expires in 10 min, single-use).
 // POST /api/admin/ranking-portfolio-fix
 func (a *appServer) handleAdminRankingPortfolioFix(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -424,7 +424,7 @@ func (a *appServer) handleAdminRankingPortfolioFix(w http.ResponseWriter, r *htt
 	})
 }
 
-// handleAdminRankingPortfolioStatus returns per-definition admin status.
+// LEGACY: handleAdminRankingPortfolioStatus returns admin status for the old JSON result chain.
 func (a *appServer) handleAdminRankingPortfolioStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
@@ -442,6 +442,7 @@ func (a *appServer) handleAdminRankingPortfolioStatus(w http.ResponseWriter, r *
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// LEGACY: handleAdminRankingPortfolioRepair triggers the old open-price backfill and JSON rebuild path.
 func (a *appServer) handleAdminRankingPortfolioRepair(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")

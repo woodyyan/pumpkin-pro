@@ -211,6 +211,27 @@ func TestHandleAdminRankingPortfolioRepairTriggersExecution(t *testing.T) {
 	}
 }
 
+func TestHandleAdminPortfolioTrackingSync(t *testing.T) {
+	repo, cleanup := quadrantSetupForAdminTest(t)
+	defer cleanup()
+	server := &appServer{quadrantService: quadrant.NewService(repo)}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/portfolio-tracking/sync", nil)
+	resp := httptest.NewRecorder()
+	server.handleAdminPortfolioTrackingSync(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["ok"] != true {
+		t.Fatalf("expected ok=true, got %+v", body)
+	}
+}
+
 func quadrantSetupForAdminTest(t *testing.T) (*quadrant.Repository, func()) {
 	t.Helper()
 	db := testutil.InMemoryDB(t)

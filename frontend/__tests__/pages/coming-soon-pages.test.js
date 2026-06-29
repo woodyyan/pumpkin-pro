@@ -81,7 +81,8 @@ describe('coming soon placeholder pages', () => {
 
     assert.doesNotThrow(() => parse(pageSource, { sourceType: 'module', plugins: ['jsx'] }))
     assert.doesNotMatch(pageSource, /ComingSoonPage/)
-    assert.match(pageSource, /RankingPortfolioPanel/)
+    assert.match(pageSource, /PortfolioTrackingDashboard/)
+    assert.match(pageSource, /\/api\/portfolio-tracking\/overview/)
     assert.match(pageSource, /canonical" href="https:\/\/wolongtrader\.top\/portfolio-tracking"/)
   })
 })

@@ -7,7 +7,7 @@ export const PORTFOLIO_TRACKING_MARKETS = {
   },
   HKEX: {
     key: 'HKEX',
-    label: '中国香港',
+    label: '港股',
     accentClass: 'text-sky-600',
     badgeClass: 'border-sky-500/20 bg-sky-500/10 text-sky-700',
   },

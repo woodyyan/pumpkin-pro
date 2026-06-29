@@ -105,10 +105,10 @@ export default function PortfolioTrackingPage() {
   return (
     <div className="space-y-6">
       <Head>
-        <title>组合跟踪 — 卧龙AI量化交易台</title>
+        <title>模拟组合跟踪 — 卧龙AI量化交易台</title>
         <meta
           name="description"
-          content="组合跟踪页展示新的模拟组合事实表口径：每日净值、当前持仓、实际理论成交与绩效指标。"
+          content="模拟组合跟踪页展示每日净值、当前持仓、实际理论成交与绩效指标。"
         />
         <link rel="canonical" href="https://wolongtrader.top/portfolio-tracking" />
       </Head>

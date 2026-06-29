@@ -51,7 +51,7 @@ function SummaryMetric({ label, value, valueClass = 'text-foreground' }) {
 
 function buildPortfolioTrackingSelectionLabel(item) {
   if (!item) return '模拟组合'
-  const marketLabel = String(item?.exchange || '').toUpperCase() === 'HKEX' ? '中国香港' : 'A股'
+  const marketLabel = String(item?.exchange || '').toUpperCase() === 'HKEX' ? '港股' : 'A股'
   return `${marketLabel} · ${item?.name || '模拟组合'}${item?.portfolio_variant ? ` · ${item.portfolio_variant}` : ''}`
 }
 
@@ -323,12 +323,11 @@ export default function PortfolioTrackingDashboard({
       <section className="rounded-2xl border border-border bg-card px-5 py-5">
         <div className="max-w-4xl">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-xl font-semibold tracking-tight text-foreground">组合跟踪</h1>
+            <h1 className="text-xl font-semibold tracking-tight text-foreground">模拟组合跟踪</h1>
             <StatusBadge status={selectedItem?.status} text={selectedItem?.status_text} />
           </div>
           <p className="mt-2 text-sm leading-6 text-foreground-muted">
             组合按照「T日收盘生成信号 → 下一交易日开盘理论建仓 → 当日收盘估值」运行。
-            页面只展示新的事实表口径：每日净值、持仓明细、实际理论成交与绩效指标。
           </p>
           <div className="mt-3 flex flex-wrap gap-3 text-xs text-foreground-muted">
             <span>初始资金：¥1,000,000</span>
@@ -345,10 +344,6 @@ export default function PortfolioTrackingDashboard({
 
       {!overviewLoading && sections.length ? (
         <div className="space-y-4">
-          <div className="rounded-2xl border border-border bg-background px-4 py-4">
-            <div className="text-sm font-medium text-foreground">先选一个组合</div>
-            <div className="mt-1 text-xs leading-6 text-foreground-muted">点击下面任意组合卡片，页面下半部分会自动切换到对应的净值曲线、绩效指标、持仓明细和调仓记录。</div>
-          </div>
           {sections.map((section) => (
             <section key={section.market.key} className="space-y-3">
               <div className="flex items-center gap-2">
@@ -419,9 +414,6 @@ export default function PortfolioTrackingDashboard({
                 <div className="flex items-center justify-between gap-4">
                   <span>最新估值日</span>
                   <span className="font-medium text-foreground">{formatPortfolioTrackingDate(selectedItem.latest_trade_date)}</span>
-                </div>
-                <div className="rounded-2xl border border-border bg-background px-4 py-3 text-xs leading-6 text-foreground-muted">
-                  非交易日自动跳过；BUY / SELL / HOLD 只在拿到下一交易日开盘价后才会写入成交表。
                 </div>
               </div>
             </div>

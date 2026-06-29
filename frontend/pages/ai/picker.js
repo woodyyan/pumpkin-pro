@@ -72,6 +72,13 @@ export default function AIPickerPage() {
         <meta name="description" content="每日自动生成 A 股 AI 优选组合，默认展示全站共享的最新结果。" />
       </Head>
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
+        <section className="flex items-start gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-4 text-sm text-amber-800 dark:text-amber-200">
+          <span className="mt-0.5 shrink-0 text-base leading-none">⚠️</span>
+          <div>
+            <span className="font-semibold">内测公告：</span>
+            当前选股结果仅供内部测试，<span className="font-medium">数据不可靠，请勿参考</span>。正式版本上线后我们将第一时间通知，感谢您的耐心等待。
+          </div>
+        </section>
         <section className="overflow-hidden rounded-[28px] border border-primary/20 bg-gradient-to-br from-primary/20 via-card to-card px-5 py-5 shadow-card sm:px-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>

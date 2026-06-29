@@ -21,6 +21,7 @@ type Config struct {
 	AI                       AIConfig
 	Stripe                   StripeConfig
 	Backup                   BackupConfig
+	Quadrant                 QuadrantConfig
 	FactorLab                FactorLabConfig
 	PortfolioSnapshot        PortfolioSnapshotConfig
 	RankingPortfolioRealtime RankingPortfolioRealtimeConfig
@@ -50,6 +51,13 @@ type MailConfig struct {
 	MockLogBodies        bool
 	MockFailDelivery     bool
 	MockCaptureRecipient string
+}
+
+type QuadrantConfig struct {
+	DailyComputeEnabled bool
+	ComputeHour         int
+	ComputeMinute       int
+	RunOnNonTradingDay  bool
 }
 
 type FactorLabConfig struct {
@@ -225,6 +233,12 @@ func Load() Config {
 			COSPrefix:       getEnv("COS_BACKUP_PREFIX", "pumpkin-pro-backups/"),
 			COSSecretID:     getEnv("COS_SECRET_ID", ""),
 			COSSecretKey:    getEnv("COS_SECRET_KEY", ""),
+		},
+		Quadrant: QuadrantConfig{
+			DailyComputeEnabled: getEnvAsBool("QUADRANT_DAILY_COMPUTE_ENABLED", true),
+			ComputeHour:         getEnvAsInt("QUADRANT_COMPUTE_HOUR", 20),
+			ComputeMinute:       getEnvAsInt("QUADRANT_COMPUTE_MINUTE", 0),
+			RunOnNonTradingDay:  getEnvAsBool("QUADRANT_RUN_ON_NON_TRADING_DAY", false),
 		},
 		FactorLab: FactorLabConfig{
 			DailyComputeEnabled:  getEnvAsBool("FACTOR_LAB_DAILY_COMPUTE_ENABLED", true),

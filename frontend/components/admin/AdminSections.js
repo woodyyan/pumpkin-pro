@@ -1853,11 +1853,12 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
     const isSuccess = p.status === 'success'
     const isFailed = p.status === 'failed'
     const isTimeout = p.status === 'timeout'
+    const isSkipped = p.status === 'skipped'
     const pct = Math.min(p.percent || 0, 100).toFixed(1)
-    const statusIcon = isSuccess ? '✅' : isFailed ? '❌' : isTimeout ? '⏰' : isRunning ? '🔄' : '💤'
-    const statusLabel = isSuccess ? '已完成' : isFailed ? '失败' : isTimeout ? '超时' : isRunning ? '计算中...' : '空闲'
+    const statusIcon = isSuccess ? '✅' : isFailed ? '❌' : isTimeout ? '⏰' : isSkipped ? '⏭️' : isRunning ? '🔄' : '💤'
+    const statusLabel = isSuccess ? '已完成' : isFailed ? '失败' : isTimeout ? '超时' : isSkipped ? '已跳过' : isRunning ? '计算中...' : '空闲'
     const elapsed = p.updated_at ? formatTimeAgo(p.updated_at) : ''
-    const barColor = isSuccess ? 'bg-emerald-500' : isFailed ? 'bg-rose-500' : isTimeout ? 'bg-amber-500' : 'bg-blue-500'
+    const barColor = isSuccess ? 'bg-emerald-500' : isFailed ? 'bg-rose-500' : isTimeout ? 'bg-amber-500' : isSkipped ? 'bg-slate-400' : 'bg-blue-500'
     const barPulse = isRunning ? 'animate-pulse' : ''
 
     return (
@@ -1866,7 +1867,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
           <span className="text-sm font-semibold text-foreground-muted">{label} 四象限</span>
           <span className="flex items-center gap-1.5 text-xs font-medium">
             <span>{statusIcon}</span>
-            <span className={isSuccess ? 'text-emerald-400' : isFailed ? 'text-negative' : isTimeout ? 'text-amber-400' : isRunning ? 'text-blue-400' : 'text-foreground-dim'}>
+            <span className={isSuccess ? 'text-emerald-400' : isFailed ? 'text-negative' : isTimeout ? 'text-amber-400' : isSkipped ? 'text-foreground-dim' : isRunning ? 'text-blue-400' : 'text-foreground-dim'}>
               {statusLabel}
             </span>
           </span>
@@ -1878,9 +1879,9 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
             style={{ width: `${isRunning ? Math.max(pct, 2) : (isSuccess ? 100 : 0)}%` }}
           />
         </div>
-        {/* 阶段消息（running + 有 message 时显示） */}
-        {isRunning && p.message && (
-          <div className="text-[11px] text-blue-300/70 mb-1 truncate" title={p.message}>
+        {/* 阶段消息（running/skipped + 有 message 时显示） */}
+        {(isRunning || isSkipped) && p.message && (
+          <div className={`text-[11px] mb-1 truncate ${isSkipped ? 'text-foreground-dim' : 'text-blue-300/70'}`} title={p.message}>
             {p.message}
           </div>
         )}
@@ -1891,6 +1892,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
              isSuccess && p.total > 0 ? `${p.total.toLocaleString()} 只 · 已落库` :
              isFailed ? (p.error_msg || '数据未写入后端（回调失败）') :
              isTimeout ? '计算超时' :
+             isSkipped ? (p.message || '今日非交易日，已跳过自动执行') :
              '--'}
           </span>
           <span>{elapsed}</span>
@@ -1903,7 +1905,10 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
 
   return (
     <section>
-      <h2 className="text-base font-semibold text-foreground-muted mb-3">🔲 四象限数据总览</h2>
+      <div className="mb-3">
+        <h2 className="text-base font-semibold text-foreground-muted">🔲 四象限数据总览</h2>
+        <p className="mt-1 text-xs text-foreground-dim">自动执行时间为北京时间每日 20:00；按 A 股与中国香港交易日分别判断，非交易日自动跳过。</p>
+      </div>
       {(resource.error || actionError) && (
         <div className="mb-3 rounded-xl border border-rose-400/20 bg-negative/10 px-4 py-2 text-xs text-negative">
           {actionError || resource.error}

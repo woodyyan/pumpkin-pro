@@ -9,7 +9,7 @@ import (
 // Stored in-memory (not persisted); reset on restart.
 type ComputeProgress struct {
 	Exchange  string    `json:"exchange"`    // "ASHARE" / "HKEX"
-	Status    string    `json:"status"`      // "idle" / "running" / "success" / "failed" / "timeout"
+	Status    string    `json:"status"`      // "idle" / "running" / "success" / "failed" / "timeout" / "skipped"
 	Current   int       `json:"current"`     // 已完成数
 	Total     int       `json:"total"`       // 总数 (estimated before first callback)
 	Percent   float64   `json:"percent"`     // 0-100

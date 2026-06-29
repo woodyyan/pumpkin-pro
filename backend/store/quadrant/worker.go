@@ -14,18 +14,30 @@ import (
 )
 
 const (
-	defaultWorkerHour     = 2 // 凌晨 2 点触发
+	defaultWorkerHour     = 20 // 北京时间收盘后 20:00 触发
 	defaultWorkerMinute   = 0
 	workerMaxAttempts     = 3
 	workerCallbackTimeout = 30 * time.Minute // Quant 计算超时
 	workerHTTPTimeout     = 10 * time.Second // 触发 HTTP 请求超时
 )
 
-var workerBackoffs = []time.Duration{5 * time.Minute, 10 * time.Minute}
+var (
+	workerBackoffs         = []time.Duration{5 * time.Minute, 10 * time.Minute}
+	workerScheduleLocation = loadWorkerScheduleLocation()
+)
 
-// Worker triggers daily quadrant computation via Quant service.
+func loadWorkerScheduleLocation() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*3600)
+	}
+	return loc
+}
+
+// Worker triggers scheduled quadrant computation via Quant service.
 type Worker struct {
 	service        *Service
+	cfg            WorkerConfig
 	quantURL       string
 	callbackURL    string // Go 自身的 bulk-save URL
 	signalService  webhookNotifier
@@ -43,29 +55,62 @@ type webhookNotifier interface {
 
 // WorkerConfig holds configuration for the quadrant worker.
 type WorkerConfig struct {
-	QuantServiceURL string
-	BackendBaseURL  string // e.g. "http://localhost:8080"
+	Enabled            bool
+	ComputeHour        int
+	ComputeMinute      int
+	RunOnNonTradingDay bool
+	QuantServiceURL    string
+	BackendBaseURL     string // e.g. "http://localhost:8080"
+	NowFunc            func() time.Time
+}
+
+type scheduledRunDecision struct {
+	Exchange           string
+	ScheduledTradeDate string
+	ResolvedTradeDate  string
+	ShouldRun          bool
+	Reason             string
 }
 
 // NewWorker creates a new quadrant worker.
 func NewWorker(service *Service, cfg WorkerConfig, notifier webhookNotifier) *Worker {
+	cfg = normalizeWorkerConfig(cfg)
 	quantURL := strings.TrimRight(cfg.QuantServiceURL, "/")
 	callbackURL := strings.TrimRight(cfg.BackendBaseURL, "/") + "/api/quadrant/bulk-save"
 
 	return &Worker{
 		service:       service,
+		cfg:           cfg,
 		quantURL:      quantURL,
 		callbackURL:   callbackURL,
 		signalService: notifier,
 	}
 }
 
+func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
+	if cfg.ComputeHour < 0 || cfg.ComputeHour > 23 {
+		cfg.ComputeHour = defaultWorkerHour
+	}
+	if cfg.ComputeMinute < 0 || cfg.ComputeMinute > 59 {
+		cfg.ComputeMinute = defaultWorkerMinute
+	}
+	if cfg.NowFunc == nil {
+		cfg.NowFunc = time.Now
+	}
+	return cfg
+}
+
 // Start launches the background daily worker.
 func (w *Worker) Start(ctx context.Context) {
+	if w == nil || !w.cfg.Enabled || w.service == nil {
+		log.Printf("[quadrant-worker] disabled")
+		return
+	}
+
 	go func() {
 		for {
-			now := time.Now()
-			next := nextTriggerTime(now, defaultWorkerHour, defaultWorkerMinute)
+			now := w.now()
+			next := nextTriggerTime(now, w.cfg.ComputeHour, w.cfg.ComputeMinute)
 			wait := next.Sub(now)
 
 			log.Printf("[quadrant-worker] next trigger at %s (in %s)", next.Format(time.RFC3339), wait.Round(time.Second))
@@ -74,34 +119,115 @@ func (w *Worker) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-time.After(wait):
-				w.runWithRetry(ctx)
+				w.runScheduledCycle(ctx, next)
 			}
 		}
 	}()
-	log.Printf("[quadrant-worker] started, scheduled daily at %02d:%02d", defaultWorkerHour, defaultWorkerMinute)
+	log.Printf("[quadrant-worker] started, scheduled daily at %02d:%02d CST", w.cfg.ComputeHour, w.cfg.ComputeMinute)
 }
 
 func nextTriggerTime(now time.Time, hour, minute int) time.Time {
-	// Always use Asia/Shanghai timezone for scheduling
-	loc, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		loc = time.FixedZone("CST", 8*3600)
-	}
-	nowCST := now.In(loc)
-	today := time.Date(nowCST.Year(), nowCST.Month(), nowCST.Day(), hour, minute, 0, 0, loc)
+	nowCST := now.In(workerScheduleLocation)
+	today := time.Date(nowCST.Year(), nowCST.Month(), nowCST.Day(), hour, minute, 0, 0, workerScheduleLocation)
 	if nowCST.After(today) {
-		// Already past today's trigger time, schedule for tomorrow
 		return today.Add(24 * time.Hour)
 	}
 	return today
 }
 
+func scheduledTradeDate(t time.Time) string {
+	return t.In(workerScheduleLocation).Format("2006-01-02")
+}
+
+func normalizeScheduledExchange(exchange string) string {
+	if strings.EqualFold(strings.TrimSpace(exchange), "HKEX") {
+		return "HKEX"
+	}
+	return "ASHARE"
+}
+
+func (w *Worker) now() time.Time {
+	if w != nil && w.cfg.NowFunc != nil {
+		return w.cfg.NowFunc()
+	}
+	return time.Now()
+}
+
+func (w *Worker) runScheduledCycle(ctx context.Context, scheduledAt time.Time) {
+	ashareDecision := w.resolveScheduledRun(ctx, "ASHARE", scheduledAt)
+	hkDecision := w.resolveScheduledRun(ctx, "HKEX", scheduledAt)
+
+	if !ashareDecision.ShouldRun {
+		w.markScheduledSkip(ashareDecision)
+	} else {
+		w.runWithRetry(ctx)
+	}
+
+	if !hkDecision.ShouldRun {
+		w.markScheduledSkip(hkDecision)
+	} else {
+		w.triggerHKCompute(ctx)
+	}
+}
+
+func (w *Worker) resolveScheduledRun(ctx context.Context, exchange string, scheduledAt time.Time) scheduledRunDecision {
+	decision := scheduledRunDecision{
+		Exchange:           normalizeScheduledExchange(exchange),
+		ScheduledTradeDate: scheduledTradeDate(scheduledAt),
+		ShouldRun:          true,
+	}
+	if w == nil || w.service == nil || w.service.tradeDateResolver == nil || w.cfg.RunOnNonTradingDay {
+		decision.Reason = "scheduled run enabled"
+		return decision
+	}
+
+	resolved := strings.TrimSpace(w.service.tradeDateResolver(ctx, decision.Exchange, scheduledAt))
+	decision.ResolvedTradeDate = resolved
+	if resolved == "" {
+		decision.Reason = "trade date unavailable, continue scheduled run to avoid missing a trading day"
+		return decision
+	}
+	if resolved == decision.ScheduledTradeDate {
+		decision.Reason = "latest trade date matches scheduled date"
+		return decision
+	}
+	decision.ShouldRun = false
+	decision.Reason = fmt.Sprintf("latest trade date %s does not match scheduled date %s", resolved, decision.ScheduledTradeDate)
+	return decision
+}
+
+func (w *Worker) markScheduledSkip(decision scheduledRunDecision) {
+	message := fmt.Sprintf("%s 今日非交易日，20:00 自动跳过", scheduledExchangeLabel(decision.Exchange))
+	if strings.TrimSpace(decision.ResolvedTradeDate) != "" {
+		message = fmt.Sprintf("%s 今日非交易日，20:00 自动跳过（最近交易日 %s）", scheduledExchangeLabel(decision.Exchange), decision.ResolvedTradeDate)
+	}
+	log.Printf("[quadrant-worker] [%s] scheduled run skipped: %s", decision.Exchange, decision.Reason)
+	UpdateProgress(decision.Exchange, ComputeProgress{
+		Exchange: decision.Exchange,
+		Status:   "skipped",
+		Message:  message,
+	})
+	if decision.Exchange == "ASHARE" {
+		w.mu.Lock()
+		w.attemptsToday = 0
+		w.lastError = ""
+		w.mu.Unlock()
+	}
+}
+
+func scheduledExchangeLabel(exchange string) string {
+	if strings.EqualFold(strings.TrimSpace(exchange), "HKEX") {
+		return "港股"
+	}
+	return "A股"
+}
+
 func (w *Worker) runWithRetry(ctx context.Context) {
 	w.mu.Lock()
 	w.attemptsToday = 0
+	w.lastError = ""
 	w.mu.Unlock()
 
-	// Phase 1: Trigger A-share quadrant computation (primary)
 	for attempt := 1; attempt <= workerMaxAttempts; attempt++ {
 		w.mu.Lock()
 		w.attemptsToday = attempt
@@ -116,10 +242,6 @@ func (w *Worker) runWithRetry(ctx context.Context) {
 				w.lastError = ""
 				w.mu.Unlock()
 				log.Printf("[quadrant-worker] ✅ A-share compute cycle completed successfully on attempt %d", attempt)
-
-				// Phase 2: Trigger HK quadrant computation (best-effort, non-blocking)
-				w.triggerHKCompute(ctx)
-
 				return
 			} else {
 				log.Printf("[quadrant-worker] ⚠️ A-share callback wait failed on attempt %d: %v", attempt, waitErr)
@@ -133,7 +255,6 @@ func (w *Worker) runWithRetry(ctx context.Context) {
 		w.lastError = err.Error()
 		w.mu.Unlock()
 
-		// Update progress to failed on trigger/wait failure
 		SetProgressTerminal("ASHARE", "failed", err.Error())
 
 		if attempt < workerMaxAttempts {
@@ -150,14 +271,13 @@ func (w *Worker) runWithRetry(ctx context.Context) {
 		}
 	}
 
-	// All attempts failed — send notification
 	errMsg := fmt.Sprintf("四象限数据计算失败：已重试 %d 次均失败。最后错误：%s", workerMaxAttempts, w.lastError)
 	log.Printf("[quadrant-worker] ❌ %s", errMsg)
 	SetProgressTerminal("ASHARE", "failed", errMsg)
 	if w.signalService != nil {
 		notifyMsg := fmt.Sprintf(
 			"⚠️ 四象限数据计算失败\n时间：%s\n重试：已重试 %d 次均失败\n原因：%s\n影响：四象限图数据可能已过期",
-			time.Now().Format("2006-01-02 15:04:05"),
+			w.now().Format("2006-01-02 15:04:05"),
 			workerMaxAttempts,
 			w.lastError,
 		)
@@ -183,20 +303,16 @@ func (w *Worker) TriggerComputeHK() {
 }
 
 func (w *Worker) triggerCompute(ctx context.Context) error {
-	// Initialize progress to running state before triggering Quant
 	exchange := "ASHARE"
-	now := time.Now()
+	now := w.now()
 	UpdateProgress(exchange, ComputeProgress{
 		Exchange:  exchange,
 		Status:    "running",
 		Current:   0,
-		Total:     5000, // estimated A-share total
+		Total:     5000,
 		TaskLogID: fmt.Sprintf("qcl-%d", now.UnixMilli()),
 		UpdatedAt: now,
 	})
-	// NOTE: We do NOT write a "running" task log here. BulkSave() is responsible
-	// for writing the final terminal log. Writing a premature "running" log here
-	// creates an orphan record that never gets updated if the callback succeeds.
 
 	url := w.quantURL + "/api/quadrant/compute-all"
 	payload := map[string]string{"callback_url": w.callbackURL}
@@ -214,7 +330,7 @@ func (w *Worker) triggerCompute(ctx context.Context) error {
 		return fmt.Errorf("quant request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	_, _ = io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("quant returned HTTP %d", resp.StatusCode)
@@ -224,19 +340,17 @@ func (w *Worker) triggerCompute(ctx context.Context) error {
 }
 
 // triggerHKCompute triggers the HK quadrant computation as a best-effort fire-and-forget operation.
-// Failure here does NOT affect the overall A-share compute cycle success status.
 func (w *Worker) triggerHKCompute(ctx context.Context) {
 	exchange := "HKEX"
-	now := time.Now()
+	now := w.now()
 	UpdateProgress(exchange, ComputeProgress{
 		Exchange:  exchange,
 		Status:    "running",
 		Current:   0,
-		Total:     2600, // estimated HK total
+		Total:     2600,
 		TaskLogID: fmt.Sprintf("qcl-%d", now.UnixMilli()),
 		UpdatedAt: now,
 	})
-	// NOTE: No "running" task log here — BulkSave() handles the final terminal log.
 
 	url := w.quantURL + "/api/quadrant/compute-hk-all"
 	payload := map[string]string{"callback_url": w.callbackURL}
@@ -254,7 +368,7 @@ func (w *Worker) triggerHKCompute(ctx context.Context) {
 		return
 	}
 	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	_, _ = io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		log.Printf("[quadrant-worker] [hk] quant returned HTTP %d", resp.StatusCode)
@@ -265,8 +379,7 @@ func (w *Worker) triggerHKCompute(ctx context.Context) {
 }
 
 func (w *Worker) waitForCompletion(ctx context.Context) error {
-	// Wait up to workerCallbackTimeout for the bulk-save callback to update computed_at
-	deadline := time.Now().Add(workerCallbackTimeout)
+	deadline := w.now().Add(workerCallbackTimeout)
 
 	w.mu.Lock()
 	beforeAt := w.lastComputedAt
@@ -290,7 +403,7 @@ func (w *Worker) waitForCompletion(ctx context.Context) error {
 				w.mu.Unlock()
 				return nil
 			}
-			if time.Now().After(deadline) {
+			if w.now().After(deadline) {
 				SetProgressTerminal("ASHARE", "timeout", "回调超时（30min），数据可能已在后台完成")
 				return fmt.Errorf("callback timeout after %s", workerCallbackTimeout)
 			}

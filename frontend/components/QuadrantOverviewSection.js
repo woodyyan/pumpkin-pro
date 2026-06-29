@@ -288,7 +288,7 @@ export default function QuadrantOverviewSection({ watchlistSymbols = [] }) {
       ) : (
         <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-foreground-dim">
           {quadrantData?.all_stocks?.length === 0
-            ? '四象限数据尚未计算，请等待凌晨定时任务完成。'
+            ? '四象限数据尚未计算，请等待每日 20:00 收盘后自动计算完成。'
             : '加载四象限数据中...'}
         </div>
       )}

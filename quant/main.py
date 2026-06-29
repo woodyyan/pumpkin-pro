@@ -793,7 +793,7 @@ def quadrant_get_scores():
     """返回最近一次缓存的全市场四象限评分。"""
     cached = get_cached_scores()
     if cached is None:
-        raise HTTPException(status_code=404, detail="四象限数据尚未计算，请等待凌晨定时任务完成")
+        raise HTTPException(status_code=404, detail="四象限数据尚未计算，请等待每日 20:00 收盘后自动计算完成")
     return {
         "total": len(cached),
         "items": cached,

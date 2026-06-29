@@ -19,6 +19,7 @@ func TestLoadDefaults(t *testing.T) {
 		"PASSWORD_RESET_TTL_MINUTES", "PASSWORD_RESET_RATE_LIMIT_PER_IP", "PASSWORD_RESET_RATE_LIMIT_PER_EMAIL",
 		"PASSWORD_RESET_RATE_LIMIT_WINDOW_MINUTES", "PASSWORD_RESET_EMAIL_COOLDOWN_SECONDS",
 		"AI_API_KEY", "AI_BASE_URL", "AI_MODEL", "AI_CONFIG_CIPHER_KEY",
+		"QUADRANT_DAILY_COMPUTE_ENABLED", "QUADRANT_COMPUTE_HOUR", "QUADRANT_COMPUTE_MINUTE", "QUADRANT_RUN_ON_NON_TRADING_DAY",
 		"FACTOR_LAB_DAILY_COMPUTE_ENABLED", "FACTOR_LAB_COMPUTE_HOUR", "FACTOR_LAB_COMPUTE_MINUTE",
 		"FACTOR_LAB_PYTHON_BIN", "FACTOR_LAB_PHASE0_SCRIPT", "FACTOR_LAB_PHASE1_SCRIPT", "FACTOR_LAB_PHASE2_SCRIPT",
 		"FACTOR_LAB_DAILY_MODES", "FACTOR_LAB_INDUSTRIES_SOURCE",
@@ -99,6 +100,15 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AI.CipherKey != "" {
 		t.Errorf("expected empty AI.CipherKey by default, got %q", cfg.AI.CipherKey)
 	}
+	if !cfg.Quadrant.DailyComputeEnabled {
+		t.Errorf("expected Quadrant.DailyComputeEnabled true by default")
+	}
+	if cfg.Quadrant.ComputeHour != 20 || cfg.Quadrant.ComputeMinute != 0 {
+		t.Errorf("expected Quadrant schedule 20:00, got %02d:%02d", cfg.Quadrant.ComputeHour, cfg.Quadrant.ComputeMinute)
+	}
+	if cfg.Quadrant.RunOnNonTradingDay {
+		t.Errorf("expected Quadrant.RunOnNonTradingDay false by default")
+	}
 	if !cfg.FactorLab.DailyComputeEnabled {
 		t.Errorf("expected FactorLab.DailyComputeEnabled true by default")
 	}
@@ -136,6 +146,9 @@ func TestEnvOverride(t *testing.T) {
 		{"MAIL_TENCENT_TEMPLATE_ID", "179710", func(c Config) bool { return c.Mail.TencentTemplateID == 179710 }},
 		{"PASSWORD_RESET_RATE_LIMIT_PER_IP", "12", func(c Config) bool { return c.PasswordReset.RateLimitPerIP == 12 }},
 		{"AI_CONFIG_CIPHER_KEY", "12345678901234567890123456789012", func(c Config) bool { return c.AI.CipherKey == "12345678901234567890123456789012" }},
+		{"QUADRANT_COMPUTE_HOUR", "19", func(c Config) bool { return c.Quadrant.ComputeHour == 19 }},
+		{"QUADRANT_COMPUTE_MINUTE", "30", func(c Config) bool { return c.Quadrant.ComputeMinute == 30 }},
+		{"QUADRANT_RUN_ON_NON_TRADING_DAY", "true", func(c Config) bool { return c.Quadrant.RunOnNonTradingDay }},
 		{"FACTOR_LAB_COMPUTE_HOUR", "21", func(c Config) bool { return c.FactorLab.ComputeHour == 21 }},
 		{"FACTOR_LAB_COMPUTE_MINUTE", "0", func(c Config) bool { return c.FactorLab.ComputeMinute == 0 }},
 		{"FACTOR_LAB_DAILY_MODES", "securities,industries", func(c Config) bool {

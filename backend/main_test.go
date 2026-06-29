@@ -679,6 +679,51 @@ func TestQuadrantSnapshotTradeDates(t *testing.T) {
 	}
 }
 
+func TestLatestQuadrantTradeDateFromBars(t *testing.T) {
+	bars := []live.DailyBar{
+		{Date: "2026-04-21", Close: 100},
+		{Date: "2026-04-22", Close: 101},
+		{Date: "2026-04-23", Close: 102},
+	}
+	if got := latestQuadrantTradeDateFromBars("2026-04-23", bars); got != "2026-04-23" {
+		t.Fatalf("latestQuadrantTradeDateFromBars() = %s; want 2026-04-23", got)
+	}
+	if got := latestQuadrantTradeDateFromBars("2026-04-24", bars); got != "2026-04-23" {
+		t.Fatalf("latestQuadrantTradeDateFromBars() fallback = %s; want 2026-04-23", got)
+	}
+}
+
+func TestResolveAShareQuadrantTradeDate_PrefersExternalBenchmarkDate(t *testing.T) {
+	db := testutil.InMemoryDB(t)
+	testutil.AutoMigrateModels(t, db, &live.ClosingSnapshotRecord{})
+	liveRepo := live.NewRepository(db)
+	ctx := context.Background()
+
+	snapshot := live.SymbolSnapshot{Symbol: "000001.SH", LastPrice: 321.0}
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal snapshot failed: %v", err)
+	}
+	if err := liveRepo.UpsertClosingSnapshot(ctx, live.ClosingSnapshotRecord{
+		Symbol:       "000001.SH",
+		TradeDate:    "2026-04-22",
+		SnapshotJSON: string(payload),
+		UpdatedAt:    time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed closing snapshot failed: %v", err)
+	}
+
+	tradeDate := resolveAShareQuadrantTradeDate(ctx, liveRepo, nil, "2026-04-23")
+	if tradeDate != "2026-04-22" {
+		t.Fatalf("fallback snapshot trade date = %s; want 2026-04-22", tradeDate)
+	}
+
+	benchmarkPreferred := latestQuadrantTradeDateFromBars("2026-04-23", []live.DailyBar{{Date: "2026-04-22", Close: 3000}, {Date: "2026-04-23", Close: 3050}})
+	if benchmarkPreferred != "2026-04-23" {
+		t.Fatalf("expected benchmark helper to prefer 2026-04-23, got %s", benchmarkPreferred)
+	}
+}
+
 func TestNewQuadrantPriceResolver_HKFallsBackToPreviousTradeDate(t *testing.T) {
 	db := testutil.InMemoryDB(t)
 	testutil.AutoMigrateModels(t, db, &live.ClosingSnapshotRecord{})

@@ -26,9 +26,10 @@ describe('live-trading page syntax', () => {
     })
   })
 
-  it('keeps only market overview data on the page', () => {
+  it('keeps only market overview and factor index data on the page', () => {
     assert.ok(pageSource.includes("requestJson('/api/live/market/overview?exchange=SSE')"))
     assert.ok(pageSource.includes("requestJson('/api/live/market/overview')"))
+    assert.ok(pageSource.includes("requestJson('/api/live/factor-index/overview')"))
     assert.ok(!pageSource.includes('/api/live/watchlist'))
     assert.ok(!pageSource.includes('添加关注股票'))
     assert.ok(!pageSource.includes('signalConfigMap'))
@@ -46,7 +47,8 @@ describe('live-trading page syntax', () => {
     assert.ok(pageSource.includes('canonical" href="https://wolongtrader.top/live-trading"'))
   })
 
-  it('renders static core index cards without second-stage modules', () => {
+  it('renders factor index cards above core index cards without second-stage modules', () => {
+    assert.ok(pageSource.includes('单因子指数'))
     assert.ok(pageSource.includes('核心指数卡片'))
     assert.ok(!pageSource.includes('主图查看'))
     assert.ok(!pageSource.includes('FocusIndexPanel'))

@@ -26,6 +26,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/backup"
 	"github.com/woodyyan/pumpkin-pro/backend/store/capitalmap"
 	"github.com/woodyyan/pumpkin-pro/backend/store/companyprofile"
+	"github.com/woodyyan/pumpkin-pro/backend/store/factorindex"
 	"github.com/woodyyan/pumpkin-pro/backend/store/factorlab"
 	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
 	"github.com/woodyyan/pumpkin-pro/backend/store/fundcache"
@@ -278,6 +279,8 @@ type appServer struct {
 	aiReportService       *aireport.Service
 	factorLabService      *factorlab.Service
 	factorLabWorker       *factorlab.Worker
+	factorIndexService    *factorindex.Service
+	factorIndexWorker     *factorindex.Worker
 	backtestService       *backtest.Service
 	screenerService       *screener.Service
 	analyticsRepo         *analytics.Repository
@@ -1595,6 +1598,23 @@ func (a *appServer) handleLiveMarketOverview(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeLiveJSON(w, http.StatusOK, overview)
+}
+
+func (a *appServer) handleLiveFactorIndexOverview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	if a.factorIndexService == nil {
+		writeError(w, http.StatusServiceUnavailable, "单因子指数服务暂不可用")
+		return
+	}
+	overview, err := a.factorIndexService.GetOverview(r.Context(), r.URL.Query().Get("exchange"))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, overview)
 }
 
 func (a *appServer) handleCapitalMap(w http.ResponseWriter, r *http.Request) {
@@ -4116,6 +4136,20 @@ func main() {
 
 	factorLabRepo := factorlab.NewRepository(storeInstance.DB)
 	factorLabService := factorlab.NewService(factorLabRepo)
+	factorIndexRepo := factorindex.NewRepository(storeInstance.DB)
+	factorIndexService := factorindex.NewService(factorIndexRepo)
+	if err := factorIndexService.EnsureInitialized(context.Background()); err != nil {
+		log.Printf("factor index init skipped: %v", err)
+	}
+	factorIndexWorker := factorindex.NewWorker(factorIndexService, factorindex.WorkerConfig{
+		Enabled:         cfg.FactorIndex.DailyComputeEnabled,
+		RebalanceHour:   cfg.FactorIndex.RebalanceHour,
+		RebalanceMinute: cfg.FactorIndex.RebalanceMinute,
+		DailyHour:       cfg.FactorIndex.DailyHour,
+		DailyMinute:     cfg.FactorIndex.DailyMinute,
+		RunTimeout:      time.Duration(cfg.FactorIndex.TimeoutMinutes) * time.Minute,
+	})
+	factorIndexWorker.Start(context.Background())
 	aipickerRepo := aipicker.NewRepository(storeInstance.DB)
 	aipickerTechnicalRepo := aipicker.NewTechnicalSnapshotRepository(storeInstance.DB)
 	aipickerService := aipicker.NewService(aipickerRepo, factorLabService, aipickerTechnicalRepo)
@@ -4182,6 +4216,8 @@ func main() {
 		aiReportService:       aiReportService,
 		factorLabService:      factorLabService,
 		factorLabWorker:       factorLabWorker,
+		factorIndexService:    factorIndexService,
+		factorIndexWorker:     factorIndexWorker,
 		backtestService:       backtestService,
 		screenerService:       screenerService,
 		analyticsRepo:         analyticsRepo,
@@ -4246,6 +4282,7 @@ func main() {
 	mux.HandleFunc("/api/live/watchlist/snapshots", server.withRequiredAuth(server.handleLiveWatchlistSnapshots))
 	mux.HandleFunc("/api/live/watchlist/", server.withRequiredAuth(server.handleLiveWatchlistSubroutes))
 	mux.HandleFunc("/api/live/market/overview", server.handleLiveMarketOverview)
+	mux.HandleFunc("/api/live/factor-index/overview", server.handleLiveFactorIndexOverview)
 	mux.HandleFunc("/api/capital-map", server.handleCapitalMap)
 	mux.HandleFunc("/api/live/symbols/", server.withOptionalAuth(server.handleLiveSymbolsSubroutes))
 	mux.HandleFunc("/api/ai/reports", server.withOptionalAuth(server.handleAIReports))

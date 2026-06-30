@@ -25,6 +25,7 @@ func TestLoadDefaults(t *testing.T) {
 		"FACTOR_LAB_DAILY_MODES", "FACTOR_LAB_INDUSTRIES_SOURCE",
 		"FACTOR_LAB_DAILY_BARS_SOURCE", "FACTOR_LAB_FINANCIALS_SOURCE", "FACTOR_LAB_DIVIDENDS_SOURCE",
 		"FACTOR_LAB_PROGRESS_INTERVAL", "FACTOR_LAB_ITEM_PROGRESS_INTERVAL", "FACTOR_LAB_TIMEOUT_MINUTES", "FACTOR_LAB_STEP_TIMEOUT_MINUTES",
+		"FACTOR_INDEX_DAILY_COMPUTE_ENABLED", "FACTOR_INDEX_REBALANCE_HOUR", "FACTOR_INDEX_REBALANCE_MINUTE", "FACTOR_INDEX_DAILY_HOUR", "FACTOR_INDEX_DAILY_MINUTE", "FACTOR_INDEX_TIMEOUT_MINUTES",
 	} {
 		os.Unsetenv(key)
 	}
@@ -127,6 +128,15 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.FactorLab.ProgressInterval != 500 || cfg.FactorLab.ItemProgressInterval != 1 {
 		t.Errorf("unexpected FactorLab progress defaults: %d/%d", cfg.FactorLab.ProgressInterval, cfg.FactorLab.ItemProgressInterval)
 	}
+	if !cfg.FactorIndex.DailyComputeEnabled {
+		t.Errorf("expected FactorIndex.DailyComputeEnabled true by default")
+	}
+	if cfg.FactorIndex.RebalanceHour != 20 || cfg.FactorIndex.RebalanceMinute != 10 {
+		t.Errorf("expected FactorIndex rebalance schedule 20:10, got %02d:%02d", cfg.FactorIndex.RebalanceHour, cfg.FactorIndex.RebalanceMinute)
+	}
+	if cfg.FactorIndex.DailyHour != 20 || cfg.FactorIndex.DailyMinute != 30 {
+		t.Errorf("expected FactorIndex daily schedule 20:30, got %02d:%02d", cfg.FactorIndex.DailyHour, cfg.FactorIndex.DailyMinute)
+	}
 }
 
 func TestEnvOverride(t *testing.T) {
@@ -159,6 +169,8 @@ func TestEnvOverride(t *testing.T) {
 			return c.FactorLab.Phase0ScriptPath == "/app/quant/scripts/update_factor_lab_phase0_incremental.py"
 		}},
 		{"FACTOR_LAB_ITEM_PROGRESS_INTERVAL", "2", func(c Config) bool { return c.FactorLab.ItemProgressInterval == 2 }},
+		{"FACTOR_INDEX_REBALANCE_HOUR", "19", func(c Config) bool { return c.FactorIndex.RebalanceHour == 19 }},
+		{"FACTOR_INDEX_DAILY_MINUTE", "45", func(c Config) bool { return c.FactorIndex.DailyMinute == 45 }},
 		{"PORTFOLIO_SNAPSHOT_ASHARE_HOUR", "15", func(c Config) bool { return c.PortfolioSnapshot.AShareHour == 15 }},
 		{"PORTFOLIO_SNAPSHOT_HK_MINUTE", "30", func(c Config) bool { return c.PortfolioSnapshot.HKMinute == 30 }},
 	}

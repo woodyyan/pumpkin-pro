@@ -5,7 +5,8 @@ import { readFileSync } from 'node:fs'
 const pageSource = readFileSync(new URL('../../pages/live-trading.js', import.meta.url), 'utf8')
 
 describe('live trading overview layout', () => {
-  it('keeps the core index cards section and removes extra helper copy', () => {
+  it('keeps the factor index and core index sections while removing extra helper copy', () => {
+    assert.match(pageSource, /单因子指数/)
     assert.match(pageSource, /核心指数卡片/)
     assert.doesNotMatch(pageSource, /展示后端返回的真实指数趋势序列/)
     assert.doesNotMatch(pageSource, /行情时间/)
@@ -30,7 +31,8 @@ describe('live trading overview layout', () => {
     assert.doesNotMatch(pageSource, /function CompactIndexCard\(/)
   })
 
-  it('keeps index cards as static cards without active selection state', () => {
+  it('keeps factor and market cards as static cards without active selection state', () => {
+    assert.match(pageSource, /function FactorIndexCard\(\{ item \}\)/)
     assert.match(pageSource, /function MarketIndexCard\(\{ index \}\)/)
     assert.doesNotMatch(pageSource, /activeIndexCode/)
     assert.doesNotMatch(pageSource, /onActivate/)

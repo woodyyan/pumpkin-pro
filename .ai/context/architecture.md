@@ -39,7 +39,7 @@ frontend/
 | 路径 | 文件 | 说明 |
 |---|---|---|
 | `/` | `index.js` | 首页/落地页；内容配置集中在 `frontend/data/homepage.js`，主叙事为 AI投研工作台，包含 Hero、三大卖点、快速上手、功能分类、教程和风险提示 |
-| `/live-trading` | `live-trading.js` | 市场行情页（导航归属「看板」）；当前实现为 `Hero + 核心指数卡片 + 扩展指数 + 市场摘要` 的 dashboard，总览 A/H 股指数 |
+| `/live-trading` | `live-trading.js` | 市场行情页（导航归属「看板」）；当前实现为 `Hero + 单因子指数卡片 + 核心指数卡片 + 市场摘要` 的 dashboard，总览 A 股单因子指数与 A/H 股大盘指数 |
 | `/live-trading/[symbol]` | `live-trading/[symbol].js` | 个股详情页 (194KB)，active 仍归属「看板 / 市场行情」 |
 | `/ai/analysis` | `ai/analysis.js` | AI分析占位页（一期「敬请期待」） |
 | `/ai/reports` | `ai/reports.js` | AI研报页面：A 股/中国香港股票个股研报介绍、缩略图样例、登录后弹窗预览、微信定制转化与合规风险提示 |
@@ -76,15 +76,15 @@ frontend/
 - 功能总览按「AI投研 / 市场与机会发现 / 选股与策略研究 / 跟踪与组合管理 / 账户服务」分类展示，功能项需带状态标签。
 - AI分析、AI研报、AI选股、因子排序、策略回测、模拟组合、交易信号相关首页文案必须保留风险提示，不得暗示收益承诺。
 
-### 页面模式补充（2026-06-13）
+### 页面模式补充（2026-06-13 / 2026-06-30）
 - `frontend/pages/live-trading.js` 已从单行指数文本列表升级为 dashboard 页面，内部自行完成：
   - 指数标准化：`normalizeIndex(...)`
   - 页面分组：`buildMarketState(...)`
   - 市场摘要：`buildMarketInsights(...)`
-  - 占位趋势图：`buildTrendSeries(...)`
-- 趋势图组件继续复用 `frontend/components/MiniChart.js`，当前仅用于表达“近几次观察点的方向感”，不是专业分时图。
-- `/api/live/market/overview` 尚未提供真实指数趋势数据，因此页面暂用前端推导的 7 点占位序列支撑卡片视觉；后续若后端补齐真实序列，应直接替换 `buildTrendSeries(...)` 的输入来源。
-- 页面首屏核心指数固定为 6 张：上证指数、深证成指、创业板指、恒生指数、恒生中国企业指数、恒生科技指数；扩展指数预留沪深300、科创50、上证50、中证500。
+- 页面新增 `frontend/lib/live-factor-index.js`，专门负责单因子指数卡片状态归一化；前端只请求 `/api/live/factor-index/overview` 并展示，不在页面内计算 NAV 或区间收益。
+- 趋势图组件继续复用 `frontend/components/MiniChart.js`，当前用于市场指数真实趋势点和单因子指数近 20 日净值曲线的轻量表达，不承载专业分时分析交互。
+- 页面首屏新增 7 张 A 股单因子指数卡片，固定放在「核心指数卡片」上方；不新增单独详情页，用户在同一页完成因子指数与大盘指数对比。
+- 页面首屏核心指数固定为 6 张：上证指数、深证成指、创业板指、恒生指数、恒生中国企业指数、恒生科技指数；扩展指数仍预留沪深300、科创50、上证50、中证500。
 
 ### 关键组件
 - `ThemeToggle.js`: 主题切换按钮（三态：浅色/深色/跟随系统）

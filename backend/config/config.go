@@ -23,6 +23,7 @@ type Config struct {
 	Backup                   BackupConfig
 	Quadrant                 QuadrantConfig
 	FactorLab                FactorLabConfig
+	FactorIndex              FactorIndexConfig
 	PortfolioSnapshot        PortfolioSnapshotConfig
 	RankingPortfolioRealtime RankingPortfolioRealtimeConfig
 }
@@ -77,6 +78,15 @@ type FactorLabConfig struct {
 	ItemProgressInterval int
 	TimeoutMinutes       int
 	StepTimeoutMinutes   int
+}
+
+type FactorIndexConfig struct {
+	DailyComputeEnabled bool
+	RebalanceHour       int
+	RebalanceMinute     int
+	DailyHour           int
+	DailyMinute         int
+	TimeoutMinutes      int
 }
 
 type PortfolioSnapshotConfig struct {
@@ -257,6 +267,14 @@ func Load() Config {
 			ItemProgressInterval: getEnvAsInt("FACTOR_LAB_ITEM_PROGRESS_INTERVAL", 1),
 			TimeoutMinutes:       getEnvAsInt("FACTOR_LAB_TIMEOUT_MINUTES", 180),
 			StepTimeoutMinutes:   getEnvAsInt("FACTOR_LAB_STEP_TIMEOUT_MINUTES", 30),
+		},
+		FactorIndex: FactorIndexConfig{
+			DailyComputeEnabled: getEnvAsBool("FACTOR_INDEX_DAILY_COMPUTE_ENABLED", true),
+			RebalanceHour:       getEnvAsInt("FACTOR_INDEX_REBALANCE_HOUR", 20),
+			RebalanceMinute:     getEnvAsInt("FACTOR_INDEX_REBALANCE_MINUTE", 10),
+			DailyHour:           getEnvAsInt("FACTOR_INDEX_DAILY_HOUR", 20),
+			DailyMinute:         getEnvAsInt("FACTOR_INDEX_DAILY_MINUTE", 30),
+			TimeoutMinutes:      getEnvAsInt("FACTOR_INDEX_TIMEOUT_MINUTES", 120),
 		},
 		PortfolioSnapshot: PortfolioSnapshotConfig{
 			DailyComputeEnabled: getEnvAsBool("PORTFOLIO_SNAPSHOT_DAILY_COMPUTE_ENABLED", true),

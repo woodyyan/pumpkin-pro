@@ -32,11 +32,13 @@ type simPortfolioHolding struct {
 }
 
 type simPortfolioStatus struct {
-	LatestSignalDate   string
-	PendingSignalDate  string
-	NextEntryTradeDate string
-	Status             string
-	StatusText         string
+	LatestSignalDate      string
+	PendingSignalDate     string
+	NextEntryTradeDate    string
+	Status               string
+	StatusText           string
+	MissingOpenPriceCount int
+	MissingClosePriceCount int
 }
 
 func resolveSimPortfolioExchangeCodes(exchange string) []string {
@@ -631,7 +633,136 @@ func (s *Service) syncSimPortfolios(ctx context.Context) error {
 func (s *Service) SyncSimPortfolios(ctx context.Context) error {
 	s.simPortfolioMu.Lock()
 	defer s.simPortfolioMu.Unlock()
+	// Auto-backfill missing open prices before syncing fact tables.
+	_ = s.backfillSimPortfolioOpenPrices(ctx, "", "", true)
 	return s.syncSimPortfolios(ctx)
+}
+
+// BackfillSimPortfolioOpenPrices scans market-price rows whose open_price is
+// still 0 and fills them from the openPriceResolver (daily-bar Open). It is
+// idempotent: rows whose open_price is already > 0 are never touched.
+//
+// When latestOnly is true, only the most recent pending snapshot date per
+// definition is scanned (lightweight, suitable for admin quick-fix).
+//
+// When portfolioID is non-empty, only that definition is processed.
+// When exchange is non-empty ("ASHARE" or "HKEX"), only definitions for that
+// market scope are processed.
+func (s *Service) BackfillSimPortfolioOpenPrices(ctx context.Context, portfolioID string, exchange string, latestOnly bool) (*SimPortfolioBackfillOpenPriceResponse, error) {
+	s.simPortfolioMu.Lock()
+	defer s.simPortfolioMu.Unlock()
+	resp := s.backfillSimPortfolioOpenPrices(ctx, portfolioID, exchange, latestOnly)
+	return resp, nil
+}
+
+func (s *Service) backfillSimPortfolioOpenPrices(ctx context.Context, portfolioID string, exchange string, latestOnly bool) *SimPortfolioBackfillOpenPriceResponse {
+	resp := &SimPortfolioBackfillOpenPriceResponse{
+		OK:                true,
+		PortfolioSummaries: []SimPortfolioBackfillSummary{},
+	}
+	if s.openPriceResolver == nil {
+		resp.OK = false
+		resp.Message = "open price resolver not configured"
+		return resp
+	}
+
+	definitions, err := s.repo.ListActiveRankingPortfolioDefinitions(ctx)
+	if err != nil {
+		resp.OK = false
+		resp.Message = err.Error()
+		return resp
+	}
+
+	totalSummary := SimPortfolioBackfillSummary{}
+	for _, definition := range definitions {
+		if strings.TrimSpace(portfolioID) != "" && definition.ID != strings.TrimSpace(portfolioID) {
+			continue
+		}
+		if strings.TrimSpace(exchange) != "" && !strings.EqualFold(strings.TrimSpace(definition.Exchange), strings.TrimSpace(exchange)) {
+			continue
+		}
+		summary := s.backfillOpenPricesForDefinition(ctx, definition, latestOnly)
+		resp.PortfolioSummaries = append(resp.PortfolioSummaries, summary)
+		totalSummary.ScannedCount += summary.ScannedCount
+		totalSummary.FilledCount += summary.FilledCount
+		totalSummary.StillPendingCount += summary.StillPendingCount
+		totalSummary.FailedCount += summary.FailedCount
+		totalSummary.SkippedBeforeCutover += summary.SkippedBeforeCutover
+		totalSummary.MissingMarketPriceRows += summary.MissingMarketPriceRows
+	}
+	resp.Summary = totalSummary
+	if resp.OK {
+		if totalSummary.FilledCount > 0 {
+			resp.Message = fmt.Sprintf("已补齐 %d 条建仓开盘价，仍有 %d 条待补。", totalSummary.FilledCount, totalSummary.StillPendingCount)
+		} else if totalSummary.StillPendingCount > 0 {
+			resp.Message = fmt.Sprintf("仍有 %d 条建仓开盘价待补（可能是停牌、日线源未更新或目标交易日尚未到达）。", totalSummary.StillPendingCount)
+		} else {
+			resp.Message = "暂无缺失的建仓开盘价。"
+		}
+	}
+	return resp
+}
+
+func (s *Service) backfillOpenPricesForDefinition(ctx context.Context, definition RankingPortfolioDefinition, latestOnly bool) SimPortfolioBackfillSummary {
+	summary := SimPortfolioBackfillSummary{}
+	missingRows, err := s.repo.ListMarketPricesMissingOpenByDateRange(ctx, "")
+	if err != nil {
+		summary.FailedCount = -1
+		return summary
+	}
+
+	// Filter rows for this definition.
+	var targetRows []MissingOpenPriceRow
+	for _, row := range missingRows {
+		if row.DefinitionID != definition.ID {
+			continue
+		}
+		targetRows = append(targetRows, row)
+	}
+
+	if latestOnly && len(targetRows) > 0 {
+		// Find the latest snapshot date among missing rows.
+		latestDate := ""
+		for _, row := range targetRows {
+			if row.SnapshotDate > latestDate {
+				latestDate = row.SnapshotDate
+			}
+		}
+		filtered := targetRows[:0]
+		for _, row := range targetRows {
+			if row.SnapshotDate == latestDate {
+				filtered = append(filtered, row)
+			}
+		}
+		targetRows = filtered
+	}
+
+	summary.ScannedCount = len(targetRows)
+	for _, row := range targetRows {
+		entryTradeDate, err := s.resolveSimPortfolioEntryTradeDate(ctx, definition, row.SnapshotDate)
+		if err != nil || entryTradeDate == "" {
+			summary.StillPendingCount++
+			continue
+		}
+		openPrice := s.openPriceResolver(ctx, row.Code, row.Exchange, entryTradeDate)
+		if openPrice <= 0 {
+			summary.StillPendingCount++
+			continue
+		}
+		if err := s.repo.SetRankingPortfolioMarketPriceOpen(ctx, row.DefinitionID, row.SnapshotVersion, row.Code, row.Exchange, openPrice, entryTradeDate); err != nil {
+			summary.FailedCount++
+			continue
+		}
+		summary.FilledCount++
+	}
+	return summary
+}
+
+// resolveSimPortfolioEntryTradeDate returns the T+1 trading date for a given
+// snapshot/signal date. It reuses the legacy resolveEntryTradeDateForSnapshot
+// logic which already handles the D0/latest-snapshot edge case.
+func (s *Service) resolveSimPortfolioEntryTradeDate(ctx context.Context, definition RankingPortfolioDefinition, snapshotDate string) (string, error) {
+	return s.resolveEntryTradeDateForSnapshot(ctx, definition.ID, snapshotDate)
 }
 
 func buildSimPortfolioStatusText(status string) string {
@@ -678,18 +809,24 @@ func (s *Service) resolveSimPortfolioStatus(ctx context.Context, definition Rank
 		return status, nil
 	}
 	entryDates := make([]string, 0, len(signalItems))
+	missingOpen := 0
 	for _, item := range signalItems {
 		openPrice, entryTradeDate, priceErr := s.repo.GetRankingPortfolioSelectionOpenPrice(ctx, definition.ID, latestSignalDate, item.Code, item.Exchange)
 		if priceErr != nil {
 			return status, priceErr
 		}
 		if openPrice <= 0 || entryTradeDate == "" {
+			missingOpen++
 			status.PendingSignalDate = latestSignalDate
 			status.Status = "pending_open_price"
 			status.StatusText = buildSimPortfolioStatusText(status.Status)
-			return status, nil
+			continue
 		}
 		entryDates = append(entryDates, entryTradeDate)
+	}
+	status.MissingOpenPriceCount = missingOpen
+	if missingOpen > 0 {
+		return status, nil
 	}
 	status.PendingSignalDate = latestSignalDate
 	status.NextEntryTradeDate = sameSimPortfolioTradeDate(entryDates)
@@ -919,14 +1056,16 @@ func (s *Service) GetSimPortfolioAdminStatus(ctx context.Context) (*SimPortfolio
 			return nil, err
 		}
 		item := SimPortfolioAdminStatusItem{
-			PortfolioID:        definition.ID,
-			Name:               definition.Name,
-			Exchange:           definition.Exchange,
-			LatestSignalDate:   status.LatestSignalDate,
-			PendingSignalDate:  status.PendingSignalDate,
-			NextEntryTradeDate: status.NextEntryTradeDate,
-			Status:             status.Status,
-			StatusText:         status.StatusText,
+			PortfolioID:            definition.ID,
+			Name:                   definition.Name,
+			Exchange:               definition.Exchange,
+			LatestSignalDate:       status.LatestSignalDate,
+			PendingSignalDate:      status.PendingSignalDate,
+			NextEntryTradeDate:     status.NextEntryTradeDate,
+			Status:                 status.Status,
+			StatusText:             status.StatusText,
+			MissingOpenPriceCount:  status.MissingOpenPriceCount,
+			MissingClosePriceCount: status.MissingClosePriceCount,
 		}
 		if latestDaily != nil {
 			item.LatestTradeDate = latestDaily.TradeDate
@@ -956,8 +1095,12 @@ func (s *Service) VerifySimPortfolios(ctx context.Context, portfolioID string) (
 				return nil, err
 			}
 			positionAssets := 0.0
+			missingOpenPrices := 0
 			for _, position := range positions {
 				positionAssets += position.MarketValue
+				if position.BuyPrice <= 0 {
+					missingOpenPrices++
+				}
 			}
 			difference := positionAssets - daily.TotalAssets
 			status := "ok"
@@ -965,6 +1108,9 @@ func (s *Service) VerifySimPortfolios(ctx context.Context, portfolioID string) (
 			if daily.PositionCount != 0 && len(positions) != daily.PositionCount {
 				status = "count_mismatch"
 				message = "position_count 与持仓明细数量不一致"
+			} else if missingOpenPrices > 0 {
+				status = "missing_open_price"
+				message = fmt.Sprintf("%d 只持仓的建仓开盘价缺失", missingOpenPrices)
 			} else if math.Abs(difference) > 0.01 {
 				status = "asset_mismatch"
 				message = "portfolio_daily.total_assets 与持仓市值汇总不一致"
@@ -987,6 +1133,8 @@ func (s *Service) VerifySimPortfolios(ctx context.Context, portfolioID string) (
 func (s *Service) RecomputeSimPortfolios(ctx context.Context, portfolioID string, fromDate string, toDate string, reset bool) error {
 	s.simPortfolioMu.Lock()
 	defer s.simPortfolioMu.Unlock()
+	// Auto-backfill missing open prices before recomputing fact tables.
+	_ = s.backfillSimPortfolioOpenPrices(ctx, portfolioID, "", false)
 	definitions, err := s.repo.ListActiveRankingPortfolioDefinitions(ctx)
 	if err != nil {
 		return err

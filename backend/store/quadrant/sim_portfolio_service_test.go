@@ -140,3 +140,144 @@ func TestGetSimPortfolioOverviewShowsPendingOpenPrice(t *testing.T) {
 		t.Fatalf("pending_signal_date = %s, want 2026-06-02", resp.Items[0].PendingSignalDate)
 	}
 }
+
+func TestBackfillSimPortfolioOpenPrices_FillsMissingOpen(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	def := seedSimPortfolioDefinition(t, repo)
+	seedSimPortfolioSnapshots(t, repo)
+	now := time.Now().UTC()
+
+	// Seed market price rows for 2026-06-02 with open_price=0 (pending).
+	rows := []RankingPortfolioMarketPrice{
+		{DefinitionID: def.ID, SnapshotVersion: "2026-06-02", SnapshotDate: "2026-06-02", Code: "600001", Exchange: "SSE", OpenPrice: 0, CreatedAt: now, UpdatedAt: now},
+		{DefinitionID: def.ID, SnapshotVersion: "2026-06-02", SnapshotDate: "2026-06-02", Code: "600002", Exchange: "SSE", OpenPrice: 0, CreatedAt: now, UpdatedAt: now},
+		{DefinitionID: def.ID, SnapshotVersion: "2026-06-02", SnapshotDate: "2026-06-02", Code: "600005", Exchange: "SSE", OpenPrice: 0, CreatedAt: now, UpdatedAt: now},
+		{DefinitionID: def.ID, SnapshotVersion: "2026-06-02", SnapshotDate: "2026-06-02", Code: "600006", Exchange: "SSE", OpenPrice: 0, CreatedAt: now, UpdatedAt: now},
+	}
+	for _, row := range rows {
+		if err := repo.db.WithContext(ctx).Create(&row).Error; err != nil {
+			t.Fatalf("seed market price %s: %v", row.Code, err)
+		}
+	}
+
+	svc := NewService(repo)
+	svc.SetOpenPriceResolver(func(_ context.Context, code string, _ string, _ string) float64 {
+		if code == "600005" {
+			return 0 // simulate unavailable (suspended)
+		}
+		return 10.5
+	})
+
+	resp, err := svc.BackfillSimPortfolioOpenPrices(ctx, def.ID, "", true)
+	if err != nil {
+		t.Fatalf("BackfillSimPortfolioOpenPrices: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("backfill failed: %s", resp.Message)
+	}
+	if resp.Summary.FilledCount != 3 {
+		t.Fatalf("filled = %d, want 3", resp.Summary.FilledCount)
+	}
+	if resp.Summary.StillPendingCount != 1 {
+		t.Fatalf("still_pending = %d, want 1", resp.Summary.StillPendingCount)
+	}
+
+	// Verify the open prices were actually written.
+	for _, code := range []string{"600001", "600002", "600006"} {
+		openPrice, _, err := repo.GetRankingPortfolioSelectionOpenPrice(ctx, def.ID, "2026-06-02", code, "SSE")
+		if err != nil {
+			t.Fatalf("GetRankingPortfolioSelectionOpenPrice %s: %v", code, err)
+		}
+		if openPrice != 10.5 {
+			t.Fatalf("open_price for %s = %v, want 10.5", code, openPrice)
+		}
+	}
+}
+
+func TestBackfillSimPortfolioOpenPrices_NoResolver(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	def := seedSimPortfolioDefinition(t, repo)
+	seedSimPortfolioSnapshots(t, repo)
+
+	svc := NewService(repo) // no openPriceResolver set
+	resp, err := svc.BackfillSimPortfolioOpenPrices(ctx, def.ID, "", true)
+	if err != nil {
+		t.Fatalf("BackfillSimPortfolioOpenPrices: %v", err)
+	}
+	if resp.OK {
+		t.Fatalf("expected OK=false when resolver not configured")
+	}
+}
+
+func TestGetSimPortfolioAdminStatus_ShowsMissingOpenPriceCount(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	def := seedSimPortfolioDefinition(t, repo)
+	seedSimPortfolioSnapshots(t, repo)
+	seedSimPortfolioMarketPrices(t, repo, def.ID)
+	svc := NewService(repo)
+
+	// Recompute to build fact tables for 2026-06-01 -> 2026-06-02.
+	if err := svc.RecomputeSimPortfolios(ctx, def.ID, "2026-06-01", "2026-06-02", true); err != nil {
+		t.Fatalf("RecomputeSimPortfolios: %v", err)
+	}
+
+	// Now the latest signal is 2026-06-02 but market prices for 2026-06-02
+	// haven't been created yet, so the status should show pending_open_price.
+	resp, err := svc.GetSimPortfolioAdminStatus(ctx)
+	if err != nil {
+		t.Fatalf("GetSimPortfolioAdminStatus: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(resp.Items))
+	}
+	item := resp.Items[0]
+	if item.Status != "pending_open_price" {
+		t.Fatalf("status = %s, want pending_open_price", item.Status)
+	}
+	if item.MissingOpenPriceCount <= 0 {
+		t.Fatalf("missing_open_price_count = %d, expected > 0", item.MissingOpenPriceCount)
+	}
+}
+
+func TestVerifySimPortfolios_DetectsMissingOpenPrice(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	def := seedSimPortfolioDefinition(t, repo)
+	seedSimPortfolioSnapshots(t, repo)
+	seedSimPortfolioMarketPrices(t, repo, def.ID)
+	svc := NewService(repo)
+
+	if err := svc.RecomputeSimPortfolios(ctx, def.ID, "2026-06-01", "2026-06-02", true); err != nil {
+		t.Fatalf("RecomputeSimPortfolios: %v", err)
+	}
+
+	// Tamper: set one position's buy_price to 0 to simulate missing open price.
+	if err := repo.db.WithContext(ctx).
+		Model(&SimPortfolioPosition{}).
+		Where("portfolio_id = ? AND trade_date = ? AND stock_code = ?", def.ID, "2026-06-02", "600001").
+		Update("buy_price", 0).Error; err != nil {
+		t.Fatalf("tamper buy_price: %v", err)
+	}
+
+	resp, err := svc.VerifySimPortfolios(ctx, def.ID)
+	if err != nil {
+		t.Fatalf("VerifySimPortfolios: %v", err)
+	}
+	foundMissingOpen := false
+	for _, item := range resp.Items {
+		if item.Status == "missing_open_price" {
+			foundMissingOpen = true
+			break
+		}
+	}
+	if !foundMissingOpen {
+		t.Fatalf("expected at least one missing_open_price status")
+	}
+}

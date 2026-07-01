@@ -166,3 +166,28 @@ func (a *appServer) handleAdminPortfolioTrackingReset(w http.ResponseWriter, r *
 		"message": "模拟组合数据已清空。",
 	})
 }
+
+func (a *appServer) handleAdminPortfolioTrackingBackfillOpenPrices(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	var req struct {
+		PortfolioID string `json:"portfolio_id"`
+		Exchange    string `json:"exchange"`
+		LatestOnly  *bool  `json:"latest_only"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	latestOnly := true
+	if req.LatestOnly != nil {
+		latestOnly = *req.LatestOnly
+	}
+	resp, err := a.quadrantService.BackfillSimPortfolioOpenPrices(r.Context(), req.PortfolioID, req.Exchange, latestOnly)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}

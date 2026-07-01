@@ -228,15 +228,17 @@ type SimPortfolioAdminStatusResponse struct {
 }
 
 type SimPortfolioAdminStatusItem struct {
-	PortfolioID        string `json:"portfolio_id"`
-	Name               string `json:"name"`
-	Exchange           string `json:"exchange"`
-	LatestTradeDate    string `json:"latest_trade_date,omitempty"`
-	LatestSignalDate   string `json:"latest_signal_date,omitempty"`
-	PendingSignalDate  string `json:"pending_signal_date,omitempty"`
-	NextEntryTradeDate string `json:"next_entry_trade_date,omitempty"`
-	Status             string `json:"status"`
-	StatusText         string `json:"status_text,omitempty"`
+	PortfolioID           string `json:"portfolio_id"`
+	Name                  string `json:"name"`
+	Exchange              string `json:"exchange"`
+	LatestTradeDate       string `json:"latest_trade_date,omitempty"`
+	LatestSignalDate      string `json:"latest_signal_date,omitempty"`
+	PendingSignalDate     string `json:"pending_signal_date,omitempty"`
+	NextEntryTradeDate    string `json:"next_entry_trade_date,omitempty"`
+	Status                string `json:"status"`
+	StatusText            string `json:"status_text,omitempty"`
+	MissingOpenPriceCount int    `json:"missing_open_price_count"`
+	MissingClosePriceCount int   `json:"missing_close_price_count"`
 }
 
 type SimPortfolioVerifyResponse struct {
@@ -252,4 +254,20 @@ type SimPortfolioVerifyItem struct {
 	PositionAssets float64 `json:"position_assets"`
 	Difference     float64 `json:"difference"`
 	Message        string  `json:"message,omitempty"`
+}
+
+type SimPortfolioBackfillOpenPriceResponse struct {
+	OK              bool                             `json:"ok"`
+	Message         string                           `json:"message,omitempty"`
+	Summary         SimPortfolioBackfillSummary       `json:"summary"`
+	PortfolioSummaries []SimPortfolioBackfillSummary `json:"portfolios"`
+}
+
+type SimPortfolioBackfillSummary struct {
+	ScannedCount           int `json:"scanned_count"`
+	FilledCount             int `json:"filled_count"`
+	StillPendingCount      int `json:"still_pending_count"`
+	FailedCount            int `json:"failed_count"`
+	SkippedBeforeCutover   int `json:"skipped_before_cutover"`
+	MissingMarketPriceRows int `json:"missing_market_price_rows"`
 }

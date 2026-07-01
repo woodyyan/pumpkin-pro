@@ -1710,6 +1710,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
   const [expandedLog, setExpandedLog] = useState(null)
   const [triggering, setTriggering] = useState(false)
   const [syncingPortfolio, setSyncingPortfolio] = useState(false)
+  const [backfillingOpenPrices, setBackfillingOpenPrices] = useState(false)
   const [verifyingPortfolio, setVerifyingPortfolio] = useState(false)
   const [verifyPortfolioResult, setVerifyPortfolioResult] = useState(null)
   const [recomputingPortfolio, setRecomputingPortfolio] = useState(false)
@@ -1781,6 +1782,26 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
       if (message) setActionError(message)
     } finally {
       setSyncingPortfolio(false)
+    }
+  }
+
+  const handlePortfolioTrackingBackfillOpenPrices = async () => {
+    setBackfillingOpenPrices(true)
+    setActionError('')
+    setPortfolioActionNotice('')
+    try {
+      const resp = await adminFetch('/api/admin/portfolio-tracking/backfill-open-prices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latest_only: true }),
+      })
+      setPortfolioActionNotice(resp?.message || '建仓开盘价补齐完成。')
+      await resource.refresh()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '补齐建仓开盘价失败')
+      if (message) setActionError(message)
+    } finally {
+      setBackfillingOpenPrices(false)
     }
   }
 
@@ -1959,15 +1980,22 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <button
+              onClick={handlePortfolioTrackingBackfillOpenPrices}
+              disabled={backfillingOpenPrices || syncingPortfolio || recomputingPortfolio}
+              className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {backfillingOpenPrices ? '补齐中…' : '补齐建仓开盘价'}
+            </button>
+            <button
               onClick={handlePortfolioTrackingSync}
-              disabled={syncingPortfolio || recomputingPortfolio}
+              disabled={syncingPortfolio || recomputingPortfolio || backfillingOpenPrices}
               className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
             >
               {syncingPortfolio ? '同步中…' : '同步最新事实表'}
             </button>
             <button
               onClick={handlePortfolioTrackingVerify}
-              disabled={verifyingPortfolio || syncingPortfolio || recomputingPortfolio}
+              disabled={verifyingPortfolio || syncingPortfolio || recomputingPortfolio || backfillingOpenPrices}
               className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
             >
               {verifyingPortfolio ? '验证中…' : '验证事实表一致性'}
@@ -1992,7 +2020,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
             ) : (
               <button
                 onClick={handlePortfolioTrackingRecompute}
-                disabled={recomputingPortfolio || syncingPortfolio}
+                disabled={recomputingPortfolio || syncingPortfolio || backfillingOpenPrices}
                 className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {recomputingPortfolio ? '重算中…' : '从头重算全部组合'}
@@ -2025,6 +2053,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
                   <th className="pb-2 pr-4 font-medium">待执行信号</th>
                   <th className="pb-2 pr-4 font-medium">下一次开盘</th>
                   <th className="pb-2 pr-4 font-medium">最新估值日</th>
+                  <th className="pb-2 pr-4 font-medium">缺开盘价</th>
                   <th className="pb-2 font-medium">状态</th>
                 </tr>
               </thead>
@@ -2037,6 +2066,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
                     <td className="py-2 pr-4 tabular-nums">{item.pending_signal_date || '--'}</td>
                     <td className="py-2 pr-4 tabular-nums">{item.next_entry_trade_date || '--'}</td>
                     <td className="py-2 pr-4 tabular-nums">{item.latest_trade_date || '--'}</td>
+                    <td className="py-2 pr-4 tabular-nums">{item.missing_open_price_count > 0 ? <span className="text-amber-700">{item.missing_open_price_count}</span> : (item.missing_open_price_count === 0 ? '0' : '--')}</td>
                     <td className={`py-2 font-medium ${getPortfolioTrackingStatusClass(item.status)}`}>{item.status_text || item.status || '--'}</td>
                   </tr>
                 ))}

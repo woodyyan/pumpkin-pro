@@ -1,5 +1,36 @@
 # 设计决策记录
 
+## 决策 24: 模拟组合事实表链路新增补开盘价补偿与缺口可观测性
+
+**日期**: 2026-07-01
+
+**背景**: `/portfolio-tracking` 四个模拟组合因建仓开盘价填充链路断裂（09:25 worker 错过窗口或 market price 行未先生成），导致事实表只停留在 seeded baseline，页面永久显示「等待下一交易日开盘价」且无任何失败状态暴露。
+
+**决策**:
+1. 新增 `BackfillSimPortfolioOpenPrices` service 方法，从日线 open 精确补齐 T+1 建仓开盘价，支持 `latest_only` 轻量模式和按组合/市场筛选。
+2. 新增 `POST /api/admin/portfolio-tracking/backfill-open-prices` API 与 admin 按钮「补齐建仓开盘价」，作为新口径事实表链路的独立运维入口。
+3. `SyncSimPortfolios` 内部先执行一次 `backfillSimPortfolioOpenPrices(latest_only=true)` 再同步事实表，具备最小自愈能力。
+4. `RecomputeSimPortfolios` 内部先执行全量 `backfillSimPortfolioOpenPrices` 再重算，避免重算时因缺价失败。
+5. admin status 响应新增 `missing_open_price_count` 和 `missing_close_price_count` 字段；admin 状态表新增「缺开盘价」列，琥珀色标记缺口。
+6. `VerifySimPortfolios` 新增 `missing_open_price` 校验状态，检测持仓 `buy_price <= 0` 的记录。
+7. 所有运维动作互斥，同一时间只能执行一个写库操作（sync / recompute / backfill / verify）。
+
+**原因**:
+1. 补开盘价是恢复事实表链路的最小修复动作，不应每次都从头重算。
+2. sync/recompute 内部自动补价能覆盖大部分自动恢复场景，但 admin 仍需独立按钮用于排障。
+3. 缺口计数让运维一眼看到"缺什么"而不是只看到"pending"。
+4. verify 覆盖开盘价完整性可以防止事实表写入了无效 buy_price=0 的持仓。
+
+**替代方案**:
+- 只在 sync 内部补价，不加独立按钮：否决，运维需要分步排障能力。
+- 新建 `portfolio_entry_price` 独立表去 legacy 依赖：暂缓，当前复用 legacy 表成本更低，封装在 service 后面即可。
+- 用异步任务替代同步执行：暂缓，当前数据量小，同步返回足够快；后续数据量变大再改异步。
+
+**风险与代价**:
+- 补开盘价依赖外部日线接口，如果接口不可用仍会 pending；admin 应提示"可能是停牌、日线源未更新或目标交易日尚未到达"。
+- latest_only 模式只补最新批次，历史缺口需要手动指定范围或走 recompute。
+- 所有运维动作串行化，如果某个动作卡住，其他动作会等待；但这对当前低频运维场景可接受。
+
 ## 决策 23: 单因子指数以内嵌卡片形式接入 `/live-trading`，并采用后端全量物化链路
 
 **日期**: 2026-06-30

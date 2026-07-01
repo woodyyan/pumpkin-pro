@@ -4338,6 +4338,7 @@ func main() {
 	mux.HandleFunc("/api/admin/portfolio-tracking/sync", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingSync))
 	mux.HandleFunc("/api/admin/portfolio-tracking/recompute", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingRecompute))
 	mux.HandleFunc("/api/admin/portfolio-tracking/reset", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingReset))
+	mux.HandleFunc("/api/admin/portfolio-tracking/backfill-open-prices", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingBackfillOpenPrices))
 	mux.HandleFunc("/api/admin/company-profiles", server.withSuperAdminAuth(server.handleAdminCompanyProfiles))
 	mux.HandleFunc("/api/admin/company-profiles/refresh", server.withSuperAdminAuth(server.handleAdminCompanyProfileRefresh))
 	mux.HandleFunc("/api/admin/company-profiles/refresh-status", server.withSuperAdminAuth(server.handleAdminCompanyProfileRefreshStatus))

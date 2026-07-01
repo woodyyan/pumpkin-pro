@@ -1,4 +1,5 @@
 import { useRef, useEffect } from 'react'
+import { buildYAxisScale, formatTickValue } from '../lib/mini-chart-scale'
 
 /**
  * MiniChart — lightweight Canvas chart (line or bar).
@@ -10,6 +11,11 @@ import { useRef, useEffect } from 'react'
  *   color:   stroke / fill color (default "#e67e22")
  *   areaColor: fill under line (default color + 15% opacity)
  *   label:   optional axis label
+ *   yAxisMode:       "auto" | "zero-based" (default "auto")
+ *                    auto = Y 轴按数据 min/max ± padding 自适应，放大微小波动
+ *                    zero-based = 旧行为，0 到 max，适合必须从 0 起算的柱状图
+ *   valuePrecision:  Y 轴刻度小数位；不传时按量级自适应（≥100 取整，否则 2 位）
+ *   baselineValue:   可选基准线值（如起始净值），在图上画一条虚线参考
  */
 const PAD = { top: 20, right: 12, bottom: 24, left: 40 }
 
@@ -21,6 +27,9 @@ export default function MiniChart({
   color = '#e67e22',
   areaColor,
   label = '',
+  yAxisMode = 'auto',
+  valuePrecision,
+  baselineValue,
 }) {
   const canvasRef = useRef(null)
 
@@ -37,17 +46,28 @@ export default function MiniChart({
     const plotW = width - PAD.left - PAD.right
     const plotH = height - PAD.top - PAD.bottom
     const values = data.map((d) => d.count || 0)
-    const maxVal = Math.max(...values, 1)
     const n = values.length
+
+    const scale = buildYAxisScale(values, {
+      mode: yAxisMode,
+      tickCount: 3,
+      valuePrecision,
+    })
+    const yMin = scale ? scale.yMin : 0
+    const yMax = scale ? scale.yMax : 1
+    const ticks = scale ? scale.ticks : [0, 0.33, 0.67, 1]
+    const precision = scale ? scale.valuePrecision : 0
+    const span = yMax - yMin || 1
+
+    const mapY = (v) => PAD.top + plotH - ((v - yMin) / span) * plotH
 
     // Y-axis ticks
     ctx.fillStyle = 'rgba(255,255,255,0.25)'
     ctx.font = '10px system-ui, sans-serif'
     ctx.textAlign = 'right'
-    for (let i = 0; i <= 3; i++) {
-      const v = Math.round((maxVal * i) / 3)
-      const y = PAD.top + plotH - (plotH * i) / 3
-      ctx.fillText(String(v), PAD.left - 6, y + 3)
+    ticks.forEach((v, i) => {
+      const y = PAD.top + plotH - (plotH * i) / (ticks.length - 1)
+      ctx.fillText(formatTickValue(v, precision), PAD.left - 6, y + 3)
       // Grid line
       ctx.strokeStyle = 'rgba(255,255,255,0.05)'
       ctx.lineWidth = 1
@@ -55,6 +75,25 @@ export default function MiniChart({
       ctx.moveTo(PAD.left, y)
       ctx.lineTo(PAD.left + plotW, y)
       ctx.stroke()
+    })
+
+    // Optional baseline reference line
+    if (
+      baselineValue != null &&
+      Number.isFinite(baselineValue) &&
+      baselineValue >= yMin &&
+      baselineValue <= yMax
+    ) {
+      const y = mapY(baselineValue)
+      ctx.save()
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)'
+      ctx.setLineDash([4, 4])
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(PAD.left, y)
+      ctx.lineTo(PAD.left + plotW, y)
+      ctx.stroke()
+      ctx.restore()
     }
 
     // X-axis labels (show first, mid, last date)
@@ -74,18 +113,18 @@ export default function MiniChart({
       const barW = Math.max(2, plotW / n - 2)
       values.forEach((v, i) => {
         const x = PAD.left + (plotW * i) / n + 1
-        const barH = (v / maxVal) * plotH
+        const barH = ((v - yMin) / span) * plotH
         const y = PAD.top + plotH - barH
         ctx.fillStyle = color
         ctx.globalAlpha = 0.7
-        ctx.fillRect(x, y, barW, barH)
+        ctx.fillRect(x, y, barW, Math.max(barH, 0))
         ctx.globalAlpha = 1.0
       })
     } else {
       // Line + area
       const points = values.map((v, i) => ({
         x: PAD.left + (plotW * i) / Math.max(n - 1, 1),
-        y: PAD.top + plotH - (v / maxVal) * plotH,
+        y: mapY(v),
       }))
 
       // Area fill
@@ -119,7 +158,18 @@ export default function MiniChart({
       ctx.textAlign = 'left'
       ctx.fillText(label, PAD.left, 12)
     }
-  }, [data, width, height, type, color, areaColor, label])
+  }, [
+    data,
+    width,
+    height,
+    type,
+    color,
+    areaColor,
+    label,
+    yAxisMode,
+    valuePrecision,
+    baselineValue,
+  ])
 
   if (!data || data.length === 0) {
     return (

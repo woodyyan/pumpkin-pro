@@ -155,3 +155,12 @@ frontend/
   - `POST /api/admin/portfolio-tracking/start-date/apply`：二次确认后清空并从该 `start_signal_date` 重算 4 个组合事实表。
 - 新增持久化表：`sim_portfolio_tracking_config` 保存当前全局起点，`sim_portfolio_tracking_jobs` 保存应用任务审计结果。
 - 应用重置复用既有事实表计算链路，仍写入 `portfolio_daily`、`portfolio_position`、`portfolio_trade`、`portfolio_metrics`；不新增第二套组合计算口径。
+
+### 个股详情页信息架构（2026-07-01）
+- `/live-trading/[symbol]` 从纵向长页面调整为「首屏决策概览 + 分域 Tab」。
+- 用户任务优先级固定为：看行情、AI 判断优先；持仓管理其次。
+- AI 分析是商业转化核心入口，必须在首屏概览中常驻，同时完整结果和历史归入「AI & 资讯」。
+- PC 端 Tab 固定为：概览、走势、技术、基本面、AI & 资讯、持仓 & 提醒。
+- 移动端主入口固定为：概览、走势、分析、持仓；「分析」组内二级切换技术、基本面、AI。
+- Tab 配置和 URL `tab` 归一化集中在 `frontend/lib/stock-detail-tabs.js`；非法 tab 回退 `overview`。
+- 本阶段不新增后端接口，继续复用个股页既有行情、技术、基础面、新闻、AI、持仓和信号配置 API。

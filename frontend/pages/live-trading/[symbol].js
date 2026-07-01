@@ -56,6 +56,13 @@ import {
   fetchSymbolDailyBars,
   findClosePriceByDate,
 } from '../../lib/portfolio-dashboard'
+import {
+  STOCK_DETAIL_TAB_KEYS,
+  STOCK_DETAIL_TABS,
+  getStockDetailMobileGroups,
+  getStockDetailTabByKey,
+  normalizeStockDetailTab,
+} from '../../lib/stock-detail-tabs'
 
 const POLL_MS = 10000
 const POLL_MS_NON_TRADING = 60000  // non-trading: 1 min fallback (data comes from DB cache)
@@ -112,6 +119,9 @@ export default function LiveTradingDetailPage() {
   const router = useRouter()
   const { symbol: rawSymbol } = router.query
   const symbol = rawSymbol ? decodeURIComponent(rawSymbol).toUpperCase() : ''
+  const activeTab = normalizeStockDetailTab(router.query.tab)
+  const activeTabMeta = getStockDetailTabByKey(activeTab)
+  const mobileTabGroups = useMemo(() => getStockDetailMobileGroups(), [])
 
   const { isLoggedIn, openAuthModal, ready, user } = useAuth()
   const { resolvedTheme } = useTheme()
@@ -220,6 +230,19 @@ export default function LiveTradingDetailPage() {
     () => deriveAIAnalysisWaitState(aiWaitElapsedSec, { hasPosition: aiHasPositionContext, newsState: aiNewsContextState }),
     [aiWaitElapsedSec, aiHasPositionContext, aiNewsContextState]
   )
+
+  const switchStockDetailTab = useCallback((nextTab) => {
+    const normalized = normalizeStockDetailTab(nextTab)
+    if (!symbol || normalized === activeTab) return
+    router.replace(
+      {
+        pathname: router.pathname,
+        query: { ...router.query, symbol: rawSymbol, tab: normalized },
+      },
+      undefined,
+      { shallow: true, scroll: false }
+    )
+  }, [activeTab, rawSymbol, router, symbol])
 
   const signalDirty = useMemo(() => hasSignalConfigChanged(serverSignalConfig, draftSignalConfig), [serverSignalConfig, draftSignalConfig])
 
@@ -1202,6 +1225,12 @@ export default function LiveTradingDetailPage() {
   })
   const canDeletePortfolioHistory = Boolean(portfolioData?.symbol)
   const portfolioDangerMenuOpen = portfolioDangerMenu.open
+  const isOverviewTab = activeTab === STOCK_DETAIL_TAB_KEYS.OVERVIEW
+  const isChartTab = activeTab === STOCK_DETAIL_TAB_KEYS.CHART
+  const isTechnicalTab = activeTab === STOCK_DETAIL_TAB_KEYS.TECHNICAL
+  const isFundamentalTab = activeTab === STOCK_DETAIL_TAB_KEYS.FUNDAMENTAL
+  const isAITab = activeTab === STOCK_DETAIL_TAB_KEYS.AI
+  const isPortfolioTab = activeTab === STOCK_DETAIL_TAB_KEYS.PORTFOLIO
 
   if (!symbol) {
     return (
@@ -1219,7 +1248,7 @@ export default function LiveTradingDetailPage() {
 
       <div className="space-y-6">
         {/* Header */}
-        <section className="rounded-2xl border border-border bg-card p-6">
+        <section className="sticky top-20 z-30 rounded-2xl border border-border bg-card/95 p-6 shadow-sm backdrop-blur">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="flex flex-wrap items-center gap-3">
@@ -1336,7 +1365,7 @@ export default function LiveTradingDetailPage() {
           )}
 
           {/* Inline signal config (login required) */}
-          {privateAccessReady && signalConfig && (
+          {privateAccessReady && signalConfig && isPortfolioTab && (
             <div className="mt-4 border-t border-border/60 pt-4">
               {signalError && <div className="mb-3 rounded-lg border border-negative/40 bg-negative/10 px-3 py-2 text-xs text-negative">{signalError}</div>}
 
@@ -1465,13 +1494,15 @@ export default function LiveTradingDetailPage() {
           />
         )}
 
-        <SymbolNewsSummaryCard
+        {(isOverviewTab || isAITab) && (
+          <SymbolNewsSummaryCard
           summary={newsSummary}
           updatedAt={newsUpdatedAt}
           loading={newsLoading && newsPanelOpen}
           error={newsError && !newsPanelOpen ? newsError : ''}
           onOpen={openNewsPanel}
-        />
+          />
+        )}
 
         {error ? (
           <div className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-negative">
@@ -1487,6 +1518,81 @@ export default function LiveTradingDetailPage() {
             ) : null}
           </div>
         ) : null}
+
+        <StockDetailTabNav
+          tabs={STOCK_DETAIL_TABS}
+          mobileGroups={mobileTabGroups}
+          activeTab={activeTab}
+          activeTabMeta={activeTabMeta}
+          onChange={switchStockDetailTab}
+        />
+
+        {isOverviewTab && (
+          <section className="grid gap-4 xl:grid-cols-[1.2fr_0.9fr_0.9fr]">
+            <div className="rounded-2xl border border-primary/25 bg-card p-5">
+              <div className="text-xs font-medium text-primary">AI 判断入口</div>
+              <h2 className="mt-2 text-lg font-semibold text-foreground">先看行情，再让 AI 做综合判断</h2>
+              <p className="mt-2 text-sm leading-6 text-foreground-muted">AI 会结合实时行情、基础面、技术面、新闻和你的持仓上下文，输出方向判断、交易建议、执行条件和风险提示。</p>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={aiAnalyzing || !snapshotPayload?.snapshot}
+                  onClick={handleAIAnalysis}
+                  className="rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 px-4 py-2 text-xs font-semibold text-white shadow-[0_0_16px_rgba(99,102,241,0.35)] transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {aiAnalyzing ? `分析中 · ${formatAIElapsedCompact(aiWaitElapsedSec)}` : '✨ 立即 AI 分析'}
+                </button>
+                {latestAnalysisReference ? (
+                  <button
+                    type="button"
+                    onClick={() => switchStockDetailTab(STOCK_DETAIL_TAB_KEYS.AI)}
+                    className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-2 text-xs font-medium text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
+                  >
+                    查看最近观点
+                  </button>
+                ) : null}
+              </div>
+              <div className="mt-4 rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-3 text-xs leading-6 text-foreground-muted">
+                {latestAnalysisReference
+                  ? `最近观点：${latestAnalysisReference.summary || latestAnalysisReference.final_signal || latestAnalysisReference.action || '已生成，可在 AI & 资讯中查看详情。'}`
+                  : '暂无历史 AI 观点。生成一次分析后，这里会优先展示最近一次观点摘要。'}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-base font-semibold text-foreground">技术速览</h2>
+                <button type="button" onClick={() => switchStockDetailTab(STOCK_DETAIL_TAB_KEYS.TECHNICAL)} className="text-xs text-primary hover:underline">看技术</button>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                <MetricMini label="均线状态" value={movingAveragePayload ? formatMAStatus(movingAveragePayload.status) : '--'} accent={movingAverageStatusAccent} emphasis />
+                <MetricMini label="RSI(14)" value={movingAveragePayload ? formatNumber(movingAveragePayload.rsi14, 2) : '--'} accent={rsiAccent(movingAveragePayload?.rsi14)} />
+                <MetricMini label="最近支撑" value={supportSummary?.nearest_price ? formatNumber(supportSummary.nearest_price, 3) : '--'} accent={supportStatusAccent} />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-base font-semibold text-foreground">个人相关</h2>
+                <button type="button" onClick={() => switchStockDetailTab(STOCK_DETAIL_TAB_KEYS.PORTFOLIO)} className="text-xs text-primary hover:underline">持仓&提醒</button>
+              </div>
+              {privateAccessReady ? (
+                <div className="mt-4 space-y-3">
+                  <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-3">
+                    <div className="text-xs text-foreground-dim">持仓状态</div>
+                    <div className="mt-1 text-sm font-semibold text-foreground">{portfolioHasPosition ? '当前有持仓' : '当前未持有'}</div>
+                  </div>
+                  <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-3">
+                    <div className="text-xs text-foreground-dim">交易信号</div>
+                    <div className="mt-1 text-sm font-semibold text-foreground">{signalStatusSummary || '未配置'}</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-foreground-muted">登录后可记录持仓、让 AI 结合你的仓位分析，并配置交易提醒。</div>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* AI 分析结果面板 — 标题栏下方、实时快照上方 */}
         {showAiPanel && (
@@ -1509,7 +1615,7 @@ export default function LiveTradingDetailPage() {
         )}
 
         {/* AI 分析历史（登录后展示，默认折叠） */}
-        {privateAccessReady && analysisHistory.length > 0 && (
+        {privateAccessReady && analysisHistory.length > 0 && isAITab && (
           <AnalysisHistoryPanel
             items={analysisHistory}
             expanded={historyExpanded}
@@ -1575,546 +1681,596 @@ export default function LiveTradingDetailPage() {
         )}
 
         {/* Snapshot */}
-        <section className="rounded-2xl border border-border bg-card p-5">
-          <h3 className="text-base font-semibold text-foreground">实时快照</h3>
-          {!snapshot ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">数据加载中...</div>
-          ) : (
-            <div className="mt-4 grid gap-3 md:grid-cols-4">
-              <MetricMini
-                label="最新价"
-                value={formatNumber(snapshot.last_price, 3)}
-                accent={snapshot.change_rate > 0 ? 'up' : snapshot.change_rate < 0 ? 'down' : 'normal'}
-                featured
-                marketAccent
-              />
-              <MetricMini label="涨跌幅" value={formatPercent(snapshot.change_rate)} accent={snapshot.change_rate >= 0 ? 'up' : 'down'} tooltip="今日价格相比昨日收盘价的变化百分比。红色表示上涨，绿色表示下跌。" />
-              <MetricMini label="量比" value={formatNumber(snapshot.volume_ratio, 2)} tooltip="当前成交量与过去 5 日同时段平均成交量的比值。大于 1 说明今天比平时活跃，越大越异常。" />
-              <MetricMini label="成交量" value={formatCompact(snapshot.volume)} tooltip="今日到目前为止的总成交股数（或手数），反映市场参与的活跃程度。" />
-              <MetricMini label={`成交额(${isAShare ? 'CNY' : 'HKD'})`} value={formatCompact(snapshot.turnover)} tooltip="今日到目前为止的总成交金额，比成交量更能反映真实的资金参与规模。" />
-              <MetricMini label="振幅" value={formatPercent(snapshot.amplitude)} tooltip="今日最高价与最低价之间的波动幅度占昨收价的百分比。振幅越大，说明今天价格波动越剧烈。" />
-              <MetricMini label="换手率" value={formatTurnoverRate(snapshot.turnover_rate)} tooltip="今日成交股数占流通股总数的百分比。换手率越高，说明交易越活跃、筹码流动越快。" />
-            </div>
-          )}
-        </section>
+        {isOverviewTab && (
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <h3 className="text-base font-semibold text-foreground">实时快照</h3>
+            {!snapshot ? (
+              <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">数据加载中...</div>
+            ) : (
+              <div className="mt-4 grid gap-3 md:grid-cols-4">
+                <MetricMini
+                  label="最新价"
+                  value={formatNumber(snapshot.last_price, 3)}
+                  accent={snapshot.change_rate > 0 ? 'up' : snapshot.change_rate < 0 ? 'down' : 'normal'}
+                  featured
+                  marketAccent
+                />
+                <MetricMini label="涨跌幅" value={formatPercent(snapshot.change_rate)} accent={snapshot.change_rate >= 0 ? 'up' : 'down'} tooltip="今日价格相比昨日收盘价的变化百分比。红色表示上涨，绿色表示下跌。" />
+                <MetricMini label="量比" value={formatNumber(snapshot.volume_ratio, 2)} tooltip="当前成交量与过去 5 日同时段平均成交量的比值。大于 1 说明今天比平时活跃，越大越异常。" />
+                <MetricMini label="成交量" value={formatCompact(snapshot.volume)} tooltip="今日到目前为止的总成交股数（或手数），反映市场参与的活跃程度。" />
+                <MetricMini label={`成交额(${isAShare ? 'CNY' : 'HKD'})`} value={formatCompact(snapshot.turnover)} tooltip="今日到目前为止的总成交金额，比成交量更能反映真实的资金参与规模。" />
+                <MetricMini label="振幅" value={formatPercent(snapshot.amplitude)} tooltip="今日最高价与最低价之间的波动幅度占昨收价的百分比。振幅越大，说明今天价格波动越剧烈。" />
+                <MetricMini label="换手率" value={formatTurnoverRate(snapshot.turnover_rate)} tooltip="今日成交股数占流通股总数的百分比。换手率越高，说明交易越活跃、筹码流动越快。" />
+              </div>
+            )}
+          </section>
+
+
+        )}
 
         {/* My Portfolio (login required) */}
-        {privateAccessReady && (
-          <section className="rounded-2xl border border-border bg-card p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold text-foreground">我的持仓</h3>
-                <p className="mt-1 text-xs text-foreground-dim">查看当前仓位状态，更多记录请前往持仓管理。</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Link
-                  href="/portfolio"
-                  className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
-                >
-                  去持仓管理查看完整记录
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => openPortfolioAction('buy')}
-                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-primary/85"
-                >
-                  {portfolioHasPosition ? '买入 / 加仓' : '买入建仓'}
-                </button>
-                {portfolioHasPosition && (
+        {isPortfolioTab && (
+          <>
+            {privateAccessReady && (
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold text-foreground">我的持仓</h3>
+                  <p className="mt-1 text-xs text-foreground-dim">查看当前仓位状态，更多记录请前往持仓管理。</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link
+                    href="/portfolio"
+                    className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
+                  >
+                    去持仓管理查看完整记录
+                  </Link>
                   <button
                     type="button"
-                    onClick={() => openPortfolioAction('sell')}
-                    className="rounded-lg border border-emerald-400/35 bg-emerald-500/8 px-3 py-1.5 text-xs font-medium text-positive transition hover:border-emerald-300/60"
+                    onClick={() => openPortfolioAction('buy')}
+                    className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-primary/85"
                   >
-                    卖出 / 减仓
+                    {portfolioHasPosition ? '买入 / 加仓' : '买入建仓'}
                   </button>
-                )}
-                {portfolioHasPosition && (
-                  <button
-                    type="button"
-                    onClick={() => openPortfolioAction('adjust')}
-                    className="rounded-lg border border-sky-400/35 bg-sky-500/8 px-3 py-1.5 text-xs font-medium text-sky-200 transition hover:border-sky-300/60"
-                  >
-                    调整均价
-                  </button>
-                )}
-                {portfolioData?.last_event_id && (
-                  <button
-                    type="button"
-                    disabled={portfolioSaving}
-                    onClick={undoLatestPortfolioEvent}
-                    className="rounded-lg border border-[var(--color-border-strong)] px-3 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    撤销最近一条
-                  </button>
-                )}
-                {canDeletePortfolioHistory && (
-                  <div className="relative">
+                  {portfolioHasPosition && (
                     <button
                       type="button"
-                      aria-haspopup="menu"
-                      aria-expanded={portfolioDangerMenuOpen ? 'true' : 'false'}
-                      onClick={togglePortfolioDangerMenu}
-                      className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-2.5 py-1.5 text-xs text-foreground-dim transition hover:border-[var(--color-border-strong)] hover:text-foreground-muted"
+                      onClick={() => openPortfolioAction('sell')}
+                      className="rounded-lg border border-emerald-400/35 bg-emerald-500/8 px-3 py-1.5 text-xs font-medium text-positive transition hover:border-emerald-300/60"
                     >
-                      更多
+                      卖出 / 减仓
                     </button>
-                    {portfolioDangerMenuOpen && (
-                      <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-56 rounded-xl border border-border bg-[#131820] p-2 shadow-[0_18px_48px_rgba(0,0,0,0.35)]">
-                        <div className="px-2 pb-2 text-[11px] leading-5 text-foreground-dim">危险操作已折叠到这里，避免干扰日常买卖与调仓。</div>
-                        <button
-                          type="button"
-                          onClick={openPortfolioDeleteConfirm}
-                          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs text-negative transition hover:bg-negative/10"
-                        >
-                          <span>删除全部持仓记录</span>
-                          <span className="text-[10px] text-negative/65">不可恢复</span>
-                        </button>
+                  )}
+                  {portfolioHasPosition && (
+                    <button
+                      type="button"
+                      onClick={() => openPortfolioAction('adjust')}
+                      className="rounded-lg border border-sky-400/35 bg-sky-500/8 px-3 py-1.5 text-xs font-medium text-sky-200 transition hover:border-sky-300/60"
+                    >
+                      调整均价
+                    </button>
+                  )}
+                  {portfolioData?.last_event_id && (
+                    <button
+                      type="button"
+                      disabled={portfolioSaving}
+                      onClick={undoLatestPortfolioEvent}
+                      className="rounded-lg border border-[var(--color-border-strong)] px-3 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      撤销最近一条
+                    </button>
+                  )}
+                  {canDeletePortfolioHistory && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        aria-haspopup="menu"
+                        aria-expanded={portfolioDangerMenuOpen ? 'true' : 'false'}
+                        onClick={togglePortfolioDangerMenu}
+                        className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-2.5 py-1.5 text-xs text-foreground-dim transition hover:border-[var(--color-border-strong)] hover:text-foreground-muted"
+                      >
+                        更多
+                      </button>
+                      {portfolioDangerMenuOpen && (
+                        <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-56 rounded-xl border border-border bg-[#131820] p-2 shadow-[0_18px_48px_rgba(0,0,0,0.35)]">
+                          <div className="px-2 pb-2 text-[11px] leading-5 text-foreground-dim">危险操作已折叠到这里，避免干扰日常买卖与调仓。</div>
+                          <button
+                            type="button"
+                            onClick={openPortfolioDeleteConfirm}
+                            className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs text-negative transition hover:bg-negative/10"
+                          >
+                            <span>删除全部持仓记录</span>
+                            <span className="text-[10px] text-negative/65">不可恢复</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {portfolioNotice && (
+                <div className="mt-3 rounded-lg border border-emerald-400/25 bg-positive/10 px-3 py-2 text-xs text-positive">
+                  {portfolioNotice}
+                </div>
+              )}
+
+              {portfolioHasPosition ? (
+                <div className="mt-4 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
+                  <div className="inline-flex items-center rounded-full border border-emerald-400/25 bg-positive/10 px-2.5 py-1 text-[11px] font-medium text-positive">
+                    当前有持仓
+                  </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                    {portfolioSummaryMetrics.map((metric) => (
+                      <MetricMini
+                        key={metric.label}
+                        label={metric.label}
+                        value={metric.value}
+                        accent={metric.accent}
+                        emphasis={metric.emphasis}
+                        marketAccent={metric.marketAccent}
+                        tooltip={metric.tooltip}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-foreground-dim">
+                  <div>当前未持有该股票。</div>
+                  <div className="mt-1 text-xs text-foreground-dim">你可以直接记录一笔买入，或去持仓管理查看完整历史。</div>
+                </div>
+              )}
+              {portfolioAction && (
+                <div className="mt-4 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-foreground">
+                        {portfolioAction === 'buy' ? '买入 / 加仓' : portfolioAction === 'sell' ? '卖出 / 减仓' : '手动调整均价'}
+                      </div>
+                      <div className="mt-1 text-xs text-foreground-dim">
+                        {portfolioAction === 'buy'
+                          ? '记录这次买入后，系统会自动重算最新均价。'
+                          : portfolioAction === 'sell'
+                            ? '记录这次卖出后，剩余持仓均价保持不变。'
+                            : '仅校准当前均价，不改动持仓数量。'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closePortfolioAction}
+                      className="rounded-lg border border-border px-2.5 py-1 text-xs text-foreground-dim transition hover:border-[var(--color-border-strong)] hover:text-foreground-muted"
+                    >
+                      取消
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <label className="block">
+                      <span className="text-xs text-foreground-dim">成交日期</span>
+                      <input
+                        type="date"
+                        max={new Date().toISOString().split('T')[0]}
+                        value={portfolioForm.trade_date}
+                        onChange={(e) => setPortfolioForm((f) => ({ ...f, trade_date: e.target.value }))}
+                        className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
+                      />
+                    </label>
+
+                    {portfolioAction !== 'adjust' ? (
+                      <>
+                        <label className="block">
+                          <span className="text-xs text-foreground-dim">{portfolioAction === 'buy' ? '数量（股）' : '卖出数量（股）'}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={portfolioForm.quantity}
+                            onChange={(e) => setPortfolioForm((f) => ({ ...f, quantity: e.target.value }))}
+                            className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
+                            placeholder={portfolioAction === 'buy' ? '例：200' : '例：100'}
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs text-foreground-dim inline-flex items-center gap-1.5">
+                            成交价格
+                            {priceAutoFilled ? (
+                              <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">自动</span>
+                            ) : null}
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={portfolioForm.price}
+                            onChange={(e) => {
+                              setPriceAutoFilled(false)
+                              setPortfolioForm((f) => ({ ...f, price: e.target.value }))
+                            }}
+                            className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
+                            placeholder="例：12.35"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs text-foreground-dim inline-flex items-center gap-1.5">
+                            手续费率（%）
+                            <span className="rounded-full border border-border px-1.5 py-0.5 text-[10px] text-foreground-dim">{describeFeeRate(portfolioPreview?.feeRate ?? 0)}</span>
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={portfolioForm.fee_rate}
+                            onChange={(e) => setPortfolioForm((f) => ({ ...f, fee_rate: e.target.value }))}
+                            className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
+                            placeholder={portfolioAction === 'buy' ? (isAShare ? '默认 0.03' : '默认 0.13') : (isAShare ? '默认 0.08' : '默认 0.13')}
+                          />
+                          <div className="mt-1 text-[11px] leading-5 text-foreground-dim">{portfolioFeeHint}</div>
+                        </label>
+                      </>
+                    ) : (
+                      <label className="block md:col-span-2">
+                        <span className="text-xs text-foreground-dim">新的买入均价</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={portfolioForm.avg_cost_price}
+                          onChange={(e) => setPortfolioForm((f) => ({ ...f, avg_cost_price: e.target.value }))}
+                          className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
+                          placeholder="例：12.15"
+                        />
+                      </label>
+                    )}
+
+                    <label className={`block ${portfolioAction === 'adjust' ? 'md:col-span-2' : ''}`}>
+                      <span className="text-xs text-foreground-dim">{portfolioAction === 'adjust' ? '调整原因（必填）' : '备注'}</span>
+                      <input
+                        type="text"
+                        value={portfolioForm.note}
+                        onChange={(e) => setPortfolioForm((f) => ({ ...f, note: e.target.value }))}
+                        className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
+                        placeholder={portfolioAction === 'adjust' ? '例：补录券商真实成本，已含手续费' : '例：午后加仓'}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-4 rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-3">
+                    <div className="text-xs font-medium text-foreground-muted">结果预览</div>
+                    {portfolioPreview?.errors?.length > 0 ? (
+                      <div className="mt-2 text-xs text-amber-700 dark:text-amber-200">{portfolioPreview.errors[0]}</div>
+                    ) : (
+                      <div className={`mt-2 grid gap-2 ${portfolioAction === 'adjust' ? 'sm:grid-cols-3' : 'sm:grid-cols-2 xl:grid-cols-4'}`}>
+                        <div>
+                          <div className="text-[11px] text-foreground-dim">变动后股数</div>
+                          <div className="text-sm font-semibold text-foreground">{Number(portfolioPreview?.nextShares || 0).toLocaleString('zh-CN')} 股</div>
+                        </div>
+                        <div>
+                          <div className="text-[11px] text-foreground-dim">变动后均价</div>
+                          <div className="text-sm font-semibold text-foreground">{formatNumber(portfolioPreview?.nextAvgCostPrice, 3)}</div>
+                        </div>
+                        {portfolioAction === 'buy' ? (
+                          <div>
+                            <div className="text-[11px] text-foreground-dim">变动后成本</div>
+                            <div className="text-sm font-semibold text-foreground">{formatYiCurrency(portfolioPreview?.nextTotalCostAmount, isAShare ? '¥' : 'HK$')}</div>
+                          </div>
+                        ) : null}
+                        {portfolioAction === 'sell' ? (
+                          <div>
+                            <div className="text-[11px] text-foreground-dim">本次已实现收益</div>
+                            <div className={`text-sm font-semibold ${(portfolioPreview?.realizedPnlAmount || 0) >= 0 ? 'text-negative' : 'text-positive'}`}>
+                              {(portfolioPreview?.realizedPnlAmount || 0) >= 0 ? '+' : ''}{formatYiCurrency(portfolioPreview?.realizedPnlAmount, isAShare ? '¥' : 'HK$')}
+                            </div>
+                          </div>
+                        ) : null}
+                        <div>
+                          <div className="text-[11px] text-foreground-dim">口径说明</div>
+                          <div className="text-sm font-semibold text-foreground-muted">
+                            {portfolioAction === 'buy'
+                              ? '买入后自动重算均价'
+                              : portfolioAction === 'sell'
+                                ? '卖出后剩余仓位沿用原均价'
+                                : '仅调整均价，不改股数'}
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-            </div>
 
-            {portfolioNotice && (
-              <div className="mt-3 rounded-lg border border-emerald-400/25 bg-positive/10 px-3 py-2 text-xs text-positive">
-                {portfolioNotice}
-              </div>
-            )}
-
-            {portfolioHasPosition ? (
-              <div className="mt-4 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
-                <div className="inline-flex items-center rounded-full border border-emerald-400/25 bg-positive/10 px-2.5 py-1 text-[11px] font-medium text-positive">
-                  当前有持仓
-                </div>
-                <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                  {portfolioSummaryMetrics.map((metric) => (
-                    <MetricMini
-                      key={metric.label}
-                      label={metric.label}
-                      value={metric.value}
-                      accent={metric.accent}
-                      emphasis={metric.emphasis}
-                      marketAccent={metric.marketAccent}
-                      tooltip={metric.tooltip}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-foreground-dim">
-                <div>当前未持有该股票。</div>
-                <div className="mt-1 text-xs text-foreground-dim">你可以直接记录一笔买入，或去持仓管理查看完整历史。</div>
-              </div>
-            )}
-            {portfolioAction && (
-              <div className="mt-4 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-foreground">
-                      {portfolioAction === 'buy' ? '买入 / 加仓' : portfolioAction === 'sell' ? '卖出 / 减仓' : '手动调整均价'}
-                    </div>
-                    <div className="mt-1 text-xs text-foreground-dim">
-                      {portfolioAction === 'buy'
-                        ? '记录这次买入后，系统会自动重算最新均价。'
-                        : portfolioAction === 'sell'
-                          ? '记录这次卖出后，剩余持仓均价保持不变。'
-                          : '仅校准当前均价，不改动持仓数量。'}
-                    </div>
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={portfolioSaving}
+                      onClick={submitPortfolioAction}
+                      className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {portfolioSaving ? '保存中...' : portfolioAction === 'buy' ? '确认买入' : portfolioAction === 'sell' ? '确认卖出' : '确认调整'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={closePortfolioAction}
+                      className="rounded-lg border border-border px-4 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)]"
+                    >
+                      取消
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={closePortfolioAction}
-                    className="rounded-lg border border-border px-2.5 py-1 text-xs text-foreground-dim transition hover:border-[var(--color-border-strong)] hover:text-foreground-muted"
-                  >
-                    取消
-                  </button>
                 </div>
+              )}
 
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <label className="block">
-                    <span className="text-xs text-foreground-dim">成交日期</span>
-                    <input
-                      type="date"
-                      max={new Date().toISOString().split('T')[0]}
-                      value={portfolioForm.trade_date}
-                      onChange={(e) => setPortfolioForm((f) => ({ ...f, trade_date: e.target.value }))}
-                      className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
-                    />
-                  </label>
+            </section>
+          )}
+          </>
+        )}
 
-                  {portfolioAction !== 'adjust' ? (
-                    <>
-                      <label className="block">
-                        <span className="text-xs text-foreground-dim">{portfolioAction === 'buy' ? '数量（股）' : '卖出数量（股）'}</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={portfolioForm.quantity}
-                          onChange={(e) => setPortfolioForm((f) => ({ ...f, quantity: e.target.value }))}
-                          className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
-                          placeholder={portfolioAction === 'buy' ? '例：200' : '例：100'}
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-xs text-foreground-dim inline-flex items-center gap-1.5">
-                          成交价格
-                          {priceAutoFilled ? (
-                            <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">自动</span>
-                          ) : null}
-                        </span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={portfolioForm.price}
-                          onChange={(e) => {
-                            setPriceAutoFilled(false)
-                            setPortfolioForm((f) => ({ ...f, price: e.target.value }))
-                          }}
-                          className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
-                          placeholder="例：12.35"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-xs text-foreground-dim inline-flex items-center gap-1.5">
-                          手续费率（%）
-                          <span className="rounded-full border border-border px-1.5 py-0.5 text-[10px] text-foreground-dim">{describeFeeRate(portfolioPreview?.feeRate ?? 0)}</span>
-                        </span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={portfolioForm.fee_rate}
-                          onChange={(e) => setPortfolioForm((f) => ({ ...f, fee_rate: e.target.value }))}
-                          className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
-                          placeholder={portfolioAction === 'buy' ? (isAShare ? '默认 0.03' : '默认 0.13') : (isAShare ? '默认 0.08' : '默认 0.13')}
-                        />
-                        <div className="mt-1 text-[11px] leading-5 text-foreground-dim">{portfolioFeeHint}</div>
-                      </label>
-                    </>
-                  ) : (
-                    <label className="block md:col-span-2">
-                      <span className="text-xs text-foreground-dim">新的买入均价</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        value={portfolioForm.avg_cost_price}
-                        onChange={(e) => setPortfolioForm((f) => ({ ...f, avg_cost_price: e.target.value }))}
-                        className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
-                        placeholder="例：12.15"
-                      />
-                    </label>
-                  )}
-
-                  <label className={`block ${portfolioAction === 'adjust' ? 'md:col-span-2' : ''}`}>
-                    <span className="text-xs text-foreground-dim">{portfolioAction === 'adjust' ? '调整原因（必填）' : '备注'}</span>
-                    <input
-                      type="text"
-                      value={portfolioForm.note}
-                      onChange={(e) => setPortfolioForm((f) => ({ ...f, note: e.target.value }))}
-                      className="mt-1 block w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
-                      placeholder={portfolioAction === 'adjust' ? '例：补录券商真实成本，已含手续费' : '例：午后加仓'}
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-4 rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-3">
-                  <div className="text-xs font-medium text-foreground-muted">结果预览</div>
-                  {portfolioPreview?.errors?.length > 0 ? (
-                    <div className="mt-2 text-xs text-amber-700 dark:text-amber-200">{portfolioPreview.errors[0]}</div>
-                  ) : (
-                    <div className={`mt-2 grid gap-2 ${portfolioAction === 'adjust' ? 'sm:grid-cols-3' : 'sm:grid-cols-2 xl:grid-cols-4'}`}>
-                      <div>
-                        <div className="text-[11px] text-foreground-dim">变动后股数</div>
-                        <div className="text-sm font-semibold text-foreground">{Number(portfolioPreview?.nextShares || 0).toLocaleString('zh-CN')} 股</div>
-                      </div>
-                      <div>
-                        <div className="text-[11px] text-foreground-dim">变动后均价</div>
-                        <div className="text-sm font-semibold text-foreground">{formatNumber(portfolioPreview?.nextAvgCostPrice, 3)}</div>
-                      </div>
-                      {portfolioAction === 'buy' ? (
-                        <div>
-                          <div className="text-[11px] text-foreground-dim">变动后成本</div>
-                          <div className="text-sm font-semibold text-foreground">{formatYiCurrency(portfolioPreview?.nextTotalCostAmount, isAShare ? '¥' : 'HK$')}</div>
-                        </div>
-                      ) : null}
-                      {portfolioAction === 'sell' ? (
-                        <div>
-                          <div className="text-[11px] text-foreground-dim">本次已实现收益</div>
-                          <div className={`text-sm font-semibold ${(portfolioPreview?.realizedPnlAmount || 0) >= 0 ? 'text-negative' : 'text-positive'}`}>
-                            {(portfolioPreview?.realizedPnlAmount || 0) >= 0 ? '+' : ''}{formatYiCurrency(portfolioPreview?.realizedPnlAmount, isAShare ? '¥' : 'HK$')}
-                          </div>
-                        </div>
-                      ) : null}
-                      <div>
-                        <div className="text-[11px] text-foreground-dim">口径说明</div>
-                        <div className="text-sm font-semibold text-foreground-muted">
-                          {portfolioAction === 'buy'
-                            ? '买入后自动重算均价'
-                            : portfolioAction === 'sell'
-                              ? '卖出后剩余仓位沿用原均价'
-                              : '仅调整均价，不改股数'}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={portfolioSaving}
-                    onClick={submitPortfolioAction}
-                    className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {portfolioSaving ? '保存中...' : portfolioAction === 'buy' ? '确认买入' : portfolioAction === 'sell' ? '确认卖出' : '确认调整'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={closePortfolioAction}
-                    className="rounded-lg border border-border px-4 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)]"
-                  >
-                    取消
-                  </button>
-                </div>
-              </div>
-            )}
-
+        {isPortfolioTab && !privateAccessReady && (
+          <section className="rounded-2xl border border-dashed border-border bg-card px-5 py-8 text-sm text-foreground-muted">
+            <h3 className="text-base font-semibold text-foreground">登录后管理持仓与提醒</h3>
+            <p className="mt-2 leading-6">你可以记录买入/卖出、让 AI 结合仓位做判断，并配置交易信号提醒。</p>
+            <button
+              type="button"
+              onClick={() => openAuthModal('login', '登录后可管理该股票的持仓与提醒')}
+              className="mt-4 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-foreground shadow-sm transition hover:bg-primary/85"
+            >
+              去登录
+            </button>
           </section>
         )}
 
         {/* Fundamentals */}
-        <section className="rounded-2xl border border-border bg-card p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="text-base font-semibold text-foreground">基础面概览</h3>
-              {fundamentalsMetaLine ? (
-                <p className="mt-1 text-xs text-foreground-dim">{fundamentalsMetaLine}</p>
+        {isFundamentalTab && (
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-foreground">基础面概览</h3>
+                {fundamentalsMetaLine ? (
+                  <p className="mt-1 text-xs text-foreground-dim">{fundamentalsMetaLine}</p>
+                ) : null}
+              </div>
+              {!fundamentalsSupported && fundamentalsMeta?.warning ? (
+                <div className="rounded-full border border-amber-300/25 bg-amber-500/10 px-3 py-1 text-[11px] text-amber-200">
+                  {fundamentalsMeta.warning}
+                </div>
               ) : null}
             </div>
-            {!fundamentalsSupported && fundamentalsMeta?.warning ? (
-              <div className="rounded-full border border-amber-300/25 bg-amber-500/10 px-3 py-1 text-[11px] text-amber-200">
-                {fundamentalsMeta.warning}
-              </div>
+            {fundamentalsError ? (
+              <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{fundamentalsError}</div>
             ) : null}
-          </div>
-          {fundamentalsError ? (
-            <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{fundamentalsError}</div>
-          ) : null}
-          {!fundamentalsPayload && fundamentalsLoading ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">基础面数据加载中...</div>
-          ) : (
-            <div className="mt-4 grid gap-3 md:grid-cols-5">
-              <MetricMini label={`市值(${fundamentalsCurrencyCode})`} value={formatYiCurrency(fundamentalsItems.market_cap, fundamentalsCurrencySymbol)} emphasis tooltip="公司所有流通股按当前价格计算的总价值。市值越大，公司规模越大。" />
-              <MetricMini label="股息收益率" value={formatPercentMaybeNull(fundamentalsItems.dividend_yield)} tooltip="过去一年的每股分红金额占当前股价的比例。收益率越高，分红回报越好。" />
-              <MetricMini label="市盈率(TTM)" value={formatMultiple(fundamentalsItems.pe_ttm)} tooltip="当前股价是过去 12 个月每股利润的多少倍。市盈率越低，可能越「便宜」；越高可能表示市场对未来增长的期望越大。" />
-              <MetricMini label="市净率(PB)" value={formatMultiple(fundamentalsItems.pb_ttm)} tooltip="当前股价是每股净资产的多少倍。PB 越低，说明股价相对账面价值越「便宜」；PB < 1 意味着股价低于净资产（可能被低估，也可能反映经营困难）。" />
-              <MetricMini label="PEG" value={formatPEG(fundamentalsItems.peg)} accent={pegAccent(fundamentalsItems.peg)} tooltip="市盈率与盈利增长率的比值（PEG = PE / 净利润增长率%）。PEG < 1 通常被认为低估（成长性好且估值合理），PEG > 2 可能偏贵。增长率为负时不可计算。" />
-              <MetricMini label="流通股" value={formatYiShares(fundamentalsItems.float_shares)} tooltip="目前在市场上可以自由买卖的股票总数。流通股越少，股价越容易被大资金影响。" />
-              <MetricMini label={`净利润(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.net_profit_fy, fundamentalsCurrencySymbol)} tooltip="公司在报告期内扣除所有成本和税费后的最终利润。这是衡量公司赚钱能力的核心指标。" />
-              <MetricMini label={`收入(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.revenue_fy, fundamentalsCurrencySymbol)} tooltip="公司在报告期内的总营业收入（卖出产品或服务获得的钱）。收入增长通常意味着公司业务在扩张。" />
-              <MetricMini label="毛利率" value={formatPercentDirect(fundamentalsItems.gross_margin)} tooltip="收入减去直接成本后剩余的利润占收入的比例。毛利率越高，说明产品或服务的附加值越大。" />
-              <MetricMini label="净利率" value={formatPercentDirect(fundamentalsItems.net_margin)} tooltip="净利润占总收入的比例。净利率越高，说明公司每赚 1 块钱中能留下的利润越多。" />
-            </div>
-          )}
-        </section>
+            {!fundamentalsPayload && fundamentalsLoading ? (
+              <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">基础面数据加载中...</div>
+            ) : (
+              <div className="mt-4 grid gap-3 md:grid-cols-5">
+                <MetricMini label={`市值(${fundamentalsCurrencyCode})`} value={formatYiCurrency(fundamentalsItems.market_cap, fundamentalsCurrencySymbol)} emphasis tooltip="公司所有流通股按当前价格计算的总价值。市值越大，公司规模越大。" />
+                <MetricMini label="股息收益率" value={formatPercentMaybeNull(fundamentalsItems.dividend_yield)} tooltip="过去一年的每股分红金额占当前股价的比例。收益率越高，分红回报越好。" />
+                <MetricMini label="市盈率(TTM)" value={formatMultiple(fundamentalsItems.pe_ttm)} tooltip="当前股价是过去 12 个月每股利润的多少倍。市盈率越低，可能越「便宜」；越高可能表示市场对未来增长的期望越大。" />
+                <MetricMini label="市净率(PB)" value={formatMultiple(fundamentalsItems.pb_ttm)} tooltip="当前股价是每股净资产的多少倍。PB 越低，说明股价相对账面价值越「便宜」；PB < 1 意味着股价低于净资产（可能被低估，也可能反映经营困难）。" />
+                <MetricMini label="PEG" value={formatPEG(fundamentalsItems.peg)} accent={pegAccent(fundamentalsItems.peg)} tooltip="市盈率与盈利增长率的比值（PEG = PE / 净利润增长率%）。PEG < 1 通常被认为低估（成长性好且估值合理），PEG > 2 可能偏贵。增长率为负时不可计算。" />
+                <MetricMini label="流通股" value={formatYiShares(fundamentalsItems.float_shares)} tooltip="目前在市场上可以自由买卖的股票总数。流通股越少，股价越容易被大资金影响。" />
+                <MetricMini label={`净利润(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.net_profit_fy, fundamentalsCurrencySymbol)} tooltip="公司在报告期内扣除所有成本和税费后的最终利润。这是衡量公司赚钱能力的核心指标。" />
+                <MetricMini label={`收入(${fundamentalsReportLabel} · ${fundamentalsCurrencyCode})`} value={formatYiAmount(fundamentalsItems.revenue_fy, fundamentalsCurrencySymbol)} tooltip="公司在报告期内的总营业收入（卖出产品或服务获得的钱）。收入增长通常意味着公司业务在扩张。" />
+                <MetricMini label="毛利率" value={formatPercentDirect(fundamentalsItems.gross_margin)} tooltip="收入减去直接成本后剩余的利润占收入的比例。毛利率越高，说明产品或服务的附加值越大。" />
+                <MetricMini label="净利率" value={formatPercentDirect(fundamentalsItems.net_margin)} tooltip="净利润占总收入的比例。净利率越高，说明公司每赚 1 块钱中能留下的利润越多。" />
+              </div>
+            )}
+          </section>
+
+
+        )}
 
         {/* Daily history chart */}
-        <section className="rounded-2xl border border-border bg-card p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <h3 className="text-base font-semibold text-foreground">历史走势</h3>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {DAILY_RANGE_LABELS.map((key) => {
-              const ret = rangeReturns[key]
-              const hasReturn = ret !== undefined && ret !== null
-              const isUp = hasReturn && ret >= 0
-              const retColor = hasReturn ? (isUp ? 'text-negative' : 'text-positive') : 'text-foreground-dim'
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setDailyRange(key)}
-                  className={`flex flex-col items-center rounded-lg px-2.5 py-1.5 text-xs font-medium transition min-w-[48px] ${
-                    dailyRange === key
-                      ? 'bg-primary text-foreground shadow-sm'
-                      : 'bg-[var(--color-bg-secondary)] text-foreground-muted hover:bg-black/35 hover:text-foreground-muted'
-                  }`}
-                >
-                  <span>{key === 'ALL' ? '全部' : key.replace('D','天').replace('W','周').replace('M','月').replace('Y','年')}</span>
-                  <span className={`mt-0.5 text-[10px] leading-tight font-semibold ${dailyRange === key ? (isUp ? 'text-foreground/90' : 'text-foreground/90') : retColor}`}>
-                    {hasReturn ? `${isUp ? '+' : ''}${(ret * 100).toFixed(1)}%` : '--'}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-          {dailyLoading ? (
-            <div className="mt-4 flex items-center justify-center rounded-xl border border-dashed border-border py-16 text-sm text-foreground-dim">加载中...</div>
-          ) : dailyBars.length === 0 ? (
-            <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">暂无历史数据。</div>
-          ) : (
-            <DailyHistoryChart bars={dailyBars} />
-          )}
-        </section>
+        {isChartTab && (
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <h3 className="text-base font-semibold text-foreground">历史走势</h3>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {DAILY_RANGE_LABELS.map((key) => {
+                const ret = rangeReturns[key]
+                const hasReturn = ret !== undefined && ret !== null
+                const isUp = hasReturn && ret >= 0
+                const retColor = hasReturn ? (isUp ? 'text-negative' : 'text-positive') : 'text-foreground-dim'
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setDailyRange(key)}
+                    className={`flex flex-col items-center rounded-lg px-2.5 py-1.5 text-xs font-medium transition min-w-[48px] ${
+                      dailyRange === key
+                        ? 'bg-primary text-foreground shadow-sm'
+                        : 'bg-[var(--color-bg-secondary)] text-foreground-muted hover:bg-black/35 hover:text-foreground-muted'
+                    }`}
+                  >
+                    <span>{key === 'ALL' ? '全部' : key.replace('D','天').replace('W','周').replace('M','月').replace('Y','年')}</span>
+                    <span className={`mt-0.5 text-[10px] leading-tight font-semibold ${dailyRange === key ? (isUp ? 'text-foreground/90' : 'text-foreground/90') : retColor}`}>
+                      {hasReturn ? `${isUp ? '+' : ''}${(ret * 100).toFixed(1)}%` : '--'}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            {dailyLoading ? (
+              <div className="mt-4 flex items-center justify-center rounded-xl border border-dashed border-border py-16 text-sm text-foreground-dim">加载中...</div>
+            ) : dailyBars.length === 0 ? (
+              <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">暂无历史数据。</div>
+            ) : (
+              <DailyHistoryChart bars={dailyBars} />
+            )}
+          </section>
+
+
+        )}
 
         {/* Moving averages */}
-        <section className="rounded-2xl border border-border bg-card p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="text-base font-semibold text-foreground">技术指标</h3>
-              <p className="mt-1 text-xs text-foreground-muted">均线 / RSI / MACD / 布林带，基于最近 {MA_LOOKBACK_DAYS} 个交易日收盘价。</p>
-            </div>
-            <div className="text-xs text-foreground-dim">
-              {movingAveragePayload?.updated_at ? `更新：${formatDateTime(movingAveragePayload.updated_at)}` : '等待数据'}
-            </div>
-          </div>
-          {movingAverageError && <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{movingAverageError}</div>}
-          {!movingAveragePayload ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">暂无均线数据。</div>
-          ) : (
-            <div className="mt-4 space-y-3">
-              <div className="grid gap-3 md:grid-cols-4">
-                <MetricMini label="MA5" value={formatNumber(movingAveragePayload.ma5, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma5)} tooltip="最近 5 个交易日收盘价的平均值，反映超短线趋势。价格在 MA5 上方通常偏强。" />
-                <MetricMini label="MA20" value={formatNumber(movingAveragePayload.ma20, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma20)} tooltip="最近 20 个交易日（约 1 个月）收盘价均值，常用来判断短线趋势方向。" />
-                <MetricMini label="MA60" value={formatNumber(movingAveragePayload.ma60, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma60)} tooltip="最近 60 个交易日（约 3 个月）收盘价均值，反映中线趋势。常被称为「生命线」。" />
-                <MetricMini label="MA200" value={formatNumber(movingAveragePayload.ma200, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma200)} tooltip="最近 200 个交易日（约 1 年）收盘价均值，反映长线趋势。价格站上 MA200 通常被视为牛市信号。" />
+        {isTechnicalTab && (
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-foreground">技术指标</h3>
+                <p className="mt-1 text-xs text-foreground-muted">均线 / RSI / MACD / 布林带，基于最近 {MA_LOOKBACK_DAYS} 个交易日收盘价。</p>
               </div>
-              <div className="grid gap-3 md:grid-cols-5">
-                <MetricMini label="距 MA5" value={formatDistancePct(movingAveragePayload.distance_to_ma5_pct)} accent={movingAveragePayload.distance_to_ma5_pct >= 0 ? 'up' : 'down'} tooltip="当前价格偏离 MA5 的程度。正值说明价格在均线上方，负值说明在下方。偏离越大，回归的可能性越高。" />
-                <MetricMini label="距 MA20" value={formatDistancePct(movingAveragePayload.distance_to_ma20_pct)} accent={movingAveragePayload.distance_to_ma20_pct >= 0 ? 'up' : 'down'} tooltip="当前价格偏离 MA20 的程度。偏离过大可能意味着短期涨跌过快，有修正的可能。" />
-                <MetricMini label="距 MA60" value={formatDistancePct(movingAveragePayload.distance_to_ma60_pct)} accent={movingAveragePayload.distance_to_ma60_pct >= 0 ? 'up' : 'down'} tooltip="当前价格偏离 MA60 的程度。偏离 MA60 过远通常意味着中线超涨或超跌。" />
-                <MetricMini label="距 MA200" value={formatDistancePct(movingAveragePayload.distance_to_ma200_pct)} accent={movingAveragePayload.distance_to_ma200_pct >= 0 ? 'up' : 'down'} tooltip="当前价格偏离 MA200 的程度。正值越大说明长线涨幅越多，负值越大说明长线偏弱。" />
-                <MetricMini label="位置状态" value={formatMAStatus(movingAveragePayload.status)} accent={movingAverageStatusAccent} emphasis tooltip="当前价格相对 MA20 和 MA200 的位置组合。「双双站上」意味着短线和长线都偏强，「双双跌破」则都偏弱。" />
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <MetricMini label="RSI(14)" value={formatNumber(movingAveragePayload.rsi14, 2)} accent={rsiAccent(movingAveragePayload.rsi14)} tooltip="衡量最近 14 个交易日涨跌动能的指标，范围 0~100。≥70 为超买（可能回调），≤30 为超卖（可能反弹），50 附近为中性。" />
-                <MetricMini label="RSI 状态" value={movingAveragePayload.rsi14_status || '--'} accent={rsiAccent(movingAveragePayload.rsi14)} emphasis tooltip="基于 RSI 数值的市场情绪判断。超买意味着短期涨太多可能要歇一歇，超卖意味着跌太多可能要反弹。" />
-              </div>
-              <div className="grid gap-3 md:grid-cols-3">
-                <MetricMini label="MACD" value={formatNumber(movingAveragePayload.macd, 4)} accent={movingAveragePayload.macd >= 0 ? 'up' : 'down'} tooltip="快线（12日EMA）减慢线（26日EMA）的差值。MACD 为正说明短期趋势强于长期，为负则相反。MACD 从负转正叫「金叉」，是买入信号。" />
-                <MetricMini label="信号线" value={formatNumber(movingAveragePayload.macd_signal, 4)} tooltip="MACD 线的 9 日平均值，用来平滑 MACD 的波动。当 MACD 线向上穿过信号线时为金叉（看涨），向下穿过时为死叉（看跌）。" />
-                <MetricMini label="MACD 柱" value={formatNumber(movingAveragePayload.macd_histogram, 4)} accent={movingAveragePayload.macd_histogram >= 0 ? 'up' : 'down'} emphasis tooltip="MACD 线与信号线的差值。红柱（正值）表示多头动能在增强，绿柱（负值）表示空头动能在增强。柱子由短变长说明趋势在加速。" />
-              </div>
-              {movingAveragePayload.macd_series?.length > 0 && (
-                <MACDChart series={movingAveragePayload.macd_series} />
-              )}
-              <div className="grid gap-3 md:grid-cols-4">
-                <MetricMini label="布林上轨" value={formatNumber(movingAveragePayload.bollinger_upper, 3)} tooltip="布林带上轨 = MA20 + 2倍标准差。价格触及或突破上轨通常意味着短期涨幅较大，可能面临回调压力。" />
-                <MetricMini label="布林下轨" value={formatNumber(movingAveragePayload.bollinger_lower, 3)} tooltip="布林带下轨 = MA20 - 2倍标准差。价格触及或跌破下轨通常意味着短期跌幅较大，可能有反弹机会。" />
-                <MetricMini label="带宽" value={formatBollingerBW(movingAveragePayload.bollinger_bandwidth)} tooltip="上轨与下轨之间的宽度占中轨的百分比。带宽收窄说明波动率降低，往往预示即将出现大的方向性突破。" />
-                <MetricMini label="%B 位置" value={formatPercentB(movingAveragePayload.bollinger_percent_b)} accent={percentBAccent(movingAveragePayload.bollinger_percent_b)} emphasis tooltip="价格在布林带中的相对位置。%B > 1 表示价格在上轨之上（超买区），%B < 0 表示在下轨之下（超卖区），0.5 表示正好在中轨。" />
-              </div>
-              {movingAveragePayload.bollinger_series?.length > 0 && (
-                <BollingerChart series={movingAveragePayload.bollinger_series} />
-              )}
-              <div className="grid gap-3 md:grid-cols-3">
-                <MetricMini label="60日涨跌幅" value={formatDistancePct(movingAveragePayload.change_pct_60d)} accent={movingAveragePayload.change_pct_60d >= 0 ? 'up' : 'down'} emphasis marketAccent tooltip="最近 60 个交易日（约 3 个月）的累计涨跌幅。正值表示上涨，负值表示下跌。用于判断中期趋势方向。" />
-                <MetricMini label="20日波动率" value={formatVolatility(movingAveragePayload.volatility_20d)} accent={volatilityAccent(movingAveragePayload.volatility_20d)} emphasis tooltip="基于最近 20 个交易日收盘价日收益率计算的年化波动率。波动率越高，价格变动越剧烈。>40% 为高波动，<20% 为低波动。" />
-                <MetricMini label="均量比(5日/20日)" value={formatVolumeRatio(movingAveragePayload.volume_ma5_to_ma20)} accent={volumeRatioAccent(movingAveragePayload.volume_ma5_to_ma20)} emphasis tooltip="近 5 日平均成交量与近 20 日平均成交量的比值。>1.5 说明近期明显放量，<0.7 说明近期明显缩量。放量配合涨价通常是积极信号。" />
+              <div className="text-xs text-foreground-dim">
+                {movingAveragePayload?.updated_at ? `更新：${formatDateTime(movingAveragePayload.updated_at)}` : '等待数据'}
               </div>
             </div>
-          )}
-        </section>
+            {movingAverageError && <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{movingAverageError}</div>}
+            {!movingAveragePayload ? (
+              <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">暂无均线数据。</div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <MetricMini label="MA5" value={formatNumber(movingAveragePayload.ma5, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma5)} tooltip="最近 5 个交易日收盘价的平均值，反映超短线趋势。价格在 MA5 上方通常偏强。" />
+                  <MetricMini label="MA20" value={formatNumber(movingAveragePayload.ma20, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma20)} tooltip="最近 20 个交易日（约 1 个月）收盘价均值，常用来判断短线趋势方向。" />
+                  <MetricMini label="MA60" value={formatNumber(movingAveragePayload.ma60, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma60)} tooltip="最近 60 个交易日（约 3 个月）收盘价均值，反映中线趋势。常被称为「生命线」。" />
+                  <MetricMini label="MA200" value={formatNumber(movingAveragePayload.ma200, 3)} accent={maAccent(movingAveragePayload.price_ref, movingAveragePayload.ma200)} tooltip="最近 200 个交易日（约 1 年）收盘价均值，反映长线趋势。价格站上 MA200 通常被视为牛市信号。" />
+                </div>
+                <div className="grid gap-3 md:grid-cols-5">
+                  <MetricMini label="距 MA5" value={formatDistancePct(movingAveragePayload.distance_to_ma5_pct)} accent={movingAveragePayload.distance_to_ma5_pct >= 0 ? 'up' : 'down'} tooltip="当前价格偏离 MA5 的程度。正值说明价格在均线上方，负值说明在下方。偏离越大，回归的可能性越高。" />
+                  <MetricMini label="距 MA20" value={formatDistancePct(movingAveragePayload.distance_to_ma20_pct)} accent={movingAveragePayload.distance_to_ma20_pct >= 0 ? 'up' : 'down'} tooltip="当前价格偏离 MA20 的程度。偏离过大可能意味着短期涨跌过快，有修正的可能。" />
+                  <MetricMini label="距 MA60" value={formatDistancePct(movingAveragePayload.distance_to_ma60_pct)} accent={movingAveragePayload.distance_to_ma60_pct >= 0 ? 'up' : 'down'} tooltip="当前价格偏离 MA60 的程度。偏离 MA60 过远通常意味着中线超涨或超跌。" />
+                  <MetricMini label="距 MA200" value={formatDistancePct(movingAveragePayload.distance_to_ma200_pct)} accent={movingAveragePayload.distance_to_ma200_pct >= 0 ? 'up' : 'down'} tooltip="当前价格偏离 MA200 的程度。正值越大说明长线涨幅越多，负值越大说明长线偏弱。" />
+                  <MetricMini label="位置状态" value={formatMAStatus(movingAveragePayload.status)} accent={movingAverageStatusAccent} emphasis tooltip="当前价格相对 MA20 和 MA200 的位置组合。「双双站上」意味着短线和长线都偏强，「双双跌破」则都偏弱。" />
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <MetricMini label="RSI(14)" value={formatNumber(movingAveragePayload.rsi14, 2)} accent={rsiAccent(movingAveragePayload.rsi14)} tooltip="衡量最近 14 个交易日涨跌动能的指标，范围 0~100。≥70 为超买（可能回调），≤30 为超卖（可能反弹），50 附近为中性。" />
+                  <MetricMini label="RSI 状态" value={movingAveragePayload.rsi14_status || '--'} accent={rsiAccent(movingAveragePayload.rsi14)} emphasis tooltip="基于 RSI 数值的市场情绪判断。超买意味着短期涨太多可能要歇一歇，超卖意味着跌太多可能要反弹。" />
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <MetricMini label="MACD" value={formatNumber(movingAveragePayload.macd, 4)} accent={movingAveragePayload.macd >= 0 ? 'up' : 'down'} tooltip="快线（12日EMA）减慢线（26日EMA）的差值。MACD 为正说明短期趋势强于长期，为负则相反。MACD 从负转正叫「金叉」，是买入信号。" />
+                  <MetricMini label="信号线" value={formatNumber(movingAveragePayload.macd_signal, 4)} tooltip="MACD 线的 9 日平均值，用来平滑 MACD 的波动。当 MACD 线向上穿过信号线时为金叉（看涨），向下穿过时为死叉（看跌）。" />
+                  <MetricMini label="MACD 柱" value={formatNumber(movingAveragePayload.macd_histogram, 4)} accent={movingAveragePayload.macd_histogram >= 0 ? 'up' : 'down'} emphasis tooltip="MACD 线与信号线的差值。红柱（正值）表示多头动能在增强，绿柱（负值）表示空头动能在增强。柱子由短变长说明趋势在加速。" />
+                </div>
+                {movingAveragePayload.macd_series?.length > 0 && (
+                  <MACDChart series={movingAveragePayload.macd_series} />
+                )}
+                <div className="grid gap-3 md:grid-cols-4">
+                  <MetricMini label="布林上轨" value={formatNumber(movingAveragePayload.bollinger_upper, 3)} tooltip="布林带上轨 = MA20 + 2倍标准差。价格触及或突破上轨通常意味着短期涨幅较大，可能面临回调压力。" />
+                  <MetricMini label="布林下轨" value={formatNumber(movingAveragePayload.bollinger_lower, 3)} tooltip="布林带下轨 = MA20 - 2倍标准差。价格触及或跌破下轨通常意味着短期跌幅较大，可能有反弹机会。" />
+                  <MetricMini label="带宽" value={formatBollingerBW(movingAveragePayload.bollinger_bandwidth)} tooltip="上轨与下轨之间的宽度占中轨的百分比。带宽收窄说明波动率降低，往往预示即将出现大的方向性突破。" />
+                  <MetricMini label="%B 位置" value={formatPercentB(movingAveragePayload.bollinger_percent_b)} accent={percentBAccent(movingAveragePayload.bollinger_percent_b)} emphasis tooltip="价格在布林带中的相对位置。%B > 1 表示价格在上轨之上（超买区），%B < 0 表示在下轨之下（超卖区），0.5 表示正好在中轨。" />
+                </div>
+                {movingAveragePayload.bollinger_series?.length > 0 && (
+                  <BollingerChart series={movingAveragePayload.bollinger_series} />
+                )}
+                <div className="grid gap-3 md:grid-cols-3">
+                  <MetricMini label="60日涨跌幅" value={formatDistancePct(movingAveragePayload.change_pct_60d)} accent={movingAveragePayload.change_pct_60d >= 0 ? 'up' : 'down'} emphasis marketAccent tooltip="最近 60 个交易日（约 3 个月）的累计涨跌幅。正值表示上涨，负值表示下跌。用于判断中期趋势方向。" />
+                  <MetricMini label="20日波动率" value={formatVolatility(movingAveragePayload.volatility_20d)} accent={volatilityAccent(movingAveragePayload.volatility_20d)} emphasis tooltip="基于最近 20 个交易日收盘价日收益率计算的年化波动率。波动率越高，价格变动越剧烈。>40% 为高波动，<20% 为低波动。" />
+                  <MetricMini label="均量比(5日/20日)" value={formatVolumeRatio(movingAveragePayload.volume_ma5_to_ma20)} accent={volumeRatioAccent(movingAveragePayload.volume_ma5_to_ma20)} emphasis tooltip="近 5 日平均成交量与近 20 日平均成交量的比值。>1.5 说明近期明显放量，<0.7 说明近期明显缩量。放量配合涨价通常是积极信号。" />
+                </div>
+              </div>
+            )}
+          </section>
+
+
+        )}
 
         {/* Daily overlay: stock vs benchmark */}
-        <section className="rounded-2xl border border-border bg-card p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="text-base font-semibold text-foreground">走势对比（个股 vs 大盘）</h3>
-              <p className="mt-1 text-xs text-foreground-dim">
-                基于日收盘价归一化对比，基准：{dailyOverlay?.benchmark || (isAShare ? 'SHCI' : 'HSI')}
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5">
-              {[{ label: '30天', value: '30' }, { label: '60天', value: '60' }, { label: '120天', value: '120' }, { label: '1年', value: '260' }].map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setOverlayRange(opt.value)}
-                  className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${overlayRange === opt.value ? 'bg-primary text-foreground' : 'bg-[var(--color-bg-secondary)] text-foreground-muted hover:bg-black/35 hover:text-foreground-muted'}`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {!dailyOverlay?.series?.length ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">走势对比数据加载中...</div>
-          ) : (
-            <div className="mt-4 space-y-4">
-              <DailyOverlayChart series={dailyOverlay.series} benchmark={dailyOverlay.benchmark} symbol={dailyOverlay.symbol} />
-              <div className="grid gap-3 md:grid-cols-4">
-                <MetricMini label="基准指数" value={dailyOverlay.benchmark || 'HSI'} />
-                <MetricMini label="相对强度" value={formatPercentMaybeNull(dailyOverlay?.metrics?.relative_strength)} accent={dailyOverlay?.metrics?.relative_strength != null && dailyOverlay.metrics.relative_strength >= 0 ? 'up' : 'down'} emphasis tooltip="个股累计涨幅减去大盘累计涨幅。正值说明跑赢大盘，负值说明跑输大盘。" />
-                <MetricMini label="Beta" value={formatNumberMaybeNull(dailyOverlay?.metrics?.beta, 2)} accent={dailyOverlay?.metrics?.beta != null && dailyOverlay.metrics.beta >= 1 ? 'up' : 'normal'} tooltip="衡量该股票相对大盘的波动程度。Beta=1 表示与大盘同步；>1 表示波动比大盘大（更激进）；<1 表示波动比大盘小（更稳健）。" />
-                <MetricMini label="相关系数" value={formatNumberMaybeNull(dailyOverlay?.metrics?.correlation, 2)} tooltip="个股与大盘走势的同步程度。1 表示完全同步，0 表示无关，-1 表示完全相反。" />
+        {isChartTab && (
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-foreground">走势对比（个股 vs 大盘）</h3>
+                <p className="mt-1 text-xs text-foreground-dim">
+                  基于日收盘价归一化对比，基准：{dailyOverlay?.benchmark || (isAShare ? 'SHCI' : 'HSI')}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {[{ label: '30天', value: '30' }, { label: '60天', value: '60' }, { label: '120天', value: '120' }, { label: '1年', value: '260' }].map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setOverlayRange(opt.value)}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${overlayRange === opt.value ? 'bg-primary text-foreground' : 'bg-[var(--color-bg-secondary)] text-foreground-muted hover:bg-black/35 hover:text-foreground-muted'}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
             </div>
-          )}
-        </section>
+            {!dailyOverlay?.series?.length ? (
+              <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">走势对比数据加载中...</div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <DailyOverlayChart series={dailyOverlay.series} benchmark={dailyOverlay.benchmark} symbol={dailyOverlay.symbol} />
+                <div className="grid gap-3 md:grid-cols-4">
+                  <MetricMini label="基准指数" value={dailyOverlay.benchmark || 'HSI'} />
+                  <MetricMini label="相对强度" value={formatPercentMaybeNull(dailyOverlay?.metrics?.relative_strength)} accent={dailyOverlay?.metrics?.relative_strength != null && dailyOverlay.metrics.relative_strength >= 0 ? 'up' : 'down'} emphasis tooltip="个股累计涨幅减去大盘累计涨幅。正值说明跑赢大盘，负值说明跑输大盘。" />
+                  <MetricMini label="Beta" value={formatNumberMaybeNull(dailyOverlay?.metrics?.beta, 2)} accent={dailyOverlay?.metrics?.beta != null && dailyOverlay.metrics.beta >= 1 ? 'up' : 'normal'} tooltip="衡量该股票相对大盘的波动程度。Beta=1 表示与大盘同步；>1 表示波动比大盘大（更激进）；<1 表示波动比大盘小（更稳健）。" />
+                  <MetricMini label="相关系数" value={formatNumberMaybeNull(dailyOverlay?.metrics?.correlation, 2)} tooltip="个股与大盘走势的同步程度。1 表示完全同步，0 表示无关，-1 表示完全相反。" />
+                </div>
+              </div>
+            )}
+          </section>
+
+
+        )}
 
         {/* Support levels */}
-        <section className="rounded-2xl border border-border bg-card p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <h3 className="text-base font-semibold text-foreground">支撑位（近{SUPPORT_LOOKBACK_DAYS}天）</h3>
-            <div className="text-xs text-foreground-dim">{supportPayload?.meta?.updated_at ? `更新：${formatDateTime(supportPayload.meta.updated_at)}` : '等待数据'}</div>
-          </div>
-          {supportError && <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{supportError}</div>}
-          {!supportSummary ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">暂无支撑位数据。</div>
-          ) : (
-            <div className="mt-4 space-y-4">
-              <div className="grid gap-3 md:grid-cols-4">
-                <MetricMini label="最近支撑位" value={supportSummary.nearest_price ? formatNumber(supportSummary.nearest_price, 3) : '--'} accent={supportStatusAccent} emphasis tooltip="距离当前价格最近的一个支撑价位。历史上价格多次在这个位置附近止跌回升。" />
-                <MetricMini label="距最近支撑位" value={formatDistancePct(supportSummary.distance_pct)} accent={supportSummary.distance_pct >= 0 ? 'normal' : 'down'} tooltip="当前价格与最近支撑位之间的距离百分比。负值说明已经跌破支撑。" />
-                <MetricMini label="支撑强度" value={supportSummary.strength || '--'} accent={supportSummary.strength === '强' ? 'up' : supportSummary.strength === '弱' ? 'down' : 'normal'} tooltip="该支撑位的可靠程度。强度越高，价格在此位置止跌的可能性越大。" />
-                <MetricMini label="支撑状态" value={formatSupportStatus(supportSummary.status)} accent={supportStatusAccent} emphasis tooltip="当前价格与支撑位的关系。例如「接近支撑区」说明价格快要触碰支撑，「跌破支撑区」说明支撑已失效。" />
-              </div>
-              <div className="space-y-2">
-                {supportLevels.map((level, i) => (
-                  <LevelCard key={level.level} level={level} index={i} type="support" />
-                ))}
-              </div>
+        {isTechnicalTab && (
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <h3 className="text-base font-semibold text-foreground">支撑位（近{SUPPORT_LOOKBACK_DAYS}天）</h3>
+              <div className="text-xs text-foreground-dim">{supportPayload?.meta?.updated_at ? `更新：${formatDateTime(supportPayload.meta.updated_at)}` : '等待数据'}</div>
             </div>
-          )}
-        </section>
+            {supportError && <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{supportError}</div>}
+            {!supportSummary ? (
+              <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">暂无支撑位数据。</div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <MetricMini label="最近支撑位" value={supportSummary.nearest_price ? formatNumber(supportSummary.nearest_price, 3) : '--'} accent={supportStatusAccent} emphasis tooltip="距离当前价格最近的一个支撑价位。历史上价格多次在这个位置附近止跌回升。" />
+                  <MetricMini label="距最近支撑位" value={formatDistancePct(supportSummary.distance_pct)} accent={supportSummary.distance_pct >= 0 ? 'normal' : 'down'} tooltip="当前价格与最近支撑位之间的距离百分比。负值说明已经跌破支撑。" />
+                  <MetricMini label="支撑强度" value={supportSummary.strength || '--'} accent={supportSummary.strength === '强' ? 'up' : supportSummary.strength === '弱' ? 'down' : 'normal'} tooltip="该支撑位的可靠程度。强度越高，价格在此位置止跌的可能性越大。" />
+                  <MetricMini label="支撑状态" value={formatSupportStatus(supportSummary.status)} accent={supportStatusAccent} emphasis tooltip="当前价格与支撑位的关系。例如「接近支撑区」说明价格快要触碰支撑，「跌破支撑区」说明支撑已失效。" />
+                </div>
+                <div className="space-y-2">
+                  {supportLevels.map((level, i) => (
+                    <LevelCard key={level.level} level={level} index={i} type="support" />
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+
+
+        )}
 
         {/* Resistance levels */}
-        <section className="rounded-2xl border border-border bg-card p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <h3 className="text-base font-semibold text-foreground">压力位（近{SUPPORT_LOOKBACK_DAYS}天）</h3>
-            <div className="text-xs text-foreground-dim">{resistancePayload?.meta?.updated_at ? `更新：${formatDateTime(resistancePayload.meta.updated_at)}` : '等待数据'}</div>
-          </div>
-          {resistanceError && <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{resistanceError}</div>}
-          {!resistanceSummary ? (
-            <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">暂无压力位数据。</div>
-          ) : (
-            <div className="mt-4 space-y-4">
-              <div className="grid gap-3 md:grid-cols-4">
-                <MetricMini label="最近压力位" value={resistanceSummary.nearest_price ? formatNumber(resistanceSummary.nearest_price, 3) : '--'} accent={resistanceStatusAccent} emphasis tooltip="距离当前价格最近的一个压力价位。历史上价格多次在这个位置附近遇阻回落。" />
-                <MetricMini label="距最近压力位" value={formatDistancePct(resistanceSummary.distance_pct)} accent={resistanceSummary.distance_pct >= 0 ? 'normal' : 'up'} tooltip="当前价格与最近压力位之间的距离百分比。负值说明已经突破压力。" />
-                <MetricMini label="压力强度" value={resistanceSummary.strength || '--'} accent={resistanceSummary.strength === '强' ? 'down' : resistanceSummary.strength === '弱' ? 'up' : 'normal'} tooltip="该压力位的阻力程度。强度越高，价格在此位置被压回的可能性越大。" />
-                <MetricMini label="压力状态" value={formatResistanceStatus(resistanceSummary.status)} accent={resistanceStatusAccent} emphasis tooltip="当前价格与压力位的关系。例如「接近压力区」说明价格快要碰到天花板，「突破压力区」说明阻力已被突破。" />
-              </div>
-              <div className="space-y-2">
-                {resistanceLevels.map((level, i) => (
-                  <LevelCard key={level.level} level={level} index={i} type="resistance" />
-                ))}
-              </div>
+        {isTechnicalTab && (
+          <section className="rounded-2xl border border-border bg-card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <h3 className="text-base font-semibold text-foreground">压力位（近{SUPPORT_LOOKBACK_DAYS}天）</h3>
+              <div className="text-xs text-foreground-dim">{resistancePayload?.meta?.updated_at ? `更新：${formatDateTime(resistancePayload.meta.updated_at)}` : '等待数据'}</div>
             </div>
-          )}
-        </section>
+            {resistanceError && <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{resistanceError}</div>}
+            {!resistanceSummary ? (
+              <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-6 text-sm text-foreground-dim">暂无压力位数据。</div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <MetricMini label="最近压力位" value={resistanceSummary.nearest_price ? formatNumber(resistanceSummary.nearest_price, 3) : '--'} accent={resistanceStatusAccent} emphasis tooltip="距离当前价格最近的一个压力价位。历史上价格多次在这个位置附近遇阻回落。" />
+                  <MetricMini label="距最近压力位" value={formatDistancePct(resistanceSummary.distance_pct)} accent={resistanceSummary.distance_pct >= 0 ? 'normal' : 'up'} tooltip="当前价格与最近压力位之间的距离百分比。负值说明已经突破压力。" />
+                  <MetricMini label="压力强度" value={resistanceSummary.strength || '--'} accent={resistanceSummary.strength === '强' ? 'down' : resistanceSummary.strength === '弱' ? 'up' : 'normal'} tooltip="该压力位的阻力程度。强度越高，价格在此位置被压回的可能性越大。" />
+                  <MetricMini label="压力状态" value={formatResistanceStatus(resistanceSummary.status)} accent={resistanceStatusAccent} emphasis tooltip="当前价格与压力位的关系。例如「接近压力区」说明价格快要碰到天花板，「突破压力区」说明阻力已被突破。" />
+                </div>
+                <div className="space-y-2">
+                  {resistanceLevels.map((level, i) => (
+                    <LevelCard key={level.level} level={level} index={i} type="resistance" />
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+
+
+        )}
 
         {/* Anomaly charts */}
-        <section className="grid gap-4 xl:grid-cols-2">
-          <PriceVolumeChart events={priceVolumeEvents} />
-          <BlockFlowChart events={blockFlowEvents} />
-        </section>
+        {isChartTab && (
+          <section className="grid gap-4 xl:grid-cols-2">
+            <PriceVolumeChart events={priceVolumeEvents} />
+            <BlockFlowChart events={blockFlowEvents} />
+          </section>
+
+        )}
+
       </div>
 
       <SymbolNewsPanel
@@ -2133,6 +2289,71 @@ export default function LiveTradingDetailPage() {
         }}
       />
     </>
+  )
+}
+
+
+function StockDetailTabNav({ tabs, mobileGroups, activeTab, activeTabMeta, onChange }) {
+  const activeMobileGroup = activeTabMeta?.mobileGroup || activeTab
+  const analysisTabs = tabs.filter((tab) => tab.mobileGroup === 'analysis')
+  return (
+    <section className="rounded-2xl border border-border bg-card p-2">
+      <div className="hidden gap-1 lg:flex" role="tablist" aria-label="个股详情分类">
+        {tabs.map((tab) => {
+          const selected = activeTab === tab.key
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={selected ? 'true' : 'false'}
+              onClick={() => onChange(tab.key)}
+              className={`flex min-w-0 flex-1 flex-col rounded-xl px-3 py-2.5 text-left transition ${selected ? 'bg-primary text-foreground shadow-sm' : 'text-foreground-muted hover:bg-[var(--color-bg-hover)] hover:text-foreground'}`}
+            >
+              <span className="text-sm font-semibold">{tab.label}</span>
+              <span className={`mt-1 line-clamp-1 text-[11px] ${selected ? 'text-foreground/80' : 'text-foreground-dim'}`}>{tab.description}</span>
+            </button>
+          )
+        })}
+      </div>
+      <div className="flex gap-1 overflow-x-auto lg:hidden" role="tablist" aria-label="个股详情移动端分类">
+        {mobileGroups.map((group) => {
+          const selected = activeMobileGroup === group.key || activeTab === group.key
+          return (
+            <button
+              key={group.key}
+              type="button"
+              role="tab"
+              aria-selected={selected ? 'true' : 'false'}
+              onClick={() => onChange(group.key === 'analysis' ? STOCK_DETAIL_TAB_KEYS.TECHNICAL : group.key)}
+              className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition ${selected ? 'bg-primary text-foreground shadow-sm' : 'bg-[var(--color-bg-hover)] text-foreground-muted'}`}
+            >
+              {group.label}
+            </button>
+          )
+        })}
+      </div>
+      {activeMobileGroup === 'analysis' && (
+        <div className="mt-2 flex gap-1 overflow-x-auto rounded-xl border border-border bg-[var(--color-bg-hover)] p-1 lg:hidden">
+          {analysisTabs.map((tab) => {
+            const selected = activeTab === tab.key
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => onChange(tab.key)}
+                className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition ${selected ? 'bg-card text-foreground shadow-sm' : 'text-foreground-muted'}`}
+              >
+                {tab.shortLabel || tab.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      <div className="mt-2 rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-2 text-xs leading-5 text-foreground-muted lg:hidden">
+        当前：{activeTabMeta?.label || '概览'} · {activeTabMeta?.description || '查看个股详情'}
+      </div>
+    </section>
   )
 }
 

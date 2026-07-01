@@ -82,6 +82,7 @@ frontend/
   - 页面分组：`buildMarketState(...)`
   - 市场摘要：`buildMarketInsights(...)`
 - 页面新增 `frontend/lib/live-factor-index.js`，专门负责单因子指数卡片状态归一化；前端只请求 `/api/live/factor-index/overview` 并展示，不在页面内计算 NAV 或区间收益。
+- 管理后台数据页新增 `frontend/components/admin/FactorIndexAdminPanel.js`，对应 `GET /api/admin/factor-index/status` 与 `POST /api/admin/factor-index/recompute`；后台只触发后端 worker / service 做异步补算和状态查询，不在前端直接重算。
 - 趋势图组件继续复用 `frontend/components/MiniChart.js`，当前用于市场指数真实趋势点和单因子指数近 20 日净值曲线的轻量表达，不承载专业分时分析交互。
 - 页面首屏新增 7 张 A 股单因子指数卡片，固定放在「核心指数卡片」上方；不新增单独详情页，用户在同一页完成因子指数与大盘指数对比。
 - 页面首屏核心指数固定为 6 张：上证指数、深证成指、创业板指、恒生指数、恒生中国企业指数、恒生科技指数；扩展指数仍预留沪深300、科创50、上证50、中证500。

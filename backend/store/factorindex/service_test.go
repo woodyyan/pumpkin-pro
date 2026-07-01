@@ -138,3 +138,85 @@ func TestFactorIndexSyncAllMarksPartialWhenDailyBarMissing(t *testing.T) {
 		t.Fatalf("expected nav to remain positive, got %+v", valueItem.NAV)
 	}
 }
+
+// TestListTopScoresExcludesDelistedAndSTStocks verifies that ListTopScores does
+// not select stocks that are marked is_active=0 (delisted) or is_st=1 (ST),
+// even when their factor scores are very high.
+//
+// Note: SQLite stores Go bool false as NULL via GORM's default path, so we
+// seed is_active=0 and is_st=1 via raw SQL to match the actual production
+// storage format (same as the UPDATE fix applied to live DB).
+func TestListTopScoresExcludesDelistedAndSTStocks(t *testing.T) {
+	_, repo := setupFactorIndexService(t)
+	now := time.Now().UTC()
+
+	// Seed 48 normal active stocks with descending scores via GORM (is_active=1)
+	scores := make([]factorlab.FactorScore, 0, 50)
+	for idx := 1; idx <= 48; idx++ {
+		code := fmt.Sprintf("600%03d", idx)
+		if err := repo.db.WithContext(context.Background()).Exec(
+			`INSERT INTO factor_securities (code,symbol,name,exchange,board,is_active,is_st,source,updated_at) VALUES (?,?,?,?,?,1,0,?,?)`,
+			code, code+".SH", fmt.Sprintf("样本股%d", idx), "SSE", factorlab.BoardMain, "test", now,
+		).Error; err != nil {
+			t.Fatalf("seed security %s: %v", code, err)
+		}
+		score := float64(50 - idx)
+		scores = append(scores, factorlab.FactorScore{
+			SnapshotDate: "2026-06-01", Code: code, Symbol: code + ".SH",
+			Name: fmt.Sprintf("样本股%d", idx), ClosePrice: float64(100 + idx),
+			ValueScore: floatPtr(score), CreatedAt: now,
+		})
+	}
+
+	// Seed 1 delisted stock with the highest score (is_active=0) — must NOT be selected
+	const delistedCode = "600599"
+	if err := repo.db.WithContext(context.Background()).Exec(
+		`INSERT INTO factor_securities (code,symbol,name,exchange,board,is_active,is_st,source,updated_at) VALUES (?,?,?,?,?,0,0,?,?)`,
+		delistedCode, delistedCode+".SH", "退市熊猫", "SSE", factorlab.BoardMain, "test", now,
+	).Error; err != nil {
+		t.Fatalf("seed delisted security: %v", err)
+	}
+	scores = append(scores, factorlab.FactorScore{
+		SnapshotDate: "2026-06-01", Code: delistedCode, Symbol: delistedCode + ".SH",
+		Name: "退市熊猫", ClosePrice: 0.44,
+		ValueScore: floatPtr(99.0), // artificially high score
+		CreatedAt:  now,
+	})
+
+	// Seed 1 ST stock with the second highest score (is_st=1) — must NOT be selected
+	const stCode = "000001"
+	if err := repo.db.WithContext(context.Background()).Exec(
+		`INSERT INTO factor_securities (code,symbol,name,exchange,board,is_active,is_st,source,updated_at) VALUES (?,?,?,?,?,1,1,?,?)`,
+		stCode, stCode+".SZ", "*ST 样本", "SZSE", factorlab.BoardMain, "test", now,
+	).Error; err != nil {
+		t.Fatalf("seed ST security: %v", err)
+	}
+	scores = append(scores, factorlab.FactorScore{
+		SnapshotDate: "2026-06-01", Code: stCode, Symbol: stCode + ".SZ",
+		Name: "*ST 样本", ClosePrice: 3.5,
+		ValueScore: floatPtr(98.0), // second highest, still must be excluded
+		CreatedAt:  now,
+	})
+
+	if err := repo.db.WithContext(context.Background()).Create(&scores).Error; err != nil {
+		t.Fatalf("seed scores: %v", err)
+	}
+
+	rows, err := repo.ListTopScores(context.Background(), "2026-06-01", "value_score", 50)
+	if err != nil {
+		t.Fatalf("ListTopScores: %v", err)
+	}
+
+	// Only the 48 normal stocks should be returned (delisted + ST excluded)
+	if len(rows) != 48 {
+		t.Fatalf("expected 48 rows (delisted+ST excluded), got %d", len(rows))
+	}
+	for _, row := range rows {
+		if row.Code == delistedCode {
+			t.Errorf("delisted stock %s must not appear in top scores", delistedCode)
+		}
+		if row.Code == stCode {
+			t.Errorf("ST stock %s must not appear in top scores", stCode)
+		}
+	}
+}

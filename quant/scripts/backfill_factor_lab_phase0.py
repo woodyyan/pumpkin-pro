@@ -535,6 +535,16 @@ def is_st_name(name: Any) -> bool:
     return "ST" in text
 
 
+def is_delisted_name(name: Any) -> bool:
+    """Return True if the security name indicates it has been delisted.
+
+    A-share delisted stocks are renamed with a "退市" prefix by exchanges
+    (e.g. "退市熊猫", "退市中新").  Such stocks should be marked is_active=0
+    so they are excluded from factor scoring and index construction.
+    """
+    return str(name or "").strip().startswith("退市")
+
+
 def safe_float(value: Any) -> Optional[float]:
     if value is None:
         return None
@@ -1378,7 +1388,8 @@ def build_security_payload_from_quote_records(records: list[dict[str, Any]], arg
         name = str(record.get("name") or "").strip()
         board = str(record.get("board") or "").strip().upper() or classify_board(code)
         exchange = str(record.get("exchange") or "").strip().upper() or infer_exchange(code)
-        rows.append((code, infer_symbol(code), name, exchange, board, "", int(is_st_name(name)), 1, source, now))
+        is_active = 0 if is_delisted_name(name) else 1
+        rows.append((code, infer_symbol(code), name, exchange, board, "", int(is_st_name(name)), is_active, source, now))
         raw_industry = first_industry_value(record)
         industry_name = normalize_industry_name(raw_industry)
         if industry_name:

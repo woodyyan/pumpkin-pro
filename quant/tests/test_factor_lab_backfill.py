@@ -26,6 +26,34 @@ def test_classify_board_and_symbol_helpers():
     assert module.is_st_name("平安银行") is False
 
 
+def test_is_delisted_name():
+    # 退市前缀股票应被识别为已退市
+    assert module.is_delisted_name("退市熊猫") is True
+    assert module.is_delisted_name("退市中新") is True
+    assert module.is_delisted_name("退市紫晶") is True
+    # 普通股票、ST 股票不应被识别为已退市
+    assert module.is_delisted_name("平安银行") is False
+    assert module.is_delisted_name("*ST 样本") is False
+    assert module.is_delisted_name("") is False
+    assert module.is_delisted_name(None) is False
+
+
+def test_build_security_payload_sets_is_active_false_for_delisted():
+    """退市股（名称以"退市"开头）在 build_security_payload_from_quote_records 中
+    is_active 应被设为 0，确保其不再参与选股和因子指数构建。"""
+    args = module.parse_args(["--mode", "securities"])
+    records = [
+        {"code": "600599", "name": "退市熊猫", "price": 0.44, "volume": 0, "amount": 0},
+        {"code": "600519", "name": "贵州茅台", "price": 1500.0, "volume": 100, "amount": 150000},
+    ]
+    payload = module.build_security_payload_from_quote_records(records, args, "test")
+    rows_by_code = {row[0]: row for row in payload.rows}
+    # 退市熊猫: is_active (index 7) should be 0
+    assert rows_by_code["600599"][7] == 0, "退市股 is_active 应为 0"
+    # 正常股票: is_active should be 1
+    assert rows_by_code["600519"][7] == 1, "正常股 is_active 应为 1"
+
+
 def test_safe_float_and_date_normalization():
     assert module.safe_float("1.23") == 1.23
     assert module.safe_float("-") is None

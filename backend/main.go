@@ -4308,6 +4308,8 @@ func main() {
 	mux.HandleFunc("/api/admin/device-analytics", server.withSuperAdminAuth(server.handleAdminDeviceAnalytics))
 	mux.HandleFunc("/api/admin/factor-lab/pipeline/status", server.withSuperAdminAuth(server.handleAdminFactorLabPipelineStatus))
 	mux.HandleFunc("/api/admin/factor-lab/pipeline/run", server.withSuperAdminAuth(server.handleAdminFactorLabPipelineRun))
+	mux.HandleFunc("/api/admin/factor-index/status", server.withSuperAdminAuth(server.handleAdminFactorIndexStatus))
+	mux.HandleFunc("/api/admin/factor-index/recompute", server.withSuperAdminAuth(server.handleAdminFactorIndexRecompute))
 
 	mux.HandleFunc("/api/analytics/pageview", server.withOptionalAuth(server.handlePageView))
 

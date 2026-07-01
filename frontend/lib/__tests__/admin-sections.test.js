@@ -17,6 +17,7 @@ describe('resolveAdminSectionApis()', () => {
     assert.deepEqual(resolveAdminSectionApis('data'), [
       '/api/admin/company-profiles',
       '/api/admin/factor-lab/pipeline/status',
+      '/api/admin/factor-index/status',
       '/api/admin/quadrant-overview',
       '/api/admin/quadrant-logs',
       '/api/admin/compute-status',

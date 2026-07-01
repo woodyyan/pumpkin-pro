@@ -110,6 +110,12 @@ func (r *Repository) ListTopScores(ctx context.Context, snapshotDate, scoreField
 	if limit <= 0 {
 		limit = defaultTopN
 	}
+	// Exclude stocks that are explicitly inactive (delisted) or flagged as ST.
+	// COALESCE defaults handle the case where no matching row exists in
+	// factor_securities (treat as active, non-ST when the record is absent).
+	// is_active and is_st are stored as SQLite numeric booleans (1/0); we use
+	// explicit integer comparisons rather than relying on the boolean default
+	// to avoid NULL-ambiguity for is_active=false rows written by GORM.
 	query := fmt.Sprintf(`
 		SELECT fs.code, fs.name, COALESCE(sec.exchange, '') AS exchange, fs.industry, fs.close_price, fs.%s AS score
 		FROM factor_scores fs
@@ -117,7 +123,8 @@ func (r *Repository) ListTopScores(ctx context.Context, snapshotDate, scoreField
 		WHERE fs.snapshot_date = ?
 		  AND fs.%s IS NOT NULL
 		  AND fs.close_price > 0
-		  AND COALESCE(sec.is_active, 1) = 1
+		  AND COALESCE(sec.is_active, 1) <> 0
+		  AND COALESCE(sec.is_st, 0) <> 1
 		  AND COALESCE(sec.exchange, '') IN ('SSE', 'SZSE')
 		ORDER BY fs.%s DESC, fs.code ASC
 		LIMIT ?

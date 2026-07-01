@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import MiniChart from '../MiniChart'
 import AIReportsAdminPanel from './AIReportsAdminPanel'
+import FactorIndexAdminPanel from './FactorIndexAdminPanel'
 import {
   BACKUP_STATUS_COLORS,
   BACKUP_TRIGGER_LABELS,
@@ -3225,6 +3226,7 @@ export function AdminDataPage({ onUnauthorized }) {
     <div className="space-y-8">
       <CompanyProfilesAdminPanel onUnauthorized={onUnauthorized} />
       <FactorLabPipelinePanel onUnauthorized={onUnauthorized} />
+      <FactorIndexAdminPanel onUnauthorized={onUnauthorized} />
       <QuadrantAdminPanel onUnauthorized={onUnauthorized} />
     </div>
   )

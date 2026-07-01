@@ -11,6 +11,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// rankingPortfolioCutoverDefault is the default start date for sim portfolio
+// recompute when no explicit from_date is provided. It matches the open-entry
+// pricing cutover date (RANKING_PORTFOLIO_CUTOVER_DATE) to avoid scanning the
+// entire ranking snapshot history back to the earliest available date.
+const rankingPortfolioCutoverDefault = "2026-06-10"
+
 type simPortfolioSignalItem struct {
 	Rank            int
 	Code            string
@@ -499,6 +505,11 @@ func (s *Service) computeAndPersistSimPortfolioDay(ctx context.Context, definiti
 }
 
 func (s *Service) recomputeSimPortfolioDefinition(ctx context.Context, definition RankingPortfolioDefinition, fromDate string, toDate string, reset bool) error {
+	// When fromDate is empty, default to the cutover date to avoid scanning
+	// the entire ranking snapshot history (which may go back to 2026-04-16).
+	if strings.TrimSpace(fromDate) == "" {
+		fromDate = rankingPortfolioCutoverDefault
+	}
 	dates, err := s.repo.ListRankingSnapshotDatesByExchangeRange(ctx, definition.Exchange, fromDate, toDate)
 	if err != nil {
 		return err
@@ -759,10 +770,39 @@ func (s *Service) backfillOpenPricesForDefinition(ctx context.Context, definitio
 }
 
 // resolveSimPortfolioEntryTradeDate returns the T+1 trading date for a given
-// snapshot/signal date. It reuses the legacy resolveEntryTradeDateForSnapshot
-// logic which already handles the D0/latest-snapshot edge case.
+// snapshot/signal date. It queries the RankingSnapshot table (the authoritative
+// ranking snapshots source) for the next snapshot date after the given date.
+// If no successor exists (latest snapshot), it falls back to today in Beijing
+// time, provided today is strictly later than the snapshot date.
 func (s *Service) resolveSimPortfolioEntryTradeDate(ctx context.Context, definition RankingPortfolioDefinition, snapshotDate string) (string, error) {
-	return s.resolveEntryTradeDateForSnapshot(ctx, definition.ID, snapshotDate)
+	snapshotDate = strings.TrimSpace(snapshotDate)
+	if snapshotDate == "" {
+		return "", nil
+	}
+	// Query RankingSnapshot (the authoritative table with daily snapshots)
+	// instead of the legacy RankingPortfolioSnapshot table, which may lag behind.
+	exchangeCodes := resolveSimPortfolioExchangeCodes(definition.Exchange)
+	var nextDate string
+	query := s.repo.db.WithContext(ctx).
+		Model(&RankingSnapshot{}).
+		Distinct("snapshot_date").
+		Where("snapshot_date > ?", snapshotDate).
+		Where("exchange IN ?", exchangeCodes).
+		Order("snapshot_date ASC").
+		Limit(1)
+	if err := query.Pluck("snapshot_date", &nextDate).Error; err != nil {
+		return "", err
+	}
+	if nextDate != "" {
+		return nextDate, nil
+	}
+	// No successor snapshot — this is the latest batch.
+	// Fall back to today in Beijing time if the snapshot is from a previous day.
+	todayBJ := time.Now().In(beijingLocation()).Format("2006-01-02")
+	if todayBJ > snapshotDate {
+		return todayBJ, nil
+	}
+	return "", nil
 }
 
 func buildSimPortfolioStatusText(status string) string {
@@ -1090,6 +1130,18 @@ func (s *Service) VerifySimPortfolios(ctx context.Context, portfolioID string) (
 			return nil, err
 		}
 		for _, daily := range dailyRows {
+			// Skip seeded baseline rows — they have no positions by design.
+			if daily.Status == simPortfolioStatusSeeded || daily.PositionCount == 0 {
+				resp.Items = append(resp.Items, SimPortfolioVerifyItem{
+					PortfolioID:   definition.ID,
+					TradeDate:     daily.TradeDate,
+					Status:        "ok",
+					PositionCount: 0,
+					TotalAssets:   daily.TotalAssets,
+					Message:       "seeded baseline, no positions",
+				})
+				continue
+			}
 			positions, err := s.repo.ListSimPortfolioPositionsByTradeDate(ctx, definition.ID, daily.TradeDate)
 			if err != nil {
 				return nil, err

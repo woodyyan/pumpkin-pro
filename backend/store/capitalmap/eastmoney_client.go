@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,8 +19,14 @@ const (
 	eastmoneyTimeout   = 9 * time.Second
 	eastmoneyPageSize  = 100
 	eastmoneyPageCount = 16
-	eastmoneyUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36"
-	eastmoneyReferer   = "https://quote.eastmoney.com/"
+	// batchSize controls how many pages are fetched serially before a pause.
+	// Fetching all 16 pages concurrently triggers IP-based rate limiting on the
+	// eastmoney servers when requests originate from overseas IPs.
+	eastmoneyBatchSize    = 4
+	eastmoneyBatchPause   = 800 * time.Millisecond
+	eastmoneyUserAgent    = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36"
+	eastmoneyReferer      = "https://quote.eastmoney.com/"
+	eastmoneyPageInterval = 200 * time.Millisecond
 )
 
 var stockFields = []string{
@@ -31,41 +38,56 @@ var sectorFields = []string{"f3", "f6", "f12", "f14", "f62", "f128", "f140", "f1
 type EastmoneyClient struct {
 	httpClient *http.Client
 	now        func() time.Time
+	// sleep is injectable for tests.
+	sleep func(time.Duration)
 }
 
 func NewEastmoneyClient(httpClient *http.Client) *EastmoneyClient {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: eastmoneyTimeout + time.Second}
 	}
-	return &EastmoneyClient{httpClient: httpClient, now: time.Now}
+	return &EastmoneyClient{httpClient: httpClient, now: time.Now, sleep: time.Sleep}
 }
 
+// FetchAshareSnapshot fetches all pages serially in small batches.
+// Pages are fetched one by one with a short pause between each request
+// and a longer pause between batches, to avoid triggering rate-limiting
+// or IP bans on overseas servers. A single page failure is logged and
+// skipped; the remaining pages are still collected.
 func (c *EastmoneyClient) FetchAshareSnapshot(ctx context.Context) (SnapshotResult, error) {
-	type pageResult struct {
-		payload eastmoneyListResponse
-		err     error
-	}
-	results := make(chan pageResult, eastmoneyPageCount)
-	for page := 1; page <= eastmoneyPageCount; page++ {
-		page := page
-		go func() {
-			var payload eastmoneyListResponse
-			err := c.fetchJSON(ctx, c.stockURL(page), &payload)
-			results <- pageResult{payload: payload, err: err}
-		}()
-	}
-
 	allRows := make([]map[string]any, 0, eastmoneyPageCount*eastmoneyPageSize)
 	totalAvailable := 0
-	for page := 0; page < eastmoneyPageCount; page++ {
-		result := <-results
-		if result.err != nil {
-			return SnapshotResult{}, result.err
+	failedPages := 0
+
+	for page := 1; page <= eastmoneyPageCount; page++ {
+		if ctx.Err() != nil {
+			return SnapshotResult{}, ctx.Err()
 		}
-		if totalAvailable == 0 {
-			totalAvailable = result.payload.Data.Total
+
+		var payload eastmoneyListResponse
+		if err := c.fetchJSON(ctx, c.stockURL(page), &payload); err != nil {
+			log.Printf("eastmoney stock page %d fetch failed (skipped): %v", page, err)
+			failedPages++
+		} else {
+			if totalAvailable == 0 {
+				totalAvailable = payload.Data.Total
+			}
+			allRows = append(allRows, payload.Data.Diff...)
 		}
-		allRows = append(allRows, result.payload.Data.Diff...)
+
+		// Pause between individual pages.
+		if page < eastmoneyPageCount {
+			c.sleep(eastmoneyPageInterval)
+		}
+
+		// Extra pause at the end of each batch (except after the last page).
+		if page%eastmoneyBatchSize == 0 && page < eastmoneyPageCount {
+			c.sleep(eastmoneyBatchPause)
+		}
+	}
+
+	if len(allRows) == 0 {
+		return SnapshotResult{}, fmt.Errorf("eastmoney: all %d pages failed", eastmoneyPageCount)
 	}
 
 	stocks := make([]Stock, 0, len(allRows))
@@ -77,10 +99,14 @@ func (c *EastmoneyClient) FetchAshareSnapshot(ctx context.Context) (SnapshotResu
 		stocks = append(stocks, stock)
 	}
 
+	scope := fmt.Sprintf("成交额前 %d 只股票", len(stocks))
+	if failedPages > 0 {
+		scope += fmt.Sprintf("（%d 页获取失败）", failedPages)
+	}
 	return SnapshotResult{
 		Stocks:         stocks,
 		TotalAvailable: totalAvailable,
-		SampleScope:    fmt.Sprintf("成交额前 %d 只股票", len(stocks)),
+		SampleScope:    scope,
 	}, nil
 }
 

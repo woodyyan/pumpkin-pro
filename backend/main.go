@@ -4028,6 +4028,7 @@ func main() {
 	liveService := live.NewService(liveRepo)
 	liveMarketClient := live.NewMarketClient()
 	capitalMapService := capitalmap.NewService(nil, capitalmap.DefaultCacheTTL)
+	capitalMapService.StartBackgroundRefresh(context.Background(), capitalmap.DefaultCacheTTL)
 
 	signalRepo := signal.NewRepository(storeInstance.DB)
 	signalService := signal.NewService(signalRepo, signal.ServiceConfig{

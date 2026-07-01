@@ -3,6 +3,7 @@ package capitalmap
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"sync"
@@ -42,28 +43,47 @@ func NewService(fetcher Fetcher, cacheTTL time.Duration) *Service {
 	return &Service{fetcher: fetcher, cacheTTL: cacheTTL, now: time.Now}
 }
 
-func (s *Service) GetPayload(ctx context.Context) (*Payload, error) {
-	if s == nil {
-		return nil, fmt.Errorf("capital map service is not initialized")
+// StartBackgroundRefresh performs an immediate warm-up fetch, then continues
+// refreshing the cache at the given interval in the background.
+// The caller should pass a long-lived context (e.g. context.Background()).
+// The goroutine exits when ctx is cancelled.
+func (s *Service) StartBackgroundRefresh(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = s.cacheTTL
 	}
-	now := s.now()
-	s.mu.Lock()
-	if s.cached != nil && now.Sub(s.cachedAt) < s.cacheTTL {
-		cached := clonePayload(s.cached)
-		s.mu.Unlock()
-		return cached, nil
-	}
-	s.mu.Unlock()
+	s.refresh(ctx)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.refresh(ctx)
+			}
+		}
+	}()
+}
 
-	stockResult, stockErr := s.fetcher.FetchAshareSnapshot(ctx)
+// refresh fetches fresh data from the upstream source and updates the cache.
+// Failures are logged but not propagated; a stale cache remains available.
+func (s *Service) refresh(ctx context.Context) {
+	rctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+
+	stockResult, stockErr := s.fetcher.FetchAshareSnapshot(rctx)
 	if stockErr != nil {
-		return s.cachedOrError(stockErr)
+		log.Printf("capital map refresh failed (stocks): %v", stockErr)
+		return
 	}
-	sectors, sectorErr := s.fetcher.FetchIndustrySectors(ctx)
+	sectors, sectorErr := s.fetcher.FetchIndustrySectors(rctx)
 	if sectorErr != nil {
-		return s.cachedOrError(sectorErr)
+		log.Printf("capital map refresh failed (sectors): %v", sectorErr)
+		return
 	}
 
+	now := s.now()
 	payload := BuildMarketPayload(stockResult.Stocks, sectors, stockResult, now)
 	payload.CacheStatus = "fresh"
 
@@ -71,20 +91,22 @@ func (s *Service) GetPayload(ctx context.Context) (*Payload, error) {
 	s.cached = clonePayload(payload)
 	s.cachedAt = now
 	s.mu.Unlock()
-
-	return payload, nil
 }
 
-func (s *Service) cachedOrError(err error) (*Payload, error) {
+// GetPayload returns the most recently cached payload.
+// It returns an error only if no data has ever been successfully fetched.
+// The underlying data is always populated by StartBackgroundRefresh; this
+// method intentionally does NOT make a live upstream request.
+func (s *Service) GetPayload(_ context.Context) (*Payload, error) {
+	if s == nil {
+		return nil, fmt.Errorf("capital map service is not initialized")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cached == nil {
-		return nil, err
+		return nil, fmt.Errorf("资金星图数据尚未就绪，请稍后重试")
 	}
-	cached := clonePayload(s.cached)
-	cached.CacheStatus = "stale"
-	cached.LastError = err.Error()
-	return cached, nil
+	return clonePayload(s.cached), nil
 }
 
 func BuildMarketPayload(stocks []Stock, sectors []Sector, meta SnapshotResult, now time.Time) *Payload {

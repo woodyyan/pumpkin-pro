@@ -10,6 +10,8 @@
 - [x] ranking portfolio 后端实时链路移除 benchmark 收益计算。
 - [x] ranking portfolio 重建命令移除 benchmark 收益计算与 benchmark price 表依赖。
 - [x] 相关后端、前端测试更新并通过。
+- [x] Admin 新口径模拟组合管理新增事实表完整度、baseline-only、可同步与动作建议展示。
+- [x] `SyncSimPortfolios` 返回 per-portfolio 同步摘要，bulk-save 自动同步日志记录生成估值日数量。
 
 ## 可选后续
 

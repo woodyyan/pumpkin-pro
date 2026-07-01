@@ -230,6 +230,9 @@ func TestHandleAdminPortfolioTrackingSync(t *testing.T) {
 	if body["ok"] != true {
 		t.Fatalf("expected ok=true, got %+v", body)
 	}
+	if _, ok := body["items"]; !ok {
+		t.Fatalf("expected sync response items, got %+v", body)
+	}
 }
 
 func quadrantSetupForAdminTest(t *testing.T) (*quadrant.Repository, func()) {
@@ -245,6 +248,10 @@ func quadrantSetupForAdminTest(t *testing.T) (*quadrant.Repository, func()) {
 		&quadrant.RankingPortfolioMarketPrice{},
 		&quadrant.RankingPortfolioResult{},
 		&quadrant.RankingPortfolioJobStatus{},
+		&quadrant.SimPortfolioDaily{},
+		&quadrant.SimPortfolioPosition{},
+		&quadrant.SimPortfolioTrade{},
+		&quadrant.SimPortfolioMetrics{},
 	)
 	return quadrant.NewRepository(db), func() {}
 }

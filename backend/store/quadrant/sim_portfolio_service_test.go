@@ -281,3 +281,81 @@ func TestVerifySimPortfolios_DetectsMissingOpenPrice(t *testing.T) {
 		t.Fatalf("expected at least one missing_open_price status")
 	}
 }
+
+func TestSyncSimPortfoliosReportsGeneratedRows(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	def := seedSimPortfolioDefinition(t, repo)
+	seedSimPortfolioSnapshots(t, repo)
+	seedSimPortfolioMarketPrices(t, repo, def.ID)
+	svc := NewService(repo)
+
+	// Simulate the D0/baseline-only state found in local admin: a seeded row
+	// exists at the first signal date while a successor snapshot is already ready.
+	if err := svc.ensureSimPortfolioBaseline(ctx, def, "2026-06-01"); err != nil {
+		t.Fatalf("ensureSimPortfolioBaseline: %v", err)
+	}
+
+	// Sync sees successor snapshot 2026-06-02 and should generate one
+	// completed valuation day instead of silently staying at baseline.
+	resp, err := svc.SyncSimPortfolios(ctx)
+	if err != nil {
+		t.Fatalf("second SyncSimPortfolios: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("sync response not ok: %+v", resp)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(resp.Items))
+	}
+	item := resp.Items[0]
+	if item.GeneratedDailyCount != 1 || item.LastGeneratedTradeDate != "2026-06-02" || item.Status != "synced" {
+		t.Fatalf("sync item = %+v, want generated 2026-06-02", item)
+	}
+	positions, err := repo.ListSimPortfolioPositionsByTradeDate(ctx, def.ID, "2026-06-02")
+	if err != nil {
+		t.Fatalf("ListSimPortfolioPositionsByTradeDate: %v", err)
+	}
+	if len(positions) != 4 {
+		t.Fatalf("positions = %d, want 4", len(positions))
+	}
+}
+
+func TestGetSimPortfolioAdminStatus_ShowsBaselineOnlyAndActionHint(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	def := seedSimPortfolioDefinition(t, repo)
+	seedSimPortfolioSnapshots(t, repo)
+	seedSimPortfolioMarketPrices(t, repo, def.ID)
+	svc := NewService(repo)
+
+	if err := svc.ensureSimPortfolioBaseline(ctx, def, "2026-06-01"); err != nil {
+		t.Fatalf("ensureSimPortfolioBaseline: %v", err)
+	}
+
+	resp, err := svc.GetSimPortfolioAdminStatus(ctx)
+	if err != nil {
+		t.Fatalf("GetSimPortfolioAdminStatus: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(resp.Items))
+	}
+	item := resp.Items[0]
+	if !item.BaselineOnly {
+		t.Fatalf("baseline_only = false, item=%+v", item)
+	}
+	if item.Status != "baseline_only" {
+		t.Fatalf("status = %s, want baseline_only", item.Status)
+	}
+	if !item.CanSync || item.NextSyncSignalDate != "2026-06-01" || item.NextSyncTradeDate != "2026-06-02" {
+		t.Fatalf("sync hint mismatch: %+v", item)
+	}
+	if item.DailyRowCount != 1 || item.PositionRowCount != 0 || item.TradeRowCount != 0 || item.MetricsRowCount != 0 {
+		t.Fatalf("fact counts mismatch: %+v", item)
+	}
+	if item.ActionHint == "" {
+		t.Fatalf("expected action hint, got empty")
+	}
+}

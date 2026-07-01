@@ -38,12 +38,12 @@ type simPortfolioHolding struct {
 }
 
 type simPortfolioStatus struct {
-	LatestSignalDate      string
-	PendingSignalDate     string
-	NextEntryTradeDate    string
-	Status               string
-	StatusText           string
-	MissingOpenPriceCount int
+	LatestSignalDate       string
+	PendingSignalDate      string
+	NextEntryTradeDate     string
+	Status                 string
+	StatusText             string
+	MissingOpenPriceCount  int
 	MissingClosePriceCount int
 }
 
@@ -565,21 +565,62 @@ func (s *Service) recomputeSimPortfolioDefinition(ctx context.Context, definitio
 	return nil
 }
 
-func (s *Service) syncSimPortfolioDefinition(ctx context.Context, definition RankingPortfolioDefinition) error {
+func buildSimPortfolioSyncStatusText(generated int, status string) string {
+	if generated > 0 {
+		return fmt.Sprintf("已生成 %d 个估值日", generated)
+	}
+	switch status {
+	case "initialized":
+		return "已初始化基准资金，等待下一批信号形成 T+1 估值"
+	case "up_to_date":
+		return "事实表已是最新状态"
+	case "no_source_snapshot":
+		return "暂无可同步的排行榜快照"
+	case "no_anchor":
+		return "缺少同步锚点，需从头重算"
+	case "blocked":
+		return "同步被前置数据阻断"
+	default:
+		return "未生成新的估值日"
+	}
+}
+
+func (s *Service) syncSimPortfolioDefinition(ctx context.Context, definition RankingPortfolioDefinition) (SimPortfolioSyncSummary, error) {
+	summary := SimPortfolioSyncSummary{
+		PortfolioID: definition.ID,
+		Name:        definition.Name,
+		Exchange:    definition.Exchange,
+		Status:      "skipped",
+	}
 	latestSnapshotDate, err := s.repo.GetLatestRankingSnapshotDateByExchange(ctx, definition.Exchange)
 	if err != nil {
-		return err
+		summary.Status = "failed"
+		summary.Message = err.Error()
+		return summary, err
 	}
 	latestSnapshotDate = strings.TrimSpace(latestSnapshotDate)
+	summary.LatestSignalDate = latestSnapshotDate
 	if latestSnapshotDate == "" {
-		return nil
+		summary.Status = "no_source_snapshot"
+		summary.Message = buildSimPortfolioSyncStatusText(0, summary.Status)
+		return summary, nil
 	}
 	latestDaily, err := s.repo.GetLatestSimPortfolioDaily(ctx, definition.ID)
 	if err != nil {
-		return err
+		summary.Status = "failed"
+		summary.Message = err.Error()
+		return summary, err
 	}
 	if latestDaily == nil {
-		return s.ensureSimPortfolioBaseline(ctx, definition, latestSnapshotDate)
+		if err := s.ensureSimPortfolioBaseline(ctx, definition, latestSnapshotDate); err != nil {
+			summary.Status = "failed"
+			summary.Message = err.Error()
+			return summary, err
+		}
+		summary.Status = "initialized"
+		summary.AnchorDate = latestSnapshotDate
+		summary.Message = buildSimPortfolioSyncStatusText(0, summary.Status)
+		return summary, nil
 	}
 	anchorDate := latestDaily.SignalDate
 	includeAnchor := false
@@ -587,15 +628,22 @@ func (s *Service) syncSimPortfolioDefinition(ctx context.Context, definition Ran
 		anchorDate = latestDaily.TradeDate
 		includeAnchor = true
 	}
+	summary.AnchorDate = anchorDate
 	if anchorDate == "" {
-		return nil
+		summary.Status = "no_anchor"
+		summary.Message = buildSimPortfolioSyncStatusText(0, summary.Status)
+		return summary, nil
 	}
 	dates, err := s.repo.ListRankingSnapshotDatesByExchangeRange(ctx, definition.Exchange, anchorDate, latestSnapshotDate)
 	if err != nil {
-		return err
+		summary.Status = "failed"
+		summary.Message = err.Error()
+		return summary, err
 	}
 	if len(dates) < 2 {
-		return nil
+		summary.Status = "up_to_date"
+		summary.Message = buildSimPortfolioSyncStatusText(0, summary.Status)
+		return summary, nil
 	}
 	startIndex := 0
 	for index, date := range dates {
@@ -608,7 +656,9 @@ func (s *Service) syncSimPortfolioDefinition(ctx context.Context, definition Ran
 		startIndex++
 	}
 	if startIndex >= len(dates)-1 {
-		return nil
+		summary.Status = "up_to_date"
+		summary.Message = buildSimPortfolioSyncStatusText(0, summary.Status)
+		return summary, nil
 	}
 	previousDaily := latestDaily
 	for index := startIndex; index < len(dates)-1; index++ {
@@ -618,30 +668,60 @@ func (s *Service) syncSimPortfolioDefinition(ctx context.Context, definition Ran
 			continue
 		}
 		if err := s.computeAndPersistSimPortfolioDay(ctx, definition, signalDate, tradeDate, previousDaily); err != nil {
-			return err
+			summary.Status = "blocked"
+			summary.Message = err.Error()
+			if strings.Contains(err.Error(), "missing open price") {
+				summary.MissingOpenPriceCount = 1
+			}
+			if strings.Contains(err.Error(), "missing close price") {
+				summary.MissingClosePriceCount = 1
+			}
+			return summary, err
 		}
+		summary.GeneratedDailyCount++
+		summary.LastGeneratedTradeDate = tradeDate
 		previousDaily, err = s.repo.GetSimPortfolioDailyByTradeDate(ctx, definition.ID, tradeDate)
 		if err != nil {
-			return err
+			summary.Status = "failed"
+			summary.Message = err.Error()
+			return summary, err
 		}
 	}
-	return nil
+	if summary.GeneratedDailyCount > 0 {
+		summary.Status = "synced"
+	} else {
+		summary.Status = "up_to_date"
+	}
+	summary.Message = buildSimPortfolioSyncStatusText(summary.GeneratedDailyCount, summary.Status)
+	return summary, nil
 }
 
-func (s *Service) syncSimPortfolios(ctx context.Context) error {
+func (s *Service) syncSimPortfolios(ctx context.Context) (*SimPortfolioSyncResponse, error) {
 	definitions, err := s.repo.ListActiveRankingPortfolioDefinitions(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	resp := &SimPortfolioSyncResponse{OK: true, Items: []SimPortfolioSyncSummary{}}
+	totalGenerated := 0
 	for _, definition := range definitions {
-		if err := s.syncSimPortfolioDefinition(ctx, definition); err != nil {
-			return err
+		summary, err := s.syncSimPortfolioDefinition(ctx, definition)
+		resp.Items = append(resp.Items, summary)
+		totalGenerated += summary.GeneratedDailyCount
+		if err != nil {
+			resp.OK = false
+			resp.Message = fmt.Sprintf("%s 同步失败：%s", definition.Name, summary.Message)
+			return resp, err
 		}
 	}
-	return nil
+	if totalGenerated > 0 {
+		resp.Message = fmt.Sprintf("模拟组合事实表已同步，新增 %d 个估值日。", totalGenerated)
+	} else {
+		resp.Message = "模拟组合事实表已检查，暂无新增估值日。"
+	}
+	return resp, nil
 }
 
-func (s *Service) SyncSimPortfolios(ctx context.Context) error {
+func (s *Service) SyncSimPortfolios(ctx context.Context) (*SimPortfolioSyncResponse, error) {
 	s.simPortfolioMu.Lock()
 	defer s.simPortfolioMu.Unlock()
 	// Auto-backfill missing open prices before syncing fact tables.
@@ -668,7 +748,7 @@ func (s *Service) BackfillSimPortfolioOpenPrices(ctx context.Context, portfolioI
 
 func (s *Service) backfillSimPortfolioOpenPrices(ctx context.Context, portfolioID string, exchange string, latestOnly bool) *SimPortfolioBackfillOpenPriceResponse {
 	resp := &SimPortfolioBackfillOpenPriceResponse{
-		OK:                true,
+		OK:                 true,
 		PortfolioSummaries: []SimPortfolioBackfillSummary{},
 	}
 	if s.openPriceResolver == nil {
@@ -807,6 +887,10 @@ func (s *Service) resolveSimPortfolioEntryTradeDate(ctx context.Context, definit
 
 func buildSimPortfolioStatusText(status string) string {
 	switch status {
+	case "baseline_only":
+		return "仅有初始化资金，尚未生成持仓"
+	case "pending_fact_sync":
+		return "前置数据已就绪，等待同步事实表"
 	case "pending_open_price":
 		return "等待下一交易日开盘价"
 	case "pending_close_price":
@@ -820,6 +904,25 @@ func buildSimPortfolioStatusText(status string) string {
 	default:
 		return "等待数据更新"
 	}
+}
+
+func buildSimPortfolioAdminActionHint(status SimPortfolioAdminStatusItem) string {
+	if status.BaselineOnly && status.CanSync {
+		return "只有初始化资金，前置数据已具备；请点击“同步最新事实表”生成持仓、调仓和指标。"
+	}
+	if status.BaselineOnly {
+		return "只有初始化资金，等待下一批排行榜快照形成 T+1 估值；如需回灌历史请点击“从头重算全部组合”。"
+	}
+	if status.MissingOpenPriceCount > 0 {
+		return "建仓开盘价缺失；请先点击“补齐建仓开盘价”，再同步事实表。"
+	}
+	if status.MissingClosePriceCount > 0 {
+		return "收盘估值价缺失；请先刷新四象限/行情数据，再同步事实表。"
+	}
+	if status.CanSync {
+		return "已有新信号可推进；请点击“同步最新事实表”。"
+	}
+	return "无需操作；如页面数据异常可先验证事实表一致性。"
 }
 
 func (s *Service) resolveSimPortfolioStatus(ctx context.Context, definition RankingPortfolioDefinition, latestDaily *SimPortfolioDaily) (simPortfolioStatus, error) {
@@ -1095,6 +1198,29 @@ func (s *Service) GetSimPortfolioAdminStatus(ctx context.Context) (*SimPortfolio
 		if err != nil {
 			return nil, err
 		}
+		dailyRows, err := s.repo.ListAllSimPortfolioDaily(ctx, definition.ID)
+		if err != nil {
+			return nil, err
+		}
+		positionCount, err := s.repo.CountSimPortfolioPositions(ctx, definition.ID)
+		if err != nil {
+			return nil, err
+		}
+		tradeCount, err := s.repo.CountSimPortfolioTrades(ctx, definition.ID)
+		if err != nil {
+			return nil, err
+		}
+		metricsCount, err := s.repo.CountSimPortfolioMetrics(ctx, definition.ID)
+		if err != nil {
+			return nil, err
+		}
+		completedDailyCount := 0
+		for _, daily := range dailyRows {
+			if daily.Status == simPortfolioStatusComplete && daily.PositionCount > 0 {
+				completedDailyCount++
+			}
+		}
+
 		item := SimPortfolioAdminStatusItem{
 			PortfolioID:            definition.ID,
 			Name:                   definition.Name,
@@ -1104,12 +1230,56 @@ func (s *Service) GetSimPortfolioAdminStatus(ctx context.Context) (*SimPortfolio
 			NextEntryTradeDate:     status.NextEntryTradeDate,
 			Status:                 status.Status,
 			StatusText:             status.StatusText,
+			DailyRowCount:          len(dailyRows),
+			CompletedDailyCount:    completedDailyCount,
+			PositionRowCount:       positionCount,
+			TradeRowCount:          tradeCount,
+			MetricsRowCount:        metricsCount,
 			MissingOpenPriceCount:  status.MissingOpenPriceCount,
 			MissingClosePriceCount: status.MissingClosePriceCount,
 		}
 		if latestDaily != nil {
 			item.LatestTradeDate = latestDaily.TradeDate
 		}
+		item.BaselineOnly = item.DailyRowCount > 0 && item.CompletedDailyCount == 0 && item.PositionRowCount == 0
+		if item.BaselineOnly {
+			item.Status = "baseline_only"
+			item.StatusText = buildSimPortfolioStatusText(item.Status)
+		}
+		if latestDaily != nil {
+			anchorDate := strings.TrimSpace(latestDaily.SignalDate)
+			includeAnchor := false
+			if anchorDate == "" {
+				anchorDate = strings.TrimSpace(latestDaily.TradeDate)
+				includeAnchor = true
+			}
+			if anchorDate != "" {
+				dates, err := s.repo.ListRankingSnapshotDatesByExchangeRange(ctx, definition.Exchange, anchorDate, status.LatestSignalDate)
+				if err != nil {
+					return nil, err
+				}
+				startIndex := 0
+				for index, date := range dates {
+					if date == anchorDate {
+						startIndex = index
+						break
+					}
+				}
+				if !includeAnchor {
+					startIndex++
+				}
+				if startIndex < len(dates)-1 {
+					item.CanSync = true
+					item.NextSyncSignalDate = dates[startIndex]
+					item.NextSyncTradeDate = dates[startIndex+1]
+				}
+			}
+		}
+		if item.Status == "pending_open_price" && item.MissingOpenPriceCount == 0 && item.CanSync {
+			item.Status = "pending_fact_sync"
+			item.StatusText = buildSimPortfolioStatusText(item.Status)
+		}
+		item.ActionHint = buildSimPortfolioAdminActionHint(item)
 		resp.Items = append(resp.Items, item)
 	}
 	return resp, nil

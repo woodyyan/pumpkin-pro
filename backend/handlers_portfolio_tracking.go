@@ -107,14 +107,12 @@ func (a *appServer) handleAdminPortfolioTrackingSync(w http.ResponseWriter, r *h
 		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
 		return
 	}
-	if err := a.quadrantService.SyncSimPortfolios(r.Context()); err != nil {
+	resp, err := a.quadrantService.SyncSimPortfolios(r.Context())
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"message": "模拟组合事实表已同步最新信号。",
-	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (a *appServer) handleAdminPortfolioTrackingRecompute(w http.ResponseWriter, r *http.Request) {

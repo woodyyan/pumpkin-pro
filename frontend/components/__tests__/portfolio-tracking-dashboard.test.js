@@ -20,6 +20,11 @@ describe('admin quadrant panel migration hints', () => {
   it('surfaces the new fact-table management entry and hides old buttons behind legacy notice', () => {
     assert.match(adminSectionsSource, /新口径模拟组合管理/)
     assert.match(adminSectionsSource, /同步最新事实表/)
-    assert.match(adminSectionsSource, /管理后台不再展示旧按钮/)
+    assert.match(adminSectionsSource, /运维顺序/)
+    assert.match(adminSectionsSource, /只补前置价格，不生成持仓/)
+    assert.match(adminSectionsSource, /事实表/)
+    assert.match(adminSectionsSource, /可同步/)
+    assert.match(adminSectionsSource, /建议动作/)
+    assert.match(adminSectionsSource, /最近一次事实表同步结果/)
   })
 })

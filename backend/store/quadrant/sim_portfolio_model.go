@@ -228,17 +228,47 @@ type SimPortfolioAdminStatusResponse struct {
 }
 
 type SimPortfolioAdminStatusItem struct {
-	PortfolioID           string `json:"portfolio_id"`
-	Name                  string `json:"name"`
-	Exchange              string `json:"exchange"`
-	LatestTradeDate       string `json:"latest_trade_date,omitempty"`
-	LatestSignalDate      string `json:"latest_signal_date,omitempty"`
-	PendingSignalDate     string `json:"pending_signal_date,omitempty"`
-	NextEntryTradeDate    string `json:"next_entry_trade_date,omitempty"`
-	Status                string `json:"status"`
-	StatusText            string `json:"status_text,omitempty"`
-	MissingOpenPriceCount int    `json:"missing_open_price_count"`
-	MissingClosePriceCount int   `json:"missing_close_price_count"`
+	PortfolioID            string `json:"portfolio_id"`
+	Name                   string `json:"name"`
+	Exchange               string `json:"exchange"`
+	LatestTradeDate        string `json:"latest_trade_date,omitempty"`
+	LatestSignalDate       string `json:"latest_signal_date,omitempty"`
+	PendingSignalDate      string `json:"pending_signal_date,omitempty"`
+	NextEntryTradeDate     string `json:"next_entry_trade_date,omitempty"`
+	Status                 string `json:"status"`
+	StatusText             string `json:"status_text,omitempty"`
+	ActionHint             string `json:"action_hint,omitempty"`
+	DailyRowCount          int    `json:"daily_row_count"`
+	CompletedDailyCount    int    `json:"completed_daily_count"`
+	PositionRowCount       int    `json:"position_row_count"`
+	TradeRowCount          int    `json:"trade_row_count"`
+	MetricsRowCount        int    `json:"metrics_row_count"`
+	BaselineOnly           bool   `json:"baseline_only"`
+	CanSync                bool   `json:"can_sync"`
+	NextSyncSignalDate     string `json:"next_sync_signal_date,omitempty"`
+	NextSyncTradeDate      string `json:"next_sync_trade_date,omitempty"`
+	MissingOpenPriceCount  int    `json:"missing_open_price_count"`
+	MissingClosePriceCount int    `json:"missing_close_price_count"`
+}
+
+type SimPortfolioSyncResponse struct {
+	OK      bool                      `json:"ok"`
+	Message string                    `json:"message,omitempty"`
+	Items   []SimPortfolioSyncSummary `json:"items"`
+}
+
+type SimPortfolioSyncSummary struct {
+	PortfolioID            string `json:"portfolio_id"`
+	Name                   string `json:"name"`
+	Exchange               string `json:"exchange"`
+	Status                 string `json:"status"`
+	Message                string `json:"message,omitempty"`
+	AnchorDate             string `json:"anchor_date,omitempty"`
+	LatestSignalDate       string `json:"latest_signal_date,omitempty"`
+	GeneratedDailyCount    int    `json:"generated_daily_count"`
+	LastGeneratedTradeDate string `json:"last_generated_trade_date,omitempty"`
+	MissingOpenPriceCount  int    `json:"missing_open_price_count"`
+	MissingClosePriceCount int    `json:"missing_close_price_count"`
 }
 
 type SimPortfolioVerifyResponse struct {
@@ -257,15 +287,15 @@ type SimPortfolioVerifyItem struct {
 }
 
 type SimPortfolioBackfillOpenPriceResponse struct {
-	OK              bool                             `json:"ok"`
-	Message         string                           `json:"message,omitempty"`
-	Summary         SimPortfolioBackfillSummary       `json:"summary"`
+	OK                 bool                          `json:"ok"`
+	Message            string                        `json:"message,omitempty"`
+	Summary            SimPortfolioBackfillSummary   `json:"summary"`
 	PortfolioSummaries []SimPortfolioBackfillSummary `json:"portfolios"`
 }
 
 type SimPortfolioBackfillSummary struct {
 	ScannedCount           int `json:"scanned_count"`
-	FilledCount             int `json:"filled_count"`
+	FilledCount            int `json:"filled_count"`
 	StillPendingCount      int `json:"still_pending_count"`
 	FailedCount            int `json:"failed_count"`
 	SkippedBeforeCutover   int `json:"skipped_before_cutover"`

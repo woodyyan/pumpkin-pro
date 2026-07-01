@@ -3631,11 +3631,18 @@ func (a *appServer) handleQuadrantBulkSave(w http.ResponseWriter, r *http.Reques
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
-			if err := a.quadrantService.SyncSimPortfolios(ctx); err != nil {
+			resp, err := a.quadrantService.SyncSimPortfolios(ctx)
+			if err != nil {
 				log.Printf("[portfolio-tracking] auto sync after quadrant bulk-save failed: %v", err)
 				return
 			}
-			log.Printf("[portfolio-tracking] auto sync after quadrant bulk-save completed")
+			generated := 0
+			if resp != nil {
+				for _, item := range resp.Items {
+					generated += item.GeneratedDailyCount
+				}
+			}
+			log.Printf("[portfolio-tracking] auto sync after quadrant bulk-save completed: generated=%d", generated)
 		}()
 	}
 }

@@ -171,6 +171,36 @@ func (r *Repository) ListAllSimPortfolioDaily(ctx context.Context, portfolioID s
 	return rows, nil
 }
 
+func (r *Repository) CountSimPortfolioPositions(ctx context.Context, portfolioID string) (int, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&SimPortfolioPosition{}).
+		Where("portfolio_id = ?", strings.TrimSpace(portfolioID)).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+func (r *Repository) CountSimPortfolioTrades(ctx context.Context, portfolioID string) (int, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&SimPortfolioTrade{}).
+		Where("portfolio_id = ?", strings.TrimSpace(portfolioID)).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+func (r *Repository) CountSimPortfolioMetrics(ctx context.Context, portfolioID string) (int, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&SimPortfolioMetrics{}).
+		Where("portfolio_id = ?", strings.TrimSpace(portfolioID)).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
 func (r *Repository) ListSimPortfolioPositionsByTradeDate(ctx context.Context, portfolioID string, tradeDate string) ([]SimPortfolioPosition, error) {
 	var rows []SimPortfolioPosition
 	if err := r.db.WithContext(ctx).

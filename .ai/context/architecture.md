@@ -133,3 +133,13 @@ frontend/
   - 市场级模式：调用 `RunDailyMarketSnapshot(...)` 执行整市场历史单日重建。
   - 用户级模式：调用 `RebuildDailySnapshotForUser(...)` 执行指定 `user + scope + date` 重建。
 - 配置层新增 `PortfolioSnapshotConfig`，把开关、A 股/港股触发时间与超时统一放在 `backend/config/config.go` 管理，避免调度参数散落在 `main.go` 或 worker 常量中。
+
+## 新口径模拟组合事实表运维链路（2026-07-01）
+
+- `/portfolio-tracking` 只读取新事实表：`portfolio_daily`、`portfolio_position`、`portfolio_trade`、`portfolio_metrics`；legacy `quadrant_ranking_portfolio_results` 仅用于历史核查。
+- Admin 四象限页的「新口径模拟组合管理」固定按三步表达：
+  1. 「补齐建仓开盘价」只补 `quadrant_ranking_portfolio_market_prices.open_price` / `entry_trade_date`，不生成持仓或调仓。
+  2. 「同步最新事实表」负责推进 `signal_date -> trade_date`，生成 `portfolio_daily/position/trade/metrics`。
+  3. 「验证事实表一致性」检查资产汇总、持仓数量和建仓价完整性。
+- Admin status 必须同时暴露前置价格缺口与事实表完整度：`daily_row_count`、`completed_daily_count`、`position_row_count`、`trade_row_count`、`metrics_row_count`、`baseline_only`、`can_sync`、`action_hint`。
+- `SyncSimPortfolios` 返回每个组合的同步摘要：锚点、最新信号、生成估值日数量、最后生成日期和阻断原因；bulk-save 后的自动同步日志至少记录 generated 数量。

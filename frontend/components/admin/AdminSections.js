@@ -1713,6 +1713,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
   const [backfillingOpenPrices, setBackfillingOpenPrices] = useState(false)
   const [verifyingPortfolio, setVerifyingPortfolio] = useState(false)
   const [verifyPortfolioResult, setVerifyPortfolioResult] = useState(null)
+  const [syncPortfolioResult, setSyncPortfolioResult] = useState(null)
   const [recomputingPortfolio, setRecomputingPortfolio] = useState(false)
   const [recomputeConfirming, setRecomputeConfirming] = useState(false)
   const [portfolioActionNotice, setPortfolioActionNotice] = useState('')
@@ -1775,6 +1776,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
     try {
       const resp = await adminFetch('/api/admin/portfolio-tracking/sync', { method: 'POST' })
       setVerifyPortfolioResult(null)
+      setSyncPortfolioResult(resp)
       setPortfolioActionNotice(resp?.message || '模拟组合事实表已同步最新信号。')
       await resource.refresh()
     } catch (err) {
@@ -1795,6 +1797,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ latest_only: true }),
       })
+      setSyncPortfolioResult(null)
       setPortfolioActionNotice(resp?.message || '建仓开盘价补齐完成。')
       await resource.refresh()
     } catch (err) {
@@ -1811,6 +1814,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
     setPortfolioActionNotice('')
     try {
       const resp = await adminFetch('/api/admin/portfolio-tracking/verify', { method: 'POST' })
+      setSyncPortfolioResult(null)
       setVerifyPortfolioResult(resp)
       const diffCount = Array.isArray(resp?.items) ? resp.items.filter((item) => item.status !== 'ok').length : 0
       setPortfolioActionNotice(diffCount > 0 ? `发现 ${diffCount} 条需要人工核查的事实表记录。` : '所有事实表记录校验通过。')
@@ -1839,6 +1843,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
         body: JSON.stringify({ reset: true }),
       })
       setVerifyPortfolioResult(null)
+      setSyncPortfolioResult(null)
       setPortfolioActionNotice(resp?.message || '模拟组合已从头重算。')
       await resource.refresh()
     } catch (err) {
@@ -1913,6 +1918,8 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
     switch (status) {
       case 'completed':
         return 'text-positive'
+      case 'baseline_only':
+      case 'pending_fact_sync':
       case 'pending_open_price':
       case 'pending_close_price':
       case 'seeded':
@@ -2030,8 +2037,8 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
         </div>
 
         <div className="mb-3 rounded-xl border border-dashed border-border bg-background px-4 py-3 text-xs leading-6 text-foreground-muted">
-          旧版「补齐开盘价并重算曲线（仅上线日后）」与「验证收益曲线」只服务 legacy JSON 结果表。
-          当前主站页面已不再依赖那套结果，管理后台不再展示旧按钮；相关后端接口暂时保留，仅用于历史核查。
+          运维顺序：先补齐建仓开盘价（只补前置价格，不生成持仓），再同步最新事实表（生成持仓、调仓和指标），最后验证事实表一致性。
+          如果某组合显示「仅有初始化资金」且「可同步」为是，优先点击「同步最新事实表」；需要回灌历史曲线时再使用「从头重算全部组合」。
         </div>
 
         {portfolioActionNotice ? (
@@ -2053,8 +2060,11 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
                   <th className="pb-2 pr-4 font-medium">待执行信号</th>
                   <th className="pb-2 pr-4 font-medium">下一次开盘</th>
                   <th className="pb-2 pr-4 font-medium">最新估值日</th>
+                  <th className="pb-2 pr-4 font-medium">事实表</th>
+                  <th className="pb-2 pr-4 font-medium">可同步</th>
                   <th className="pb-2 pr-4 font-medium">缺开盘价</th>
-                  <th className="pb-2 font-medium">状态</th>
+                  <th className="pb-2 pr-4 font-medium">状态</th>
+                  <th className="pb-2 font-medium">建议动作</th>
                 </tr>
               </thead>
               <tbody className="text-foreground-muted">
@@ -2066,14 +2076,51 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
                     <td className="py-2 pr-4 tabular-nums">{item.pending_signal_date || '--'}</td>
                     <td className="py-2 pr-4 tabular-nums">{item.next_entry_trade_date || '--'}</td>
                     <td className="py-2 pr-4 tabular-nums">{item.latest_trade_date || '--'}</td>
+                    <td className="py-2 pr-4 tabular-nums">
+                      {item.daily_row_count ?? 0}日 / {item.position_row_count ?? 0}持仓 / {item.trade_row_count ?? 0}调仓 / {item.metrics_row_count ?? 0}指标
+                    </td>
+                    <td className="py-2 pr-4 tabular-nums">{item.can_sync ? <span className="text-amber-700">{item.next_sync_signal_date || '--'} → {item.next_sync_trade_date || '--'}</span> : '否'}</td>
                     <td className="py-2 pr-4 tabular-nums">{item.missing_open_price_count > 0 ? <span className="text-amber-700">{item.missing_open_price_count}</span> : (item.missing_open_price_count === 0 ? '0' : '--')}</td>
-                    <td className={`py-2 font-medium ${getPortfolioTrackingStatusClass(item.status)}`}>{item.status_text || item.status || '--'}</td>
+                    <td className={`py-2 pr-4 font-medium ${getPortfolioTrackingStatusClass(item.status)}`}>{item.status_text || item.status || '--'}</td>
+                    <td className="py-2 text-foreground-dim">{item.action_hint || '--'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
+
+        {syncPortfolioResult?.items?.length ? (
+          <div className="mt-4 rounded-xl border border-border bg-background px-4 py-3">
+            <div className="text-xs font-medium text-foreground">最近一次事实表同步结果</div>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-[11px] text-left">
+                <thead>
+                  <tr className="border-b border-border text-foreground-dim">
+                    <th className="pb-2 pr-3 font-medium">组合</th>
+                    <th className="pb-2 pr-3 font-medium">状态</th>
+                    <th className="pb-2 pr-3 font-medium">锚点</th>
+                    <th className="pb-2 pr-3 font-medium">最新信号</th>
+                    <th className="pb-2 pr-3 font-medium text-right">新增估值日</th>
+                    <th className="pb-2 font-medium">说明</th>
+                  </tr>
+                </thead>
+                <tbody className="text-foreground-muted">
+                  {syncPortfolioResult.items.map((item) => (
+                    <tr key={item.portfolio_id} className="border-b border-border last:border-0 align-top">
+                      <td className="py-2 pr-3 text-foreground">{item.name || item.portfolio_id}</td>
+                      <td className="py-2 pr-3">{item.status || '--'}</td>
+                      <td className="py-2 pr-3 tabular-nums">{item.anchor_date || '--'}</td>
+                      <td className="py-2 pr-3 tabular-nums">{item.latest_signal_date || '--'}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums">{item.generated_daily_count ?? 0}</td>
+                      <td className="py-2 text-foreground-dim">{item.message || '--'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
 
         {verifyPortfolioResult ? (
           portfolioVerifyDiffs.length > 0 ? (

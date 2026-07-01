@@ -5,8 +5,11 @@ go 1.23
 require (
 	github.com/glebarez/sqlite v1.11.0
 	github.com/google/uuid v1.3.0
+	github.com/mileusna/useragent v1.3.5
 	github.com/stretchr/testify v1.8.1
+	github.com/stripe/stripe-go/v83 v83.2.1
 	golang.org/x/crypto v0.31.0
+	golang.org/x/sync v0.10.0
 	golang.org/x/text v0.21.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/driver/sqlite v1.6.0
@@ -26,12 +29,9 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.17 // indirect
 	github.com/mattn/go-sqlite3 v1.14.22 // indirect
-	github.com/mileusna/useragent v1.3.5 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
-	github.com/stripe/stripe-go/v83 v83.2.1 // indirect
-	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/sys v0.28.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.22.5 // indirect

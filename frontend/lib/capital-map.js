@@ -1,4 +1,4 @@
-export const CAPITAL_MAP_REFRESH_MS = 60000
+export const CAPITAL_MAP_REFRESH_MS = 1800000
 
 export function buildCapitalMapUrl() {
   return '/api/capital-map'

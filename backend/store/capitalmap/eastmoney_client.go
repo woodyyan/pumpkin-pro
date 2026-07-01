@@ -8,17 +8,18 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
 
 const (
-	eastmoneyToken     = "bd1d9ddb04089700cf9c27f6f7426281"
-	eastmoneyStockURL  = "https://82.push2.eastmoney.com/api/qt/clist/get"
-	eastmoneySectorURL = "https://push2.eastmoney.com/api/qt/clist/get"
-	eastmoneyTimeout   = 9 * time.Second
-	eastmoneyPageSize  = 100
-	eastmoneyPageCount = 16
+	eastmoneyToken       = "bd1d9ddb04089700cf9c27f6f7426281"
+	defaultStockURL      = "https://82.push2.eastmoney.com/api/qt/clist/get"
+	defaultSectorURL     = "https://push2.eastmoney.com/api/qt/clist/get"
+	eastmoneyTimeout     = 9 * time.Second
+	eastmoneyPageSize    = 100
+	eastmoneyPageCount   = 16
 	// batchSize controls how many pages are fetched serially before a pause.
 	// Fetching all 16 pages concurrently triggers IP-based rate limiting on the
 	// eastmoney servers when requests originate from overseas IPs.
@@ -28,6 +29,23 @@ const (
 	eastmoneyReferer      = "https://quote.eastmoney.com/"
 	eastmoneyPageInterval = 200 * time.Millisecond
 )
+
+// eastmoneyStockURL / eastmoneySectorURL are configurable via environment so
+// operators can switch to a reachable eastmoney push2 node (e.g. when the
+// default 82.push2 node blocks the server's egress IP) without recompiling.
+//   CAPITAL_MAP_STOCK_URL=https://push2.eastmoney.com/api/qt/clist/get
+//   CAPITAL_MAP_SECTOR_URL=https://push2.eastmoney.com/api/qt/clist/get
+var (
+	eastmoneyStockURL  = getenvDefault("CAPITAL_MAP_STOCK_URL", defaultStockURL)
+	eastmoneySectorURL = getenvDefault("CAPITAL_MAP_SECTOR_URL", defaultSectorURL)
+)
+
+func getenvDefault(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
+}
 
 var stockFields = []string{
 	"f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f12", "f13", "f14", "f15", "f16", "f17", "f18", "f20", "f21", "f23", "f24", "f25", "f62", "f115",

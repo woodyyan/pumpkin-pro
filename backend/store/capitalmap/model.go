@@ -3,8 +3,11 @@ package capitalmap
 import "time"
 
 const (
-	DefaultCacheTTL           = 30 * time.Second
-	DefaultRefreshHintSeconds = 60
+	// DefaultCacheTTL controls the background refresh interval (and thus how
+	// often the backend hits eastmoney). Lowered from 30s to 30min to reduce
+	// the chance of triggering IP-based rate limiting on the push2 endpoints.
+	DefaultCacheTTL           = 30 * time.Minute
+	DefaultRefreshHintSeconds = 1800
 )
 
 type Stock struct {

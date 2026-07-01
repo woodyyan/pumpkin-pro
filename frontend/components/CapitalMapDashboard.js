@@ -336,7 +336,7 @@ export default function CapitalMapDashboard() {
             </p>
             <div className="mt-4 flex flex-wrap gap-2 text-xs text-foreground-dim">
               <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-3 py-1.5">样本：{data?.sampleScope || '--'}</span>
-              <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-3 py-1.5">刷新：{data?.refreshHintSeconds || 60} 秒</span>
+              <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-3 py-1.5">刷新：{Math.round((data?.refreshHintSeconds || 1800) / 60)} 分钟</span>
               <span className="rounded-full border border-border bg-[var(--color-bg-hover)] px-3 py-1.5">快照：{formatBeijingTime(data?.updatedAt)}</span>
             </div>
           </div>

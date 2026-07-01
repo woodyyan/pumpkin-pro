@@ -8,6 +8,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -23,24 +25,39 @@ type Fetcher interface {
 	FetchIndustrySectors(ctx context.Context) ([]Sector, error)
 }
 
-type Service struct {
-	fetcher  Fetcher
-	cacheTTL time.Duration
-	now      func() time.Time
+// onDemandFetchTimeout caps the synchronous fetch that GetPayload triggers
+// when the cache is empty (e.g. warm-up failed). This keeps a slow upstream
+// from stalling the request while still allowing self-healing.
+const onDemandFetchTimeout = 12 * time.Second
 
-	mu       sync.Mutex
+type Service struct {
+	fetcher Fetcher
+	now     func() time.Time
+
+	mu sync.Mutex
+	// cached holds the most recent successful payload. When refresh fails but
+	// a previous payload exists, cached is kept and tagged stale (see
+	// markStale) so callers still get data and can observe staleness via
+	// CacheStatus / LastError.
 	cached   *Payload
 	cachedAt time.Time
+
+	// inflight deduplicates concurrent on-demand fetches triggered by
+	// GetPayload when the cache is empty, so a burst of first requests
+	// triggers at most one upstream fetch.
+	inflight singleflight.Group
+
+	// lastErr / lastErrAt record the most recent refresh failure (warm-up or
+	// background) for observability. Cleared on success.
+	lastErr   error
+	lastErrAt time.Time
 }
 
-func NewService(fetcher Fetcher, cacheTTL time.Duration) *Service {
+func NewService(fetcher Fetcher) *Service {
 	if fetcher == nil {
 		fetcher = NewEastmoneyClient(nil)
 	}
-	if cacheTTL <= 0 {
-		cacheTTL = DefaultCacheTTL
-	}
-	return &Service{fetcher: fetcher, cacheTTL: cacheTTL, now: time.Now}
+	return &Service{fetcher: fetcher, now: time.Now}
 }
 
 // StartBackgroundRefresh performs an immediate warm-up fetch, then continues
@@ -49,9 +66,9 @@ func NewService(fetcher Fetcher, cacheTTL time.Duration) *Service {
 // The goroutine exits when ctx is cancelled.
 func (s *Service) StartBackgroundRefresh(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
-		interval = s.cacheTTL
+		interval = DefaultCacheTTL
 	}
-	s.refresh(ctx)
+	s.refreshAndRecord(ctx)
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -60,53 +77,138 @@ func (s *Service) StartBackgroundRefresh(ctx context.Context, interval time.Dura
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				s.refresh(ctx)
+				s.refreshAndRecord(ctx)
 			}
 		}
 	}()
 }
 
+// refreshAndRecord runs refresh and records failures for observability.
+func (s *Service) refreshAndRecord(ctx context.Context) {
+	if err := s.refresh(ctx); err != nil {
+		log.Printf("capital map background refresh failed: %v", err)
+	}
+}
+
 // refresh fetches fresh data from the upstream source and updates the cache.
-// Failures are logged but not propagated; a stale cache remains available.
-func (s *Service) refresh(ctx context.Context) {
+// On success the cache is marked "fresh". On failure the existing cache (if
+// any) is preserved and tagged "stale" with the error; the error is returned
+// so callers (warm-up, on-demand fetch) can react. The cache is never wiped
+// by a failure, so a transient upstream outage never blanks the page.
+func (s *Service) refresh(ctx context.Context) error {
 	rctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
 	stockResult, stockErr := s.fetcher.FetchAshareSnapshot(rctx)
 	if stockErr != nil {
-		log.Printf("capital map refresh failed (stocks): %v", stockErr)
-		return
+		s.markStale(stockErr)
+		return stockErr
 	}
 	sectors, sectorErr := s.fetcher.FetchIndustrySectors(rctx)
 	if sectorErr != nil {
-		log.Printf("capital map refresh failed (sectors): %v", sectorErr)
-		return
+		s.markStale(sectorErr)
+		return sectorErr
 	}
 
 	now := s.now()
 	payload := BuildMarketPayload(stockResult.Stocks, sectors, stockResult, now)
 	payload.CacheStatus = "fresh"
+	payload.LastError = ""
 
 	s.mu.Lock()
 	s.cached = clonePayload(payload)
 	s.cachedAt = now
+	s.lastErr = nil
+	s.lastErrAt = time.Time{}
 	s.mu.Unlock()
+	return nil
 }
 
-// GetPayload returns the most recently cached payload.
-// It returns an error only if no data has ever been successfully fetched.
-// The underlying data is always populated by StartBackgroundRefresh; this
-// method intentionally does NOT make a live upstream request.
-func (s *Service) GetPayload(_ context.Context) (*Payload, error) {
+// markStale preserves the existing cache but flags it as stale, so callers
+// still receive data during a transient upstream outage. If no cache exists
+// yet, only the failure is recorded (for observability) and the cache stays
+// nil.
+func (s *Service) markStale(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cached != nil {
+		s.cached.CacheStatus = "stale"
+		s.cached.LastError = err.Error()
+	}
+	s.lastErr = err
+	s.lastErrAt = s.now()
+}
+
+// GetPayload returns the most recently cached payload. If the cache is empty
+// (warm-up failed or not yet run), it triggers one synchronous fetch
+// deduplicated across concurrent callers, so the first request self-heals
+// instead of hard erroring. An error is returned only when both the cache and
+// the on-demand fetch are unavailable.
+func (s *Service) GetPayload(ctx context.Context) (*Payload, error) {
 	if s == nil {
 		return nil, fmt.Errorf("capital map service is not initialized")
 	}
+
+	s.mu.Lock()
+	cached := s.cached
+	s.mu.Unlock()
+	if cached != nil {
+		return clonePayload(cached), nil
+	}
+
+	// Cache empty — deduplicate concurrent first-fetch attempts.
+	_, err, _ := s.inflight.Do("fetch", func() (any, error) {
+		// Re-check inside the leader: another caller may have populated the
+		// cache between our first check and acquiring the singleflight slot.
+		s.mu.Lock()
+		if s.cached != nil {
+			s.mu.Unlock()
+			return nil, nil
+		}
+		s.mu.Unlock()
+
+		fetchCtx, cancel := context.WithTimeout(ctx, onDemandFetchTimeout)
+		defer cancel()
+		return nil, s.refresh(fetchCtx)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("资金星图数据暂不可用: %w", err)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cached == nil {
 		return nil, fmt.Errorf("资金星图数据尚未就绪，请稍后重试")
 	}
 	return clonePayload(s.cached), nil
+}
+
+// ServiceStatus exposes the current cache state for observability (admin
+// diagnostics). It never triggers a fetch.
+type ServiceStatus struct {
+	CacheAvailable bool      `json:"cacheAvailable"`
+	CacheStatus    string    `json:"cacheStatus"`
+	CachedAt       time.Time `json:"cachedAt"`
+	LastError      string    `json:"lastError,omitempty"`
+	LastErrAt      time.Time `json:"lastErrAt,omitempty"`
+}
+
+// Status returns a snapshot of the cache health.
+func (s *Service) Status() ServiceStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := ServiceStatus{}
+	if s.cached != nil {
+		st.CacheAvailable = true
+		st.CacheStatus = s.cached.CacheStatus
+		st.CachedAt = s.cachedAt
+		st.LastError = s.cached.LastError
+	}
+	if s.lastErr != nil {
+		st.LastError = s.lastErr.Error()
+		st.LastErrAt = s.lastErrAt
+	}
+	return st
 }
 
 func BuildMarketPayload(stocks []Stock, sectors []Sector, meta SnapshotResult, now time.Time) *Payload {

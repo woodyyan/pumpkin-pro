@@ -1628,7 +1628,9 @@ func (a *appServer) handleCapitalMap(w http.ResponseWriter, r *http.Request) {
 	}
 	payload, err := a.capitalMapService.GetPayload(r.Context())
 	if err != nil {
-		log.Printf("capital map refresh failed: %v", err)
+		st := a.capitalMapService.Status()
+		log.Printf("capital map GetPayload failed: %v | cacheAvailable=%v cacheStatus=%q lastError=%q",
+			err, st.CacheAvailable, st.CacheStatus, st.LastError)
 		writeJSON(w, http.StatusBadGateway, map[string]any{
 			"error":   "CAPITAL_MAP_SOURCE_UNAVAILABLE",
 			"message": "资金星图数据暂不可用",
@@ -1638,7 +1640,8 @@ func (a *appServer) handleCapitalMap(w http.ResponseWriter, r *http.Request) {
 	if payload.CacheStatus == "stale" && strings.TrimSpace(payload.LastError) != "" {
 		log.Printf("capital map served stale snapshot after refresh failure: %s", payload.LastError)
 	}
-	w.Header().Set("Cache-Control", "s-maxage=30, stale-while-revalidate=90")
+	cacheMaxAge := int(capitalmap.DefaultCacheTTL.Seconds())
+	w.Header().Set("Cache-Control", fmt.Sprintf("s-maxage=%d, stale-while-revalidate=%d", cacheMaxAge, cacheMaxAge*2))
 	writeJSON(w, http.StatusOK, payload)
 }
 
@@ -4027,7 +4030,7 @@ func main() {
 	liveRepo := live.NewRepository(storeInstance.DB)
 	liveService := live.NewService(liveRepo)
 	liveMarketClient := live.NewMarketClient()
-	capitalMapService := capitalmap.NewService(nil, capitalmap.DefaultCacheTTL)
+	capitalMapService := capitalmap.NewService(nil)
 	capitalMapService.StartBackgroundRefresh(context.Background(), capitalmap.DefaultCacheTTL)
 
 	signalRepo := signal.NewRepository(storeInstance.DB)

@@ -19,16 +19,23 @@ type mockFetcher struct {
 	sectorErr   error
 	stockCalls  int
 	sectorCalls int
+	stockSleep  time.Duration
 }
 
 func (m *mockFetcher) FetchAshareSnapshot(_ context.Context) (SnapshotResult, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.stockCalls++
-	if m.stockErr != nil {
-		return SnapshotResult{}, m.stockErr
+	err := m.stockErr
+	result := m.stockResult
+	sleep := m.stockSleep
+	m.mu.Unlock()
+	if sleep > 0 {
+		time.Sleep(sleep)
 	}
-	return m.stockResult, nil
+	if err != nil {
+		return SnapshotResult{}, err
+	}
+	return result, nil
 }
 
 func (m *mockFetcher) FetchIndustrySectors(_ context.Context) ([]Sector, error) {
@@ -65,20 +72,44 @@ func sampleFetcher() *mockFetcher {
 
 // ── GetPayload ────────────────────────────────────────────────────────────────
 
-func TestGetPayload_ReturnsErrorWhenNoCacheYet(t *testing.T) {
-	svc := NewService(sampleFetcher(), 30*time.Second)
-	// cache is still nil — GetPayload must return an error
+func TestGetPayload_ReturnsErrorWhenFetchFailsAndNoCache(t *testing.T) {
+	fetcher := &mockFetcher{stockErr: errors.New("upstream down")}
+	svc := NewService(fetcher)
+	// cache is nil and on-demand fetch fails — GetPayload must return an error
 	_, err := svc.GetPayload(context.Background())
 	if err == nil {
-		t.Fatal("expected error when no cache is populated yet, got nil")
+		t.Fatal("expected error when fetch fails and no cache exists, got nil")
+	}
+	if !strings.Contains(err.Error(), "暂不可用") {
+		t.Fatalf("expected unavailable error, got %q", err.Error())
+	}
+}
+
+func TestGetPayload_SelfHealsOnDemandWhenCacheEmpty(t *testing.T) {
+	fetcher := sampleFetcher()
+	svc := NewService(fetcher)
+	// No warm-up / refresh yet — cache is nil. GetPayload must trigger one
+	// on-demand fetch and return the freshly fetched payload.
+	payload, err := svc.GetPayload(context.Background())
+	if err != nil {
+		t.Fatalf("expected self-healing fetch to succeed, got error: %v", err)
+	}
+	if payload == nil || payload.CacheStatus != "fresh" {
+		t.Fatalf("expected fresh payload from on-demand fetch, got %+v", payload)
+	}
+	if fetcher.stockCalls != 1 || fetcher.sectorCalls != 1 {
+		t.Fatalf("expected exactly 1 on-demand fetch each, got stock=%d sector=%d",
+			fetcher.stockCalls, fetcher.sectorCalls)
 	}
 }
 
 func TestGetPayload_ReturnsCachedPayloadAfterRefresh(t *testing.T) {
 	fetcher := sampleFetcher()
-	svc := NewService(fetcher, 30*time.Second)
+	svc := NewService(fetcher)
 
-	svc.refresh(context.Background())
+	if err := svc.refresh(context.Background()); err != nil {
+		t.Fatalf("refresh returned error: %v", err)
+	}
 
 	payload, err := svc.GetPayload(context.Background())
 	if err != nil {
@@ -88,15 +119,17 @@ func TestGetPayload_ReturnsCachedPayloadAfterRefresh(t *testing.T) {
 		t.Fatalf("expected fresh cache, got %q", payload.CacheStatus)
 	}
 	if fetcher.stockCalls != 1 || fetcher.sectorCalls != 1 {
-		t.Fatalf("expected exactly 1 fetch each, got stock=%d sector=%d",
+		t.Fatalf("expected exactly 1 fetch each (from refresh), got stock=%d sector=%d",
 			fetcher.stockCalls, fetcher.sectorCalls)
 	}
 }
 
-func TestGetPayload_DoesNotFetchUpstream(t *testing.T) {
+func TestGetPayload_DoesNotFetchUpstreamWhenCachePresent(t *testing.T) {
 	fetcher := sampleFetcher()
-	svc := NewService(fetcher, 30*time.Second)
-	svc.refresh(context.Background())
+	svc := NewService(fetcher)
+	if err := svc.refresh(context.Background()); err != nil {
+		t.Fatalf("refresh returned error: %v", err)
+	}
 
 	// Multiple calls to GetPayload must never call the fetcher again.
 	for i := 0; i < 5; i++ {
@@ -105,8 +138,28 @@ func TestGetPayload_DoesNotFetchUpstream(t *testing.T) {
 		}
 	}
 	if fetcher.stockCalls != 1 || fetcher.sectorCalls != 1 {
-		t.Fatalf("GetPayload should never call the fetcher; got stock=%d sector=%d",
+		t.Fatalf("GetPayload should never call the fetcher when cache present; got stock=%d sector=%d",
 			fetcher.stockCalls, fetcher.sectorCalls)
+	}
+}
+
+func TestGetPayload_DeduplicatesConcurrentFirstFetch(t *testing.T) {
+	fetcher := sampleFetcher()
+	fetcher.stockSleep = 20 * time.Millisecond // ensure concurrent callers overlap
+	svc := NewService(fetcher)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = svc.GetPayload(context.Background())
+		}()
+	}
+	wg.Wait()
+
+	if fetcher.stockCalls != 1 {
+		t.Fatalf("expected singleflight to deduplicate to 1 fetch, got %d", fetcher.stockCalls)
 	}
 }
 
@@ -114,9 +167,11 @@ func TestGetPayload_DoesNotFetchUpstream(t *testing.T) {
 
 func TestRefresh_SkipsUpdateOnStockError(t *testing.T) {
 	fetcher := &mockFetcher{stockErr: errors.New("network error")}
-	svc := NewService(fetcher, 30*time.Second)
+	svc := NewService(fetcher)
 
-	svc.refresh(context.Background())
+	if err := svc.refresh(context.Background()); err == nil {
+		t.Fatal("expected error when stock fetch fails, got nil")
+	}
 
 	svc.mu.Lock()
 	cached := svc.cached
@@ -129,9 +184,11 @@ func TestRefresh_SkipsUpdateOnStockError(t *testing.T) {
 func TestRefresh_SkipsUpdateOnSectorError(t *testing.T) {
 	fetcher := sampleFetcher()
 	fetcher.sectorErr = errors.New("sector error")
-	svc := NewService(fetcher, 30*time.Second)
+	svc := NewService(fetcher)
 
-	svc.refresh(context.Background())
+	if err := svc.refresh(context.Background()); err == nil {
+		t.Fatal("expected error when sector fetch fails, got nil")
+	}
 
 	svc.mu.Lock()
 	cached := svc.cached
@@ -141,27 +198,35 @@ func TestRefresh_SkipsUpdateOnSectorError(t *testing.T) {
 	}
 }
 
-func TestRefresh_PreservesStaleDataWhenSubsequentFetchFails(t *testing.T) {
+func TestRefresh_MarksExistingCacheStaleOnSubsequentFailure(t *testing.T) {
 	fetcher := sampleFetcher()
-	svc := NewService(fetcher, 30*time.Second)
+	svc := NewService(fetcher)
 
 	// First successful refresh populates the cache.
-	svc.refresh(context.Background())
+	if err := svc.refresh(context.Background()); err != nil {
+		t.Fatalf("first refresh failed: %v", err)
+	}
 
 	// Make subsequent fetches fail.
 	fetcher.mu.Lock()
 	fetcher.stockErr = errors.New("eastmoney down")
 	fetcher.mu.Unlock()
 
-	// refresh should log and return without clearing the existing cache.
-	svc.refresh(context.Background())
+	// refresh should return an error and tag the existing cache as stale,
+	// but NOT wipe it.
+	if err := svc.refresh(context.Background()); err == nil {
+		t.Fatal("expected error on second refresh, got nil")
+	}
 
 	payload, err := svc.GetPayload(context.Background())
 	if err != nil {
 		t.Fatalf("expected stale cache to remain available, got error: %v", err)
 	}
-	if payload.CacheStatus != "fresh" {
-		t.Fatalf("stale cache was mutated; expected fresh, got %q", payload.CacheStatus)
+	if payload.CacheStatus != "stale" {
+		t.Fatalf("expected stale cache status, got %q", payload.CacheStatus)
+	}
+	if !strings.Contains(payload.LastError, "eastmoney down") {
+		t.Fatalf("expected lastError to contain failure reason, got %q", payload.LastError)
 	}
 }
 
@@ -169,7 +234,7 @@ func TestRefresh_PreservesStaleDataWhenSubsequentFetchFails(t *testing.T) {
 
 func TestStartBackgroundRefresh_WarmUpOnStart(t *testing.T) {
 	fetcher := sampleFetcher()
-	svc := NewService(fetcher, time.Minute)
+	svc := NewService(fetcher)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -191,7 +256,7 @@ func TestStartBackgroundRefresh_WarmUpOnStart(t *testing.T) {
 
 func TestStartBackgroundRefresh_CancelStopsGoroutine(t *testing.T) {
 	fetcher := sampleFetcher()
-	svc := NewService(fetcher, time.Millisecond)
+	svc := NewService(fetcher)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	svc.StartBackgroundRefresh(ctx, time.Millisecond)
@@ -214,6 +279,70 @@ func TestStartBackgroundRefresh_CancelStopsGoroutine(t *testing.T) {
 	if finalCalls != callsAfterCancel {
 		t.Fatalf("goroutine still running after cancel: calls went %d → %d",
 			callsAfterCancel, finalCalls)
+	}
+}
+
+func TestStartBackgroundRefresh_RecordsFailureWhenWarmUpFails(t *testing.T) {
+	fetcher := &mockFetcher{stockErr: errors.New("warm-up upstream down")}
+	svc := NewService(fetcher)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.StartBackgroundRefresh(ctx, time.Hour) // long interval, only warm-up runs
+
+	st := svc.Status()
+	if st.CacheAvailable {
+		t.Fatal("cache should be unavailable when warm-up fails")
+	}
+	if !strings.Contains(st.LastError, "warm-up upstream down") {
+		t.Fatalf("expected lastError to record warm-up failure, got %q", st.LastError)
+	}
+}
+
+// ── Status ────────────────────────────────────────────────────────────────────
+
+func TestStatus_ReflectsFreshCache(t *testing.T) {
+	fetcher := sampleFetcher()
+	svc := NewService(fetcher)
+	if err := svc.refresh(context.Background()); err != nil {
+		t.Fatalf("refresh failed: %v", err)
+	}
+
+	st := svc.Status()
+	if !st.CacheAvailable {
+		t.Fatal("expected cache available")
+	}
+	if st.CacheStatus != "fresh" {
+		t.Fatalf("expected fresh status, got %q", st.CacheStatus)
+	}
+	if st.LastError != "" {
+		t.Fatalf("expected empty lastError on success, got %q", st.LastError)
+	}
+}
+
+func TestStatus_ReflectsStaleCacheAfterFailure(t *testing.T) {
+	fetcher := sampleFetcher()
+	svc := NewService(fetcher)
+	if err := svc.refresh(context.Background()); err != nil {
+		t.Fatalf("refresh failed: %v", err)
+	}
+
+	fetcher.mu.Lock()
+	fetcher.stockErr = errors.New("transient outage")
+	fetcher.mu.Unlock()
+	if err := svc.refresh(context.Background()); err == nil {
+		t.Fatal("expected refresh to fail")
+	}
+
+	st := svc.Status()
+	if !st.CacheAvailable {
+		t.Fatal("cache should still be available (stale)")
+	}
+	if st.CacheStatus != "stale" {
+		t.Fatalf("expected stale status, got %q", st.CacheStatus)
+	}
+	if !strings.Contains(st.LastError, "transient outage") {
+		t.Fatalf("expected lastError to contain failure, got %q", st.LastError)
 	}
 }
 

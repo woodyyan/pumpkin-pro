@@ -189,3 +189,74 @@ func (a *appServer) handleAdminPortfolioTrackingBackfillOpenPrices(w http.Respon
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
+
+func (a *appServer) handleAdminPortfolioTrackingStartDateStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	if a.simPortfolioTrackingStartService == nil {
+		writeError(w, http.StatusInternalServerError, "模拟组合起点服务未配置")
+		return
+	}
+	resp, err := a.simPortfolioTrackingStartService.GetStatus(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *appServer) handleAdminPortfolioTrackingStartDatePreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	if a.simPortfolioTrackingStartService == nil {
+		writeError(w, http.StatusInternalServerError, "模拟组合起点服务未配置")
+		return
+	}
+	var req struct {
+		StartSignalDate string `json:"start_signal_date"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	resp, err := a.simPortfolioTrackingStartService.Preview(r.Context(), req.StartSignalDate)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *appServer) handleAdminPortfolioTrackingStartDateApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	if a.simPortfolioTrackingStartService == nil {
+		writeError(w, http.StatusInternalServerError, "模拟组合起点服务未配置")
+		return
+	}
+	var req struct {
+		StartSignalDate string `json:"start_signal_date"`
+		Confirm         bool   `json:"confirm"`
+		Note            string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	if !req.Confirm {
+		writeError(w, http.StatusBadRequest, "请确认后再执行重置")
+		return
+	}
+	resp, err := a.simPortfolioTrackingStartService.Apply(r.Context(), req.StartSignalDate, "super_admin", req.Note)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}

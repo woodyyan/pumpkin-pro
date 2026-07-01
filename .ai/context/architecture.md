@@ -143,3 +143,15 @@ frontend/
   3. 「验证事实表一致性」检查资产汇总、持仓数量和建仓价完整性。
 - Admin status 必须同时暴露前置价格缺口与事实表完整度：`daily_row_count`、`completed_daily_count`、`position_row_count`、`trade_row_count`、`metrics_row_count`、`baseline_only`、`can_sync`、`action_hint`。
 - `SyncSimPortfolios` 返回每个组合的同步摘要：锚点、最新信号、生成估值日数量、最后生成日期和阻断原因；bulk-save 后的自动同步日志至少记录 generated 数量。
+
+## 模拟组合全局开始信号日重置（2026-07-01）
+
+- Admin「新口径模拟组合管理」新增全局开始跟踪日期能力，后台服务为 `SimPortfolioTrackingStartService`。
+- 管理员选择的日期语义固定为 `start_signal_date`（榜单信号日 / 收盘日），不是买入交易日；首次建仓日由该市场下一条排行榜快照日期表示。
+- 该能力采用严格共同日期：A 股与港股在同一个 `start_signal_date` 都必须有排行榜快照，4 个 active 模拟组合才能一起应用；不支持单组合设置起点。
+- 新增 Admin API：
+  - `GET /api/admin/portfolio-tracking/start-date/status`：读取当前全局开始信号日与最近 apply job。
+  - `POST /api/admin/portfolio-tracking/start-date/preview`：只读预检该日期是否具备 A/H 快照、成分股、T+1 开盘价和首日收盘价。
+  - `POST /api/admin/portfolio-tracking/start-date/apply`：二次确认后清空并从该 `start_signal_date` 重算 4 个组合事实表。
+- 新增持久化表：`sim_portfolio_tracking_config` 保存当前全局起点，`sim_portfolio_tracking_jobs` 保存应用任务审计结果。
+- 应用重置复用既有事实表计算链路，仍写入 `portfolio_daily`、`portfolio_position`、`portfolio_trade`、`portfolio_metrics`；不新增第二套组合计算口径。

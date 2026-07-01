@@ -19,6 +19,11 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// DB exposes the underlying GORM handle for integration tests and controlled admin workflows.
+func (r *Repository) DB() *gorm.DB {
+	return r.db
+}
+
 // BulkUpsert replaces all quadrant scores in a single transaction.
 func (r *Repository) BulkUpsert(ctx context.Context, records []QuadrantScoreRecord) error {
 	if len(records) == 0 {

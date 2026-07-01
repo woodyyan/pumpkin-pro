@@ -12,6 +12,8 @@
 - [x] 相关后端、前端测试更新并通过。
 - [x] Admin 新口径模拟组合管理新增事实表完整度、baseline-only、可同步与动作建议展示。
 - [x] `SyncSimPortfolios` 返回 per-portfolio 同步摘要，bulk-save 自动同步日志记录生成估值日数量。
+- [x] Admin 新增全局开始信号日预检与应用重置能力：严格共同日期、4 个组合同时生效、不支持单组合起点。
+- [x] 新增 `SimPortfolioTrackingStartService` 与 `sim_portfolio_tracking_config` / `sim_portfolio_tracking_jobs`，沉淀当前全局起点和 apply 审计记录。
 
 ## 可选后续
 

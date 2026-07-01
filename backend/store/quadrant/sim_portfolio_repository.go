@@ -257,3 +257,46 @@ func (r *Repository) ListAllSimPortfolioTrades(ctx context.Context, portfolioID 
 	}
 	return rows, nil
 }
+
+func (r *Repository) GetSimPortfolioTrackingConfig(ctx context.Context) (*SimPortfolioTrackingConfig, error) {
+	var row SimPortfolioTrackingConfig
+	if err := r.db.WithContext(ctx).
+		Where("config_key = ?", simPortfolioTrackingStartConfigKey).
+		First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *Repository) GetLatestSimPortfolioTrackingJob(ctx context.Context) (*SimPortfolioTrackingJob, error) {
+	var row SimPortfolioTrackingJob
+	if err := r.db.WithContext(ctx).
+		Where("job_type = ?", simPortfolioTrackingJobApply).
+		Order("started_at DESC, id DESC").
+		First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *Repository) CountRankingSnapshotsByExchangeDate(ctx context.Context, exchange string, snapshotDate string) (int, error) {
+	var count int64
+	query := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
+		Where("snapshot_date = ?", strings.TrimSpace(snapshotDate))
+	switch strings.ToUpper(strings.TrimSpace(exchange)) {
+	case "HKEX":
+		query = query.Where("exchange = ?", "HKEX")
+	default:
+		query = query.Where("exchange IN ?", []string{"SSE", "SZSE"})
+	}
+	if err := query.Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}

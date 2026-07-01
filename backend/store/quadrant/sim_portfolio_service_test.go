@@ -2,6 +2,7 @@ package quadrant
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -357,5 +358,147 @@ func TestGetSimPortfolioAdminStatus_ShowsBaselineOnlyAndActionHint(t *testing.T)
 	}
 	if item.ActionHint == "" {
 		t.Fatalf("expected action hint, got empty")
+	}
+}
+
+func seedAllSimPortfolioDefinitions(t *testing.T, repo *Repository) []RankingPortfolioDefinition {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	defs := defaultRankingPortfolioDefinitionRecords(now)
+	for _, def := range defs {
+		if err := repo.db.WithContext(ctx).Create(&def).Error; err != nil {
+			t.Fatalf("seed definition %s: %v", def.ID, err)
+		}
+	}
+	return defs
+}
+
+func seedStrictCommonStartSnapshots(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	rows := []RankingSnapshot{}
+	for _, date := range []string{"2026-06-01", "2026-06-02", "2026-06-03"} {
+		for index := 1; index <= 6; index++ {
+			rows = append(rows, RankingSnapshot{Code: fmt.Sprintf("60000%d", index), Name: fmt.Sprintf("A%d", index), Exchange: "SSE", Rank: index, ClosePrice: 10 + float64(index), PriceTradeDate: date, SnapshotDate: date, CreatedAt: now})
+			rows = append(rows, RankingSnapshot{Code: fmt.Sprintf("00%d", index), Name: fmt.Sprintf("H%d", index), Exchange: "HKEX", Rank: index, ClosePrice: 20 + float64(index), PriceTradeDate: date, SnapshotDate: date, CreatedAt: now})
+		}
+	}
+	for _, row := range rows {
+		if err := repo.UpsertSnapshot(ctx, row); err != nil {
+			t.Fatalf("seed snapshot %s %s: %v", row.SnapshotDate, row.Code, err)
+		}
+	}
+}
+
+func seedStrictCommonStartMarketPrices(t *testing.T, repo *Repository, defs []RankingPortfolioDefinition) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, def := range defs {
+		prefix := "60000"
+		exchange := "SSE"
+		if def.Exchange == "HKEX" {
+			prefix = "00"
+			exchange = "HKEX"
+		}
+		for index := 1; index <= 4; index++ {
+			for _, plan := range []struct {
+				signalDate string
+				entryDate  string
+			}{
+				{signalDate: "2026-06-01", entryDate: "2026-06-02"},
+				{signalDate: "2026-06-02", entryDate: "2026-06-03"},
+			} {
+				row := RankingPortfolioMarketPrice{DefinitionID: def.ID, SnapshotVersion: plan.signalDate, SnapshotDate: plan.signalDate, Code: fmt.Sprintf("%s%d", prefix, index), Exchange: exchange, OpenPrice: 10 + float64(index), EntryTradeDate: plan.entryDate, CreatedAt: now, UpdatedAt: now}
+				if err := repo.db.WithContext(ctx).Create(&row).Error; err != nil {
+					t.Fatalf("seed market price %s %s: %v", def.ID, row.Code, err)
+				}
+			}
+		}
+	}
+}
+
+func TestSimPortfolioTrackingStartPreviewStrictCommonDate(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	defs := seedAllSimPortfolioDefinitions(t, repo)
+	seedStrictCommonStartSnapshots(t, repo)
+	seedStrictCommonStartMarketPrices(t, repo, defs)
+	svc := NewService(repo)
+	startSvc := NewSimPortfolioTrackingStartService(svc)
+
+	resp, err := startSvc.Preview(ctx, "2026-06-01")
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	if !resp.CanApply || resp.Severity != "ok" {
+		t.Fatalf("preview should be applicable: %+v", resp)
+	}
+	if len(resp.Markets) != 2 || len(resp.Portfolios) != 4 {
+		t.Fatalf("markets/portfolios = %d/%d, want 2/4", len(resp.Markets), len(resp.Portfolios))
+	}
+	for _, market := range resp.Markets {
+		if !market.HasSnapshot || market.NextEntryTradeDate != "2026-06-02" {
+			t.Fatalf("market preview = %+v", market)
+		}
+	}
+}
+
+func TestSimPortfolioTrackingStartPreviewBlocksMissingMarketSnapshot(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	seedAllSimPortfolioDefinitions(t, repo)
+	seedSimPortfolioSnapshots(t, repo) // A-share only.
+	svc := NewService(repo)
+	startSvc := NewSimPortfolioTrackingStartService(svc)
+
+	resp, err := startSvc.Preview(ctx, "2026-06-01")
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	if resp.CanApply {
+		t.Fatalf("preview should be blocked: %+v", resp)
+	}
+	foundHK := false
+	for _, reason := range resp.BlockingReasons {
+		if reason.Exchange == "HKEX" && reason.Code == "missing_snapshot" {
+			foundHK = true
+		}
+	}
+	if !foundHK {
+		t.Fatalf("expected HKEX missing_snapshot reason: %+v", resp.BlockingReasons)
+	}
+}
+
+func TestSimPortfolioTrackingStartApplyResetsAllPortfolios(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	defs := seedAllSimPortfolioDefinitions(t, repo)
+	seedStrictCommonStartSnapshots(t, repo)
+	seedStrictCommonStartMarketPrices(t, repo, defs)
+	svc := NewService(repo)
+	startSvc := NewSimPortfolioTrackingStartService(svc)
+
+	resp, err := startSvc.Apply(ctx, "2026-06-01", "tester", "reset from chosen signal date")
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if !resp.OK || resp.Summary.PortfolioCount != 4 {
+		t.Fatalf("apply response = %+v", resp)
+	}
+	if resp.Summary.DailyRowCount != 12 { // 4 portfolios * (baseline + two completed days)
+		t.Fatalf("daily rows = %d, want 12", resp.Summary.DailyRowCount)
+	}
+	status, err := startSvc.GetStatus(ctx)
+	if err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	if status.CurrentStartSignalDate != "2026-06-01" || status.AppliedBy != "tester" || status.LatestJob == nil || status.LatestJob.Status != simPortfolioTrackingJobStatusOK {
+		t.Fatalf("status = %+v", status)
 	}
 }

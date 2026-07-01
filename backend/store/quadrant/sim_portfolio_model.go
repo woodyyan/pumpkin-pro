@@ -112,6 +112,48 @@ type SimPortfolioMetrics struct {
 
 func (SimPortfolioMetrics) TableName() string { return "portfolio_metrics" }
 
+const (
+	simPortfolioTrackingStartConfigKey  = "global_start_signal_date"
+	simPortfolioTrackingJobApply        = "apply_start_date"
+	simPortfolioTrackingJobStatusOK     = "success"
+	simPortfolioTrackingJobStatusFailed = "failed"
+	simPortfolioTrackingJobStatusReject = "rejected"
+)
+
+type SimPortfolioTrackingConfig struct {
+	ID               int64     `gorm:"primaryKey;autoIncrement"`
+	ConfigKey        string    `gorm:"size:64;not null;uniqueIndex"`
+	StartSignalDate  string    `gorm:"size:10;not null;default:''"`
+	LatestApplyJobID string    `gorm:"size:64;not null;default:''"`
+	Status           string    `gorm:"size:24;not null;default:'active'"`
+	AppliedBy        string    `gorm:"size:128;not null;default:''"`
+	AppliedAt        time.Time `gorm:"not null"`
+	Note             string    `gorm:"type:text;not null;default:''"`
+	CreatedAt        time.Time `gorm:"not null"`
+	UpdatedAt        time.Time `gorm:"not null"`
+}
+
+func (SimPortfolioTrackingConfig) TableName() string { return "sim_portfolio_tracking_config" }
+
+type SimPortfolioTrackingJob struct {
+	ID                       string    `gorm:"primaryKey;size:64"`
+	JobType                  string    `gorm:"size:32;not null;index"`
+	RequestedStartSignalDate string    `gorm:"size:10;not null;default:''"`
+	EffectiveStartSignalDate string    `gorm:"size:10;not null;default:''"`
+	Status                   string    `gorm:"size:24;not null;index"`
+	Message                  string    `gorm:"type:text;not null;default:''"`
+	RequestedBy              string    `gorm:"size:128;not null;default:''"`
+	StartedAt                time.Time `gorm:"not null;index"`
+	FinishedAt               time.Time `gorm:"not null"`
+	PreviewJSON              string    `gorm:"type:text;not null;default:'{}'"`
+	ResultJSON               string    `gorm:"type:text;not null;default:'{}'"`
+	ErrorText                string    `gorm:"type:text;not null;default:''"`
+	CreatedAt                time.Time `gorm:"not null"`
+	UpdatedAt                time.Time `gorm:"not null"`
+}
+
+func (SimPortfolioTrackingJob) TableName() string { return "sim_portfolio_tracking_jobs" }
+
 type SimPortfolioOverviewResponse struct {
 	AsOfTradeDate string                     `json:"as_of_trade_date,omitempty"`
 	Items         []SimPortfolioOverviewItem `json:"items"`
@@ -300,4 +342,104 @@ type SimPortfolioBackfillSummary struct {
 	FailedCount            int `json:"failed_count"`
 	SkippedBeforeCutover   int `json:"skipped_before_cutover"`
 	MissingMarketPriceRows int `json:"missing_market_price_rows"`
+}
+
+type SimPortfolioTrackingStartStatusResponse struct {
+	OK                     bool                            `json:"ok"`
+	CurrentStartSignalDate string                          `json:"current_start_signal_date,omitempty"`
+	AppliedAt              string                          `json:"applied_at,omitempty"`
+	AppliedBy              string                          `json:"applied_by,omitempty"`
+	Status                 string                          `json:"status,omitempty"`
+	Note                   string                          `json:"note,omitempty"`
+	LatestJob              *SimPortfolioTrackingJobSummary `json:"latest_job,omitempty"`
+}
+
+type SimPortfolioTrackingJobSummary struct {
+	JobID      string `json:"job_id"`
+	Status     string `json:"status"`
+	Message    string `json:"message,omitempty"`
+	StartedAt  string `json:"started_at,omitempty"`
+	FinishedAt string `json:"finished_at,omitempty"`
+}
+
+type SimPortfolioTrackingStartPreviewResponse struct {
+	OK               bool                                        `json:"ok"`
+	StartSignalDate  string                                      `json:"start_signal_date"`
+	CanApply         bool                                        `json:"can_apply"`
+	Severity         string                                      `json:"severity"`
+	Message          string                                      `json:"message,omitempty"`
+	LatestSignalDate string                                      `json:"latest_signal_date,omitempty"`
+	Markets          []SimPortfolioTrackingStartMarketPreview    `json:"markets"`
+	Portfolios       []SimPortfolioTrackingStartPortfolioPreview `json:"portfolios"`
+	BlockingReasons  []SimPortfolioTrackingStartReason           `json:"blocking_reasons"`
+	Warnings         []SimPortfolioTrackingStartReason           `json:"warnings"`
+}
+
+type SimPortfolioTrackingStartMarketPreview struct {
+	Exchange              string `json:"exchange"`
+	Label                 string `json:"label"`
+	HasSnapshot           bool   `json:"has_snapshot"`
+	StartSignalDate       string `json:"start_signal_date"`
+	NextEntryTradeDate    string `json:"next_entry_trade_date,omitempty"`
+	LatestSignalDate      string `json:"latest_signal_date,omitempty"`
+	SnapshotCountToLatest int    `json:"snapshot_count_to_latest"`
+	Status                string `json:"status"`
+	Message               string `json:"message,omitempty"`
+}
+
+type SimPortfolioTrackingStartPortfolioPreview struct {
+	PortfolioID             string `json:"portfolio_id"`
+	Name                    string `json:"name"`
+	Exchange                string `json:"exchange"`
+	Status                  string `json:"status"`
+	SelectedCount           int    `json:"selected_count"`
+	RequiredCount           int    `json:"required_count"`
+	MissingOpenPriceCount   int    `json:"missing_open_price_count"`
+	MissingClosePriceCount  int    `json:"missing_close_price_count"`
+	FirstEntryTradeDate     string `json:"first_entry_trade_date,omitempty"`
+	FirstValuationTradeDate string `json:"first_valuation_trade_date,omitempty"`
+	Message                 string `json:"message,omitempty"`
+}
+
+type SimPortfolioTrackingStartReason struct {
+	Scope       string `json:"scope"`
+	Exchange    string `json:"exchange,omitempty"`
+	PortfolioID string `json:"portfolio_id,omitempty"`
+	Code        string `json:"code"`
+	Message     string `json:"message"`
+}
+
+type SimPortfolioTrackingStartApplyResponse struct {
+	OK              bool                                      `json:"ok"`
+	JobID           string                                    `json:"job_id,omitempty"`
+	StartSignalDate string                                    `json:"start_signal_date"`
+	Message         string                                    `json:"message,omitempty"`
+	Summary         SimPortfolioTrackingStartApplySummary     `json:"summary"`
+	Portfolios      []SimPortfolioTrackingStartApplyPortfolio `json:"portfolios"`
+	Verify          SimPortfolioTrackingStartVerifySummary    `json:"verify"`
+}
+
+type SimPortfolioTrackingStartApplySummary struct {
+	PortfolioCount   int `json:"portfolio_count"`
+	DailyRowCount    int `json:"daily_row_count"`
+	PositionRowCount int `json:"position_row_count"`
+	TradeRowCount    int `json:"trade_row_count"`
+	MetricsRowCount  int `json:"metrics_row_count"`
+}
+
+type SimPortfolioTrackingStartApplyPortfolio struct {
+	PortfolioID         string `json:"portfolio_id"`
+	Name                string `json:"name"`
+	Exchange            string `json:"exchange"`
+	Status              string `json:"status"`
+	StartSignalDate     string `json:"start_signal_date"`
+	FirstTradeDate      string `json:"first_trade_date,omitempty"`
+	LatestTradeDate     string `json:"latest_trade_date,omitempty"`
+	GeneratedDailyCount int    `json:"generated_daily_count"`
+	Message             string `json:"message,omitempty"`
+}
+
+type SimPortfolioTrackingStartVerifySummary struct {
+	Status     string `json:"status"`
+	IssueCount int    `json:"issue_count"`
 }

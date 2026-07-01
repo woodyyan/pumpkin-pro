@@ -1716,22 +1716,30 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
   const [syncPortfolioResult, setSyncPortfolioResult] = useState(null)
   const [recomputingPortfolio, setRecomputingPortfolio] = useState(false)
   const [recomputeConfirming, setRecomputeConfirming] = useState(false)
+  const [startSignalDate, setStartSignalDate] = useState('')
+  const [previewingStartDate, setPreviewingStartDate] = useState(false)
+  const [applyingStartDate, setApplyingStartDate] = useState(false)
+  const [startDateApplyConfirming, setStartDateApplyConfirming] = useState(false)
+  const [startDatePreview, setStartDatePreview] = useState(null)
+  const [startDateApplyResult, setStartDateApplyResult] = useState(null)
   const [portfolioActionNotice, setPortfolioActionNotice] = useState('')
   const [actionError, setActionError] = useState('')
   const resource = useAdminResource({
     key: 'admin:quadrant',
     request: async () => {
-      const [overview, logsPayload, progress, portfolioTrackingStatus] = await Promise.all([
+      const [overview, logsPayload, progress, portfolioTrackingStatus, portfolioTrackingStartStatus] = await Promise.all([
         adminFetch('/api/admin/quadrant-overview').catch(() => null),
         adminFetch('/api/admin/quadrant-logs').catch(() => ({ items: [] })),
         adminFetch('/api/admin/compute-status').catch(() => null),
         adminFetch('/api/admin/portfolio-tracking/status').catch(() => ({ items: [] })),
+        adminFetch('/api/admin/portfolio-tracking/start-date/status').catch(() => null),
       ])
       return {
         overview,
         logs: logsPayload?.items || [],
         progress,
         portfolioTrackingStatus: portfolioTrackingStatus?.items || [],
+        portfolioTrackingStartStatus,
       }
     },
     staleMs: 5_000,
@@ -1747,6 +1755,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
   const logs = resource.data?.logs || null
   const progress = resource.data?.progress || null
   const portfolioTrackingStatus = resource.data?.portfolioTrackingStatus || []
+  const portfolioTrackingStartStatus = resource.data?.portfolioTrackingStartStatus || null
 
   // ── Manual trigger ──
   const handleTrigger = async (exchange) => {
@@ -1766,6 +1775,65 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
       }
     } finally {
       setTriggering(false)
+    }
+  }
+
+
+  const handlePortfolioTrackingStartDatePreview = async () => {
+    setPreviewingStartDate(true)
+    setActionError('')
+    setPortfolioActionNotice('')
+    setStartDateApplyConfirming(false)
+    try {
+      const resp = await adminFetch('/api/admin/portfolio-tracking/start-date/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start_signal_date: startSignalDate }),
+      })
+      setStartDatePreview(resp)
+      setStartDateApplyResult(null)
+      setPortfolioActionNotice(resp?.message || '开始信号日预检完成。')
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '预检开始信号日失败')
+      if (message) setActionError(message)
+    } finally {
+      setPreviewingStartDate(false)
+    }
+  }
+
+  const handlePortfolioTrackingStartDateApply = async () => {
+    if (!startDatePreview?.can_apply) {
+      setActionError('请先选择可用的开始信号日并通过预检。')
+      return
+    }
+    if (!startDateApplyConfirming) {
+      setStartDateApplyConfirming(true)
+      return
+    }
+    setStartDateApplyConfirming(false)
+    setApplyingStartDate(true)
+    setActionError('')
+    setPortfolioActionNotice('')
+    try {
+      const resp = await adminFetch('/api/admin/portfolio-tracking/start-date/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start_signal_date: startDatePreview.start_signal_date,
+          confirm: true,
+          note: 'Admin 手动设置全局开始信号日',
+        }),
+      })
+      setStartDateApplyResult(resp)
+      setVerifyPortfolioResult(null)
+      setSyncPortfolioResult(null)
+      setPortfolioActionNotice(resp?.message || '已按指定开始信号日重置并重算。')
+      await resource.refresh()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '应用开始信号日失败')
+      if (message) setActionError(message)
+    } finally {
+      setApplyingStartDate(false)
     }
   }
 
@@ -2037,8 +2105,93 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
         </div>
 
         <div className="mb-3 rounded-xl border border-dashed border-border bg-background px-4 py-3 text-xs leading-6 text-foreground-muted">
-          运维顺序：先补齐建仓开盘价（只补前置价格，不生成持仓），再同步最新事实表（生成持仓、调仓和指标），最后验证事实表一致性。
-          如果某组合显示「仅有初始化资金」且「可同步」为是，优先点击「同步最新事实表」；需要回灌历史曲线时再使用「从头重算全部组合」。
+          运维顺序：先设置全局开始信号日并预检；需要重启跟踪时执行「按该日期重置并重算 4 个组合」。日常维护再按补价 → 同步事实表 → 验证一致性处理；补价只补前置价格，不生成持仓。
+          这里选择的是榜单信号日 / 收盘日，不是买入日；系统会在下一交易日开盘价建仓。严格共同日期要求 A 股和港股当天都具备排行榜快照。
+        </div>
+
+        <div className="mb-4 rounded-xl border border-border bg-background px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold text-foreground">全局开始跟踪日期</div>
+              <p className="mt-1 text-xs text-foreground-dim">当前开始信号日：{portfolioTrackingStartStatus?.current_start_signal_date || '尚未设置'}{portfolioTrackingStartStatus?.applied_at ? ` · 最近应用 ${portfolioTrackingStartStatus.applied_at}` : ''}</p>
+              {portfolioTrackingStartStatus?.latest_job ? (
+                <p className="mt-1 text-[11px] text-foreground-dim">最近任务：{portfolioTrackingStartStatus.latest_job.status} · {portfolioTrackingStartStatus.latest_job.message || '--'}</p>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="date"
+                value={startSignalDate}
+                onChange={(event) => {
+                  setStartSignalDate(event.target.value)
+                  setStartDatePreview(null)
+                  setStartDateApplyConfirming(false)
+                }}
+                className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground outline-none focus:border-primary"
+              />
+              <button
+                onClick={handlePortfolioTrackingStartDatePreview}
+                disabled={previewingStartDate || applyingStartDate || !startSignalDate}
+                className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {previewingStartDate ? '预检中…' : '检查该日期数据'}
+              </button>
+              {startDateApplyConfirming ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-amber-700">确认清空并从 {startDatePreview?.start_signal_date} 重算 4 个组合？</span>
+                  <button
+                    onClick={handlePortfolioTrackingStartDateApply}
+                    disabled={applyingStartDate}
+                    className="rounded-lg border border-amber-500/40 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    确认应用
+                  </button>
+                  <button
+                    onClick={() => setStartDateApplyConfirming(false)}
+                    className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground-dim hover:bg-background-alt"
+                  >
+                    取消
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={handlePortfolioTrackingStartDateApply}
+                  disabled={applyingStartDate || !startDatePreview?.can_apply || syncingPortfolio || recomputingPortfolio || backfillingOpenPrices}
+                  className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {applyingStartDate ? '应用中…' : '按该日期重置并重算'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {startDatePreview ? (
+            <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${startDatePreview.can_apply ? 'border-positive/20 bg-positive/10 text-positive' : 'border-negative/20 bg-negative/10 text-negative'}`}>
+              <div className="font-medium">{startDatePreview.message}</div>
+              <div className="mt-2 grid gap-2 md:grid-cols-2">
+                {(startDatePreview.markets || []).map((market) => (
+                  <div key={market.exchange} className="rounded-lg border border-border bg-card px-3 py-2 text-foreground-muted">
+                    <div className="font-medium text-foreground">{market.label}</div>
+                    <div className="mt-1 tabular-nums">信号日 {market.start_signal_date} · 首次建仓 {market.next_entry_trade_date || '--'} · 快照数 {market.snapshot_count_to_latest ?? 0}</div>
+                    <div className="mt-1 text-foreground-dim">{market.message || '--'}</div>
+                  </div>
+                ))}
+              </div>
+              {startDatePreview.blocking_reasons?.length ? (
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {startDatePreview.blocking_reasons.map((reason, index) => (
+                    <li key={`${reason.code}-${index}`}>{reason.message}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+
+          {startDateApplyResult ? (
+            <div className="mt-3 rounded-lg border border-positive/20 bg-positive/10 px-3 py-2 text-xs text-positive">
+              {startDateApplyResult.message} · 生成 {startDateApplyResult.summary?.daily_row_count ?? 0} 个估值日记录 / {startDateApplyResult.summary?.position_row_count ?? 0} 条持仓。
+            </div>
+          ) : null}
         </div>
 
         {portfolioActionNotice ? (

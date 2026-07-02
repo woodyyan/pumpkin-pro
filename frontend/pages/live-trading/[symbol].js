@@ -1229,7 +1229,7 @@ export default function LiveTradingDetailPage() {
   const isChartTab = activeTab === STOCK_DETAIL_TAB_KEYS.CHART
   const isTechnicalTab = activeTab === STOCK_DETAIL_TAB_KEYS.TECHNICAL
   const isFundamentalTab = activeTab === STOCK_DETAIL_TAB_KEYS.FUNDAMENTAL
-  const isAITab = activeTab === STOCK_DETAIL_TAB_KEYS.AI
+  const isNewsTab = activeTab === STOCK_DETAIL_TAB_KEYS.NEWS
   const isPortfolioTab = activeTab === STOCK_DETAIL_TAB_KEYS.PORTFOLIO
 
   if (!symbol) {
@@ -1364,125 +1364,6 @@ export default function LiveTradingDetailPage() {
             </div>
           )}
 
-          {/* Inline signal config (login required) */}
-          {privateAccessReady && signalConfig && isPortfolioTab && (
-            <div className="mt-4 border-t border-border/60 pt-4">
-              {signalError && <div className="mb-3 rounded-lg border border-negative/40 bg-negative/10 px-3 py-2 text-xs text-negative">{signalError}</div>}
-
-              <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] p-3">
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <div className="text-sm font-medium text-foreground/88">交易信号</div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${signalConfig.is_enabled ? 'border-emerald-400/60 dark:border-primary/70 bg-emerald-100 dark:bg-white text-emerald-700 dark:text-primary shadow-[0_0_0_1px_rgba(16,185,129,0.3)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.18)]' : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted'}`}>
-                      {signalStatusSummary}
-                    </div>
-                    <button
-                      type="button"
-                      aria-expanded={signalConfigExpanded ? 'true' : 'false'}
-                      onClick={() => setSignalConfigExpanded((prev) => !prev)}
-                      className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
-                    >
-                      {signalConfigExpanded ? '收起配置' : '配置'}
-                    </button>
-                  </div>
-                </div>
-
-                {signalNotice && (
-                  <div className="mt-3 rounded-lg border border-emerald-400/25 bg-positive/10 px-3 py-2 text-xs text-positive">
-                    {signalNotice}
-                  </div>
-                )}
-
-                {signalConfigExpanded && (
-                  <div className="mt-3 border-t border-border pt-3">
-                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                      {signalConfigMeta.map((item) => (
-                        <div key={item.label} className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-2.5">
-                          <div className="text-[11px] text-foreground-dim">{item.label}</div>
-                          <div className={`mt-1 text-sm font-semibold ${item.tone === 'warning' ? 'text-amber-300' : 'text-foreground'}`}>{item.value}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-2.5">
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={Boolean(signalConfig.is_enabled)}
-                        disabled={isTogglingSignal || savingSignalConfig}
-                        onClick={handleToggleSignal}
-                        className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60 ${
-                          signalConfig.is_enabled
-                            ? 'border-emerald-500/60 dark:border-emerald-300/60 bg-emerald-100 dark:bg-emerald-500/18 text-emerald-800 dark:text-emerald-50'
-                            : 'border-[var(--color-border-strong)] bg-[var(--color-bg-secondary)] text-foreground-muted hover:border-[var(--color-border-strong)]'
-                        }`}
-                      >
-                        <span className="font-medium">
-                          {isTogglingSignal
-                            ? (toggleTargetEnabled ? '开启中...' : '关闭中...')
-                            : (signalConfig.is_enabled ? '已开启' : '已关闭')}
-                        </span>
-                        <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border transition ${signalConfig.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-[var(--color-border-strong)] bg-[var(--color-bg-overlay)]'}`}>
-                          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${signalConfig.is_enabled ? 'left-[18px]' : 'left-0.5'}`} />
-                        </span>
-                      </button>
-                      <select
-                        value={signalConfig.strategy_id || ''}
-                        onChange={(e) => updateDraftSignalConfig({ strategy_id: e.target.value })}
-                        className={`min-w-[140px] rounded-lg border bg-[var(--color-bg-overlay)] px-2.5 py-1.5 text-xs text-foreground outline-none transition focus:border-primary ${signalError.includes('请选择策略') ? 'border-rose-300/60' : 'border-border'}`}
-                      >
-                        <option value="">请选择策略</option>
-                        {activeStrategies.map((s) => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                      </select>
-                      <select
-                        value={signalConfig.eval_interval_seconds || 3600}
-                        onChange={(e) => updateDraftSignalConfig({ eval_interval_seconds: Number(e.target.value) })}
-                        className="rounded-lg border border-border bg-[var(--color-bg-overlay)] px-2.5 py-1.5 text-xs text-foreground outline-none transition focus:border-primary"
-                      >
-                        <option value={900}>每 15 分钟</option>
-                        <option value={1800}>每 30 分钟</option>
-                        <option value={3600}>每小时</option>
-                        <option value={7200}>每 2 小时</option>
-                        <option value={14400}>每 4 小时</option>
-                      </select>
-                      <button
-                        type="button"
-                        disabled={savingSignalConfig || isTogglingSignal || !signalDirty}
-                        onClick={handleSaveSignalConfig}
-                        className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {savingSignalConfig ? '保存中...' : '保存配置'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingSignalConfig || isTogglingSignal || !signalDirty}
-                        onClick={handleResetSignalDraft}
-                        className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        取消修改
-                      </button>
-                    </div>
-
-                    {signalDirty && !isTogglingSignal && (
-                      <div className="mt-2 rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-[11px] text-foreground-dim">
-                        当前修改尚未生效，点击「保存配置」后更新信号配置。
-                      </div>
-                    )}
-
-                    {signalConfig.is_enabled && (!webhookConfigured || !webhookConfig.is_enabled) && (
-                      <div className="mt-2 rounded-lg border border-amber-400/25 bg-amber-500/8 px-3 py-1.5 text-[11px] text-amber-200/90">
-                        信号已开启，但当前 Webhook 未配置或未启用，暂时不会发送提醒。<a href="/settings" className="ml-1 underline underline-offset-2 hover:text-amber-100">去配置</a>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </section>
 
         {aboutOpen && (
@@ -1491,16 +1372,6 @@ export default function LiveTradingDetailPage() {
             loading={aboutLoading}
             error={aboutError}
             onClose={() => setAboutOpen(false)}
-          />
-        )}
-
-        {(isOverviewTab || isAITab) && (
-          <SymbolNewsSummaryCard
-          summary={newsSummary}
-          updatedAt={newsUpdatedAt}
-          loading={newsLoading && newsPanelOpen}
-          error={newsError && !newsPanelOpen ? newsError : ''}
-          onOpen={openNewsPanel}
           />
         )}
 
@@ -1527,6 +1398,18 @@ export default function LiveTradingDetailPage() {
           onChange={switchStockDetailTab}
         />
 
+        {isNewsTab && (
+          <section className="space-y-4">
+            <SymbolNewsSummaryCard
+              summary={newsSummary}
+              updatedAt={newsUpdatedAt}
+              loading={newsLoading && newsPanelOpen}
+              error={newsError && !newsPanelOpen ? newsError : ''}
+              onOpen={openNewsPanel}
+            />
+          </section>
+        )}
+
         {isOverviewTab && (
           <section className="grid gap-4 xl:grid-cols-[1.2fr_0.9fr_0.9fr]">
             <div className="rounded-2xl border border-primary/25 bg-card p-5">
@@ -1542,19 +1425,10 @@ export default function LiveTradingDetailPage() {
                 >
                   {aiAnalyzing ? `分析中 · ${formatAIElapsedCompact(aiWaitElapsedSec)}` : '✨ 立即 AI 分析'}
                 </button>
-                {latestAnalysisReference ? (
-                  <button
-                    type="button"
-                    onClick={() => switchStockDetailTab(STOCK_DETAIL_TAB_KEYS.AI)}
-                    className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-4 py-2 text-xs font-medium text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
-                  >
-                    查看最近观点
-                  </button>
-                ) : null}
               </div>
               <div className="mt-4 rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-3 text-xs leading-6 text-foreground-muted">
                 {latestAnalysisReference
-                  ? `最近观点：${latestAnalysisReference.summary || latestAnalysisReference.final_signal || latestAnalysisReference.action || '已生成，可在 AI & 资讯中查看详情。'}`
+                  ? `最近观点：${latestAnalysisReference.summary || latestAnalysisReference.final_signal || latestAnalysisReference.action || '已生成，可在下方 AI 分析历史中查看详情。'}`
                   : '暂无历史 AI 观点。生成一次分析后，这里会优先展示最近一次观点摘要。'}
               </div>
             </div>
@@ -1615,7 +1489,7 @@ export default function LiveTradingDetailPage() {
         )}
 
         {/* AI 分析历史（登录后展示，默认折叠） */}
-        {privateAccessReady && analysisHistory.length > 0 && isAITab && (
+        {privateAccessReady && analysisHistory.length > 0 && isOverviewTab && (
           <AnalysisHistoryPanel
             items={analysisHistory}
             expanded={historyExpanded}
@@ -1998,6 +1872,125 @@ export default function LiveTradingDetailPage() {
 
             </section>
           )}
+              {/* Inline signal config (login required) */}
+              {privateAccessReady && signalConfig && (
+                <section className="mt-4 rounded-2xl border border-border bg-card p-5">
+                {signalError && <div className="mb-3 rounded-lg border border-negative/40 bg-negative/10 px-3 py-2 text-xs text-negative">{signalError}</div>}
+
+                <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] p-3">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="text-sm font-medium text-foreground/88">交易信号</div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${signalConfig.is_enabled ? 'border-emerald-400/60 dark:border-primary/70 bg-emerald-100 dark:bg-white text-emerald-700 dark:text-primary shadow-[0_0_0_1px_rgba(16,185,129,0.3)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.18)]' : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted'}`}>
+                        {signalStatusSummary}
+                      </div>
+                      <button
+                        type="button"
+                        aria-expanded={signalConfigExpanded ? 'true' : 'false'}
+                        onClick={() => setSignalConfigExpanded((prev) => !prev)}
+                        className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
+                      >
+                        {signalConfigExpanded ? '收起配置' : '配置'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {signalNotice && (
+                    <div className="mt-3 rounded-lg border border-emerald-400/25 bg-positive/10 px-3 py-2 text-xs text-positive">
+                      {signalNotice}
+                    </div>
+                  )}
+
+                  {signalConfigExpanded && (
+                    <div className="mt-3 border-t border-border pt-3">
+                      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                        {signalConfigMeta.map((item) => (
+                          <div key={item.label} className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-2.5">
+                            <div className="text-[11px] text-foreground-dim">{item.label}</div>
+                            <div className={`mt-1 text-sm font-semibold ${item.tone === 'warning' ? 'text-amber-300' : 'text-foreground'}`}>{item.value}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={Boolean(signalConfig.is_enabled)}
+                          disabled={isTogglingSignal || savingSignalConfig}
+                          onClick={handleToggleSignal}
+                          className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60 ${
+                            signalConfig.is_enabled
+                              ? 'border-emerald-500/60 dark:border-emerald-300/60 bg-emerald-100 dark:bg-emerald-500/18 text-emerald-800 dark:text-emerald-50'
+                              : 'border-[var(--color-border-strong)] bg-[var(--color-bg-secondary)] text-foreground-muted hover:border-[var(--color-border-strong)]'
+                          }`}
+                        >
+                          <span className="font-medium">
+                            {isTogglingSignal
+                              ? (toggleTargetEnabled ? '开启中...' : '关闭中...')
+                              : (signalConfig.is_enabled ? '已开启' : '已关闭')}
+                          </span>
+                          <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border transition ${signalConfig.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-[var(--color-border-strong)] bg-[var(--color-bg-overlay)]'}`}>
+                            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${signalConfig.is_enabled ? 'left-[18px]' : 'left-0.5'}`} />
+                          </span>
+                        </button>
+                        <select
+                          value={signalConfig.strategy_id || ''}
+                          onChange={(e) => updateDraftSignalConfig({ strategy_id: e.target.value })}
+                          className={`min-w-[140px] rounded-lg border bg-[var(--color-bg-overlay)] px-2.5 py-1.5 text-xs text-foreground outline-none transition focus:border-primary ${signalError.includes('请选择策略') ? 'border-rose-300/60' : 'border-border'}`}
+                        >
+                          <option value="">请选择策略</option>
+                          {activeStrategies.map((s) => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={signalConfig.eval_interval_seconds || 3600}
+                          onChange={(e) => updateDraftSignalConfig({ eval_interval_seconds: Number(e.target.value) })}
+                          className="rounded-lg border border-border bg-[var(--color-bg-overlay)] px-2.5 py-1.5 text-xs text-foreground outline-none transition focus:border-primary"
+                        >
+                          <option value={900}>每 15 分钟</option>
+                          <option value={1800}>每 30 分钟</option>
+                          <option value={3600}>每小时</option>
+                          <option value={7200}>每 2 小时</option>
+                          <option value={14400}>每 4 小时</option>
+                        </select>
+                        <button
+                          type="button"
+                          disabled={savingSignalConfig || isTogglingSignal || !signalDirty}
+                          onClick={handleSaveSignalConfig}
+                          className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {savingSignalConfig ? '保存中...' : '保存配置'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingSignalConfig || isTogglingSignal || !signalDirty}
+                          onClick={handleResetSignalDraft}
+                          className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          取消修改
+                        </button>
+                      </div>
+
+                      {signalDirty && !isTogglingSignal && (
+                        <div className="mt-2 rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-[11px] text-foreground-dim">
+                          当前修改尚未生效，点击「保存配置」后更新信号配置。
+                        </div>
+                      )}
+
+                      {signalConfig.is_enabled && (!webhookConfigured || !webhookConfig.is_enabled) && (
+                        <div className="mt-2 rounded-lg border border-amber-400/25 bg-amber-500/8 px-3 py-1.5 text-[11px] text-amber-200/90">
+                          信号已开启，但当前 Webhook 未配置或未启用，暂时不会发送提醒。<a href="/settings" className="ml-1 underline underline-offset-2 hover:text-amber-100">去配置</a>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
           </>
         )}
 

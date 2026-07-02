@@ -19,18 +19,19 @@ describe('stock-detail-tabs', () => {
   it('keeps the PC information architecture in the confirmed order', () => {
     assert.deepEqual(
       STOCK_DETAIL_TABS.map((tab) => tab.key),
-      ['overview', 'chart', 'technical', 'fundamental', 'ai', 'portfolio']
+      ['overview', 'chart', 'technical', 'fundamental', 'news', 'portfolio']
     )
   })
 
-  it('groups mobile tabs into overview, chart, analysis and portfolio', () => {
+  it('groups mobile tabs into overview, chart, analysis, news and portfolio', () => {
     assert.deepEqual(
       getStockDetailMobileGroups().map((group) => group.key),
-      ['overview', 'chart', 'analysis', 'portfolio']
+      ['overview', 'chart', 'analysis', 'news', 'portfolio']
     )
     assert.equal(isStockDetailTabInMobileGroup('technical', 'analysis'), true)
     assert.equal(isStockDetailTabInMobileGroup('fundamental', 'analysis'), true)
-    assert.equal(isStockDetailTabInMobileGroup('ai', 'analysis'), true)
+    assert.equal(isStockDetailTabInMobileGroup('news', 'news'), true)
+    assert.equal(isStockDetailTabInMobileGroup('news', 'analysis'), false)
     assert.equal(isStockDetailTabInMobileGroup('portfolio', 'analysis'), false)
   })
 })

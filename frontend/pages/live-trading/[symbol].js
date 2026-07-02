@@ -7,13 +7,18 @@ import InfoTip from '../../components/InfoTip'
 import AIAnalysisReportContent from '../../components/AIAnalysisReportContent'
 import AIAnalysisShareCard from '../../components/AIAnalysisShareCard'
 import { notifyAIAnalysisFinished } from '../../components/AIAnalysisWorkspace'
-import SymbolNewsPanel from '../../components/SymbolNewsPanel'
 import SymbolNewsSummaryCard from '../../components/SymbolNewsSummaryCard'
 import { useTheme } from '../../lib/theme-context'
 import CompanyAboutPanel from '../../components/CompanyAboutPanel'
 import { requestJson } from '../../lib/api'
 import { fetchCompanyAbout } from '../../lib/company-about'
-import { buildAINewsContext } from '../../lib/symbol-news-ui'
+import {
+  buildAINewsContext,
+  buildNewsEmptyState,
+  filterSymbolNewsItems,
+  formatNewsTime,
+  formatNewsTypeLabel,
+} from '../../lib/symbol-news-ui'
 import { useAuth } from '../../lib/auth-context'
 import { isAuthRequiredError } from '../../lib/auth-storage'
 import { deriveAIAnalysisWaitState } from '../../lib/ai-analysis-wait'
@@ -69,7 +74,7 @@ const POLL_MS_NON_TRADING = 60000  // non-trading: 1 min fallback (data comes fr
 const OVERLAY_WINDOW_MINUTES = 60
 const SUPPORT_REFRESH_MS = 60 * 1000
 const NEWS_SUMMARY_REFRESH_MS = 10 * 60 * 1000
-const NEWS_PANEL_REFRESH_MS = 60 * 1000
+const NEWS_ITEMS_REFRESH_MS = 60 * 1000
 const SIGNAL_CENTER_REFRESH_MS = 15 * 1000
 const FUNDAMENTALS_REFRESH_MS = 24 * 60 * 60 * 1000
 const SUPPORT_LOOKBACK_DAYS = 120
@@ -154,12 +159,10 @@ export default function LiveTradingDetailPage() {
   const [toggleTargetEnabled, setToggleTargetEnabled] = useState(null)
   const [signalNotice, setSignalNotice] = useState('')
   const [signalError, setSignalError] = useState('')
-  const [signalConfigExpanded, setSignalConfigExpanded] = useState(false)
   const [newsSummary, setNewsSummary] = useState(null)
   const [newsItems, setNewsItems] = useState([])
   const [newsLoading, setNewsLoading] = useState(false)
   const [newsError, setNewsError] = useState('')
-  const [newsPanelOpen, setNewsPanelOpen] = useState(false)
   const [newsFilter, setNewsFilter] = useState('all')
   const [newsUpdatedAt, setNewsUpdatedAt] = useState('')
   const [error, setError] = useState('')
@@ -207,7 +210,7 @@ export default function LiveTradingDetailPage() {
   const movingAverageRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const fundamentalsRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const newsSummaryRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
-  const newsPanelRefreshRef = useRef(0)
+  const newsItemsRefreshRef = useRef(0)
   const signalCenterRefreshRef = useRef(0)
   const signalDirtyRef = useRef(false)
   const togglingSignalRef = useRef(false)
@@ -438,7 +441,7 @@ export default function LiveTradingDetailPage() {
   const loadNewsItems = async (sym, { type = 'all', force = false } = {}) => {
     if (!sym) return
     const now = Date.now()
-    if (!force && now - newsPanelRefreshRef.current < NEWS_PANEL_REFRESH_MS && newsItems.length > 0 && newsFilter === type) return
+    if (!force && now - newsItemsRefreshRef.current < NEWS_ITEMS_REFRESH_MS && newsItems.length > 0 && newsFilter === type) return
     setNewsLoading(true)
     try {
       const query = type && type !== 'all' ? `?type=${encodeURIComponent(type)}&limit=24` : '?limit=24'
@@ -447,7 +450,7 @@ export default function LiveTradingDetailPage() {
       setNewsItems(Array.isArray(data?.items) ? data.items : [])
       setNewsUpdatedAt(data?.updated_at || '')
       setNewsError('')
-      newsPanelRefreshRef.current = now
+      newsItemsRefreshRef.current = now
       newsSummaryRefreshRef.current = { symbol: sym, refreshedAt: now }
     } catch (err) {
       setNewsError(err.message || '新闻列表暂不可用')
@@ -455,19 +458,6 @@ export default function LiveTradingDetailPage() {
     } finally {
       setNewsLoading(false)
     }
-  }
-
-  const openNewsPanel = () => {
-    setNewsPanelOpen(true)
-    loadNewsItems(symbol, { type: newsFilter, force: true })
-  }
-
-  const closeNewsPanel = () => {
-    setNewsPanelOpen(false)
-  }
-
-  const refreshNewsPanel = () => {
-    loadNewsItems(symbol, { type: newsFilter, force: true })
   }
 
   const loadInvestmentProfile = async () => {
@@ -900,14 +890,10 @@ export default function LiveTradingDetailPage() {
   }, [ready, symbol])
 
   useEffect(() => {
-    if (!ready || !symbol || !newsPanelOpen) return undefined
-    const timer = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
-      loadNewsItems(symbol, { type: newsFilter, force: true })
-    }, NEWS_PANEL_REFRESH_MS)
-    return () => clearInterval(timer)
+    if (!ready || !symbol || activeTab !== STOCK_DETAIL_TAB_KEYS.NEWS) return
+    loadNewsItems(symbol, { type: newsFilter, force: true })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, symbol, newsPanelOpen, newsFilter])
+  }, [ready, symbol, activeTab, newsFilter])
 
   const loadSignalCenter = async ({ force = false } = {}) => {
     const now = Date.now()
@@ -994,9 +980,7 @@ export default function LiveTradingDetailPage() {
     setPortfolioDeleteConfirmOpen(false)
     setPortfolioDeleteConfirmValue('')
     setPortfolioDangerMenu(createPortfolioDangerMenuState())
-    setSignalConfigExpanded(false)
     setPriceAutoFilled(false)
-    setNewsPanelOpen(false)
     setNewsFilter('all')
     setNewsItems([])
     setNewsSummary(null)
@@ -1008,7 +992,7 @@ export default function LiveTradingDetailPage() {
     setAboutError('')
     setAboutLoadedSymbol('')
     newsSummaryRefreshRef.current = { symbol: '', refreshedAt: 0 }
-    newsPanelRefreshRef.current = 0
+    newsItemsRefreshRef.current = 0
   }, [symbol, authIdentityKey, exchange])
 
   useEffect(() => {
@@ -1403,9 +1387,18 @@ export default function LiveTradingDetailPage() {
             <SymbolNewsSummaryCard
               summary={newsSummary}
               updatedAt={newsUpdatedAt}
-              loading={newsLoading && newsPanelOpen}
-              error={newsError && !newsPanelOpen ? newsError : ''}
-              onOpen={openNewsPanel}
+              loading={newsLoading}
+              error={newsError || ''}
+            />
+            <InlineSymbolNewsList
+              items={newsItems}
+              summary={newsSummary}
+              activeType={newsFilter}
+              loading={newsLoading}
+              error={newsError}
+              updatedAt={newsUpdatedAt}
+              onRefresh={() => loadNewsItems(symbol, { type: newsFilter, force: true })}
+              onTypeChange={setNewsFilter}
             />
           </section>
         )}
@@ -1425,11 +1418,6 @@ export default function LiveTradingDetailPage() {
                 >
                   {aiAnalyzing ? `分析中 · ${formatAIElapsedCompact(aiWaitElapsedSec)}` : '✨ 立即 AI 分析'}
                 </button>
-              </div>
-              <div className="mt-4 rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-3 text-xs leading-6 text-foreground-muted">
-                {latestAnalysisReference
-                  ? `最近观点：${latestAnalysisReference.summary || latestAnalysisReference.final_signal || latestAnalysisReference.action || '已生成，可在下方 AI 分析历史中查看详情。'}`
-                  : '暂无历史 AI 观点。生成一次分析后，这里会优先展示最近一次观点摘要。'}
               </div>
             </div>
 
@@ -1485,28 +1473,6 @@ export default function LiveTradingDetailPage() {
             onNotifPromptClose={() => setAiNotifPromptVisible(false)}
             onClose={() => { setShowAiPanel(false); setAiResult(null); setAiError(''); setAiNewsContextState('idle') }}
             onRetry={handleAIAnalysis}
-          />
-        )}
-
-        {/* AI 分析历史（登录后展示，默认折叠） */}
-        {privateAccessReady && analysisHistory.length > 0 && isOverviewTab && (
-          <AnalysisHistoryPanel
-            items={analysisHistory}
-            expanded={historyExpanded}
-            onToggleExpand={() => setHistoryExpanded(!historyExpanded)}
-            onViewDetail={(id) => {
-              // TODO: 可扩展为点击查看完整历史详情
-            }}
-            onDelete={async (id) => {
-              try {
-                await requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/analysis-history?id=${id}`, {
-                  method: 'DELETE',
-                })
-                loadAnalysisHistory(symbol, { limit: 10 })
-              } catch {
-                // silent fail
-              }
-            }}
           />
         )}
 
@@ -1579,7 +1545,28 @@ export default function LiveTradingDetailPage() {
             )}
           </section>
 
+        )}
 
+        {/* AI 分析历史（登录后展示，默认折叠） */}
+        {privateAccessReady && analysisHistory.length > 0 && isOverviewTab && (
+          <AnalysisHistoryPanel
+            items={analysisHistory}
+            expanded={historyExpanded}
+            onToggleExpand={() => setHistoryExpanded(!historyExpanded)}
+            onViewDetail={(id) => {
+              // TODO: 可扩展为点击查看完整历史详情
+            }}
+            onDelete={async (id) => {
+              try {
+                await requestJson(`/api/live/symbols/${encodeURIComponent(symbol)}/analysis-history?id=${id}`, {
+                  method: 'DELETE',
+                })
+                loadAnalysisHistory(symbol, { limit: 10 })
+              } catch {
+                // silent fail
+              }
+            }}
+          />
         )}
 
         {/* My Portfolio (login required) */}
@@ -1886,14 +1873,6 @@ export default function LiveTradingDetailPage() {
                       <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${signalConfig.is_enabled ? 'border-emerald-400/60 dark:border-primary/70 bg-emerald-100 dark:bg-white text-emerald-700 dark:text-primary shadow-[0_0_0_1px_rgba(16,185,129,0.3)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.18)]' : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted'}`}>
                         {signalStatusSummary}
                       </div>
-                      <button
-                        type="button"
-                        aria-expanded={signalConfigExpanded ? 'true' : 'false'}
-                        onClick={() => setSignalConfigExpanded((prev) => !prev)}
-                        className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
-                      >
-                        {signalConfigExpanded ? '收起配置' : '配置'}
-                      </button>
                     </div>
                   </div>
 
@@ -1903,8 +1882,7 @@ export default function LiveTradingDetailPage() {
                     </div>
                   )}
 
-                  {signalConfigExpanded && (
-                    <div className="mt-3 border-t border-border pt-3">
+                  <div className="mt-3 border-t border-border pt-3">
                       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                         {signalConfigMeta.map((item) => (
                           <div key={item.label} className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-2.5">
@@ -1987,7 +1965,6 @@ export default function LiveTradingDetailPage() {
                         </div>
                       )}
                     </div>
-                  )}
                 </div>
               </section>
             )}
@@ -2266,25 +2243,97 @@ export default function LiveTradingDetailPage() {
 
       </div>
 
-      <SymbolNewsPanel
-        open={newsPanelOpen}
-        items={newsItems}
-        summary={newsSummary}
-        activeType={newsFilter}
-        loading={newsLoading}
-        error={newsPanelOpen ? newsError : ''}
-        updatedAt={newsUpdatedAt}
-        onClose={closeNewsPanel}
-        onRefresh={refreshNewsPanel}
-        onTypeChange={(nextType) => {
-          setNewsFilter(nextType)
-          loadNewsItems(symbol, { type: nextType, force: true })
-        }}
-      />
     </>
   )
 }
 
+const NEWS_FILTERS = [
+  { value: 'all', label: '全部' },
+  { value: 'news', label: '新闻' },
+  { value: 'announcement', label: '公告' },
+  { value: 'filing', label: '财报' },
+]
+
+function InlineSymbolNewsList({ items, summary, activeType, loading = false, error = '', updatedAt = '', onRefresh, onTypeChange }) {
+  const filtered = filterSymbolNewsItems(items, activeType)
+
+  return (
+    <section className="rounded-2xl border border-border bg-card p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold text-foreground">新闻与公告列表</h3>
+          <div className="mt-1 text-xs text-foreground-dim">
+            {summary?.last_24h_count ? `近24h ${summary.last_24h_count} 条` : '暂无高相关事件'}
+            {updatedAt ? ` · 更新：${formatNewsTime(updatedAt)}` : ''}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
+        >
+          刷新
+        </button>
+      </div>
+
+      {Array.isArray(summary?.highlight_tags) && summary.highlight_tags.length > 0 ? (
+        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+          {summary.highlight_tags.map((tag) => (
+            <span key={tag} className="whitespace-nowrap rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] text-primary">
+              {tag}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+        {NEWS_FILTERS.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            onClick={() => onTypeChange(item.value)}
+            className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs transition ${activeType === item.value ? 'border-primary bg-primary text-foreground' : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted hover:border-[var(--color-border-strong)] hover:text-foreground'}`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4">
+        {error ? <div className="mb-3 rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">{error}</div> : null}
+        {loading ? (
+          <div className="rounded-xl border border-dashed border-border px-4 py-8 text-sm text-foreground-dim">新闻加载中...</div>
+        ) : filtered.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border px-4 py-8 text-sm text-foreground-dim">{buildNewsEmptyState(activeType)}</div>
+        ) : (
+          <div className="space-y-3">
+            {filtered.map((item) => (
+              <article key={item.id} className="rounded-2xl border border-border bg-[var(--color-bg-hover)] p-4">
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-foreground-dim">
+                  <span className={`rounded-full border px-2 py-0.5 ${item.type === 'filing' ? 'border-primary/30 bg-primary/10 text-primary' : item.type === 'announcement' ? 'border-amber-300/30 bg-amber-500/10 text-amber-800 dark:text-amber-200' : 'border-border bg-[var(--color-bg-hover)] text-foreground-dim'}`}>
+                    {formatNewsTypeLabel(item.type)}
+                  </span>
+                  {(item.source_type === 'official' || item.official) ? <span className="rounded-full border border-emerald-300/25 bg-positive/10 px-2 py-0.5 text-positive">官方</span> : null}
+                  <span>{item.source_name || item.source || '未知来源'}</span>
+                  <span>{formatNewsTime(item.published_at)}</span>
+                </div>
+                <div className="mt-3 text-sm font-medium leading-6 text-foreground">{item.title}</div>
+                {item.summary ? <div className="mt-2 text-sm leading-6 text-foreground-muted">{item.summary}</div> : null}
+                {(item.report_period || item.report_type || item.url) ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-foreground-dim">
+                    {item.report_period ? <span>{item.report_period}</span> : null}
+                    {item.report_type ? <span>{item.report_type}</span> : null}
+                    {item.url ? <a href={item.url} target="_blank" rel="noreferrer" className="text-primary hover:text-primary/80">原文</a> : null}
+                  </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
 
 function StockDetailTabNav({ tabs, mobileGroups, activeTab, activeTabMeta, onChange }) {
   const activeMobileGroup = activeTabMeta?.mobileGroup || activeTab

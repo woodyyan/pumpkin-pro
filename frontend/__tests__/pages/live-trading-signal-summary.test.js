@@ -5,26 +5,20 @@ import { readFileSync } from 'node:fs'
 const pageSource = readFileSync(new URL('../../pages/live-trading/[symbol].js', import.meta.url), 'utf8')
 
 describe('live trading signal summary section', () => {
-  it('keeps folded state minimal and exposes only status plus config entry', () => {
-    const foldedStart = pageSource.indexOf('交易信号')
-    const expandedStart = pageSource.indexOf('signalConfigExpanded && (')
-    assert.notEqual(foldedStart, -1)
-    assert.notEqual(expandedStart, -1)
-    const foldedSegment = pageSource.slice(foldedStart, expandedStart)
+  it('keeps trading signal configuration visible by default inside portfolio tab', () => {
+    const signalStart = pageSource.indexOf('Inline signal config')
+    assert.notEqual(signalStart, -1)
+    const signalSegment = pageSource.slice(signalStart, pageSource.indexOf('{isPortfolioTab && !privateAccessReady', signalStart))
 
-    assert.match(foldedSegment, /signalStatusSummary/)
-    assert.match(foldedSegment, /dark:bg-white text-emerald-700 dark:text-primary/)
-    assert.match(foldedSegment, /配置/)
-    assert.doesNotMatch(foldedSegment, /role="switch"/)
-    assert.doesNotMatch(foldedSegment, /signalConfigMeta.map/)
+    assert.match(signalSegment, /交易信号/)
+    assert.match(signalSegment, /signalStatusSummary/)
+    assert.match(signalSegment, /signalConfigMeta.map/)
+    assert.match(signalSegment, /role="switch"/)
+    assert.match(signalSegment, /保存配置/)
   })
 
-  it('renders switch and meta cards only after expansion', () => {
-    const expandedStart = pageSource.indexOf('signalConfigExpanded && (')
-    const expandedSegment = pageSource.slice(expandedStart)
-
-    assert.match(expandedSegment, /signalConfigMeta.map/)
-    assert.match(expandedSegment, /mt-3 flex flex-wrap items-center gap-2\.5/)
-    assert.match(expandedSegment, /role="switch"/)
+  it('removes the expand or collapse state and button for signal config', () => {
+    assert.doesNotMatch(pageSource, /signalConfigExpanded/)
+    assert.doesNotMatch(pageSource, /展开配置|收起配置/)
   })
 })

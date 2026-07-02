@@ -28,13 +28,15 @@ export default function SymbolNewsSummaryCard({
           <div className="mt-3 text-sm leading-6 text-foreground-muted">{headline}</div>
           {error ? <div className="mt-3 rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">{error}</div> : null}
         </div>
-        <button
-          type="button"
-          onClick={onOpen}
-          className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary/20"
-        >
-          {loading ? '加载中...' : '查看全部 →'}
-        </button>
+        {onOpen ? (
+          <button
+            type="button"
+            onClick={onOpen}
+            className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary/20"
+          >
+            {loading ? '加载中...' : '查看全部 →'}
+          </button>
+        ) : null}
       </div>
     </section>
   )

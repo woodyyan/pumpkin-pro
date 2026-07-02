@@ -10,13 +10,14 @@ describe('live trading news summary integration', () => {
   it('renders the news summary card near the top of the detail page', () => {
     assert.match(pageSource, /<SymbolNewsSummaryCard/)
     assert.match(pageSource, /summary=\{newsSummary\}/)
-    assert.match(pageSource, /onOpen=\{openNewsPanel\}/)
+    assert.match(pageSource, /<InlineSymbolNewsList/)
+    assert.doesNotMatch(pageSource, /onOpen=\{openNewsPanel\}/)
   })
 
-  it('uses the watch-style CTA copy for opening the full news panel', () => {
+  it('keeps the summary card CTA optional so the news tab can omit 查看全部', () => {
     const cardSource = readFileSync(new URL('../../components/SymbolNewsSummaryCard.js', import.meta.url), 'utf8')
+    assert.match(cardSource, /onOpen \? \(/)
     assert.match(cardSource, /查看全部 →/)
-    assert.match(cardSource, /border-primary\/40 bg-primary\/10/)
   })
 
   it('loads summary and panel data through dedicated endpoints', () => {

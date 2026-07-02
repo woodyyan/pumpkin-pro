@@ -61,16 +61,20 @@ jobs:
       - name: Python syntax check
         run: python -m compileall quant
 
-  publish_images:
-    name: Build and Push Images to TCR
+  build_backend:
+    name: Build and Push Backend Image
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 90
     env:
       IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
       IMAGE_NAMESPACE: ${{ vars.IMAGE_NAMESPACE }}
       IMAGE_TAG: ${{ vars.IMAGE_TAG }}
       IMAGE_PLATFORM: ${{ vars.IMAGE_PLATFORM }}
+    outputs:
+      image_repo: ${{ steps.image_meta.outputs.image_repo }}
+      image_tag: ${{ steps.image_meta.outputs.image_tag }}
+      image_ref: ${{ steps.image_meta.outputs.image_ref }}
 
     steps:
       - name: Checkout
@@ -102,6 +106,16 @@ jobs:
           echo "image_namespace=$IMAGE_NAMESPACE" >> "$GITHUB_OUTPUT"
           echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
           echo "image_platform=$IMAGE_PLATFORM" >> "$GITHUB_OUTPUT"
+
+      - name: Set backend image metadata
+        id: image_meta
+        run: |
+          set -euo pipefail
+          IMAGE_REPO="${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-backend"
+          IMAGE_TAG="${{ steps.resolve_images.outputs.image_tag }}"
+          echo "image_repo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "image_ref=${IMAGE_REPO}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Login to TCR
         env:
@@ -135,22 +149,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-backend-
 
-      - name: Restore frontend buildx cache
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache-frontend
-          key: ${{ runner.os }}-buildx-frontend-${{ hashFiles('frontend/Dockerfile', 'frontend/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-frontend-
-
-      - name: Restore quant buildx cache
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache-quant
-          key: ${{ runner.os }}-buildx-quant-${{ hashFiles('quant/Dockerfile', 'quant/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-quant-
-
       - name: Build and push backend image
         run: |
           mkdir -p /tmp/.buildx-cache-backend
@@ -159,11 +157,99 @@ jobs:
             --platform "${{ steps.resolve_images.outputs.image_platform }}" \
             --cache-from "type=local,src=/tmp/.buildx-cache-backend" \
             --cache-to "type=local,dest=/tmp/.buildx-cache-backend-new,mode=max" \
-            -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-backend:${{ steps.resolve_images.outputs.image_tag }}" \
-            -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-backend:latest" \
+            -t "${{ steps.image_meta.outputs.image_ref }}" \
+            -t "${{ steps.image_meta.outputs.image_repo }}:latest" \
             --push ./backend
           rm -rf /tmp/.buildx-cache-backend
           mv /tmp/.buildx-cache-backend-new /tmp/.buildx-cache-backend
+
+  build_frontend:
+    name: Build and Push Frontend Image
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+      IMAGE_NAMESPACE: ${{ vars.IMAGE_NAMESPACE }}
+      IMAGE_TAG: ${{ vars.IMAGE_TAG }}
+      IMAGE_PLATFORM: ${{ vars.IMAGE_PLATFORM }}
+    outputs:
+      image_repo: ${{ steps.image_meta.outputs.image_repo }}
+      image_tag: ${{ steps.image_meta.outputs.image_tag }}
+      image_ref: ${{ steps.image_meta.outputs.image_ref }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["https://mirror.ccs.tencentyun.com"]
+
+      - name: Resolve image variables
+        id: resolve_images
+        run: |
+          set -euo pipefail
+
+          IMAGE_REGISTRY="${IMAGE_REGISTRY:-ccr.ccs.tencentyun.com}"
+          IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-}"
+          IMAGE_TAG="${IMAGE_TAG:-${GITHUB_SHA}}"
+          IMAGE_PLATFORM="${IMAGE_PLATFORM:-linux/amd64}"
+
+          if [ -z "$IMAGE_NAMESPACE" ]; then
+            echo "IMAGE_NAMESPACE is empty. Please set Actions Variable IMAGE_NAMESPACE to your TCR namespace." >&2
+            exit 1
+          fi
+
+          echo "image_registry=$IMAGE_REGISTRY" >> "$GITHUB_OUTPUT"
+          echo "image_namespace=$IMAGE_NAMESPACE" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "image_platform=$IMAGE_PLATFORM" >> "$GITHUB_OUTPUT"
+
+      - name: Set frontend image metadata
+        id: image_meta
+        run: |
+          set -euo pipefail
+          IMAGE_REPO="${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-frontend"
+          IMAGE_TAG="${{ steps.resolve_images.outputs.image_tag }}"
+          echo "image_repo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "image_ref=${IMAGE_REPO}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to TCR
+        env:
+          TCR_REGISTRY: ${{ steps.resolve_images.outputs.image_registry }}
+          TCR_USERNAME: ${{ secrets.TCR_USERNAME }}
+          TCR_PASSWORD: ${{ secrets.TCR_PASSWORD }}
+        run: |
+          max_attempts=3
+          for attempt in $(seq 1 $max_attempts); do
+            echo "::group::Login attempt $attempt/$max_attempts"
+            if echo "$TCR_PASSWORD" | docker login "$TCR_REGISTRY" -u "$TCR_USERNAME" --password-stdin; then
+              echo "::endgroup::"
+              echo "✅ Login succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "::endgroup::"
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              wait_time=$((attempt * 10))
+              echo "⚠️ Login failed, retrying in ${wait_time}s..."
+              sleep "$wait_time"
+            fi
+          done
+          echo "❌ Login failed after $max_attempts attempts"
+          exit 1
+
+      - name: Restore frontend buildx cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-frontend
+          key: ${{ runner.os }}-buildx-frontend-${{ hashFiles('frontend/Dockerfile', 'frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-frontend-
 
       - name: Build and push frontend image
         run: |
@@ -173,11 +259,99 @@ jobs:
             --platform "${{ steps.resolve_images.outputs.image_platform }}" \
             --cache-from "type=local,src=/tmp/.buildx-cache-frontend" \
             --cache-to "type=local,dest=/tmp/.buildx-cache-frontend-new,mode=max" \
-            -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-frontend:${{ steps.resolve_images.outputs.image_tag }}" \
-            -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-frontend:latest" \
+            -t "${{ steps.image_meta.outputs.image_ref }}" \
+            -t "${{ steps.image_meta.outputs.image_repo }}:latest" \
             --push ./frontend
           rm -rf /tmp/.buildx-cache-frontend
           mv /tmp/.buildx-cache-frontend-new /tmp/.buildx-cache-frontend
+
+  build_quant:
+    name: Build and Push Quant Image
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+      IMAGE_NAMESPACE: ${{ vars.IMAGE_NAMESPACE }}
+      IMAGE_TAG: ${{ vars.IMAGE_TAG }}
+      IMAGE_PLATFORM: ${{ vars.IMAGE_PLATFORM }}
+    outputs:
+      image_repo: ${{ steps.image_meta.outputs.image_repo }}
+      image_tag: ${{ steps.image_meta.outputs.image_tag }}
+      image_ref: ${{ steps.image_meta.outputs.image_ref }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["https://mirror.ccs.tencentyun.com"]
+
+      - name: Resolve image variables
+        id: resolve_images
+        run: |
+          set -euo pipefail
+
+          IMAGE_REGISTRY="${IMAGE_REGISTRY:-ccr.ccs.tencentyun.com}"
+          IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-}"
+          IMAGE_TAG="${IMAGE_TAG:-${GITHUB_SHA}}"
+          IMAGE_PLATFORM="${IMAGE_PLATFORM:-linux/amd64}"
+
+          if [ -z "$IMAGE_NAMESPACE" ]; then
+            echo "IMAGE_NAMESPACE is empty. Please set Actions Variable IMAGE_NAMESPACE to your TCR namespace." >&2
+            exit 1
+          fi
+
+          echo "image_registry=$IMAGE_REGISTRY" >> "$GITHUB_OUTPUT"
+          echo "image_namespace=$IMAGE_NAMESPACE" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "image_platform=$IMAGE_PLATFORM" >> "$GITHUB_OUTPUT"
+
+      - name: Set quant image metadata
+        id: image_meta
+        run: |
+          set -euo pipefail
+          IMAGE_REPO="${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-quant"
+          IMAGE_TAG="${{ steps.resolve_images.outputs.image_tag }}"
+          echo "image_repo=$IMAGE_REPO" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "image_ref=${IMAGE_REPO}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to TCR
+        env:
+          TCR_REGISTRY: ${{ steps.resolve_images.outputs.image_registry }}
+          TCR_USERNAME: ${{ secrets.TCR_USERNAME }}
+          TCR_PASSWORD: ${{ secrets.TCR_PASSWORD }}
+        run: |
+          max_attempts=3
+          for attempt in $(seq 1 $max_attempts); do
+            echo "::group::Login attempt $attempt/$max_attempts"
+            if echo "$TCR_PASSWORD" | docker login "$TCR_REGISTRY" -u "$TCR_USERNAME" --password-stdin; then
+              echo "::endgroup::"
+              echo "✅ Login succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "::endgroup::"
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              wait_time=$((attempt * 10))
+              echo "⚠️ Login failed, retrying in ${wait_time}s..."
+              sleep "$wait_time"
+            fi
+          done
+          echo "❌ Login failed after $max_attempts attempts"
+          exit 1
+
+      - name: Restore quant buildx cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-quant
+          key: ${{ runner.os }}-buildx-quant-${{ hashFiles('quant/Dockerfile', 'quant/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-quant-
 
       - name: Build and push quant image
         run: |
@@ -187,19 +361,28 @@ jobs:
             --platform "${{ steps.resolve_images.outputs.image_platform }}" \
             --cache-from "type=local,src=/tmp/.buildx-cache-quant" \
             --cache-to "type=local,dest=/tmp/.buildx-cache-quant-new,mode=max" \
-            -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-quant:${{ steps.resolve_images.outputs.image_tag }}" \
-            -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-quant:latest" \
+            -t "${{ steps.image_meta.outputs.image_ref }}" \
+            -t "${{ steps.image_meta.outputs.image_repo }}:latest" \
             --push ./quant
           rm -rf /tmp/.buildx-cache-quant
           mv /tmp/.buildx-cache-quant-new /tmp/.buildx-cache-quant
 
   deploy:
     name: Deploy to Server
-    needs: publish_images
+    needs:
+      - build_backend
+      - build_frontend
+      - build_quant
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
+      - name: Print deployment image summary
+        run: |
+          echo "backend=${{ needs.build_backend.outputs.image_ref }}"
+          echo "frontend=${{ needs.build_frontend.outputs.image_ref }}"
+          echo "quant=${{ needs.build_quant.outputs.image_ref }}"
+
       - name: Deploy over SSH (key auth)
         if: ${{ vars.DEPLOY_AUTH_METHOD == 'ssh' }}
         uses: appleboy/ssh-action@v1.2.0

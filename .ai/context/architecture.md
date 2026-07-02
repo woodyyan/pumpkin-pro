@@ -127,7 +127,10 @@ frontend/
   - backend: `backend/Dockerfile` + `backend/go.mod` + `backend/go.sum`
   - frontend: `frontend/Dockerfile` + `frontend/package-lock.json`
   - quant: `quant/Dockerfile` + `quant/requirements.txt`
-- deploy 阶段暂未改动，仍按统一 `IMAGE_TAG` 在服务器侧拉取 3 个镜像并启动；Phase 2/3 再演进为并行 build job 与显式产物校验。
+- Phase 2 起，镜像构建拆成三个并行 job：`build_backend`、`build_frontend`、`build_quant`。三个 job 都依赖语言级 `build` 检查，但彼此独立执行，以总耗时接近最慢单镜像构建为目标。
+- 每个并行 build job 内部各自负责：解析镜像变量、生成 `image_repo` / `image_tag` / `image_ref` 输出、登录 TCR、恢复本镜像专属本地缓存、build 并 push 最终镜像。
+- `deploy` 现在必须 `needs` 三个 build job 全部成功后才会启动，并在开头打印本次发布的 backend / frontend / quant 镜像摘要；Phase 3 再补显式远端镜像存在性校验与更严格的产物闭环。
+- 服务器侧部署仍按统一 `IMAGE_TAG` 从 compose 拉取 3 个镜像并启动，说明当前并行化只改变 CI 构建拓扑，不改变服务器发布方式。
 
 ## 后端持仓快照架构补充（2026-06-02）
 

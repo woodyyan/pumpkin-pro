@@ -419,6 +419,35 @@
 - `mode=max` 可能放大缓存体积；若后续命中率不理想或缓存过大，再考虑降为 `mode=min`。
 - 当前仍是单 job 串行构建，整体时长上限尚受最慢镜像累加影响；并行收益留到 Phase 2。
 
+## 决策 30: 镜像构建拆为三个并行 job，deploy 统一等待全部完成
+
+**日期**: 2026-07-02
+
+**背景**: Phase 1 已将 Buildx cache 从 TCR registry cache 切到 GitHub Actions Cache，但 `backend`、`frontend`、`quant` 仍在同一个 `publish_images` job 中串行执行。即便单镜像尾部耗时已下降，总耗时仍然等于三个镜像构建时间之和，最慢的 frontend 仍会阻塞 backend / quant 的最终完成。
+
+**决策**:
+1. 删除单一 `publish_images` job，改为 `build_backend`、`build_frontend`、`build_quant` 三个并行 job。
+2. 三个 build job 全部依赖语言级 `build` 检查，保证代码检查仍先于镜像发布。
+3. 每个 build job 都必须独立完成：解析镜像变量、生成 `image_repo` / `image_tag` / `image_ref` outputs、登录 TCR、恢复本镜像专属 cache、build 并 push 最终镜像。
+4. `deploy` 必须显式 `needs` 三个 build job 全部成功后再启动，不允许依赖单一汇总 job。
+5. Phase 2 先只输出镜像摘要，不新增 digest 校验、manifest 校验或服务器侧显式拉取前检查；这些留到 Phase 3。
+
+**原因**:
+1. 并行后总耗时将从三镜像累加，下降为近似最慢单镜像耗时，更符合当前优化目标。
+2. 每个 job 独立 restore 自己的 cache path，可以天然避免后续并行写冲突。
+3. 每个 job 直接输出自身镜像引用，为后续 Phase 3 增加存在性校验和更严格的 deploy 输入打基础。
+4. deploy 明确依赖三个 job，可避免某个镜像未完成就误触发部署。
+
+**替代方案**:
+- 保留单一 `publish_images` job，仅在内部后台并发 shell 命令：否决。日志、失败定位、缓存隔离和依赖表达都更差。
+- 先做并行 job，同时把 deploy 改为按 `image_ref` 精确部署和远端校验：暂缓。当前只推进 Phase 2，避免一次性扩大变更面。
+- 让 deploy 继续只依赖一个中间汇总 job：否决。会弱化“全部构建成功后才部署”的语义，不利于后续收口。
+
+**风险与代价**:
+- 三个 job 会重复执行 checkout、buildx setup、TCR login，Runner 总消耗会增加，但换来更低 wall-clock 时间。
+- 当前输出的是 `image_ref` 而非 digest，仍无法彻底防止 tag 被误覆盖；该问题留待 Phase 3 解决。
+- deploy 仍按统一 `IMAGE_TAG` 部署，因此当前主要收益是 CI 并行耗时下降，而不是发布一致性语义增强。
+
 ## 决策 28: 个股详情页采用“首屏 AI 决策概览 + 分域 Tab”信息架构
 
 **日期**: 2026-07-01

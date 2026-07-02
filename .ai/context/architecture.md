@@ -114,6 +114,21 @@ frontend/
   - AI 管理页只拉 AI 配置、AI 使用统计、AI研报、AI 选股相关接口；其中 AI研报管理使用 `/api/admin/ai-reports` 和 `/api/admin/ai-report-service-config` 管理 COS 图片 key 与微信服务配置；AI Picker 运维面板会并行请求 `/api/admin/ai-picker/status` 与 `/api/admin/ai-picker/latest-run`，分别承载“最近 10 条日志/最近结果摘要”和“最近一次完整 LLM 交互详情（system prompt、user prompt、provider reasoning、原始返回）”。
   - 运维与支持页只拉支付、备份、系统健康、反馈相关接口。
 
+## CI / CD 构建发布链路（2026-07-02）
+
+- GitHub Actions 当前分为 `build`、`publish_images`、`deploy` 三段：先做语言级检查，再统一构建并推送 3 个镜像，最后通过 SSH 在目标机执行 `docker compose pull && docker compose up -d`。
+- Phase 1 起，`publish_images` 仍保持单 job 串行构建 `backend`、`frontend`、`quant`，但镜像缓存策略从 `type=registry` 切换为 `type=local + actions/cache`，目标是去掉跨境 `cache export to TCR` 的长尾耗时。
+- 三个镜像必须使用独立 Buildx 本地缓存目录：
+  - backend: `/tmp/.buildx-cache-backend`
+  - frontend: `/tmp/.buildx-cache-frontend`
+  - quant: `/tmp/.buildx-cache-quant`
+- 每个镜像构建前先 restore 对应目录缓存；构建时使用 `--cache-from type=local`，输出到 `*-new` 目录，再通过目录切换覆盖旧缓存，避免 BuildKit 对同一目录读写冲突。
+- 缓存 key 只绑定 Dockerfile 与依赖定义文件，不绑定业务源码全量内容：
+  - backend: `backend/Dockerfile` + `backend/go.mod` + `backend/go.sum`
+  - frontend: `frontend/Dockerfile` + `frontend/package-lock.json`
+  - quant: `quant/Dockerfile` + `quant/requirements.txt`
+- deploy 阶段暂未改动，仍按统一 `IMAGE_TAG` 在服务器侧拉取 3 个镜像并启动；Phase 2/3 再演进为并行 build job 与显式产物校验。
+
 ## 后端持仓快照架构补充（2026-06-02）
 
 - `backend/store/portfolio/service.go` 中的历史快照能力已拆分为“历史快照重建引擎 + 单日/区间输出”两层：

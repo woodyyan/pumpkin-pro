@@ -390,6 +390,35 @@
 - apply 当前为同步重算；如果未来历史窗口变长、耗时增加，应演进为异步 job + 轮询进度。
 - apply 会清空并重建 4 个组合事实表，必须保留二次确认、后端锁和 apply 前再次预检。
 
+## 决策 29: 镜像构建缓存从 TCR registry cache 切换为 GitHub Actions 本地缓存
+
+**日期**: 2026-07-02
+
+**背景**: 现有 `publish_images` job 在同一条 `docker buildx build --push` 链路里同时执行最终镜像推送和 `type=registry` cache export。backend / frontend / quant 三个镜像都要把 BuildKit cache 推到 TCR 的 `:buildcache` 标签，导致每次构建都被跨境 cache 上传拖慢；而 deploy 实际只依赖最终镜像，不依赖 cache export 成功。
+
+**决策**:
+1. Phase 1 保持 `publish_images` 为单个串行 job，不拆并行 job，也不调整 deploy 拓扑。
+2. 三个镜像统一移除 `type=registry` 的 `--cache-from/--cache-to`，改用 `type=local` Buildx cache，并通过 `actions/cache@v4` 持久化到 GitHub Actions Cache。
+3. backend / frontend / quant 各自使用独立缓存目录和独立 key，禁止共享 cache 目录。
+4. 每个镜像构建时使用 `cache-from=type=local,src=...`，输出到 `cache-to=type=local,dest=...-new,mode=max`，构建成功后再用目录替换更新缓存。
+5. cache key 仅绑定 Dockerfile 与依赖定义文件，避免把频繁变动的业务源码纳入 key，优先复用依赖层。
+
+**原因**:
+1. 最慢的部分是 registry cache export，而不是最终镜像 push；去掉远端 cache 上传可以直接缩短主链路尾部耗时。
+2. GitHub Actions Cache 位于 GitHub 侧网络，稳定性通常高于跨境推送到 TCR 的 build cache。
+3. 独立缓存目录与独立 key 可以为后续 Phase 2 并行化铺路，避免多个镜像之间 cache 污染。
+4. 先只做缓存机制替换，能把变更面控制在最小范围，便于验证收益与稳定性。
+
+**替代方案**:
+- 继续保留 TCR registry cache，仅增加重试：否决。根因是远端 cache export 链路过慢，不是单纯偶发失败。
+- 一次性同时做并行 job、显式产物摘要和 deploy 校验：暂缓。当前先验证缓存机制替换收益，降低首轮改造风险。
+- 三个镜像共用一个本地 buildx cache 目录：否决。会引入缓存污染、key 不稳定和后续并行写覆盖问题。
+
+**风险与代价**:
+- `actions/cache` 仍受 GitHub 缓存容量和命中策略影响，首次构建或 key 变更时不会提速。
+- `mode=max` 可能放大缓存体积；若后续命中率不理想或缓存过大，再考虑降为 `mode=min`。
+- 当前仍是单 job 串行构建，整体时长上限尚受最慢镜像累加影响；并行收益留到 Phase 2。
+
 ## 决策 28: 个股详情页采用“首屏 AI 决策概览 + 分域 Tab”信息架构
 
 **日期**: 2026-07-01

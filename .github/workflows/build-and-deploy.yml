@@ -127,35 +127,71 @@ jobs:
           echo "❌ Login failed after $max_attempts attempts"
           exit 1
 
+      - name: Restore backend buildx cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-backend
+          key: ${{ runner.os }}-buildx-backend-${{ hashFiles('backend/Dockerfile', 'backend/go.mod', 'backend/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-backend-
+
+      - name: Restore frontend buildx cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-frontend
+          key: ${{ runner.os }}-buildx-frontend-${{ hashFiles('frontend/Dockerfile', 'frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-frontend-
+
+      - name: Restore quant buildx cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-quant
+          key: ${{ runner.os }}-buildx-quant-${{ hashFiles('quant/Dockerfile', 'quant/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-quant-
+
       - name: Build and push backend image
         run: |
+          mkdir -p /tmp/.buildx-cache-backend
+          rm -rf /tmp/.buildx-cache-backend-new
           docker buildx build \
             --platform "${{ steps.resolve_images.outputs.image_platform }}" \
-            --cache-from "type=registry,ref=${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-backend:buildcache" \
-            --cache-to "type=registry,ref=${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-backend:buildcache,mode=max,ignore-error=true" \
+            --cache-from "type=local,src=/tmp/.buildx-cache-backend" \
+            --cache-to "type=local,dest=/tmp/.buildx-cache-backend-new,mode=max" \
             -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-backend:${{ steps.resolve_images.outputs.image_tag }}" \
             -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-backend:latest" \
             --push ./backend
+          rm -rf /tmp/.buildx-cache-backend
+          mv /tmp/.buildx-cache-backend-new /tmp/.buildx-cache-backend
 
       - name: Build and push frontend image
         run: |
+          mkdir -p /tmp/.buildx-cache-frontend
+          rm -rf /tmp/.buildx-cache-frontend-new
           docker buildx build \
             --platform "${{ steps.resolve_images.outputs.image_platform }}" \
-            --cache-from "type=registry,ref=${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-frontend:buildcache" \
-            --cache-to "type=registry,ref=${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-frontend:buildcache,mode=max,ignore-error=true" \
+            --cache-from "type=local,src=/tmp/.buildx-cache-frontend" \
+            --cache-to "type=local,dest=/tmp/.buildx-cache-frontend-new,mode=max" \
             -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-frontend:${{ steps.resolve_images.outputs.image_tag }}" \
             -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-frontend:latest" \
             --push ./frontend
+          rm -rf /tmp/.buildx-cache-frontend
+          mv /tmp/.buildx-cache-frontend-new /tmp/.buildx-cache-frontend
 
       - name: Build and push quant image
         run: |
+          mkdir -p /tmp/.buildx-cache-quant
+          rm -rf /tmp/.buildx-cache-quant-new
           docker buildx build \
             --platform "${{ steps.resolve_images.outputs.image_platform }}" \
-            --cache-from "type=registry,ref=${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-quant:buildcache" \
-            --cache-to "type=registry,ref=${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-quant:buildcache,mode=max,ignore-error=true" \
+            --cache-from "type=local,src=/tmp/.buildx-cache-quant" \
+            --cache-to "type=local,dest=/tmp/.buildx-cache-quant-new,mode=max" \
             -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-quant:${{ steps.resolve_images.outputs.image_tag }}" \
             -t "${{ steps.resolve_images.outputs.image_registry }}/${{ steps.resolve_images.outputs.image_namespace }}/pumpkin-pro-quant:latest" \
             --push ./quant
+          rm -rf /tmp/.buildx-cache-quant
+          mv /tmp/.buildx-cache-quant-new /tmp/.buildx-cache-quant
 
   deploy:
     name: Deploy to Server

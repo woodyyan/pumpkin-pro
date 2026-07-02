@@ -479,3 +479,33 @@
 - 当前仍由 `frontend/pages/live-trading/[symbol].js` 承载多个 Tab 的具体内容，文件仍偏大；后续应继续拆出 Tab Panel 组件。
 - 本阶段只是条件渲染分域，部分数据请求仍沿用原页面加载节奏；如性能压力继续存在，应再做按 Tab 可见性延迟加载。
 - 移动端「分析」组增加二级切换，需要保持技术/基本面/AI 三个子域都可达。
+
+## 决策 31: 镜像发布改为本地 shell 入口，Phase 2 先落地制品构建与 TCR 上传
+
+**日期**: 2026-07-02
+
+**背景**: 当前 GitHub Actions 已演进到并行构建 `backend`、`frontend`、`quant` 三个镜像，但构建与 push 仍发生在 CI 内。用户进一步确认要将“构建 + push TCR”完全迁移到本地执行，Actions 后续只负责部署指定 tag。Phase 2 仅实现本地发布脚本，不处理 deploy workflow 重构与回滚治理。
+
+**决策**:
+1. 新增统一入口 `ops/local/release.sh`，承担本地镜像构建与可选 push。
+2. 支持服务固定为 `backend`、`frontend`、`quant`，并要求通过 `--services` 或 `--all` 显式指定目标。
+3. tag 默认规则为 `release-时间-shortsha`，允许手工通过 `--tag` 覆盖。
+4. 仓库映射、Dockerfile、build context 下沉到 `ops/local/release.config.sh`，避免主脚本写死服务拓扑。
+5. 每次执行都输出 `.release/manifests/<tag>.json`，作为后续 deploy 与审计输入；`.release/` 不纳入 git。
+6. Phase 2 保持串行构建，`--parallel` 只保留参数位，不真正启用并行。
+
+**原因**:
+1. 本地先构建/上传，可以先独立验证制品生成，不必等 deploy 流程一起联调。
+2. 将制品层与部署层拆开后，后续 Actions 可收敛为纯部署任务，职责边界更清晰。
+3. 配置化服务映射为后续新增服务或调整 repo 命名留下扩展点。
+4. manifest 让本地发布结果可追踪，为后续远端镜像校验、digest 闭环与回滚能力打基础。
+
+**替代方案**:
+- 继续只在 CI 中构建 push，开发者本地不提供入口：否决。不满足“先独立测试本地构建和上传 TCR”的目标。
+- 直接把本地脚本做成并行 build/push：暂缓。当前优先降低脚本复杂度，先稳定跑通 Phase 2。
+- 不输出 manifest，只在控制台打印结果：否决。后续 deploy、审计与故障排查都需要结构化产物。
+
+**风险与代价**:
+- 本地机器环境差异会导致构建耗时和稳定性波动，后续可能仍需专用 builder。
+- 当前未做远端 tag 存在性与 digest 校验，仍存在“push 成功但部署未校验闭环”的风险。
+- `.release/` 为本地产物目录，需要明确忽略并避免误提交。

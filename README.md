@@ -136,6 +136,47 @@ echo "$TCR_PASSWORD" | docker login ccr.ccs.tencentyun.com -u <tcr-username> --p
 
 如果你的目标是稳定且更快的服务器部署，建议优先使用 `docker-compose.yml` 的“拉取镜像模式”（CI 预构建后服务器仅 `pull`）；仅在需要现场编译验证时使用 `docker-compose.local.yml` 本地构建模式。
 
+#### 本地镜像发布脚本（Phase 2）
+
+仓库已提供本地发布入口 `ops/local/release.sh`，用于先在本机完成镜像构建，并按统一 tag 推送到 TCR。Phase 2 默认仍采用串行构建，但已经支持按服务选择发布。
+
+常用命令：
+
+```bash
+# 1) 先做 dry-run，检查参数、tag、镜像名、manifest 输出
+sh ops/local/release.sh --services backend --build-only --dry-run
+
+# 2) 只构建本地 backend 镜像，不 push
+sh ops/local/release.sh --services backend --build-only
+
+# 3) 构建并 push backend + frontend 到 TCR
+export TCR_USERNAME="<your-tcr-username>"
+export TCR_PASSWORD="<your-tcr-password>"
+export IMAGE_NAMESPACE="pumpkin-pro"
+sh ops/local/release.sh --services backend,frontend --push
+
+# 4) 构建并 push 全部服务
+sh ops/local/release.sh --all --push
+```
+
+脚本行为约定：
+
+- 支持服务：`backend`、`frontend`、`quant`
+- 默认 tag 规则：`release-时间-shortsha`
+- 默认 registry：`ccr.ccs.tencentyun.com`
+- 默认 namespace：`pumpkin-pro`
+- manifest 输出目录：`.release/manifests/<tag>.json`
+- 当前阶段支持 `--build-only`、`--push`、`--dry-run`、`--services`、`--all`
+- 当前阶段 `--parallel` 仅保留参数，不启用并行构建
+
+建议测试顺序：
+
+1. 先执行 `--build-only --dry-run`，确认镜像名、tag、manifest 路径符合预期
+2. 再执行 `--build-only`，确认本地镜像可构建
+3. 最后执行 `--push`，验证 TCR 登录与上传
+
+如果你已经提前 `docker login` 过 TCR，脚本也支持复用现有登录态；否则请通过 `TCR_USERNAME` / `TCR_PASSWORD` 或同名命令参数显式传入。
+
 ### 方式二：本地开发模式启动
 
 #### 1. 启动量化服务

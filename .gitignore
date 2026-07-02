@@ -24,6 +24,7 @@ quant/data/cache/
 backend/.cache/
 output/
 .session_tmps/
+.release/
 .trae/
 .agent/memory/
 .agent/logs/

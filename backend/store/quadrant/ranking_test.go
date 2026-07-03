@@ -1359,6 +1359,7 @@ func TestSaveRankingSnapshotsBestEffort_UsesResolverAndShanghaiDate(t *testing.T
 	})
 
 	record := makeRankingRecord("600519", "SSE", 95, 20)
+	record.SourceTradeDate = "2026-04-17"
 	computedAt := time.Date(2026, 4, 16, 18, 46, 37, 0, time.UTC) // 上海时间 2026-04-17 02:46:37
 	svc.saveRankingSnapshotsBestEffort(ctx, []QuadrantScoreRecord{record}, computedAt)
 
@@ -1384,7 +1385,7 @@ func TestSaveRankingSnapshotsBestEffort_UsesResolverAndShanghaiDate(t *testing.T
 	}
 }
 
-func TestBulkSaveRankingSnapshots_UsesCallbackClosePriceBeforeResolver(t *testing.T) {
+func TestBulkSaveRankingSnapshots_UsesCallbackClosePriceBeforeResolverWhenTradeDateMatches(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -1396,7 +1397,7 @@ func TestBulkSaveRankingSnapshots_UsesCallbackClosePriceBeforeResolver(t *testin
 	})
 
 	_, err := svc.BulkSave(ctx, BulkSaveInput{
-		ComputedAt: "2026-04-30T18:30:00Z", // 上海时间 2026-05-01
+		ComputedAt: "2026-04-30T12:30:00Z", // 上海时间 2026-04-30
 		Items: []BulkSaveItem{{
 			Code:           "600519",
 			Name:           "贵州茅台",
@@ -1417,7 +1418,7 @@ func TestBulkSaveRankingSnapshots_UsesCallbackClosePriceBeforeResolver(t *testin
 	}
 
 	var snap RankingSnapshot
-	if err := repo.db.WithContext(ctx).Where("code = ? AND snapshot_date = ?", "600519", "2026-05-01").First(&snap).Error; err != nil {
+	if err := repo.db.WithContext(ctx).Where("code = ? AND snapshot_date = ?", "600519", "2026-04-30").First(&snap).Error; err != nil {
 		t.Fatalf("query snapshot failed: %v", err)
 	}
 	if snap.ClosePrice != 88.8 {
@@ -1425,6 +1426,98 @@ func TestBulkSaveRankingSnapshots_UsesCallbackClosePriceBeforeResolver(t *testin
 	}
 	if snap.PriceTradeDate != "2026-04-30" {
 		t.Fatalf("price_trade_date = %s; want 2026-04-30", snap.PriceTradeDate)
+	}
+}
+
+func TestBulkSaveRankingSnapshots_RejectsStaleCallbackClosePrice(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+	resolverCalls := 0
+	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
+		resolverCalls++
+		if tradeDate != "2026-07-01" {
+			t.Fatalf("resolver tradeDate = %s; want 2026-07-01", tradeDate)
+		}
+		return 155.5
+	})
+	svc.SetTradeDateResolver(func(ctx context.Context, exchange string, computedAt time.Time) string {
+		return "2026-07-01"
+	})
+
+	_, err := svc.BulkSave(ctx, BulkSaveInput{
+		ComputedAt: "2026-07-01T13:00:00Z",
+		Items: []BulkSaveItem{{
+			Code:           "688260",
+			Name:           "昀冢科技",
+			Exchange:       "SSE",
+			Opportunity:    99,
+			Risk:           20,
+			Quadrant:       "机会",
+			AvgAmount5d:    10000,
+			ClosePrice:     144,
+			PriceTradeDate: "2026-06-25",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("BulkSave failed: %v", err)
+	}
+	if resolverCalls != 1 {
+		t.Fatalf("resolver calls = %d; want 1", resolverCalls)
+	}
+
+	var snap RankingSnapshot
+	if err := repo.db.WithContext(ctx).Where("code = ? AND snapshot_date = ?", "688260", "2026-07-01").First(&snap).Error; err != nil {
+		t.Fatalf("query snapshot failed: %v", err)
+	}
+	if snap.ClosePrice != 155.5 {
+		t.Fatalf("close_price = %.2f; want 155.50", snap.ClosePrice)
+	}
+	if snap.PriceTradeDate != "2026-07-01" {
+		t.Fatalf("price_trade_date = %s; want 2026-07-01", snap.PriceTradeDate)
+	}
+}
+
+func TestBulkSaveRankingSnapshots_MarksMissingWhenStaleCallbackAndNoExactPrice(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	svc := NewService(repo)
+	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
+		return 0
+	})
+	svc.SetTradeDateResolver(func(ctx context.Context, exchange string, computedAt time.Time) string {
+		return "2026-07-01"
+	})
+
+	_, err := svc.BulkSave(ctx, BulkSaveInput{
+		ComputedAt: "2026-07-01T13:00:00Z",
+		Items: []BulkSaveItem{{
+			Code:           "688260",
+			Name:           "昀冢科技",
+			Exchange:       "SSE",
+			Opportunity:    99,
+			Risk:           20,
+			Quadrant:       "机会",
+			AvgAmount5d:    10000,
+			ClosePrice:     144,
+			PriceTradeDate: "2026-06-25",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("BulkSave failed: %v", err)
+	}
+
+	var snap RankingSnapshot
+	if err := repo.db.WithContext(ctx).Where("code = ? AND snapshot_date = ?", "688260", "2026-07-01").First(&snap).Error; err != nil {
+		t.Fatalf("query snapshot failed: %v", err)
+	}
+	if snap.ClosePrice != 0 {
+		t.Fatalf("close_price = %.2f; want 0", snap.ClosePrice)
+	}
+	if snap.PriceTradeDate != "" {
+		t.Fatalf("price_trade_date = %s; want empty", snap.PriceTradeDate)
 	}
 }
 

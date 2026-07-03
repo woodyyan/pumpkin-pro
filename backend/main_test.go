@@ -653,6 +653,33 @@ func TestNewQuadrantPriceResolver(t *testing.T) {
 	}
 }
 
+func TestNewQuadrantPriceLookupResolverReturnsActualTradeDate(t *testing.T) {
+	db := testutil.InMemoryDB(t)
+	testutil.AutoMigrateModels(t, db, &live.ClosingSnapshotRecord{})
+	liveRepo := live.NewRepository(db)
+	resolver := newQuadrantPriceLookupResolver(liveRepo)
+	ctx := context.Background()
+
+	snapshot := live.SymbolSnapshot{Symbol: "600519.SH", LastPrice: 123.45}
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal snapshot failed: %v", err)
+	}
+	if err := liveRepo.UpsertClosingSnapshot(ctx, live.ClosingSnapshotRecord{
+		Symbol:       "600519.SH",
+		TradeDate:    "2026-04-17",
+		SnapshotJSON: string(payload),
+		UpdatedAt:    time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed closing snapshot failed: %v", err)
+	}
+
+	got := resolver(ctx, "600519", "SSE", "2026-04-18")
+	if got.ClosePrice != 123.45 || got.TradeDate != "2026-04-17" {
+		t.Fatalf("lookup = (%.2f, %s); want (123.45, 2026-04-17)", got.ClosePrice, got.TradeDate)
+	}
+}
+
 func TestQuadrantSnapshotTradeDates(t *testing.T) {
 	tests := []struct {
 		name      string

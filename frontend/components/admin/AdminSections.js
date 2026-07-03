@@ -1217,6 +1217,36 @@ function formatTimeAgo(s) {
   } catch { return '' }
 }
 
+function formatPortfolioTrackingReason(reason) {
+  if (!reason) return '--'
+  const parts = []
+  if (reason.name) parts.push(reason.name)
+  else if (reason.portfolio_id) parts.push(reason.portfolio_id)
+  if (reason.exchange) parts.push(reason.exchange === 'HKEX' ? '港股' : 'A股')
+  if (reason.trade_date) parts.push(`交易日 ${reason.trade_date}`)
+  else if (reason.signal_date) parts.push(`信号日 ${reason.signal_date}`)
+  if (reason.code) parts.push(reason.code)
+  if (reason.source === 'portfolio_market_prices') parts.push('来源: 市价表补位')
+  return parts.join(' · ')
+}
+
+function renderMissingPriceItems(items, priceLabel) {
+  if (!items?.length) return null
+  return (
+    <div className="mt-2 rounded-lg border border-border bg-background px-3 py-2 text-[11px] text-foreground-muted">
+      <div className="font-medium text-foreground">缺少{priceLabel}明细（{items.length}）</div>
+      <ul className="mt-1 list-disc space-y-1 pl-4">
+        {items.map((item, index) => (
+          <li key={`${item.portfolio_id || item.name || 'portfolio'}-${item.trade_date || item.signal_date || 'date'}-${item.code || index}-${priceLabel}`}>
+            <span className="font-medium text-foreground">{formatPortfolioTrackingReason(item)}</span>
+            {item.message ? <span className="text-foreground-dim">：{item.message}</span> : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 export function CompanyProfilesAdminPanel({ onUnauthorized }) {
   const [loading, setLoading] = useState(false)
   const [notice, setNotice] = useState('')
@@ -2206,11 +2236,39 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
                 ))}
               </div>
               {startDatePreview.blocking_reasons?.length ? (
-                <ul className="mt-2 list-disc space-y-1 pl-5">
-                  {startDatePreview.blocking_reasons.map((reason, index) => (
-                    <li key={`${reason.code}-${index}`}>{reason.message}</li>
-                  ))}
-                </ul>
+                <div className="mt-3 space-y-3">
+                  {startDatePreview.blocking_reasons.map((reason, index) => {
+                    const relatedPortfolio = (startDatePreview.portfolios || []).find((item) => item.portfolio_id === reason.portfolio_id)
+                    return (
+                      <div key={`${reason.code}-${index}`} className="rounded-lg border border-border bg-card px-3 py-2 text-foreground-muted">
+                        <div className="font-medium text-foreground">{reason.message}</div>
+                        {relatedPortfolio ? (
+                          <div className="mt-1 space-y-1 text-[11px]">
+                            <div>
+                              组合：{relatedPortfolio.name}（{relatedPortfolio.exchange === 'HKEX' ? '港股' : 'A股'}）
+                              {relatedPortfolio.required_count ? ` · 要求 ${relatedPortfolio.required_count} 只` : ''}
+                              {Number.isFinite(relatedPortfolio.selected_count) ? ` · 实际 ${relatedPortfolio.selected_count} 只` : ''}
+                            </div>
+                            {relatedPortfolio.first_entry_trade_date ? (
+                              <div>首次建仓日：{relatedPortfolio.first_entry_trade_date}</div>
+                            ) : null}
+                            {relatedPortfolio.first_valuation_trade_date ? (
+                              <div>首次估值日：{relatedPortfolio.first_valuation_trade_date}</div>
+                            ) : null}
+                            {relatedPortfolio.primary_close_miss_count > 0 || relatedPortfolio.fallback_close_hit_count > 0 ? (
+                              <div>
+                                收盘价检查：主表缺失 {relatedPortfolio.primary_close_miss_count || 0} 条
+                                {` · fallback 命中 ${relatedPortfolio.fallback_close_hit_count || 0} 条`}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {reason.code === 'missing_open_price' ? renderMissingPriceItems(relatedPortfolio?.missing_open_items, '开盘价') : null}
+                        {reason.code === 'missing_close_price' ? renderMissingPriceItems(relatedPortfolio?.missing_close_items, '收盘价') : null}
+                      </div>
+                    )
+                  })}
+                </div>
               ) : null}
             </div>
           ) : null}

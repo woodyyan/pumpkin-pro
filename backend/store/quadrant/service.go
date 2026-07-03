@@ -17,6 +17,18 @@ import (
 // Implemented by the live-store module; returns 0 if unavailable.
 type PriceResolver func(ctx context.Context, code string, exchange string, tradeDate string) float64
 
+// PriceLookupResult carries both the resolved close price and the actual trade
+// date that price belongs to. Callers that need batch-exact prices must require
+// TradeDate to match the batch source_trade_date instead of silently accepting a
+// previous close.
+type PriceLookupResult struct {
+	ClosePrice float64
+	TradeDate  string
+}
+
+// PriceLookupResolver resolves a stock's closing price and its exact trade date.
+type PriceLookupResolver func(ctx context.Context, code string, exchange string, tradeDate string) PriceLookupResult
+
 // OpenPriceResolver resolves a stock's opening price for an exact trade date.
 // It must return the 09:25 call-auction open (day-line Open) for the given date,
 // or 0 if unavailable. Used by the admin repair job to backfill missing entry
@@ -29,7 +41,8 @@ type TradeDateResolver func(ctx context.Context, exchange string, computedAt tim
 // Service provides business logic for quadrant scores.
 type Service struct {
 	repo                *Repository
-	priceResolver       PriceResolver     // optional, for snapshot close_price
+	priceResolver       PriceResolver // optional, for snapshot close_price
+	priceLookupResolver PriceLookupResolver
 	openPriceResolver   OpenPriceResolver // optional, for entry open price backfill
 	tradeDateResolver   TradeDateResolver // optional, for source_trade_date
 	worker              *Worker           // optional, injected for manual trigger
@@ -45,6 +58,13 @@ func NewService(repo *Repository) *Service {
 // SetPriceResolver injects the price resolution callback (called during init).
 func (s *Service) SetPriceResolver(r PriceResolver) {
 	s.priceResolver = r
+}
+
+// SetPriceLookupResolver injects a price resolver that returns the actual
+// trade date of the resolved price. It is used by ranking snapshot persistence
+// to avoid treating stale per-stock cache prices as current batch prices.
+func (s *Service) SetPriceLookupResolver(r PriceLookupResolver) {
+	s.priceLookupResolver = r
 }
 
 // SetOpenPriceResolver injects the open-price resolver used by the admin repair
@@ -111,6 +131,38 @@ func priceHintUsableForSnapshot(hint snapshotPriceHint, snapshotDate string) (fl
 		return 0, ""
 	}
 	return hint.ClosePrice, tradeDate
+}
+
+func strictPriceHintForTradeDate(hint snapshotPriceHint, tradeDate string) (float64, string) {
+	tradeDate = normalizeSourceTradeDate(tradeDate)
+	if tradeDate == "" || hint.ClosePrice <= 0 {
+		return 0, ""
+	}
+	hintTradeDate := validPriceTradeDate(hint.TradeDate)
+	if hintTradeDate != tradeDate {
+		return 0, ""
+	}
+	return hint.ClosePrice, hintTradeDate
+}
+
+func (s *Service) resolveStrictClosePrice(ctx context.Context, code string, exchange string, tradeDate string) (float64, string) {
+	tradeDate = normalizeSourceTradeDate(tradeDate)
+	if tradeDate == "" {
+		return 0, ""
+	}
+	if s.priceLookupResolver != nil {
+		lookup := s.priceLookupResolver(ctx, code, exchange, tradeDate)
+		if lookup.ClosePrice > 0 && validPriceTradeDate(lookup.TradeDate) == tradeDate {
+			return lookup.ClosePrice, tradeDate
+		}
+	}
+	if s.priceResolver != nil {
+		closePrice := s.priceResolver(ctx, code, exchange, tradeDate)
+		if closePrice > 0 {
+			return closePrice, tradeDate
+		}
+	}
+	return 0, ""
 }
 
 func recentSnapshotRepairFromDate(snapshotDate string) string {
@@ -510,6 +562,23 @@ func detectExchange(items []BulkSaveItem) string {
 	return "SZSE" // default fallback
 }
 
+func detectExchangeFromRecords(records []QuadrantScoreRecord) string {
+	for _, it := range records {
+		ex := strings.ToUpper(strings.TrimSpace(it.Exchange))
+		switch ex {
+		case "HKEX":
+			return "HKEX"
+		case "SSE", "SZSE":
+			return "ASHARE"
+		case "":
+			continue
+		default:
+			return ex
+		}
+	}
+	return "ASHARE"
+}
+
 // mustMarshal JSON-encodes a value; returns "{}" on error (never panics).
 func mustMarshal(v any) string {
 	b, _ := json.Marshal(v)
@@ -734,19 +803,30 @@ func (s *Service) saveRankingSnapshotsBestEffortWithHints(ctx context.Context, r
 
 	now := time.Now().UTC()
 	dateStr := rankingSnapshotDate(computedAt)
+	sourceTradeDate := collectLatestSourceTradeDate(selectedRecords)
+	if sourceTradeDate == "" {
+		sourceTradeDate = s.resolveSourceTradeDate(ctx, detectExchangeFromRecords(selectedRecords), computedAt, priceHints)
+	}
+	if sourceTradeDate == "" {
+		sourceTradeDate = dateStr
+	}
 	snaps := make([]RankingSnapshot, 0, len(selectedRecords))
 	missingPrices := 0
+	staleHintCount := 0
+	fallbackPriceCount := 0
 	for i, r := range selectedRecords {
 		closePrice := 0.0
 		priceTradeDate := ""
 		if hint, ok := priceHints[snapshotPriceHintKey(r.Code, r.Exchange)]; ok && hint.ClosePrice > 0 {
-			closePrice = hint.ClosePrice
-			priceTradeDate = hint.TradeDate
+			closePrice, priceTradeDate = strictPriceHintForTradeDate(hint, sourceTradeDate)
+			if closePrice <= 0 {
+				staleHintCount++
+			}
 		}
-		if closePrice <= 0 && s.priceResolver != nil {
-			closePrice = s.priceResolver(ctx, r.Code, r.Exchange, dateStr)
+		if closePrice <= 0 {
+			closePrice, priceTradeDate = s.resolveStrictClosePrice(ctx, r.Code, r.Exchange, sourceTradeDate)
 			if closePrice > 0 {
-				priceTradeDate = dateStr
+				fallbackPriceCount++
 			}
 		}
 		if closePrice <= 0 {
@@ -769,7 +849,7 @@ func (s *Service) saveRankingSnapshotsBestEffortWithHints(ctx context.Context, r
 		fmt.Printf("[quadrant] WARNING: failed to save ranking snapshots: %v\n", err)
 		return
 	}
-	log.Printf("[quadrant] ranking snapshots saved: date=%s count=%d missing_close_price=%d", dateStr, len(snaps), missingPrices)
+	log.Printf("[quadrant] ranking snapshots saved: date=%s source_trade_date=%s count=%d missing_close_price=%d stale_hint=%d fallback_price=%d", dateStr, sourceTradeDate, len(snaps), missingPrices, staleHintCount, fallbackPriceCount)
 	s.repairRecentMissingSnapshotPricesBestEffort(ctx, selectedRecords, dateStr, priceHints)
 }
 

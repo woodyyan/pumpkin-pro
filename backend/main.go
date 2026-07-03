@@ -107,12 +107,19 @@ func newQuadrantRealtimeQuoteFetcher(marketClient *live.MarketClient) quadrant.R
 
 func newQuadrantPriceResolver(liveRepo *live.Repository) quadrant.PriceResolver {
 	return func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
+		lookup := newQuadrantPriceLookupResolver(liveRepo)(ctx, code, exchange, tradeDate)
+		return lookup.ClosePrice
+	}
+}
+
+func newQuadrantPriceLookupResolver(liveRepo *live.Repository) quadrant.PriceLookupResolver {
+	return func(ctx context.Context, code string, exchange string, tradeDate string) quadrant.PriceLookupResult {
 		if liveRepo == nil || strings.TrimSpace(tradeDate) == "" {
-			return 0
+			return quadrant.PriceLookupResult{}
 		}
 		symbol := buildQuadrantSnapshotSymbol(code, exchange)
 		if symbol == "" {
-			return 0
+			return quadrant.PriceLookupResult{}
 		}
 		for _, candidateDate := range quadrantSnapshotTradeDates(tradeDate, exchange) {
 			record, err := liveRepo.GetClosingSnapshot(ctx, symbol, candidateDate)
@@ -124,10 +131,10 @@ func newQuadrantPriceResolver(liveRepo *live.Repository) quadrant.PriceResolver 
 				continue
 			}
 			if snapshot.LastPrice > 0 {
-				return snapshot.LastPrice
+				return quadrant.PriceLookupResult{ClosePrice: snapshot.LastPrice, TradeDate: candidateDate}
 			}
 		}
-		return 0
+		return quadrant.PriceLookupResult{}
 	}
 }
 
@@ -4074,6 +4081,7 @@ func main() {
 	quadrantRepo := quadrant.NewRepository(storeInstance.DB)
 	quadrantService := quadrant.NewService(quadrantRepo)
 	quadrantService.SetPriceResolver(newQuadrantPriceResolver(liveRepo))
+	quadrantService.SetPriceLookupResolver(newQuadrantPriceLookupResolver(liveRepo))
 	quadrantService.SetOpenPriceResolver(newQuadrantOpenPriceResolver(liveMarketClient))
 	quadrantService.SetTradeDateResolver(newQuadrantTradeDateResolver(liveRepo, liveMarketClient))
 	quadrantWorker := quadrant.NewWorker(quadrantService, quadrant.WorkerConfig{

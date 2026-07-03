@@ -671,6 +671,38 @@ def _latest_cached_close(cache: DailyBarCache, code: str) -> Tuple[float, str]:
     return 0.0, ""
 
 
+def _build_price_trade_date_coverage(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Summarise per-stock close-price freshness for compute reports."""
+    by_date: Dict[str, int] = {}
+    missing_count = 0
+    latest_date = ""
+    for item in items or []:
+        trade_date = str(item.get("price_trade_date", "") or "")
+        close_price = item.get("close_price", 0) or 0
+        try:
+            close_price = float(close_price)
+        except (TypeError, ValueError):
+            close_price = 0.0
+        if not trade_date or close_price <= 0:
+            missing_count += 1
+            continue
+        by_date[trade_date] = by_date.get(trade_date, 0) + 1
+        if not latest_date or trade_date > latest_date:
+            latest_date = trade_date
+
+    stale_count = 0
+    for trade_date, count in by_date.items():
+        if latest_date and trade_date < latest_date:
+            stale_count += count
+
+    return {
+        "latest_trade_date": latest_date,
+        "by_trade_date": dict(sorted(by_date.items(), reverse=True)),
+        "stale_price_count": stale_count,
+        "missing_price_count": missing_count,
+    }
+
+
 def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
     result: Dict[str, float] = {
         "std_20d": np.nan,
@@ -1163,6 +1195,7 @@ def compute_all_quadrant_scores(
             "exchange": "ASHARE",
             "duration_seconds": round(elapsed, 1),
             "stock_count": len(result_items),
+            "price_trade_date_coverage": _build_price_trade_date_coverage(result_items),
             "daily_bars": {
                 "success": success_count,
                 "failed": len(failed_codes),
@@ -1558,6 +1591,7 @@ def compute_hk_quadrant_scores(
         "exchange": "HKEX",
         "duration_seconds": round(elapsed, 1),
         "stock_count": len(result_items),
+        "price_trade_date_coverage": _build_price_trade_date_coverage(result_items),
         "daily_bars": {
             "success": success_count,
             "failed": len(failed_codes),

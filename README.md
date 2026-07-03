@@ -138,16 +138,22 @@ echo "$TCR_PASSWORD" | docker login ccr.ccs.tencentyun.com -u <tcr-username> --p
 
 #### 本地镜像发布脚本（Phase 2）
 
-仓库已提供本地发布入口 `ops/local/release.sh`，用于先在本机完成镜像构建，并按统一 tag 推送到 TCR。Phase 2 默认仍采用串行构建，但已经支持按服务选择发布。
+仓库已提供本地发布入口 `ops/local/release.sh`，用于先在本机完成镜像构建，并按统一 tag 推送到 TCR。Phase 2 默认仍采用串行构建，但已经支持按服务选择发布，并对 `backend` 拆分为 `base image + app image` 两层结构。
+
+其中：
+
+- `backend/Dockerfile.base`：构建后端基础镜像 `pumpkin-base:1.0`
+- `backend/Dockerfile`：基于 `pumpkin-base:1.0` 构建业务镜像 `pumpkin-pro-backend:<tag>`
+- `backend/factorlab-requirements.txt`：沉淀后端稳定 Python 依赖，降低业务镜像构建成本
 
 常用命令：
 
 ```bash
-# 1) 先做 dry-run，检查参数、tag、镜像名、manifest 输出
+# 1) 先做 dry-run，检查参数、tag、builder、基础镜像与 manifest 输出
 sh ops/local/release.sh --services backend --build-only --dry-run
 
-# 2) 只构建本地 backend 镜像，不 push
-sh ops/local/release.sh --services backend --build-only
+# 2) 强制先构建 backend 基础镜像，再构建 backend 应用镜像
+sh ops/local/release.sh --services backend --build-only --build-base
 
 # 3) 构建并 push backend + frontend 到 TCR
 export TCR_USERNAME="<your-tcr-username>"
@@ -165,14 +171,24 @@ sh ops/local/release.sh --all --push
 - 默认 tag 规则：`release-时间-shortsha`
 - 默认 registry：`ccr.ccs.tencentyun.com`
 - 默认 namespace：`pumpkin-pro`
+- 默认 builder：`default`
 - manifest 输出目录：`.release/manifests/<tag>.json`
 - 当前阶段支持 `--build-only`、`--push`、`--dry-run`、`--services`、`--all`
+- 当前阶段支持 `--builder` 显式固定 buildx builder
+- 当前阶段支持 `--build-base` 强制重建基础镜像，支持 `--skip-base-build` 跳过自动基础镜像构建
 - 当前阶段 `--parallel` 仅保留参数，不启用并行构建
+
+backend 基础镜像策略：
+
+- 默认基础镜像名：`ccr.ccs.tencentyun.com/<namespace>/pumpkin-base:1.0`
+- 当构建 `backend` 且本地不存在该基础镜像时，脚本会自动先构建基础镜像
+- 如果你想显式重建基础镜像，使用 `--build-base`
+- 如果你已提前准备好基础镜像并希望跳过自动构建，使用 `--skip-base-build`
 
 建议测试顺序：
 
-1. 先执行 `--build-only --dry-run`，确认镜像名、tag、manifest 路径符合预期
-2. 再执行 `--build-only`，确认本地镜像可构建
+1. 先执行 `--build-only --dry-run`，确认镜像名、tag、builder、manifest 路径符合预期
+2. 再执行 `--build-only --build-base`，确认 backend base image 与 app image 都能成功构建
 3. 最后执行 `--push`，验证 TCR 登录与上传
 
 如果你已经提前 `docker login` 过 TCR，脚本也支持复用现有登录态；否则请通过 `TCR_USERNAME` / `TCR_PASSWORD` 或同名命令参数显式传入。

@@ -348,7 +348,7 @@ func (s *Service) computeAndPersistSimPortfolioDay(ctx context.Context, definiti
 		if openPrice <= 0 {
 			return fmt.Errorf("missing open price for %s on %s", item.Code, tradeDate)
 		}
-		closePrice, closeErr := s.repo.GetClosePriceByTradeDate(ctx, item.Code, item.Exchange, tradeDate)
+		closePrice, closeErr := s.repo.GetClosePriceByTradeDate(ctx, definition.ID, item.Code, item.Exchange, tradeDate)
 		if closeErr != nil {
 			return closeErr
 		}
@@ -726,6 +726,7 @@ func (s *Service) SyncSimPortfolios(ctx context.Context) (*SimPortfolioSyncRespo
 	defer s.simPortfolioMu.Unlock()
 	// Auto-backfill missing open prices before syncing fact tables.
 	_ = s.backfillSimPortfolioOpenPrices(ctx, "", "", true)
+	_ = s.backfillSimPortfolioClosePrices(ctx, "", "", true, "auto_post_sync")
 	return s.syncSimPortfolios(ctx)
 }
 
@@ -749,6 +750,8 @@ func (s *Service) BackfillSimPortfolioOpenPrices(ctx context.Context, portfolioI
 func (s *Service) backfillSimPortfolioOpenPrices(ctx context.Context, portfolioID string, exchange string, latestOnly bool) *SimPortfolioBackfillOpenPriceResponse {
 	resp := &SimPortfolioBackfillOpenPriceResponse{
 		OK:                 true,
+		PriceType:          "open",
+		TriggerType:        "manual",
 		PortfolioSummaries: []SimPortfolioBackfillSummary{},
 	}
 	if s.openPriceResolver == nil {
@@ -773,6 +776,9 @@ func (s *Service) backfillSimPortfolioOpenPrices(ctx context.Context, portfolioI
 			continue
 		}
 		summary := s.backfillOpenPricesForDefinition(ctx, definition, latestOnly)
+		summary.PortfolioID = definition.ID
+		summary.Name = definition.Name
+		summary.Exchange = definition.Exchange
 		resp.PortfolioSummaries = append(resp.PortfolioSummaries, summary)
 		totalSummary.ScannedCount += summary.ScannedCount
 		totalSummary.FilledCount += summary.FilledCount
@@ -802,7 +808,6 @@ func (s *Service) backfillOpenPricesForDefinition(ctx context.Context, definitio
 		return summary
 	}
 
-	// Filter rows for this definition.
 	var targetRows []MissingOpenPriceRow
 	for _, row := range missingRows {
 		if row.DefinitionID != definition.ID {
@@ -812,7 +817,6 @@ func (s *Service) backfillOpenPricesForDefinition(ctx context.Context, definitio
 	}
 
 	if latestOnly && len(targetRows) > 0 {
-		// Find the latest snapshot date among missing rows.
 		latestDate := ""
 		for _, row := range targetRows {
 			if row.SnapshotDate > latestDate {
@@ -845,6 +849,128 @@ func (s *Service) backfillOpenPricesForDefinition(ctx context.Context, definitio
 			continue
 		}
 		summary.FilledCount++
+	}
+	return summary
+}
+
+func (s *Service) BackfillSimPortfolioClosePrices(ctx context.Context, portfolioID string, exchange string, latestOnly bool) (*SimPortfolioBackfillClosePriceResponse, error) {
+	s.simPortfolioMu.Lock()
+	defer s.simPortfolioMu.Unlock()
+	resp := s.backfillSimPortfolioClosePrices(ctx, portfolioID, exchange, latestOnly, "manual")
+	return resp, nil
+}
+
+func (s *Service) backfillSimPortfolioClosePrices(ctx context.Context, portfolioID string, exchange string, latestOnly bool, triggerType string) *SimPortfolioBackfillClosePriceResponse {
+	resp := &SimPortfolioBackfillClosePriceResponse{
+		OK:                 true,
+		PriceType:          "close",
+		TriggerType:        strings.TrimSpace(triggerType),
+		PortfolioSummaries: []SimPortfolioBackfillSummary{},
+	}
+	if s.priceResolver == nil {
+		resp.OK = false
+		resp.Message = "close price resolver not configured"
+		return resp
+	}
+	definitions, err := s.repo.ListActiveRankingPortfolioDefinitions(ctx)
+	if err != nil {
+		resp.OK = false
+		resp.Message = err.Error()
+		return resp
+	}
+	for _, definition := range definitions {
+		if strings.TrimSpace(portfolioID) != "" && definition.ID != strings.TrimSpace(portfolioID) {
+			continue
+		}
+		if strings.TrimSpace(exchange) != "" && !strings.EqualFold(strings.TrimSpace(definition.Exchange), strings.TrimSpace(exchange)) {
+			continue
+		}
+		summary := s.backfillClosePricesForDefinition(ctx, definition, latestOnly)
+		summary.PortfolioID = definition.ID
+		summary.Name = definition.Name
+		summary.Exchange = definition.Exchange
+		resp.PortfolioSummaries = append(resp.PortfolioSummaries, summary)
+		resp.Summary.ScannedCount += summary.ScannedCount
+		resp.Summary.FilledCount += summary.FilledCount
+		resp.Summary.StillPendingCount += summary.StillPendingCount
+		resp.Summary.FailedCount += summary.FailedCount
+		resp.Summary.MissingPrimaryCount += summary.MissingPrimaryCount
+		resp.Summary.FallbackHitCount += summary.FallbackHitCount
+		resp.Summary.AlreadyPresentCount += summary.AlreadyPresentCount
+	}
+	if resp.Summary.FilledCount > 0 {
+		resp.Message = fmt.Sprintf("已补齐 %d 条收盘价，仍有 %d 条待补。", resp.Summary.FilledCount, resp.Summary.StillPendingCount)
+	} else if resp.Summary.StillPendingCount > 0 {
+		resp.Message = fmt.Sprintf("仍有 %d 条收盘价待补。", resp.Summary.StillPendingCount)
+	} else {
+		resp.Message = "暂无缺失的收盘价。"
+	}
+	return resp
+}
+
+func (s *Service) backfillClosePricesForDefinition(ctx context.Context, definition RankingPortfolioDefinition, latestOnly bool) SimPortfolioBackfillSummary {
+	summary := SimPortfolioBackfillSummary{}
+	dates, err := s.repo.ListRankingSnapshotDatesByExchangeRange(ctx, definition.Exchange, "", "")
+	if err != nil {
+		summary.FailedCount = -1
+		return summary
+	}
+	if len(dates) < 2 {
+		return summary
+	}
+	startIndex := 0
+	if latestOnly && len(dates) > 1 {
+		startIndex = len(dates) - 2
+	}
+	for index := startIndex; index < len(dates)-1; index++ {
+		signalDate := dates[index]
+		tradeDate := dates[index+1]
+		items, _, err := s.selectSimPortfolioSignal(ctx, definition, signalDate)
+		if err != nil {
+			summary.FailedCount++
+			continue
+		}
+		for _, item := range items {
+			summary.ScannedCount++
+			resolved, err := s.repo.ResolveClosePriceByTradeDate(ctx, definition.ID, item.Code, item.Exchange, tradeDate)
+			if err != nil {
+				summary.FailedCount++
+				continue
+			}
+			if resolved.Price > 0 {
+				if resolved.FallbackMatched {
+					summary.FallbackHitCount++
+				} else {
+					summary.AlreadyPresentCount++
+				}
+				continue
+			}
+			if resolved.PrimaryMissing {
+				summary.MissingPrimaryCount++
+			}
+			closePrice := s.priceResolver(ctx, item.Code, item.Exchange, tradeDate)
+			if closePrice <= 0 {
+				summary.StillPendingCount++
+				continue
+			}
+			row := RankingSnapshot{
+				Code:           item.Code,
+				Name:           item.Name,
+				Exchange:       item.Exchange,
+				Rank:           item.Rank,
+				Opportunity:    0,
+				Risk:           0,
+				ClosePrice:     closePrice,
+				PriceTradeDate: tradeDate,
+				SnapshotDate:   tradeDate,
+				CreatedAt:      time.Now().UTC(),
+			}
+			if err := s.repo.UpsertSnapshot(ctx, row); err != nil {
+				summary.FailedCount++
+				continue
+			}
+			summary.FilledCount++
+		}
 	}
 	return summary
 }
@@ -1355,8 +1481,9 @@ func (s *Service) VerifySimPortfolios(ctx context.Context, portfolioID string) (
 func (s *Service) RecomputeSimPortfolios(ctx context.Context, portfolioID string, fromDate string, toDate string, reset bool) error {
 	s.simPortfolioMu.Lock()
 	defer s.simPortfolioMu.Unlock()
-	// Auto-backfill missing open prices before recomputing fact tables.
+	// Auto-backfill missing open/close prices before recomputing fact tables.
 	_ = s.backfillSimPortfolioOpenPrices(ctx, portfolioID, "", false)
+	_ = s.backfillSimPortfolioClosePrices(ctx, portfolioID, "", false, "auto_recompute")
 	definitions, err := s.repo.ListActiveRankingPortfolioDefinitions(ctx)
 	if err != nil {
 		return err

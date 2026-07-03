@@ -363,13 +363,40 @@ func (svc *SimPortfolioTrackingStartService) preview(ctx context.Context, startS
 					}
 					if openPrice <= 0 {
 						portfolio.MissingOpenPriceCount++
+						portfolio.MissingOpenItems = append(portfolio.MissingOpenItems, SimPortfolioTrackingStartMissingPriceItem{
+							PortfolioID: definition.ID,
+							Name:        definition.Name,
+							Exchange:    definition.Exchange,
+							SignalDate:  checkSignalDate,
+							TradeDate:   checkTradeDate,
+							Code:        item.Code,
+							PriceType:   "open",
+							Message:     fmt.Sprintf("%s 在 %s 缺少开盘价", item.Code, checkTradeDate),
+						})
 					}
-					closePrice, err := svc.service.repo.GetClosePriceByTradeDate(ctx, item.Code, item.Exchange, checkTradeDate)
+					closeResolved, err := svc.service.repo.ResolveClosePriceByTradeDate(ctx, definition.ID, item.Code, item.Exchange, checkTradeDate)
 					if err != nil {
 						return nil, err
 					}
-					if closePrice <= 0 {
+					if closeResolved.PrimaryMissing {
+						portfolio.PrimaryCloseMissCount++
+					}
+					if closeResolved.FallbackMatched {
+						portfolio.FallbackCloseHitCount++
+					}
+					if closeResolved.Price <= 0 {
 						portfolio.MissingClosePriceCount++
+						portfolio.MissingCloseItems = append(portfolio.MissingCloseItems, SimPortfolioTrackingStartMissingPriceItem{
+							PortfolioID: definition.ID,
+							Name:        definition.Name,
+							Exchange:    definition.Exchange,
+							SignalDate:  checkSignalDate,
+							TradeDate:   checkTradeDate,
+							Code:        item.Code,
+							PriceType:   "close",
+							Source:      closeResolved.Source,
+							Message:     fmt.Sprintf("%s 在 %s 缺少收盘价", item.Code, checkTradeDate),
+						})
 					}
 				}
 			}

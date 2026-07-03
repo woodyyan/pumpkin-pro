@@ -78,28 +78,66 @@ func (r *Repository) GetRankingPortfolioSelectionOpenPrice(ctx context.Context, 
 	return row.OpenPrice, strings.TrimSpace(row.EntryTradeDate), nil
 }
 
-func (r *Repository) GetClosePriceByTradeDate(ctx context.Context, code string, exchange string, tradeDate string) (float64, error) {
+type SimPortfolioResolvedClosePrice struct {
+	Price           float64
+	Source          string
+	PrimaryMissing  bool
+	FallbackMatched bool
+}
+
+func (r *Repository) ResolveClosePriceByTradeDate(ctx context.Context, definitionID string, code string, exchange string, tradeDate string) (SimPortfolioResolvedClosePrice, error) {
 	code = strings.TrimSpace(code)
 	tradeDate = strings.TrimSpace(tradeDate)
+	definitionID = strings.TrimSpace(definitionID)
 	if code == "" || tradeDate == "" {
-		return 0, nil
+		return SimPortfolioResolvedClosePrice{}, nil
 	}
-	var row RankingSnapshot
-	query := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
+	normalizedExchange := strings.ToUpper(strings.TrimSpace(exchange))
+
+	var snapshotRow RankingSnapshot
+	snapshotQuery := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
 		Select("close_price").
 		Where("code = ? AND close_price > ? AND ((price_trade_date = ? AND price_trade_date != '') OR snapshot_date = ?)", code, 0, tradeDate, tradeDate).
 		Order("CASE WHEN price_trade_date = '" + tradeDate + "' THEN 0 ELSE 1 END, id DESC")
-	normalizedExchange := strings.ToUpper(strings.TrimSpace(exchange))
 	if normalizedExchange != "" {
-		query = query.Where("exchange = ?", normalizedExchange)
+		snapshotQuery = snapshotQuery.Where("exchange = ?", normalizedExchange)
 	}
-	if err := query.First(&row).Error; err != nil {
+	if err := snapshotQuery.First(&snapshotRow).Error; err == nil {
+		return SimPortfolioResolvedClosePrice{Price: snapshotRow.ClosePrice, Source: "quadrant_ranking_snapshots"}, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return SimPortfolioResolvedClosePrice{}, err
+	}
+
+	resolved := SimPortfolioResolvedClosePrice{PrimaryMissing: true}
+	var marketRow RankingPortfolioMarketPrice
+	marketQuery := r.db.WithContext(ctx).Model(&RankingPortfolioMarketPrice{}).
+		Select("close_price").
+		Where("code = ? AND close_price > ? AND ((price_trade_date = ? AND price_trade_date != '') OR snapshot_date = ?)", code, 0, tradeDate, tradeDate).
+		Order("CASE WHEN price_trade_date = '" + tradeDate + "' THEN 0 ELSE 1 END, id DESC")
+	if definitionID != "" {
+		marketQuery = marketQuery.Where("definition_id = ?", definitionID)
+	}
+	if normalizedExchange != "" {
+		marketQuery = marketQuery.Where("exchange = ?", normalizedExchange)
+	}
+	if err := marketQuery.First(&marketRow).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return 0, nil
+			return resolved, nil
 		}
+		return SimPortfolioResolvedClosePrice{}, err
+	}
+	resolved.Price = marketRow.ClosePrice
+	resolved.Source = "quadrant_ranking_portfolio_market_prices"
+	resolved.FallbackMatched = true
+	return resolved, nil
+}
+
+func (r *Repository) GetClosePriceByTradeDate(ctx context.Context, definitionID string, code string, exchange string, tradeDate string) (float64, error) {
+	resolved, err := r.ResolveClosePriceByTradeDate(ctx, definitionID, code, exchange, tradeDate)
+	if err != nil {
 		return 0, err
 	}
-	return row.ClosePrice, nil
+	return resolved.Price, nil
 }
 
 func (r *Repository) GetLatestSimPortfolioDaily(ctx context.Context, portfolioID string) (*SimPortfolioDaily, error) {

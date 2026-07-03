@@ -1876,6 +1876,27 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
     }
   }
 
+  const handlePortfolioTrackingBackfillClosePrices = async () => {
+    setBackfillingOpenPrices(true)
+    setActionError('')
+    setPortfolioActionNotice('')
+    try {
+      const resp = await adminFetch('/api/admin/portfolio-tracking/backfill-close-prices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latest_only: true }),
+      })
+      setSyncPortfolioResult(null)
+      setPortfolioActionNotice(resp?.message || '收盘价补齐完成。')
+      await resource.refresh()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '补齐收盘价失败')
+      if (message) setActionError(message)
+    } finally {
+      setBackfillingOpenPrices(false)
+    }
+  }
+
   const handlePortfolioTrackingVerify = async () => {
     setVerifyingPortfolio(true)
     setActionError('')
@@ -2062,6 +2083,13 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
               {backfillingOpenPrices ? '补齐中…' : '补齐建仓开盘价'}
             </button>
             <button
+              onClick={handlePortfolioTrackingBackfillClosePrices}
+              disabled={backfillingOpenPrices || syncingPortfolio || recomputingPortfolio}
+              className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {backfillingOpenPrices ? '补齐中…' : '补齐收盘价'}
+            </button>
+            <button
               onClick={handlePortfolioTrackingSync}
               disabled={syncingPortfolio || recomputingPortfolio || backfillingOpenPrices}
               className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
@@ -2105,7 +2133,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
         </div>
 
         <div className="mb-3 rounded-xl border border-dashed border-border bg-background px-4 py-3 text-xs leading-6 text-foreground-muted">
-          运维顺序：先设置全局开始信号日并预检；需要重启跟踪时执行「按该日期重置并重算 4 个组合」。日常维护再按补价 → 同步事实表 → 验证一致性处理；补价只补前置价格，不生成持仓。
+          运维顺序：先设置全局开始信号日并预检；需要重启跟踪时执行「按该日期重置并重算 4 个组合」。日常维护再按补齐开盘价 / 收盘价 → 同步事实表 → 验证一致性处理；补价只补前置价格，不生成持仓。
           这里选择的是榜单信号日 / 收盘日，不是买入日；系统会在下一交易日开盘价建仓。严格共同日期要求 A 股和港股当天都具备排行榜快照。
         </div>
 

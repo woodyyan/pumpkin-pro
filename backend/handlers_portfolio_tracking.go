@@ -165,11 +165,11 @@ func (a *appServer) handleAdminPortfolioTrackingReset(w http.ResponseWriter, r *
 	})
 }
 
-func (a *appServer) handleAdminPortfolioTrackingBackfillOpenPrices(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
-		return
-	}
+func (a *appServer) decodePortfolioTrackingBackfillRequest(r *http.Request) (struct {
+	PortfolioID string `json:"portfolio_id"`
+	Exchange    string `json:"exchange"`
+	LatestOnly  *bool  `json:"latest_only"`
+}, bool) {
 	var req struct {
 		PortfolioID string `json:"portfolio_id"`
 		Exchange    string `json:"exchange"`
@@ -182,7 +182,31 @@ func (a *appServer) handleAdminPortfolioTrackingBackfillOpenPrices(w http.Respon
 	if req.LatestOnly != nil {
 		latestOnly = *req.LatestOnly
 	}
+	req.LatestOnly = &latestOnly
+	return req, latestOnly
+}
+
+func (a *appServer) handleAdminPortfolioTrackingBackfillOpenPrices(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	req, latestOnly := a.decodePortfolioTrackingBackfillRequest(r)
 	resp, err := a.quadrantService.BackfillSimPortfolioOpenPrices(r.Context(), req.PortfolioID, req.Exchange, latestOnly)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *appServer) handleAdminPortfolioTrackingBackfillClosePrices(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	req, latestOnly := a.decodePortfolioTrackingBackfillRequest(r)
+	resp, err := a.quadrantService.BackfillSimPortfolioClosePrices(r.Context(), req.PortfolioID, req.Exchange, latestOnly)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

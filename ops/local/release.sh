@@ -20,6 +20,7 @@ DEFAULT_TAG_PREFIX="${RELEASE_TAG_PREFIX:-release}"
 DEFAULT_SHORT_SHA="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo nogit)"
 DEFAULT_TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 DEFAULT_RELEASE_TAG="${DEFAULT_TAG_PREFIX}-${DEFAULT_TIMESTAMP}-${DEFAULT_SHORT_SHA}"
+DEFAULT_BUILDER="${RELEASE_BUILDER:-$RELEASE_DEFAULT_BUILDER}"
 
 TAG=""
 SERVICES_ARG=""
@@ -28,6 +29,8 @@ DRY_RUN=0
 PARALLEL=1
 PUSH_LATEST=0
 VERIFY_LOCAL_IMAGE=1
+BUILD_BASE_MODE="auto"
+BUILDER="$DEFAULT_BUILDER"
 
 usage() {
   cat <<'EOF'
@@ -44,6 +47,9 @@ Options:
   --push                   Build and push images to TCR (default)
   --dry-run                Print resolved plan without executing docker commands
   --parallel <n>           Reserved execution concurrency, current phase runs serially
+  --builder <name>         Buildx builder to use. Default: release.config.sh -> default
+  --build-base             Force building required base images before service images
+  --skip-base-build        Skip auto-building base images even if not found locally
   --image-registry <host>  Override IMAGE_REGISTRY
   --image-namespace <ns>   Override IMAGE_NAMESPACE
   --image-platform <plat>  Override IMAGE_PLATFORM
@@ -55,6 +61,7 @@ Options:
 
 Examples:
   sh ops/local/release.sh --services backend --build-only
+  sh ops/local/release.sh --build-base --services backend --build-only
   sh ops/local/release.sh --tag release-20260702-213300-1aa251e --services backend,quant
   IMAGE_NAMESPACE=my-team sh ops/local/release.sh --all --push
 EOF
@@ -159,8 +166,42 @@ resolve_service_dockerfile() {
   printf '%s/%s' "$ROOT_DIR" "$relative_path"
 }
 
+resolve_base_repo() {
+  local service_name="$1"
+  local repo_name
+  repo_name="$(release_base_repo "$service_name")" || die "Unsupported base repo: $service_name"
+  printf '%s/%s/%s' "$IMAGE_REGISTRY" "$IMAGE_NAMESPACE" "$repo_name"
+}
+
+resolve_base_context() {
+  local service_name="$1"
+  local relative_path
+  relative_path="$(release_base_context "$service_name")" || die "Unsupported base context: $service_name"
+  printf '%s/%s' "$ROOT_DIR" "$relative_path"
+}
+
+resolve_base_dockerfile() {
+  local service_name="$1"
+  local relative_path
+  relative_path="$(release_base_dockerfile "$service_name")" || die "Unsupported base dockerfile: $service_name"
+  printf '%s/%s' "$ROOT_DIR" "$relative_path"
+}
+
+resolve_base_tag() {
+  local service_name="$1"
+  release_base_tag "$service_name" || die "Unsupported base tag: $service_name"
+}
+
 ensure_dirs() {
   mkdir -p "$MANIFEST_DIR" "$TMP_DIR"
+}
+
+ensure_builder_selected() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] validating builder ${BUILDER}"
+    return 0
+  fi
+  docker buildx inspect "$BUILDER" >/dev/null 2>&1 || die "Buildx builder not found: $BUILDER"
 }
 
 docker_login_if_needed() {
@@ -185,21 +226,22 @@ docker_login_if_needed() {
 
 write_manifest_header() {
   local manifest_path="$1"
-  local selected_json services_json
-  services_json=""
+  local services_json=""
+  local service
   for service in "${SELECTED_SERVICES[@]}"; do
     if [ -n "$services_json" ]; then
       services_json+=" ,"
     fi
     services_json+="\"${service}\""
   done
-  selected_json="[${services_json}]"
 
   cat > "$manifest_path" <<EOF
 {
   "release_id": "${TAG}",
   "tag": "${TAG}",
   "mode": "${MODE}",
+  "builder": "${BUILDER}",
+  "build_base_mode": "${BUILD_BASE_MODE}",
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "git": {
     "branch": "$(git -C "$ROOT_DIR" branch --show-current 2>/dev/null || echo unknown)",
@@ -209,7 +251,7 @@ write_manifest_header() {
   "image_registry": "${IMAGE_REGISTRY}",
   "image_namespace": "${IMAGE_NAMESPACE}",
   "image_platform": "${IMAGE_PLATFORM}",
-  "requested_services": ${selected_json},
+  "requested_services": [${services_json}],
   "services": [
 EOF
 }
@@ -253,6 +295,73 @@ finalize_manifest() {
 EOF
 }
 
+base_image_local_exists() {
+  local image_ref="$1"
+  docker image inspect "$image_ref" >/dev/null 2>&1
+}
+
+build_base_image() {
+  local service="$1"
+  local base_repo base_tag base_ref base_dockerfile base_context
+  base_repo="$(resolve_base_repo "$service")"
+  base_tag="$(resolve_base_tag "$service")"
+  base_ref="${base_repo}:${base_tag}"
+  base_dockerfile="$(resolve_base_dockerfile "$service")"
+  base_context="$(resolve_base_context "$service")"
+
+  log "Building base image for ${service} -> ${base_ref}"
+  local build_cmd=(docker buildx build --builder "$BUILDER" --load --platform "$IMAGE_PLATFORM" -f "$base_dockerfile" -t "$base_ref" "$base_context")
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '[release][dry-run]'
+    printf ' %q' "${build_cmd[@]}"
+    printf '\n'
+    return 0
+  fi
+
+  "${build_cmd[@]}"
+}
+
+ensure_required_base_images() {
+  local service base_repo base_tag base_ref
+  for service in "${SELECTED_SERVICES[@]}"; do
+    if [ "$service" != "backend" ]; then
+      continue
+    fi
+
+    base_repo="$(resolve_base_repo "$service")"
+    base_tag="$(resolve_base_tag "$service")"
+    base_ref="${base_repo}:${base_tag}"
+
+    case "$BUILD_BASE_MODE" in
+      always)
+        build_base_image "$service"
+        ;;
+      skip)
+        if [ "$DRY_RUN" -eq 1 ]; then
+          log "[dry-run] skipping base image auto-build for ${service} (${base_ref})"
+        elif ! base_image_local_exists "$base_ref"; then
+          warn "Base image ${base_ref} not found locally; backend build may pull or fail depending on registry access"
+        fi
+        ;;
+      auto)
+        if [ "$DRY_RUN" -eq 1 ]; then
+          log "[dry-run] auto-check base image ${base_ref}"
+          continue
+        fi
+        if ! base_image_local_exists "$base_ref"; then
+          build_base_image "$service"
+        else
+          log "Reusing local base image ${base_ref}"
+        fi
+        ;;
+      *)
+        die "Unsupported base build mode: $BUILD_BASE_MODE"
+        ;;
+    esac
+  done
+}
+
 build_service() {
   local service="$1"
   local repo image_ref latest_ref dockerfile context_dir
@@ -264,7 +373,10 @@ build_service() {
 
   log "Building ${service} -> ${image_ref}"
 
-  local build_cmd=(docker buildx build --load --platform "$IMAGE_PLATFORM" -f "$dockerfile" -t "$image_ref")
+  local build_cmd=(docker buildx build --builder "$BUILDER" --load --platform "$IMAGE_PLATFORM" -f "$dockerfile" -t "$image_ref")
+  if [ "$service" = "backend" ]; then
+    build_cmd+=(--build-arg "BACKEND_BASE_IMAGE=$(resolve_base_repo backend):$(resolve_base_tag backend)")
+  fi
   if [ "$PUSH_LATEST" -eq 1 ]; then
     build_cmd+=(-t "$latest_ref")
   fi
@@ -320,6 +432,8 @@ print_summary() {
   log "Release manifest written to ${manifest_path}"
   log "Tag: ${TAG}"
   log "Mode: ${MODE}"
+  log "Builder: ${BUILDER}"
+  log "Base image mode: ${BUILD_BASE_MODE}"
   log "Services: $(join_by ',' "${SELECTED_SERVICES[@]}")"
 }
 
@@ -361,6 +475,19 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || die "--parallel requires a value"
       PARALLEL="$2"
       shift 2
+      ;;
+    --builder)
+      [ "$#" -ge 2 ] || die "--builder requires a value"
+      BUILDER="$2"
+      shift 2
+      ;;
+    --build-base)
+      BUILD_BASE_MODE="always"
+      shift
+      ;;
+    --skip-base-build)
+      BUILD_BASE_MODE="skip"
+      shift
       ;;
     --image-registry)
       [ "$#" -ge 2 ] || die "--image-registry requires a value"
@@ -428,8 +555,10 @@ log "Resolved release plan"
 log "  registry : $IMAGE_REGISTRY"
 log "  namespace: $IMAGE_NAMESPACE"
 log "  platform : $IMAGE_PLATFORM"
+log "  builder  : $BUILDER"
 log "  tag      : $TAG"
 log "  mode     : $MODE"
+log "  base     : $BUILD_BASE_MODE"
 log "  services : $(join_by ',' "${SELECTED_SERVICES[@]}")"
 log "  manifest : $manifest_path"
 
@@ -437,7 +566,9 @@ if [ "$DRY_RUN" -eq 1 ]; then
   log "Dry-run mode enabled"
 fi
 
+ensure_builder_selected
 docker_login_if_needed
+ensure_required_base_images
 write_manifest_header "$manifest_path"
 
 comma=""

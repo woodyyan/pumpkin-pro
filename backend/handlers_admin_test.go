@@ -259,6 +259,57 @@ func quadrantSetupForAdminTest(t *testing.T) (*quadrant.Repository, func()) {
 	return quadrant.NewRepository(db), func() {}
 }
 
+func TestHandleAdminPortfolioTrackingBackfillClosePrices(t *testing.T) {
+	repo, cleanup := quadrantSetupForAdminTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	def := quadrant.RankingPortfolioDefinition{
+		ID:               "p1",
+		Code:             "p1",
+		Name:             "模拟组合A",
+		Exchange:         "ASHARE",
+		PortfolioVariant: "A",
+		MaxHoldings:      4,
+		SelectionRule:    "top4",
+		WeightingMethod:  "equal",
+		IsActive:         true,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := repo.DB().WithContext(ctx).Create(&def).Error; err != nil {
+		t.Fatalf("seed def: %v", err)
+	}
+	for _, date := range []string{"2026-06-01", "2026-06-02"} {
+		for i := 1; i <= 4; i++ {
+			if err := repo.UpsertSnapshot(ctx, quadrant.RankingSnapshot{Code: fmt.Sprintf("60000%d", i), Name: fmt.Sprintf("A%d", i), Exchange: "SSE", Rank: i, ClosePrice: 10, PriceTradeDate: date, SnapshotDate: date, CreatedAt: now}); err != nil {
+				t.Fatalf("seed snapshot: %v", err)
+			}
+		}
+	}
+	qsvc := quadrant.NewService(repo)
+	qsvc.SetPriceResolver(func(_ context.Context, _ string, _ string, tradeDate string) float64 {
+		if tradeDate == "2026-06-02" {
+			return 12.5
+		}
+		return 0
+	})
+	server := &appServer{quadrantService: qsvc}
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/portfolio-tracking/backfill-close-prices", strings.NewReader(`{"latest_only":true}`))
+	resp := httptest.NewRecorder()
+	server.handleAdminPortfolioTrackingBackfillClosePrices(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["price_type"] != "close" {
+		t.Fatalf("unexpected body: %+v", body)
+	}
+}
+
 func TestHandleAdminPortfolioTrackingStartDatePreview(t *testing.T) {
 	repo, cleanup := quadrantSetupForAdminTest(t)
 	defer cleanup()

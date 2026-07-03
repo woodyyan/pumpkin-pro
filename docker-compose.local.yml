@@ -27,6 +27,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       args:
+        # 本地构建默认使用 backend/Dockerfile 内置 base stage，避免依赖 TCR
+        # 预构建 base image 的平台 manifest；如需复现发布构建，可显式覆盖。
+        BACKEND_BASE_IMAGE: "${BACKEND_BASE_IMAGE:-backend-runtime-base}"
         GOPROXY: "${BACKEND_GOPROXY:-https://proxy.golang.org|https://goproxy.cn|direct}"
         GOSUMDB: "${BACKEND_GOSUMDB:-sum.golang.org}"
     ports:

@@ -204,13 +204,89 @@ func TestBackfillSimPortfolioOpenPrices_NoResolver(t *testing.T) {
 	def := seedSimPortfolioDefinition(t, repo)
 	seedSimPortfolioSnapshots(t, repo)
 
-	svc := NewService(repo) // no openPriceResolver set
+	svc := NewService(repo)
 	resp, err := svc.BackfillSimPortfolioOpenPrices(ctx, def.ID, "", true)
 	if err != nil {
 		t.Fatalf("BackfillSimPortfolioOpenPrices: %v", err)
 	}
 	if resp.OK {
 		t.Fatalf("expected OK=false when resolver not configured")
+	}
+}
+
+func TestResolveClosePriceByTradeDate_FallbacksToMarketPrices(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	def := seedSimPortfolioDefinition(t, repo)
+	now := time.Now().UTC()
+	row := RankingPortfolioMarketPrice{
+		DefinitionID:    def.ID,
+		SnapshotVersion: "2026-06-01",
+		SnapshotDate:    "2026-06-02",
+		Code:            "600001",
+		Exchange:        "SSE",
+		ClosePrice:      11.2,
+		PriceTradeDate:  "2026-06-02",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := repo.db.WithContext(ctx).Create(&row).Error; err != nil {
+		t.Fatalf("seed market close: %v", err)
+	}
+	resolved, err := repo.ResolveClosePriceByTradeDate(ctx, def.ID, "600001", "SSE", "2026-06-02")
+	if err != nil {
+		t.Fatalf("ResolveClosePriceByTradeDate: %v", err)
+	}
+	if resolved.Price != 11.2 || !resolved.FallbackMatched || resolved.Source != "quadrant_ranking_portfolio_market_prices" {
+		t.Fatalf("resolved = %+v", resolved)
+	}
+}
+
+func TestBackfillSimPortfolioClosePrices_UsesFallbackAndSkipsMissing(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	def := seedSimPortfolioDefinition(t, repo)
+	now := time.Now().UTC()
+	for _, row := range []RankingSnapshot{
+		{Code: "600001", Name: "A", Exchange: "SSE", Rank: 1, ClosePrice: 10, PriceTradeDate: "2026-06-01", SnapshotDate: "2026-06-01", CreatedAt: now},
+		{Code: "600002", Name: "B", Exchange: "SSE", Rank: 2, ClosePrice: 10, PriceTradeDate: "2026-06-01", SnapshotDate: "2026-06-01", CreatedAt: now},
+		{Code: "600003", Name: "C", Exchange: "SSE", Rank: 3, ClosePrice: 10, PriceTradeDate: "2026-06-01", SnapshotDate: "2026-06-01", CreatedAt: now},
+		{Code: "600004", Name: "D", Exchange: "SSE", Rank: 4, ClosePrice: 10, PriceTradeDate: "2026-06-01", SnapshotDate: "2026-06-01", CreatedAt: now},
+		{Code: "600001", Name: "A", Exchange: "SSE", Rank: 1, ClosePrice: 0, PriceTradeDate: "", SnapshotDate: "2026-06-02", CreatedAt: now},
+		{Code: "600002", Name: "B", Exchange: "SSE", Rank: 2, ClosePrice: 0, PriceTradeDate: "", SnapshotDate: "2026-06-02", CreatedAt: now},
+		{Code: "600003", Name: "C", Exchange: "SSE", Rank: 3, ClosePrice: 0, PriceTradeDate: "", SnapshotDate: "2026-06-02", CreatedAt: now},
+		{Code: "600004", Name: "D", Exchange: "SSE", Rank: 4, ClosePrice: 0, PriceTradeDate: "", SnapshotDate: "2026-06-02", CreatedAt: now},
+	} {
+		if err := repo.UpsertSnapshot(ctx, row); err != nil {
+			t.Fatalf("seed snapshot %s %s: %v", row.SnapshotDate, row.Code, err)
+		}
+	}
+	marketRow := RankingPortfolioMarketPrice{DefinitionID: def.ID, SnapshotVersion: "2026-06-01", SnapshotDate: "2026-06-02", Code: "600001", Exchange: "SSE", ClosePrice: 11.1, PriceTradeDate: "2026-06-02", CreatedAt: now, UpdatedAt: now}
+	if err := repo.db.WithContext(ctx).Create(&marketRow).Error; err != nil {
+		t.Fatalf("seed market close: %v", err)
+	}
+	svc := NewService(repo)
+	svc.SetPriceResolver(func(_ context.Context, code string, _ string, tradeDate string) float64 {
+		if tradeDate == "2026-06-02" && code == "600002" {
+			return 12.3
+		}
+		return 0
+	})
+	resp, err := svc.BackfillSimPortfolioClosePrices(ctx, def.ID, "", true)
+	if err != nil {
+		t.Fatalf("BackfillSimPortfolioClosePrices: %v", err)
+	}
+	if !resp.OK || resp.Summary.FilledCount != 1 || resp.Summary.FallbackHitCount != 1 || resp.Summary.StillPendingCount != 2 {
+		t.Fatalf("resp = %+v", resp)
+	}
+	resolved, err := repo.ResolveClosePriceByTradeDate(ctx, def.ID, "600002", "SSE", "2026-06-02")
+	if err != nil {
+		t.Fatalf("ResolveClosePriceByTradeDate after backfill: %v", err)
+	}
+	if resolved.Price != 12.3 || resolved.Source != "quadrant_ranking_snapshots" {
+		t.Fatalf("resolved after backfill = %+v", resolved)
 	}
 }
 

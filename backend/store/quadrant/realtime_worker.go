@@ -46,6 +46,8 @@ func defaultAShareRefreshPoints() []string {
 	}
 }
 
+const realtimeSecondOpenCheckPoint = "10:00"
+
 // defaultHKRefreshPoints lists the Beijing-time refresh points for HK (UTC+8).
 // 09:25 = call-auction open; intraday every half hour (incl. 12:00 before the
 // 12:00–13:00 lunch break); 16:30 = post-close delayed final refresh.
@@ -319,14 +321,20 @@ func (w *RealtimeWorker) RunOnce(ctx context.Context, scope string, at time.Time
 		return err
 	}
 	fillOpen := isOpenAuctionPoint(at)
+	secondPassFill := false
 	if fillOpen {
-		// At the 09:25 call auction, every fetched last price is the open price.
+		for i := range quotes {
+			quotes[i].IsOpen = true
+		}
+	}
+	if at.In(beijingLocation()).Format("15:04") == realtimeSecondOpenCheckPoint {
+		secondPassFill = true
 		for i := range quotes {
 			quotes[i].IsOpen = true
 		}
 	}
 	w.markRun(scope, at)
-	return w.service.persistRealtimeQuotes(ctx, scope, quotes, fillOpen, at)
+	return w.service.persistRealtimeQuotes(ctx, scope, quotes, fillOpen || secondPassFill, at)
 }
 
 func (w *RealtimeWorker) markRun(scope string, at time.Time) {

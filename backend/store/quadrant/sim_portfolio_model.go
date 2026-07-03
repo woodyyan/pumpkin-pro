@@ -328,20 +328,32 @@ type SimPortfolioVerifyItem struct {
 	Message        string  `json:"message,omitempty"`
 }
 
-type SimPortfolioBackfillOpenPriceResponse struct {
+type SimPortfolioBackfillPriceResponse struct {
 	OK                 bool                          `json:"ok"`
 	Message            string                        `json:"message,omitempty"`
+	PriceType          string                        `json:"price_type"`
+	TriggerType        string                        `json:"trigger_type,omitempty"`
 	Summary            SimPortfolioBackfillSummary   `json:"summary"`
 	PortfolioSummaries []SimPortfolioBackfillSummary `json:"portfolios"`
 }
 
+type SimPortfolioBackfillOpenPriceResponse = SimPortfolioBackfillPriceResponse
+
+type SimPortfolioBackfillClosePriceResponse = SimPortfolioBackfillPriceResponse
+
 type SimPortfolioBackfillSummary struct {
-	ScannedCount           int `json:"scanned_count"`
-	FilledCount            int `json:"filled_count"`
-	StillPendingCount      int `json:"still_pending_count"`
-	FailedCount            int `json:"failed_count"`
-	SkippedBeforeCutover   int `json:"skipped_before_cutover"`
-	MissingMarketPriceRows int `json:"missing_market_price_rows"`
+	PortfolioID             string `json:"portfolio_id,omitempty"`
+	Name                    string `json:"name,omitempty"`
+	Exchange                string `json:"exchange,omitempty"`
+	ScannedCount            int    `json:"scanned_count"`
+	FilledCount             int    `json:"filled_count"`
+	StillPendingCount       int    `json:"still_pending_count"`
+	FailedCount             int    `json:"failed_count"`
+	SkippedBeforeCutover    int    `json:"skipped_before_cutover"`
+	MissingMarketPriceRows  int    `json:"missing_market_price_rows"`
+	MissingPrimaryCount     int    `json:"missing_primary_count,omitempty"`
+	FallbackHitCount        int    `json:"fallback_hit_count,omitempty"`
+	AlreadyPresentCount     int    `json:"already_present_count,omitempty"`
 }
 
 type SimPortfolioTrackingStartStatusResponse struct {
@@ -388,17 +400,33 @@ type SimPortfolioTrackingStartMarketPreview struct {
 }
 
 type SimPortfolioTrackingStartPortfolioPreview struct {
-	PortfolioID             string `json:"portfolio_id"`
-	Name                    string `json:"name"`
-	Exchange                string `json:"exchange"`
-	Status                  string `json:"status"`
-	SelectedCount           int    `json:"selected_count"`
-	RequiredCount           int    `json:"required_count"`
-	MissingOpenPriceCount   int    `json:"missing_open_price_count"`
-	MissingClosePriceCount  int    `json:"missing_close_price_count"`
-	FirstEntryTradeDate     string `json:"first_entry_trade_date,omitempty"`
-	FirstValuationTradeDate string `json:"first_valuation_trade_date,omitempty"`
-	Message                 string `json:"message,omitempty"`
+	PortfolioID             string                                     `json:"portfolio_id"`
+	Name                    string                                     `json:"name"`
+	Exchange                string                                     `json:"exchange"`
+	Status                  string                                     `json:"status"`
+	SelectedCount           int                                        `json:"selected_count"`
+	RequiredCount           int                                        `json:"required_count"`
+	MissingOpenPriceCount   int                                        `json:"missing_open_price_count"`
+	MissingClosePriceCount  int                                        `json:"missing_close_price_count"`
+	FallbackCloseHitCount   int                                        `json:"fallback_close_hit_count,omitempty"`
+	PrimaryCloseMissCount   int                                        `json:"primary_close_miss_count,omitempty"`
+	FirstEntryTradeDate     string                                     `json:"first_entry_trade_date,omitempty"`
+	FirstValuationTradeDate string                                     `json:"first_valuation_trade_date,omitempty"`
+	Message                 string                                     `json:"message,omitempty"`
+	MissingOpenItems        []SimPortfolioTrackingStartMissingPriceItem `json:"missing_open_items,omitempty"`
+	MissingCloseItems       []SimPortfolioTrackingStartMissingPriceItem `json:"missing_close_items,omitempty"`
+}
+
+type SimPortfolioTrackingStartMissingPriceItem struct {
+	PortfolioID string `json:"portfolio_id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Exchange    string `json:"exchange,omitempty"`
+	SignalDate  string `json:"signal_date,omitempty"`
+	TradeDate   string `json:"trade_date,omitempty"`
+	Code        string `json:"code"`
+	PriceType   string `json:"price_type"`
+	Source      string `json:"source,omitempty"`
+	Message     string `json:"message,omitempty"`
 }
 
 type SimPortfolioTrackingStartReason struct {

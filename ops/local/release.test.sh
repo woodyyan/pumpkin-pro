@@ -12,15 +12,21 @@ trap cleanup EXIT
 
 cd "$ROOT_DIR"
 
-output="$(sh ops/local/release.sh --tag "$TEST_TAG" --services backend,quant --build-only --dry-run)"
+output="$(sh ops/local/release.sh --tag "$TEST_TAG" --services backend,quant --build-only --dry-run --build-base --builder default)"
 printf '%s\n' "$output"
 
 printf '%s' "$output" | grep -q 'Resolved release plan'
+printf '%s' "$output" | grep -q 'builder  : default'
+printf '%s' "$output" | grep -q 'base     : always'
+printf '%s' "$output" | grep -q 'Building base image for backend'
 printf '%s' "$output" | grep -q 'Building backend'
 printf '%s' "$output" | grep -q 'Building quant'
 [ -f "$MANIFEST_PATH" ]
 
+grep -q '"builder": "default"' "$MANIFEST_PATH"
+grep -q '"build_base_mode": "always"' "$MANIFEST_PATH"
 grep -q '"requested_services": \["backend" ,"quant"\]' "$MANIFEST_PATH"
+printf '%s' "$output" | grep -q 'pumpkin-base:1.0'
 grep -q 'pumpkin-pro-backend' "$MANIFEST_PATH"
 grep -q 'pumpkin-pro-quant' "$MANIFEST_PATH"
 

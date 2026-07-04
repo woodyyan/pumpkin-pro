@@ -2004,7 +2004,9 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ market, source_trade_date: sourceTradeDate, force_full: true }),
       })
-      setPipelineNotice(resp?.message || '已触发指定日期四象限重建。')
+      setPipelineNotice(resp?.message || '已触发指定日期四象限重建，请查看上方进度条。')
+      // Force refresh to pick up the "running" progress state immediately;
+      // the 5s auto-poll will keep the progress bar updating in real time.
       await resource.refresh()
     } catch (err) {
       const message = handleAdminActionError(err, onUnauthorized, '重建该日四象限失败')

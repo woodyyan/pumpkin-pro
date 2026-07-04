@@ -427,27 +427,40 @@ func (a *appServer) handleAdminQuadrantRecomputeDate(w http.ResponseWriter, r *h
 	if market == "HKEX" {
 		endpoint = "/api/quadrant/compute-hk-all"
 	}
+	// Set progress to "running" so the admin UI progress bar reflects the
+	// rebuild. The terminal state (success/failed) will be set by the
+	// BulkSave callback when Quant finishes writing results back.
+	quadrant.UpdateProgress(market, quadrant.ComputeProgress{
+		Exchange: market,
+		Status:   "running",
+		Message:  fmt.Sprintf("正在重建 %s 四象限 (%s)…", market, sourceTradeDate),
+	})
+
 	callback := strings.TrimRight(a.cfg.BackendCallbackURL, "/") + fmt.Sprintf("/api/quadrant/bulk-save?source_trade_date=%s", sourceTradeDate)
 	payload := map[string]any{"callback_url": callback, "force_full": req.ForceFull, "source_trade_date": sourceTradeDate}
 	body, _ := json.Marshal(payload)
 	httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, quantURL+endpoint, bytes.NewReader(body))
 	if err != nil {
+		quadrant.SetProgressTerminal(market, "failed", fmt.Sprintf("创建请求失败: %v", err))
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(httpReq)
 	if err != nil {
+		quadrant.SetProgressTerminal(market, "failed", fmt.Sprintf("触发 Quant 重建失败: %v", err))
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("触发 Quant 重建失败: %v", err))
 		return
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("Quant 返回 HTTP %d: %s", resp.StatusCode, string(respBody)))
+		errMsg := fmt.Sprintf("Quant 返回 HTTP %d: %s", resp.StatusCode, string(respBody))
+		quadrant.SetProgressTerminal(market, "failed", errMsg)
+		writeError(w, http.StatusBadGateway, errMsg)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "market": market, "source_trade_date": sourceTradeDate, "status": "accepted", "message": "已触发指定日期四象限重建；完成后请重新运行对应日期模拟组合 pipeline。"})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "market": market, "source_trade_date": sourceTradeDate, "status": "accepted", "message": "已触发指定日期四象限重建，请在上方进度条查看实时状态；完成后请重新运行对应日期模拟组合 pipeline。"})
 }
 
 // LEGACY: handleAdminRankingPortfolioVerify runs a read-only replay of the old

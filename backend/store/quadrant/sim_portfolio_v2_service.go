@@ -1131,6 +1131,11 @@ func (s *SimPortfolioV2Service) buildCalendarDay(ctx context.Context, market, da
 		return day, err
 	}
 	batch, _ := s.repo.GetSimPortfolioV2SignalBatch(ctx, market, date)
+	// Auto-build signal batch from quadrant ranking snapshots if missing,
+	// so the calendar overview reflects actual upstream data status.
+	if batch == nil && row.IsTradingDay && date <= today {
+		batch, _ = s.buildSignalBatch(ctx, "", market, date)
+	}
 	if batch == nil {
 		day.OverallStatus = SimPortfolioV2StatusPending
 	}
@@ -1234,8 +1239,22 @@ func (s *SimPortfolioV2Service) GetAdminCalendarDay(ctx context.Context, market,
 	_ = s.repo.UpsertMarketCalendar(ctx, cal)
 	resp := &SimPortfolioV2DayDetailResponse{Market: market, Date: date, IsFuture: date > today, IsTradingDay: cal.IsTradingDay, HolidayName: cal.HolidayName}
 	batch, _ := s.repo.GetSimPortfolioV2SignalBatch(ctx, market, date)
+	// If no signal batch exists yet but quadrant ranking snapshots are present,
+	// auto-build the signal batch on-the-fly so the calendar day detail reflects
+	// the actual upstream data instead of misleadingly suggesting "recompute quadrant".
+	if batch == nil && cal.IsTradingDay && date <= today {
+		batch, _ = s.buildSignalBatch(ctx, "", market, date)
+	}
 	if batch != nil {
 		resp.Signal = SimPortfolioV2SignalDetail{Status: batch.Status, CandidateCount: batch.CandidateCount, SignalCount: batch.SignalCount, MissingPriceCount: batch.MissingPriceCount, Message: batch.Message}
+		// Even though buildSignalBatch always returns a non-nil batch, the batch
+		// may be in "blocked" status because the underlying quadrant ranking
+		// snapshots are missing (CandidateCount == 0). In that case we must
+		// still surface the "recompute_quadrant" repair suggestion so the admin
+		// UI can render the "重建该日四象限" button.
+		if batch.Status == SimPortfolioV2StatusBlocked && batch.CandidateCount == 0 && cal.IsTradingDay && date <= today {
+			resp.RepairSuggestions = append(resp.RepairSuggestions, SimPortfolioV2RepairSuggestion{Type: "recompute_quadrant", Label: "重建该日四象限", Hint: "请在四象限板块按 market + source_trade_date 重建上游快照。"})
+		}
 	} else if cal.IsTradingDay && date <= today {
 		resp.Signal = SimPortfolioV2SignalDetail{Status: SimPortfolioV2StatusBlocked, Message: "缺少该市场该交易日四象限/排行榜快照。"}
 		resp.RepairSuggestions = append(resp.RepairSuggestions, SimPortfolioV2RepairSuggestion{Type: "recompute_quadrant", Label: "重建该日四象限", Hint: "请在四象限板块按 market + source_trade_date 重建上游快照。"})
@@ -1340,6 +1359,10 @@ func (s *SimPortfolioV2Service) PreviewStartDate(ctx context.Context, req SimPor
 		resp.BlockingReasons = append(resp.BlockingReasons, SimPortfolioV2BlockingReason{Code: "market_closed", Message: "该市场当日休市，不能作为开始信号日。"})
 	}
 	batch, _ := s.repo.GetSimPortfolioV2SignalBatch(ctx, market, date)
+	// Auto-build signal batch from quadrant ranking snapshots if missing.
+	if batch == nil && cal.IsTradingDay && date <= time.Now().In(beijingLocation()).Format("2006-01-02") {
+		batch, _ = s.buildSignalBatch(ctx, "", market, date)
+	}
 	if batch == nil || batch.Status != SimPortfolioV2StatusOK {
 		resp.CanApply = false
 		resp.BlockingReasons = append(resp.BlockingReasons, SimPortfolioV2BlockingReason{Code: "missing_signal", Message: "缺少可用四象限/排行榜信号。", Action: "先重建该日四象限。"})

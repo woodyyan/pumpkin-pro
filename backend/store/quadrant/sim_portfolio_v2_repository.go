@@ -329,7 +329,7 @@ func (r *Repository) DeleteSimPortfolioV2FactsForMarketFromSignalDate(ctx contex
 		if err := tx.Where("market = ? AND signal_date >= ?", market, startSignalDate).Delete(&SimPortfolioV2Trade{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("market = ? AND signal_date >= ?", market, startSignalDate).Delete(&SimPortfolioV2Metrics{}).Error; err != nil {
+		if err := tx.Where("market = ? AND trade_date >= ?", market, startSignalDate).Delete(&SimPortfolioV2Metrics{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("market = ? AND signal_date >= ?", market, startSignalDate).Delete(&SimPortfolioV2Daily{}).Error; err != nil {

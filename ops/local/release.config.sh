@@ -2,10 +2,20 @@
 # shellcheck shell=bash
 
 RELEASE_SUPPORTED_SERVICES=(backend frontend quant)
-RELEASE_DEFAULT_BUILDER="default"
+RELEASE_DEFAULT_BUILDER="desktop-linux"
 RELEASE_BACKEND_BASE_SERVICE="backend-base"
 RELEASE_BACKEND_BASE_REPO="pumpkin-base"
 RELEASE_BACKEND_BASE_TAG="1.0"
+
+# ── Deploy trigger ──
+# Whether to trigger GitHub Actions deploy workflow after successful push
+RELEASE_TRIGGER_DEPLOY="${RELEASE_TRIGGER_DEPLOY:-true}"
+# Target workflow file name in .github/workflows/
+RELEASE_DEPLOY_WORKFLOW="${RELEASE_DEPLOY_WORKFLOW:-deploy.yml}"
+# Target branch to trigger the workflow on
+RELEASE_DEPLOY_REF="${RELEASE_DEPLOY_REF:-main}"
+# GitHub repo in "owner/repo" format; empty = auto-infer from git remote origin
+RELEASE_GITHUB_REPO="${RELEASE_GITHUB_REPO:-}"
 
 release_service_repo() {
   case "$1" in

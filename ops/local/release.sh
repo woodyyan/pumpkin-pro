@@ -31,6 +31,7 @@ PUSH_LATEST=0
 VERIFY_LOCAL_IMAGE=1
 BUILD_BASE_MODE="auto"
 BUILDER="$DEFAULT_BUILDER"
+TRIGGER_DEPLOY=1
 
 usage() {
   cat <<'EOF'
@@ -57,6 +58,7 @@ Options:
   --tcr-password <secret>  Override TCR password
   --push-latest            Also push :latest for selected services
   --no-verify-local-image  Skip docker image inspect after build
+  --no-deploy              Do not trigger GitHub Actions deploy workflow after push
   -h, --help               Show help
 
 Examples:
@@ -437,6 +439,109 @@ print_summary() {
   log "Services: $(join_by ',' "${SELECTED_SERVICES[@]}")"
 }
 
+resolve_github_repo() {
+  if [ -n "${RELEASE_GITHUB_REPO:-}" ]; then
+    printf '%s' "$RELEASE_GITHUB_REPO"
+    return 0
+  fi
+  local remote_url
+  remote_url="$(git -C "$ROOT_DIR" remote get-url origin 2>/dev/null || true)"
+  if [ -z "$remote_url" ]; then
+    return 1
+  fi
+  # Handle SSH (git@github.com:owner/repo.git) and HTTPS (https://github.com/owner/repo.git)
+  local repo
+  if printf '%s' "$remote_url" | grep -q '^git@github.com:'; then
+    repo="$(printf '%s' "$remote_url" | sed 's#git@github.com:##; s#\.git$##')"
+  elif printf '%s' "$remote_url" | grep -q '^https://github.com/'; then
+    repo="$(printf '%s' "$remote_url" | sed 's#https://github.com/##; s#\.git$##')"
+  else
+    return 1
+  fi
+  printf '%s' "$repo"
+}
+
+trigger_deploy() {
+  # Skip if disabled by flag or config
+  if [ "$TRIGGER_DEPLOY" -eq 0 ]; then
+    log "Deploy trigger skipped (--no-deploy)"
+    return 0
+  fi
+  if [ "${RELEASE_TRIGGER_DEPLOY:-true}" != "true" ]; then
+    log "Deploy trigger skipped (RELEASE_TRIGGER_DEPLOY != true)"
+    return 0
+  fi
+  # Only trigger in build_push mode
+  if [ "$MODE" != "build_push" ]; then
+    log "Deploy trigger skipped (mode: $MODE)"
+    return 0
+  fi
+  # Dry-run: print what would be sent
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] Would trigger deploy workflow:"
+    log "[dry-run]   workflow: $RELEASE_DEPLOY_WORKFLOW"
+    log "[dry-run]   ref:      $RELEASE_DEPLOY_REF"
+    log "[dry-run]   tag:      $TAG"
+    log "[dry-run]   services: $(join_by ',' "${SELECTED_SERVICES[@]}")"
+    return 0
+  fi
+  # Require GITHUB_TOKEN
+  if [ -z "${GITHUB_TOKEN:-}" ]; then
+    warn "GITHUB_TOKEN not set, skipping deploy trigger."
+    warn "Set GITHUB_TOKEN env var (PAT with repo+workflow scope) to enable auto-deploy."
+    return 0
+  fi
+  # Resolve GitHub repo
+  local github_repo
+  if ! github_repo="$(resolve_github_repo)"; then
+    warn "Could not resolve GitHub repo from git remote; skipping deploy trigger."
+    return 0
+  fi
+  local services_str
+  services_str="$(join_by ',' "${SELECTED_SERVICES[@]}")"
+  local git_sha git_branch
+  git_sha="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+  git_branch="$(git -C "$ROOT_DIR" branch --show-current 2>/dev/null || echo unknown)"
+
+  log "Triggering deploy workflow..."
+  log "  repo:     $github_repo"
+  log "  workflow: $RELEASE_DEPLOY_WORKFLOW"
+  log "  ref:      $RELEASE_DEPLOY_REF"
+  log "  tag:      $TAG"
+  log "  services: $services_str"
+
+  local api_url="https://api.github.com/repos/${github_repo}/actions/workflows/${RELEASE_DEPLOY_WORKFLOW}/dispatches"
+  local http_code
+  http_code="$(curl -s -o /dev/null -w '%{http_code}' \
+    -X POST \
+    -H "Accept: application/vnd.github+json" \
+    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+    -d "$(printf '{"ref":"%s","inputs":{"tag":"%s","services":"%s","git_sha":"%s","git_branch":"%s"}}' \
+      "$RELEASE_DEPLOY_REF" "$TAG" "$services_str" "$git_sha" "$git_branch")" \
+    "$api_url" 2>/dev/null)" || true
+
+  case "$http_code" in
+    204)
+      log "Deploy workflow triggered successfully (HTTP 204)."
+      log "Check: https://github.com/${github_repo}/actions/workflows/${RELEASE_DEPLOY_WORKFLOW}"
+      ;;
+    401|403)
+      warn "Deploy trigger failed (HTTP ${http_code}): GITHUB_TOKEN may be expired or lack permissions."
+      warn "Need PAT with repo + workflow scope (or fine-grained: Actions:write, Contents:read)."
+      ;;
+    404)
+      warn "Deploy trigger failed (HTTP 404): workflow '${RELEASE_DEPLOY_WORKFLOW}' not found in repo ${github_repo}."
+      ;;
+    422)
+      warn "Deploy trigger failed (HTTP 422): workflow_dispatch not enabled or inputs invalid."
+      ;;
+    *)
+      warn "Deploy trigger failed (HTTP ${http_code:-unknown})."
+      warn "API: $api_url"
+      ;;
+  esac
+}
+
 IMAGE_REGISTRY="$DEFAULT_IMAGE_REGISTRY"
 IMAGE_NAMESPACE="$DEFAULT_IMAGE_NAMESPACE"
 IMAGE_PLATFORM="$DEFAULT_IMAGE_PLATFORM"
@@ -522,6 +627,10 @@ while [ "$#" -gt 0 ]; do
       VERIFY_LOCAL_IMAGE=0
       shift
       ;;
+    --no-deploy)
+      TRIGGER_DEPLOY=0
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -592,3 +701,5 @@ done
 
 finalize_manifest "$manifest_path"
 print_summary "$manifest_path"
+
+trigger_deploy

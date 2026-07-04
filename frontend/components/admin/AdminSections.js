@@ -1217,36 +1217,6 @@ function formatTimeAgo(s) {
   } catch { return '' }
 }
 
-function formatPortfolioTrackingReason(reason) {
-  if (!reason) return '--'
-  const parts = []
-  if (reason.name) parts.push(reason.name)
-  else if (reason.portfolio_id) parts.push(reason.portfolio_id)
-  if (reason.exchange) parts.push(reason.exchange === 'HKEX' ? '港股' : 'A股')
-  if (reason.trade_date) parts.push(`交易日 ${reason.trade_date}`)
-  else if (reason.signal_date) parts.push(`信号日 ${reason.signal_date}`)
-  if (reason.code) parts.push(reason.code)
-  if (reason.source === 'portfolio_market_prices') parts.push('来源: 市价表补位')
-  return parts.join(' · ')
-}
-
-function renderMissingPriceItems(items, priceLabel) {
-  if (!items?.length) return null
-  return (
-    <div className="mt-2 rounded-lg border border-border bg-background px-3 py-2 text-[11px] text-foreground-muted">
-      <div className="font-medium text-foreground">缺少{priceLabel}明细（{items.length}）</div>
-      <ul className="mt-1 list-disc space-y-1 pl-4">
-        {items.map((item, index) => (
-          <li key={`${item.portfolio_id || item.name || 'portfolio'}-${item.trade_date || item.signal_date || 'date'}-${item.code || index}-${priceLabel}`}>
-            <span className="font-medium text-foreground">{formatPortfolioTrackingReason(item)}</span>
-            {item.message ? <span className="text-foreground-dim">：{item.message}</span> : null}
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
 export function CompanyProfilesAdminPanel({ onUnauthorized }) {
   const [loading, setLoading] = useState(false)
   const [notice, setNotice] = useState('')
@@ -1739,37 +1709,27 @@ export function AIPickerAdminPanel({ onUnauthorized }) {
 export function QuadrantAdminPanel({ onUnauthorized }) {
   const [expandedLog, setExpandedLog] = useState(null)
   const [triggering, setTriggering] = useState(false)
-  const [syncingPortfolio, setSyncingPortfolio] = useState(false)
-  const [backfillingOpenPrices, setBackfillingOpenPrices] = useState(false)
-  const [verifyingPortfolio, setVerifyingPortfolio] = useState(false)
-  const [verifyPortfolioResult, setVerifyPortfolioResult] = useState(null)
-  const [syncPortfolioResult, setSyncPortfolioResult] = useState(null)
-  const [recomputingPortfolio, setRecomputingPortfolio] = useState(false)
-  const [recomputeConfirming, setRecomputeConfirming] = useState(false)
-  const [startSignalDate, setStartSignalDate] = useState('')
-  const [previewingStartDate, setPreviewingStartDate] = useState(false)
-  const [applyingStartDate, setApplyingStartDate] = useState(false)
-  const [startDateApplyConfirming, setStartDateApplyConfirming] = useState(false)
-  const [startDatePreview, setStartDatePreview] = useState(null)
-  const [startDateApplyResult, setStartDateApplyResult] = useState(null)
-  const [portfolioActionNotice, setPortfolioActionNotice] = useState('')
+  const [runningPipeline, setRunningPipeline] = useState(false)
+  const [initializingPipeline, setInitializingPipeline] = useState(false)
+  const [pipelineRunResult, setPipelineRunResult] = useState(null)
+  const [pipelineNotice, setPipelineNotice] = useState('')
   const [actionError, setActionError] = useState('')
   const resource = useAdminResource({
     key: 'admin:quadrant',
     request: async () => {
-      const [overview, logsPayload, progress, portfolioTrackingStatus, portfolioTrackingStartStatus] = await Promise.all([
+      const [overview, logsPayload, progress, simPipelineOverview, simPipelineDays] = await Promise.all([
         adminFetch('/api/admin/quadrant-overview').catch(() => null),
         adminFetch('/api/admin/quadrant-logs').catch(() => ({ items: [] })),
         adminFetch('/api/admin/compute-status').catch(() => null),
-        adminFetch('/api/admin/portfolio-tracking/status').catch(() => ({ items: [] })),
-        adminFetch('/api/admin/portfolio-tracking/start-date/status').catch(() => null),
+        adminFetch('/api/admin/sim-portfolio-pipeline/overview').catch(() => ({ items: [], runs: [] })),
+        adminFetch('/api/admin/sim-portfolio-pipeline/days').catch(() => ({ items: [] })),
       ])
       return {
         overview,
         logs: logsPayload?.items || [],
         progress,
-        portfolioTrackingStatus: portfolioTrackingStatus?.items || [],
-        portfolioTrackingStartStatus,
+        simPipelineOverview,
+        simPipelineDays: simPipelineDays?.items || [],
       }
     },
     staleMs: 5_000,
@@ -1784,8 +1744,8 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
   const overview = resource.data?.overview || null
   const logs = resource.data?.logs || null
   const progress = resource.data?.progress || null
-  const portfolioTrackingStatus = resource.data?.portfolioTrackingStatus || []
-  const portfolioTrackingStartStatus = resource.data?.portfolioTrackingStartStatus || null
+  const simPipelineOverview = resource.data?.simPipelineOverview || { items: [], runs: [] }
+  const simPipelineDays = resource.data?.simPipelineDays || []
 
   // ── Manual trigger ──
   const handleTrigger = async (exchange) => {
@@ -1809,167 +1769,45 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
   }
 
 
-  const handlePortfolioTrackingStartDatePreview = async () => {
-    setPreviewingStartDate(true)
+  const handleSimPipelineInitialize = async () => {
+    setInitializingPipeline(true)
     setActionError('')
-    setPortfolioActionNotice('')
-    setStartDateApplyConfirming(false)
+    setPipelineNotice('')
     try {
-      const resp = await adminFetch('/api/admin/portfolio-tracking/start-date/preview', {
+      const resp = await adminFetch('/api/admin/sim-portfolio-pipeline/initialize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start_signal_date: startSignalDate }),
+        body: JSON.stringify({ market: 'ALL' }),
       })
-      setStartDatePreview(resp)
-      setStartDateApplyResult(null)
-      setPortfolioActionNotice(resp?.message || '开始信号日预检完成。')
+      setPipelineNotice(resp?.message || 'Sim Portfolio v2 已初始化。')
+      await resource.refresh()
     } catch (err) {
-      const message = handleAdminActionError(err, onUnauthorized, '预检开始信号日失败')
+      const message = handleAdminActionError(err, onUnauthorized, '初始化模拟组合 v2 失败')
       if (message) setActionError(message)
     } finally {
-      setPreviewingStartDate(false)
+      setInitializingPipeline(false)
     }
   }
 
-  const handlePortfolioTrackingStartDateApply = async () => {
-    if (!startDatePreview?.can_apply) {
-      setActionError('请先选择可用的开始信号日并通过预检。')
-      return
-    }
-    if (!startDateApplyConfirming) {
-      setStartDateApplyConfirming(true)
-      return
-    }
-    setStartDateApplyConfirming(false)
-    setApplyingStartDate(true)
+  const handleSimPipelineRun = async (market = 'ALL') => {
+    setRunningPipeline(true)
     setActionError('')
-    setPortfolioActionNotice('')
+    setPipelineNotice('')
     try {
-      const resp = await adminFetch('/api/admin/portfolio-tracking/start-date/apply', {
+      const today = new Date().toISOString().slice(0, 10)
+      const resp = await adminFetch('/api/admin/sim-portfolio-pipeline/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          start_signal_date: startDatePreview.start_signal_date,
-          confirm: true,
-          note: 'Admin 手动设置全局开始信号日',
-        }),
+        body: JSON.stringify({ market, from_date: today, to_date: today }),
       })
-      setStartDateApplyResult(resp)
-      setVerifyPortfolioResult(null)
-      setSyncPortfolioResult(null)
-      setPortfolioActionNotice(resp?.message || '已按指定开始信号日重置并重算。')
+      setPipelineRunResult(resp)
+      setPipelineNotice(resp?.message || 'Sim Portfolio v2 pipeline 已运行。')
       await resource.refresh()
     } catch (err) {
-      const message = handleAdminActionError(err, onUnauthorized, '应用开始信号日失败')
+      const message = handleAdminActionError(err, onUnauthorized, '运行模拟组合 pipeline 失败')
       if (message) setActionError(message)
     } finally {
-      setApplyingStartDate(false)
-    }
-  }
-
-  const handlePortfolioTrackingSync = async () => {
-    setSyncingPortfolio(true)
-    setActionError('')
-    setPortfolioActionNotice('')
-    try {
-      const resp = await adminFetch('/api/admin/portfolio-tracking/sync', { method: 'POST' })
-      setVerifyPortfolioResult(null)
-      setSyncPortfolioResult(resp)
-      setPortfolioActionNotice(resp?.message || '模拟组合事实表已同步最新信号。')
-      await resource.refresh()
-    } catch (err) {
-      const message = handleAdminActionError(err, onUnauthorized, '同步模拟组合事实表失败')
-      if (message) setActionError(message)
-    } finally {
-      setSyncingPortfolio(false)
-    }
-  }
-
-  const handlePortfolioTrackingBackfillOpenPrices = async () => {
-    setBackfillingOpenPrices(true)
-    setActionError('')
-    setPortfolioActionNotice('')
-    try {
-      const resp = await adminFetch('/api/admin/portfolio-tracking/backfill-open-prices', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ latest_only: true }),
-      })
-      setSyncPortfolioResult(null)
-      setPortfolioActionNotice(resp?.message || '建仓开盘价补齐完成。')
-      await resource.refresh()
-    } catch (err) {
-      const message = handleAdminActionError(err, onUnauthorized, '补齐建仓开盘价失败')
-      if (message) setActionError(message)
-    } finally {
-      setBackfillingOpenPrices(false)
-    }
-  }
-
-  const handlePortfolioTrackingBackfillClosePrices = async () => {
-    setBackfillingOpenPrices(true)
-    setActionError('')
-    setPortfolioActionNotice('')
-    try {
-      const resp = await adminFetch('/api/admin/portfolio-tracking/backfill-close-prices', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ latest_only: true }),
-      })
-      setSyncPortfolioResult(null)
-      setPortfolioActionNotice(resp?.message || '收盘价补齐完成。')
-      await resource.refresh()
-    } catch (err) {
-      const message = handleAdminActionError(err, onUnauthorized, '补齐收盘价失败')
-      if (message) setActionError(message)
-    } finally {
-      setBackfillingOpenPrices(false)
-    }
-  }
-
-  const handlePortfolioTrackingVerify = async () => {
-    setVerifyingPortfolio(true)
-    setActionError('')
-    setPortfolioActionNotice('')
-    try {
-      const resp = await adminFetch('/api/admin/portfolio-tracking/verify', { method: 'POST' })
-      setSyncPortfolioResult(null)
-      setVerifyPortfolioResult(resp)
-      const diffCount = Array.isArray(resp?.items) ? resp.items.filter((item) => item.status !== 'ok').length : 0
-      setPortfolioActionNotice(diffCount > 0 ? `发现 ${diffCount} 条需要人工核查的事实表记录。` : '所有事实表记录校验通过。')
-      await resource.refresh()
-    } catch (err) {
-      const message = handleAdminActionError(err, onUnauthorized, '验证模拟组合事实表失败')
-      if (message) setActionError(message)
-    } finally {
-      setVerifyingPortfolio(false)
-    }
-  }
-
-  const handlePortfolioTrackingRecompute = async () => {
-    if (!recomputeConfirming) {
-      setRecomputeConfirming(true)
-      return
-    }
-    setRecomputeConfirming(false)
-    setRecomputingPortfolio(true)
-    setActionError('')
-    setPortfolioActionNotice('')
-    try {
-      const resp = await adminFetch('/api/admin/portfolio-tracking/recompute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reset: true }),
-      })
-      setVerifyPortfolioResult(null)
-      setSyncPortfolioResult(null)
-      setPortfolioActionNotice(resp?.message || '模拟组合已从头重算。')
-      await resource.refresh()
-    } catch (err) {
-      const message = handleAdminActionError(err, onUnauthorized, '从头重算模拟组合失败')
-      if (message) setActionError(message)
-    } finally {
-      setRecomputingPortfolio(false)
+      setRunningPipeline(false)
     }
   }
 
@@ -2030,27 +1868,6 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
     )
   }
 
-  const portfolioVerifyDiffs = Array.isArray(verifyPortfolioResult?.items)
-    ? verifyPortfolioResult.items.filter((item) => item.status !== 'ok')
-    : []
-  const getPortfolioTrackingStatusClass = (status) => {
-    switch (status) {
-      case 'completed':
-        return 'text-positive'
-      case 'baseline_only':
-      case 'pending_fact_sync':
-      case 'pending_open_price':
-      case 'pending_close_price':
-      case 'seeded':
-        return 'text-amber-700'
-      case 'shortfall':
-      case 'failed':
-        return 'text-negative'
-      default:
-        return 'text-foreground-muted'
-    }
-  }
-
   if (!overview && !logs) return null
 
   return (
@@ -2097,306 +1914,128 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
         </div>
       )}
 
-      {/* 新口径模拟组合管理 */}
+      {/* 模拟组合 Pipeline */}
       <div className="mb-5 rounded-xl border border-border bg-card p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-foreground-muted">新口径模拟组合管理</h3>
-            <p className="mt-1 text-xs text-foreground-dim">`/portfolio-tracking` 已切到事实表链路。自动同步挂在四象限 daily bulk-save 成功之后，读取接口不再承担写库职责。</p>
+            <h3 className="text-sm font-semibold text-foreground-muted">模拟组合 Pipeline</h3>
+            <p className="mt-1 text-xs text-foreground-dim">Sim Portfolio v2 已切换为交易日历驱动的严格模式链路：日历 → 信号 → 选股 → 价格需求 → 开盘价 → 收盘价 → 事实表 → 验证。旧补价和全局起点按钮已下线。</p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <button
-              onClick={handlePortfolioTrackingBackfillOpenPrices}
-              disabled={backfillingOpenPrices || syncingPortfolio || recomputingPortfolio}
+              onClick={handleSimPipelineInitialize}
+              disabled={initializingPipeline || runningPipeline}
               className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {backfillingOpenPrices ? '补齐中…' : '补齐建仓开盘价'}
+              {initializingPipeline ? '初始化中…' : '初始化 v2 定义'}
             </button>
             <button
-              onClick={handlePortfolioTrackingBackfillClosePrices}
-              disabled={backfillingOpenPrices || syncingPortfolio || recomputingPortfolio}
+              onClick={() => handleSimPipelineRun('ASHARE')}
+              disabled={runningPipeline || initializingPipeline}
               className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {backfillingOpenPrices ? '补齐中…' : '补齐收盘价'}
+              运行 A 股 Pipeline
             </button>
             <button
-              onClick={handlePortfolioTrackingSync}
-              disabled={syncingPortfolio || recomputingPortfolio || backfillingOpenPrices}
+              onClick={() => handleSimPipelineRun('HKEX')}
+              disabled={runningPipeline || initializingPipeline}
               className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {syncingPortfolio ? '同步中…' : '同步最新事实表'}
+              运行港股 Pipeline
             </button>
             <button
-              onClick={handlePortfolioTrackingVerify}
-              disabled={verifyingPortfolio || syncingPortfolio || recomputingPortfolio || backfillingOpenPrices}
-              className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => handleSimPipelineRun('ALL')}
+              disabled={runningPipeline || initializingPipeline}
+              className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {verifyingPortfolio ? '验证中…' : '验证事实表一致性'}
+              {runningPipeline ? '运行中…' : '运行全部'}
             </button>
-            {recomputeConfirming ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-amber-700">确认从头重算全部新口径组合？</span>
-                <button
-                  onClick={handlePortfolioTrackingRecompute}
-                  disabled={recomputingPortfolio}
-                  className="rounded-lg border border-amber-500/40 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  确认重算
-                </button>
-                <button
-                  onClick={() => setRecomputeConfirming(false)}
-                  className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground-dim hover:bg-background-alt"
-                >
-                  取消
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={handlePortfolioTrackingRecompute}
-                disabled={recomputingPortfolio || syncingPortfolio || backfillingOpenPrices}
-                className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {recomputingPortfolio ? '重算中…' : '从头重算全部组合'}
-              </button>
-            )}
           </div>
         </div>
 
         <div className="mb-3 rounded-xl border border-dashed border-border bg-background px-4 py-3 text-xs leading-6 text-foreground-muted">
-          运维顺序：先设置全局开始信号日并预检；需要重启跟踪时执行「按该日期重置并重算 4 个组合」。日常维护再按补齐开盘价 / 收盘价 → 同步事实表 → 验证一致性处理；补价只补前置价格，不生成持仓。
-          这里选择的是榜单信号日 / 收盘日，不是买入日；系统会在下一交易日开盘价建仓。严格共同日期要求 A 股和港股当天都具备排行榜快照。
+          严格模式：应交易日如果缺信号、缺选股、缺精确开盘价/收盘价或验证失败，不生成正式收益；休市日会标记为 skipped，不会报缺价格。Public 页面只读取 verified 事实表。
         </div>
 
-        <div className="mb-4 rounded-xl border border-border bg-background px-4 py-3">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div className="text-xs font-semibold text-foreground">全局开始跟踪日期</div>
-              <p className="mt-1 text-xs text-foreground-dim">当前开始信号日：{portfolioTrackingStartStatus?.current_start_signal_date || '尚未设置'}{portfolioTrackingStartStatus?.applied_at ? ` · 最近应用 ${portfolioTrackingStartStatus.applied_at}` : ''}</p>
-              {portfolioTrackingStartStatus?.latest_job ? (
-                <p className="mt-1 text-[11px] text-foreground-dim">最近任务：{portfolioTrackingStartStatus.latest_job.status} · {portfolioTrackingStartStatus.latest_job.message || '--'}</p>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                type="date"
-                value={startSignalDate}
-                onChange={(event) => {
-                  setStartSignalDate(event.target.value)
-                  setStartDatePreview(null)
-                  setStartDateApplyConfirming(false)
-                }}
-                className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground outline-none focus:border-primary"
-              />
-              <button
-                onClick={handlePortfolioTrackingStartDatePreview}
-                disabled={previewingStartDate || applyingStartDate || !startSignalDate}
-                className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {previewingStartDate ? '预检中…' : '检查该日期数据'}
-              </button>
-              {startDateApplyConfirming ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-amber-700">确认清空并从 {startDatePreview?.start_signal_date} 重算 4 个组合？</span>
-                  <button
-                    onClick={handlePortfolioTrackingStartDateApply}
-                    disabled={applyingStartDate}
-                    className="rounded-lg border border-amber-500/40 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    确认应用
-                  </button>
-                  <button
-                    onClick={() => setStartDateApplyConfirming(false)}
-                    className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground-dim hover:bg-background-alt"
-                  >
-                    取消
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={handlePortfolioTrackingStartDateApply}
-                  disabled={applyingStartDate || !startDatePreview?.can_apply || syncingPortfolio || recomputingPortfolio || backfillingOpenPrices}
-                  className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {applyingStartDate ? '应用中…' : '按该日期重置并重算'}
-                </button>
-              )}
-            </div>
-          </div>
-
-          {startDatePreview ? (
-            <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${startDatePreview.can_apply ? 'border-positive/20 bg-positive/10 text-positive' : 'border-negative/20 bg-negative/10 text-negative'}`}>
-              <div className="font-medium">{startDatePreview.message}</div>
-              <div className="mt-2 grid gap-2 md:grid-cols-2">
-                {(startDatePreview.markets || []).map((market) => (
-                  <div key={market.exchange} className="rounded-lg border border-border bg-card px-3 py-2 text-foreground-muted">
-                    <div className="font-medium text-foreground">{market.label}</div>
-                    <div className="mt-1 tabular-nums">信号日 {market.start_signal_date} · 首次建仓 {market.next_entry_trade_date || '--'} · 快照数 {market.snapshot_count_to_latest ?? 0}</div>
-                    <div className="mt-1 text-foreground-dim">{market.message || '--'}</div>
-                  </div>
-                ))}
-              </div>
-              {startDatePreview.blocking_reasons?.length ? (
-                <div className="mt-3 space-y-3">
-                  {startDatePreview.blocking_reasons.map((reason, index) => {
-                    const relatedPortfolio = (startDatePreview.portfolios || []).find((item) => item.portfolio_id === reason.portfolio_id)
-                    return (
-                      <div key={`${reason.code}-${index}`} className="rounded-lg border border-border bg-card px-3 py-2 text-foreground-muted">
-                        <div className="font-medium text-foreground">{reason.message}</div>
-                        {relatedPortfolio ? (
-                          <div className="mt-1 space-y-1 text-[11px]">
-                            <div>
-                              组合：{relatedPortfolio.name}（{relatedPortfolio.exchange === 'HKEX' ? '港股' : 'A股'}）
-                              {relatedPortfolio.required_count ? ` · 要求 ${relatedPortfolio.required_count} 只` : ''}
-                              {Number.isFinite(relatedPortfolio.selected_count) ? ` · 实际 ${relatedPortfolio.selected_count} 只` : ''}
-                            </div>
-                            {relatedPortfolio.first_entry_trade_date ? (
-                              <div>首次建仓日：{relatedPortfolio.first_entry_trade_date}</div>
-                            ) : null}
-                            {relatedPortfolio.first_valuation_trade_date ? (
-                              <div>首次估值日：{relatedPortfolio.first_valuation_trade_date}</div>
-                            ) : null}
-                            {relatedPortfolio.primary_close_miss_count > 0 || relatedPortfolio.fallback_close_hit_count > 0 ? (
-                              <div>
-                                收盘价检查：主表缺失 {relatedPortfolio.primary_close_miss_count || 0} 条
-                                {` · fallback 命中 ${relatedPortfolio.fallback_close_hit_count || 0} 条`}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-                        {reason.code === 'missing_open_price' ? renderMissingPriceItems(relatedPortfolio?.missing_open_items, '开盘价') : null}
-                        {reason.code === 'missing_close_price' ? renderMissingPriceItems(relatedPortfolio?.missing_close_items, '收盘价') : null}
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {startDateApplyResult ? (
-            <div className="mt-3 rounded-lg border border-positive/20 bg-positive/10 px-3 py-2 text-xs text-positive">
-              {startDateApplyResult.message} · 生成 {startDateApplyResult.summary?.daily_row_count ?? 0} 个估值日记录 / {startDateApplyResult.summary?.position_row_count ?? 0} 条持仓。
-            </div>
-          ) : null}
-        </div>
-
-        {portfolioActionNotice ? (
+        {pipelineNotice ? (
           <div className="mb-3 rounded-lg border border-positive/20 bg-positive/10 px-3 py-2 text-xs text-positive">
-            {portfolioActionNotice}
+            {pipelineNotice}
           </div>
         ) : null}
 
-        {portfolioTrackingStatus.length === 0 ? (
-          <p className="text-xs text-foreground-dim">暂无新口径模拟组合状态。</p>
-        ) : (
-          <div className="overflow-x-auto">
+        {pipelineRunResult ? (
+          <div className="mb-3 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground-muted">
+            最近运行：{pipelineRunResult.status} · 处理 {pipelineRunResult.processed_days ?? 0} 天 · 阻断 {pipelineRunResult.blocked_days ?? 0} 天 · 生成事实表 {pipelineRunResult.generated_facts ?? 0} 个 · Run ID {pipelineRunResult.run_id || '--'}
+          </div>
+        ) : null}
+
+        <div className="grid gap-3 md:grid-cols-2">
+          {(simPipelineOverview.items || []).length === 0 ? (
+            <p className="text-xs text-foreground-dim">暂无 v2 pipeline 状态，请先初始化。</p>
+          ) : (simPipelineOverview.items || []).map((item) => (
+            <div key={item.market} className="rounded-xl border border-border bg-background px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-foreground">{item.market === 'HKEX' ? '港股' : 'A股'}</div>
+                  <div className="mt-1 text-xs text-foreground-dim">{item.status_text || item.status || '等待数据'}</div>
+                </div>
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${item.status === 'ok' ? 'bg-positive/10 text-positive' : item.status === 'blocked' || item.status === 'failed' ? 'bg-negative/10 text-negative' : 'bg-[var(--color-bg-secondary)] text-foreground-muted'}`}>
+                  {item.status || 'pending'}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-foreground-muted">
+                <div>最新信号日：<span className="tabular-nums text-foreground">{item.latest_signal_date || '--'}</span></div>
+                <div>最新 verified：<span className="tabular-nums text-foreground">{item.latest_verified_trade_date || '--'}</span></div>
+                <div>阻断阶段：<span className="text-foreground">{item.blocking_stage || '--'}</span></div>
+                <div className="truncate" title={item.blocking_message || ''}>原因：{item.blocking_message || '--'}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {simPipelineDays.length > 0 ? (
+          <div className="mt-4 overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead>
                 <tr className="border-b border-border text-foreground-dim">
-                  <th className="pb-2 pr-4 font-medium">组合</th>
+                  <th className="pb-2 pr-4 font-medium">日期</th>
                   <th className="pb-2 pr-4 font-medium">市场</th>
-                  <th className="pb-2 pr-4 font-medium">最新信号日</th>
-                  <th className="pb-2 pr-4 font-medium">待执行信号</th>
-                  <th className="pb-2 pr-4 font-medium">下一次开盘</th>
-                  <th className="pb-2 pr-4 font-medium">最新估值日</th>
-                  <th className="pb-2 pr-4 font-medium">事实表</th>
-                  <th className="pb-2 pr-4 font-medium">可同步</th>
-                  <th className="pb-2 pr-4 font-medium">缺开盘价</th>
+                  <th className="pb-2 pr-4 font-medium">阶段</th>
                   <th className="pb-2 pr-4 font-medium">状态</th>
-                  <th className="pb-2 font-medium">建议动作</th>
+                  <th className="pb-2 pr-4 font-medium text-right">预期/实际/缺失</th>
+                  <th className="pb-2 font-medium">说明</th>
                 </tr>
               </thead>
               <tbody className="text-foreground-muted">
-                {portfolioTrackingStatus.map((item) => (
-                  <tr key={item.portfolio_id} className="border-b border-border last:border-0 align-top">
-                    <td className="py-2 pr-4 font-medium text-foreground">{item.name}</td>
-                    <td className="py-2 pr-4">{item.exchange === 'HKEX' ? '中国香港' : 'A股'}</td>
-                    <td className="py-2 pr-4 tabular-nums">{item.latest_signal_date || '--'}</td>
-                    <td className="py-2 pr-4 tabular-nums">{item.pending_signal_date || '--'}</td>
-                    <td className="py-2 pr-4 tabular-nums">{item.next_entry_trade_date || '--'}</td>
-                    <td className="py-2 pr-4 tabular-nums">{item.latest_trade_date || '--'}</td>
-                    <td className="py-2 pr-4 tabular-nums">
-                      {item.daily_row_count ?? 0}日 / {item.position_row_count ?? 0}持仓 / {item.trade_row_count ?? 0}调仓 / {item.metrics_row_count ?? 0}指标
-                    </td>
-                    <td className="py-2 pr-4 tabular-nums">{item.can_sync ? <span className="text-amber-700">{item.next_sync_signal_date || '--'} → {item.next_sync_trade_date || '--'}</span> : '否'}</td>
-                    <td className="py-2 pr-4 tabular-nums">{item.missing_open_price_count > 0 ? <span className="text-amber-700">{item.missing_open_price_count}</span> : (item.missing_open_price_count === 0 ? '0' : '--')}</td>
-                    <td className={`py-2 pr-4 font-medium ${getPortfolioTrackingStatusClass(item.status)}`}>{item.status_text || item.status || '--'}</td>
-                    <td className="py-2 text-foreground-dim">{item.action_hint || '--'}</td>
+                {simPipelineDays.slice(0, 40).map((item) => (
+                  <tr key={`${item.market}-${item.trade_date}-${item.stage}`} className="border-b border-border last:border-0 align-top">
+                    <td className="py-2 pr-4 tabular-nums text-foreground">{item.trade_date}</td>
+                    <td className="py-2 pr-4">{item.market === 'HKEX' ? '港股' : 'A股'}</td>
+                    <td className="py-2 pr-4">{item.stage}</td>
+                    <td className={`py-2 pr-4 font-medium ${item.status === 'ok' || item.status === 'skipped' ? 'text-positive' : item.status === 'blocked' || item.status === 'failed' ? 'text-negative' : 'text-foreground-muted'}`}>{item.status}</td>
+                    <td className="py-2 pr-4 text-right tabular-nums">{item.expected_count ?? 0} / {item.actual_count ?? 0} / {item.missing_count ?? 0}</td>
+                    <td className="py-2 text-foreground-dim">{item.message || item.action_hint || '--'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
-
-        {syncPortfolioResult?.items?.length ? (
-          <div className="mt-4 rounded-xl border border-border bg-background px-4 py-3">
-            <div className="text-xs font-medium text-foreground">最近一次事实表同步结果</div>
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full text-[11px] text-left">
-                <thead>
-                  <tr className="border-b border-border text-foreground-dim">
-                    <th className="pb-2 pr-3 font-medium">组合</th>
-                    <th className="pb-2 pr-3 font-medium">状态</th>
-                    <th className="pb-2 pr-3 font-medium">锚点</th>
-                    <th className="pb-2 pr-3 font-medium">最新信号</th>
-                    <th className="pb-2 pr-3 font-medium text-right">新增估值日</th>
-                    <th className="pb-2 font-medium">说明</th>
-                  </tr>
-                </thead>
-                <tbody className="text-foreground-muted">
-                  {syncPortfolioResult.items.map((item) => (
-                    <tr key={item.portfolio_id} className="border-b border-border last:border-0 align-top">
-                      <td className="py-2 pr-3 text-foreground">{item.name || item.portfolio_id}</td>
-                      <td className="py-2 pr-3">{item.status || '--'}</td>
-                      <td className="py-2 pr-3 tabular-nums">{item.anchor_date || '--'}</td>
-                      <td className="py-2 pr-3 tabular-nums">{item.latest_signal_date || '--'}</td>
-                      <td className="py-2 pr-3 text-right tabular-nums">{item.generated_daily_count ?? 0}</td>
-                      <td className="py-2 text-foreground-dim">{item.message || '--'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
         ) : null}
 
-        {verifyPortfolioResult ? (
-          portfolioVerifyDiffs.length > 0 ? (
-            <div className="mt-4 rounded-xl border border-negative/20 bg-negative/10 px-4 py-3">
-              <div className="text-xs font-medium text-negative">发现 {portfolioVerifyDiffs.length} 条异常记录</div>
-              <div className="mt-3 overflow-x-auto">
-                <table className="w-full text-[11px] text-left">
-                  <thead>
-                    <tr className="border-b border-border text-foreground-dim">
-                      <th className="pb-2 pr-3 font-medium">组合</th>
-                      <th className="pb-2 pr-3 font-medium">日期</th>
-                      <th className="pb-2 pr-3 font-medium">状态</th>
-                      <th className="pb-2 pr-3 font-medium text-right">总资产</th>
-                      <th className="pb-2 pr-3 font-medium text-right">持仓汇总</th>
-                      <th className="pb-2 font-medium">说明</th>
-                    </tr>
-                  </thead>
-                  <tbody className="text-foreground-muted">
-                    {portfolioVerifyDiffs.map((item) => (
-                      <tr key={`${item.portfolio_id}-${item.trade_date}-${item.status}`} className="border-b border-border last:border-0">
-                        <td className="py-2 pr-3">{item.portfolio_id}</td>
-                        <td className="py-2 pr-3 tabular-nums">{item.trade_date}</td>
-                        <td className="py-2 pr-3 font-medium text-negative">{item.status}</td>
-                        <td className="py-2 pr-3 text-right tabular-nums">{item.total_assets?.toFixed?.(2) || '--'}</td>
-                        <td className="py-2 pr-3 text-right tabular-nums">{item.position_assets?.toFixed?.(2) || '--'}</td>
-                        <td className="py-2">{item.message || '--'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+        {(simPipelineOverview.runs || []).length > 0 ? (
+          <div className="mt-4 rounded-xl border border-border bg-background px-4 py-3">
+            <div className="text-xs font-medium text-foreground">最近运行日志</div>
+            <div className="mt-2 space-y-1 text-[11px] text-foreground-muted">
+              {simPipelineOverview.runs.slice(0, 5).map((run) => (
+                <div key={run.run_id} className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-foreground">{run.status}</span>
+                  <span>{run.market || 'ALL'}</span>
+                  <span>{run.from_date || '--'} → {run.to_date || '--'}</span>
+                  <span className="text-foreground-dim">{run.run_id}</span>
+                </div>
+              ))}
             </div>
-          ) : (
-            <div className="mt-3 rounded-lg border border-positive/20 bg-positive/10 px-3 py-2 text-xs text-positive">
-              ✅ 所有事实表记录一致。
-            </div>
-          )
+          </div>
         ) : null}
       </div>
 

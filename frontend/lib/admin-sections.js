@@ -15,7 +15,8 @@ export function resolveAdminSectionApis(section) {
       '/api/admin/quadrant-overview',
       '/api/admin/quadrant-logs',
       '/api/admin/compute-status',
-      '/api/admin/portfolio-tracking/status',
+      '/api/admin/sim-portfolio-pipeline/overview',
+      '/api/admin/sim-portfolio-pipeline/days',
     ]
   }
   if (section === 'ai') {

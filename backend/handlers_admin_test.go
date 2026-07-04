@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -212,17 +211,17 @@ func TestHandleAdminRankingPortfolioRepairTriggersExecution(t *testing.T) {
 	}
 }
 
-func TestHandleAdminPortfolioTrackingSync(t *testing.T) {
+func TestHandleAdminSimPortfolioV2Initialize(t *testing.T) {
 	repo, cleanup := quadrantSetupForAdminTest(t)
 	defer cleanup()
-	server := &appServer{quadrantService: quadrant.NewService(repo)}
+	server := &appServer{simPortfolioV2Service: quadrant.NewSimPortfolioV2Service(repo)}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/portfolio-tracking/sync", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/sim-portfolio-pipeline/initialize", strings.NewReader(`{"market":"ALL"}`))
 	resp := httptest.NewRecorder()
-	server.handleAdminPortfolioTrackingSync(resp, req)
+	server.handleAdminSimPortfolioV2Initialize(resp, req)
 
 	if resp.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.Code)
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
 	}
 	var body map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -230,9 +229,6 @@ func TestHandleAdminPortfolioTrackingSync(t *testing.T) {
 	}
 	if body["ok"] != true {
 		t.Fatalf("expected ok=true, got %+v", body)
-	}
-	if _, ok := body["items"]; !ok {
-		t.Fatalf("expected sync response items, got %+v", body)
 	}
 }
 
@@ -255,110 +251,41 @@ func quadrantSetupForAdminTest(t *testing.T) (*quadrant.Repository, func()) {
 		&quadrant.SimPortfolioMetrics{},
 		&quadrant.SimPortfolioTrackingConfig{},
 		&quadrant.SimPortfolioTrackingJob{},
+		&quadrant.MarketCalendar{},
+		&quadrant.SimPortfolioV2Definition{},
+		&quadrant.SimPortfolioV2PipelineRun{},
+		&quadrant.SimPortfolioV2PipelineDayStatus{},
+		&quadrant.SimPortfolioV2SignalBatch{},
+		&quadrant.SimPortfolioV2SignalItem{},
+		&quadrant.SimPortfolioV2SelectionBatch{},
+		&quadrant.SimPortfolioV2SelectionItem{},
+		&quadrant.SimPortfolioV2PriceRequirement{},
+		&quadrant.SimPortfolioV2Daily{},
+		&quadrant.SimPortfolioV2Position{},
+		&quadrant.SimPortfolioV2Trade{},
+		&quadrant.SimPortfolioV2Metrics{},
+		&quadrant.SimPortfolioV2Watermark{},
 	)
 	return quadrant.NewRepository(db), func() {}
 }
 
-func TestHandleAdminPortfolioTrackingBackfillClosePrices(t *testing.T) {
+func TestHandleAdminSimPortfolioV2RunSkipsHKHoliday(t *testing.T) {
 	repo, cleanup := quadrantSetupForAdminTest(t)
 	defer cleanup()
-	ctx := context.Background()
-	now := time.Now().UTC()
-	def := quadrant.RankingPortfolioDefinition{
-		ID:               "p1",
-		Code:             "p1",
-		Name:             "模拟组合A",
-		Exchange:         "ASHARE",
-		PortfolioVariant: "A",
-		MaxHoldings:      4,
-		SelectionRule:    "top4",
-		WeightingMethod:  "equal",
-		IsActive:         true,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	}
-	if err := repo.DB().WithContext(ctx).Create(&def).Error; err != nil {
-		t.Fatalf("seed def: %v", err)
-	}
-	for _, date := range []string{"2026-06-01", "2026-06-02"} {
-		for i := 1; i <= 4; i++ {
-			if err := repo.UpsertSnapshot(ctx, quadrant.RankingSnapshot{Code: fmt.Sprintf("60000%d", i), Name: fmt.Sprintf("A%d", i), Exchange: "SSE", Rank: i, ClosePrice: 10, PriceTradeDate: date, SnapshotDate: date, CreatedAt: now}); err != nil {
-				t.Fatalf("seed snapshot: %v", err)
-			}
-		}
-	}
-	qsvc := quadrant.NewService(repo)
-	qsvc.SetPriceResolver(func(_ context.Context, _ string, _ string, tradeDate string) float64 {
-		if tradeDate == "2026-06-02" {
-			return 12.5
-		}
-		return 0
-	})
-	server := &appServer{quadrantService: qsvc}
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/portfolio-tracking/backfill-close-prices", strings.NewReader(`{"latest_only":true}`))
-	resp := httptest.NewRecorder()
-	server.handleAdminPortfolioTrackingBackfillClosePrices(resp, req)
-	if resp.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
-	}
-	var body map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body["price_type"] != "close" {
-		t.Fatalf("unexpected body: %+v", body)
-	}
-}
+	server := &appServer{simPortfolioV2Service: quadrant.NewSimPortfolioV2Service(repo)}
 
-func TestHandleAdminPortfolioTrackingStartDatePreview(t *testing.T) {
-	repo, cleanup := quadrantSetupForAdminTest(t)
-	defer cleanup()
-	ctx := context.Background()
-	now := time.Now().UTC()
-	def := quadrant.RankingPortfolioDefinition{
-		ID:               "p1",
-		Code:             "p1",
-		Name:             "模拟组合A",
-		Exchange:         "ASHARE",
-		PortfolioVariant: "A",
-		MaxHoldings:      4,
-		SelectionRule:    "top4",
-		WeightingMethod:  "equal",
-		IsActive:         true,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	}
-	if err := repo.DB().WithContext(ctx).Create(&def).Error; err != nil {
-		t.Fatalf("seed def: %v", err)
-	}
-	for _, date := range []string{"2026-06-01", "2026-06-02"} {
-		for i := 1; i <= 4; i++ {
-			if err := repo.UpsertSnapshot(ctx, quadrant.RankingSnapshot{Code: fmt.Sprintf("60000%d", i), Name: fmt.Sprintf("A%d", i), Exchange: "SSE", Rank: i, ClosePrice: 10, PriceTradeDate: date, SnapshotDate: date, CreatedAt: now}); err != nil {
-				t.Fatalf("seed snapshot: %v", err)
-			}
-			if err := repo.UpsertSnapshot(ctx, quadrant.RankingSnapshot{Code: fmt.Sprintf("00%d", i), Name: fmt.Sprintf("H%d", i), Exchange: "HKEX", Rank: i, ClosePrice: 20, PriceTradeDate: date, SnapshotDate: date, CreatedAt: now}); err != nil {
-				t.Fatalf("seed hk snapshot: %v", err)
-			}
-		}
-	}
-	for i := 1; i <= 4; i++ {
-		if err := repo.DB().WithContext(ctx).Create(&quadrant.RankingPortfolioMarketPrice{DefinitionID: def.ID, SnapshotVersion: "2026-06-01", SnapshotDate: "2026-06-01", Code: fmt.Sprintf("60000%d", i), Exchange: "SSE", OpenPrice: 10, EntryTradeDate: "2026-06-02", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-			t.Fatalf("seed price: %v", err)
-		}
-	}
-	qsvc := quadrant.NewService(repo)
-	server := &appServer{simPortfolioTrackingStartService: quadrant.NewSimPortfolioTrackingStartService(qsvc)}
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/portfolio-tracking/start-date/preview", strings.NewReader(`{"start_signal_date":"2026-06-01"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/sim-portfolio-pipeline/run", strings.NewReader(`{"market":"HKEX","from_date":"2026-07-01","to_date":"2026-07-01"}`))
 	resp := httptest.NewRecorder()
-	server.handleAdminPortfolioTrackingStartDatePreview(resp, req)
+	server.handleAdminSimPortfolioV2Run(resp, req)
+
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
 	}
 	var body map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
+		t.Fatalf("decode response: %v", err)
 	}
-	if body["can_apply"] != true {
-		t.Fatalf("expected can_apply=true, got %+v", body)
+	if body["blocked_days"].(float64) != 0 {
+		t.Fatalf("expected no blocked days on holiday, got %+v", body)
 	}
 }

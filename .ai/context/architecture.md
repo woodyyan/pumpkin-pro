@@ -152,27 +152,12 @@ frontend/
   - 用户级模式：调用 `RebuildDailySnapshotForUser(...)` 执行指定 `user + scope + date` 重建。
 - 配置层新增 `PortfolioSnapshotConfig`，把开关、A 股/港股触发时间与超时统一放在 `backend/config/config.go` 管理，避免调度参数散落在 `main.go` 或 worker 常量中。
 
-## 新口径模拟组合事实表运维链路（2026-07-01）
+## 旧模拟组合事实表运维链路（2026-07-01，已由 v2 替代）
 
-- `/portfolio-tracking` 只读取新事实表：`portfolio_daily`、`portfolio_position`、`portfolio_trade`、`portfolio_metrics`；legacy `quadrant_ranking_portfolio_results` 仅用于历史核查。
-- Admin 四象限页的「新口径模拟组合管理」固定按三步表达：
-  1. 「补齐建仓开盘价」只补 `quadrant_ranking_portfolio_market_prices.open_price` / `entry_trade_date`，不生成持仓或调仓。
-  2. 「同步最新事实表」负责推进 `signal_date -> trade_date`，生成 `portfolio_daily/position/trade/metrics`。
-  3. 「验证事实表一致性」检查资产汇总、持仓数量和建仓价完整性。
-- Admin status 必须同时暴露前置价格缺口与事实表完整度：`daily_row_count`、`completed_daily_count`、`position_row_count`、`trade_row_count`、`metrics_row_count`、`baseline_only`、`can_sync`、`action_hint`。
-- `SyncSimPortfolios` 返回每个组合的同步摘要：锚点、最新信号、生成估值日数量、最后生成日期和阻断原因；bulk-save 后的自动同步日志至少记录 generated 数量。
-
-## 模拟组合全局开始信号日重置（2026-07-01）
-
-- Admin「新口径模拟组合管理」新增全局开始跟踪日期能力，后台服务为 `SimPortfolioTrackingStartService`。
-- 管理员选择的日期语义固定为 `start_signal_date`（榜单信号日 / 收盘日），不是买入交易日；首次建仓日由该市场下一条排行榜快照日期表示。
-- 该能力采用严格共同日期：A 股与港股在同一个 `start_signal_date` 都必须有排行榜快照，4 个 active 模拟组合才能一起应用；不支持单组合设置起点。
-- 新增 Admin API：
-  - `GET /api/admin/portfolio-tracking/start-date/status`：读取当前全局开始信号日与最近 apply job。
-  - `POST /api/admin/portfolio-tracking/start-date/preview`：只读预检该日期是否具备 A/H 快照、成分股、T+1 开盘价和首日收盘价。
-  - `POST /api/admin/portfolio-tracking/start-date/apply`：二次确认后清空并从该 `start_signal_date` 重算 4 个组合事实表。
-- 新增持久化表：`sim_portfolio_tracking_config` 保存当前全局起点，`sim_portfolio_tracking_jobs` 保存应用任务审计结果。
-- 应用重置复用既有事实表计算链路，仍写入 `portfolio_daily`、`portfolio_position`、`portfolio_trade`、`portfolio_metrics`；不新增第二套组合计算口径。
+- 该段记录的是 v2 重构前的历史实现，仅用于理解遗留代码；2026-07-04 起不再作为当前架构或 Admin 操作规范。
+- 旧 `/portfolio-tracking` 曾读取 `portfolio_daily`、`portfolio_position`、`portfolio_trade`、`portfolio_metrics`，并通过 Admin「新口径模拟组合管理」暴露补开盘价、同步事实表、验证一致性、全局开始信号日重置等操作。
+- v2 上线后，旧 `quadrant_ranking_portfolio_market_prices`、旧补价按钮、旧全局开始信号日和旧事实表同步链路仅作为历史遗留，不再作为模拟组合推进依据。
+- 若后续清理 legacy 代码，应优先删除旧 Admin handler / 旧按钮 / 旧起点服务入口，再评估旧表物理 drop 的数据风险。
 
 ### 个股详情页信息架构（2026-07-01）
 - `/live-trading/[symbol]` 从纵向长页面调整为「首屏决策概览 + 分域 Tab」。
@@ -182,3 +167,11 @@ frontend/
 - 移动端主入口固定为：概览、走势、分析、新闻、持仓；「分析」组内二级切换技术、基本面。
 - Tab 配置和 URL `tab` 归一化集中在 `frontend/lib/stock-detail-tabs.js`；非法 tab 回退 `overview`。
 - 本阶段不新增后端接口，继续复用个股页既有行情、技术、基础面、新闻、AI、持仓和信号配置 API。
+
+## 模拟组合 v2 Pipeline 架构（2026-07-04）
+
+- `/portfolio-tracking` 的长期目标数据源切换为 `Sim Portfolio v2`：`sim_portfolio_v2_daily`、`sim_portfolio_v2_positions`、`sim_portfolio_v2_trades`、`sim_portfolio_v2_metrics`。
+- v2 链路由市场交易日历驱动：`market_calendars` 决定 A 股/港股某日期是否交易、上一交易日和下一交易日。
+- Pipeline 阶段固定为：`calendar -> signal -> selection -> price_requirements -> entry_open -> valuation_close -> facts -> verify`。
+- Admin 数据页中的模拟组合区域升级为“模拟组合 Pipeline”独立区块，展示市场状态、阶段矩阵、缺口诊断和运行日志。
+- 旧 `quadrant_ranking_portfolio_market_prices`、旧补价按钮、旧全局开始信号日和旧事实表同步链路仅作为历史遗留，不再作为 v2 的推进依据。

@@ -268,37 +268,37 @@ type paymentService interface {
 }
 
 type appServer struct {
-	cfg                              config.Config
-	authService                      *auth.Service
-	strategyService                  *strategy.Service
-	liveService                      *live.Service
-	signalService                    *signal.Service
-	portfolioService                 *portfolio.Service
-	portfolioWorker                  *portfolio.Worker
-	companyProfileService            *companyprofile.Service
-	capitalMapService                *capitalmap.Service
-	quadrantService                  *quadrant.Service
-	simPortfolioTrackingStartService *quadrant.SimPortfolioTrackingStartService
-	adminService                     *admin.Service
-	backupService                    *backup.Service
-	backupWorker                     *backup.Worker
-	aipickerService                  *aipicker.Service
-	aipickerWorker                   *aipicker.Worker
-	aiReportService                  *aireport.Service
-	factorLabService                 *factorlab.Service
-	factorLabWorker                  *factorlab.Worker
-	factorIndexService               *factorindex.Service
-	factorIndexWorker                *factorindex.Worker
-	backtestService                  *backtest.Service
-	screenerService                  *screener.Service
-	analyticsRepo                    *analytics.Repository
-	feedbackRepo                     *feedback.Repository
-	aiRateLimiter                    *strategy.AIRateLimiter
-	fundCacheRepo                    *fundcache.Repository
-	analysisHistoryRepo              *analysis_history.Repository
-	portfolioRiskRepo                *portfolio.RiskRepository
-	newsService                      *live.NewsService
-	paymentService                   paymentService
+	cfg                   config.Config
+	authService           *auth.Service
+	strategyService       *strategy.Service
+	liveService           *live.Service
+	signalService         *signal.Service
+	portfolioService      *portfolio.Service
+	portfolioWorker       *portfolio.Worker
+	companyProfileService *companyprofile.Service
+	capitalMapService     *capitalmap.Service
+	quadrantService       *quadrant.Service
+	simPortfolioV2Service *quadrant.SimPortfolioV2Service
+	adminService          *admin.Service
+	backupService         *backup.Service
+	backupWorker          *backup.Worker
+	aipickerService       *aipicker.Service
+	aipickerWorker        *aipicker.Worker
+	aiReportService       *aireport.Service
+	factorLabService      *factorlab.Service
+	factorLabWorker       *factorlab.Worker
+	factorIndexService    *factorindex.Service
+	factorIndexWorker     *factorindex.Worker
+	backtestService       *backtest.Service
+	screenerService       *screener.Service
+	analyticsRepo         *analytics.Repository
+	feedbackRepo          *feedback.Repository
+	aiRateLimiter         *strategy.AIRateLimiter
+	fundCacheRepo         *fundcache.Repository
+	analysisHistoryRepo   *analysis_history.Repository
+	portfolioRiskRepo     *portfolio.RiskRepository
+	newsService           *live.NewsService
+	paymentService        paymentService
 }
 
 // writeDeviceSnapshotAsync parses UA and writes a device snapshot asynchronously.
@@ -3635,24 +3635,6 @@ func (a *appServer) handleQuadrantBulkSave(w http.ResponseWriter, r *http.Reques
 	}
 	log.Printf("[quadrant] bulk-save: wrote %d scores in %v", count, elapsed)
 	writeJSON(w, http.StatusOK, map[string]any{"saved": count})
-	if a.quadrantService != nil {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			defer cancel()
-			resp, err := a.quadrantService.SyncSimPortfolios(ctx)
-			if err != nil {
-				log.Printf("[portfolio-tracking] auto sync after quadrant bulk-save failed: %v", err)
-				return
-			}
-			generated := 0
-			if resp != nil {
-				for _, item := range resp.Items {
-					generated += item.GeneratedDailyCount
-				}
-			}
-			log.Printf("[portfolio-tracking] auto sync after quadrant bulk-save completed: generated=%d", generated)
-		}()
-	}
 }
 
 func (a *appServer) handleQuadrantStatus(w http.ResponseWriter, r *http.Request) {
@@ -4084,6 +4066,10 @@ func main() {
 	quadrantService.SetPriceLookupResolver(newQuadrantPriceLookupResolver(liveRepo))
 	quadrantService.SetOpenPriceResolver(newQuadrantOpenPriceResolver(liveMarketClient))
 	quadrantService.SetTradeDateResolver(newQuadrantTradeDateResolver(liveRepo, liveMarketClient))
+	simPortfolioV2Service := quadrant.NewSimPortfolioV2Service(quadrantRepo)
+	simPortfolioV2Service.SetPriceResolver(newQuadrantPriceResolver(liveRepo))
+	simPortfolioV2Service.SetPriceLookupResolver(newQuadrantPriceLookupResolver(liveRepo))
+	simPortfolioV2Service.SetOpenPriceResolver(newQuadrantOpenPriceResolver(liveMarketClient))
 	quadrantWorker := quadrant.NewWorker(quadrantService, quadrant.WorkerConfig{
 		Enabled:            cfg.Quadrant.DailyComputeEnabled,
 		ComputeHour:        cfg.Quadrant.ComputeHour,
@@ -4093,7 +4079,6 @@ func main() {
 		BackendBaseURL:     cfg.BackendCallbackURL,
 	}, nil)
 	quadrantService.SetWorker(quadrantWorker)
-	simPortfolioTrackingStartService := quadrant.NewSimPortfolioTrackingStartService(quadrantService)
 	quadrantWorker.Start(context.Background())
 
 	// Intraday realtime-price refresh for the ranking simulated portfolio.
@@ -4219,37 +4204,37 @@ func main() {
 	aipickerWorker.Start(context.Background())
 
 	server := &appServer{
-		cfg:                              cfg,
-		authService:                      authService,
-		strategyService:                  strategyService,
-		liveService:                      liveService,
-		signalService:                    signalService,
-		portfolioService:                 portfolioService,
-		portfolioWorker:                  portfolioWorker,
-		companyProfileService:            companyProfileService,
-		capitalMapService:                capitalMapService,
-		quadrantService:                  quadrantService,
-		simPortfolioTrackingStartService: simPortfolioTrackingStartService,
-		adminService:                     adminService,
-		backupService:                    backupService,
-		backupWorker:                     backupWorker,
-		aipickerService:                  aipickerService,
-		aipickerWorker:                   aipickerWorker,
-		aiReportService:                  aiReportService,
-		factorLabService:                 factorLabService,
-		factorLabWorker:                  factorLabWorker,
-		factorIndexService:               factorIndexService,
-		factorIndexWorker:                factorIndexWorker,
-		backtestService:                  backtestService,
-		screenerService:                  screenerService,
-		analyticsRepo:                    analyticsRepo,
-		feedbackRepo:                     feedbackRepo,
-		aiRateLimiter:                    strategy.NewAIRateLimiter(20),
-		fundCacheRepo:                    fundCacheRepo,
-		analysisHistoryRepo:              analysisHistoryRepo,
-		portfolioRiskRepo:                portfolioRiskRepo,
-		newsService:                      newsService,
-		paymentService:                   paymentService,
+		cfg:                   cfg,
+		authService:           authService,
+		strategyService:       strategyService,
+		liveService:           liveService,
+		signalService:         signalService,
+		portfolioService:      portfolioService,
+		portfolioWorker:       portfolioWorker,
+		companyProfileService: companyProfileService,
+		capitalMapService:     capitalMapService,
+		quadrantService:       quadrantService,
+		simPortfolioV2Service: simPortfolioV2Service,
+		adminService:          adminService,
+		backupService:         backupService,
+		backupWorker:          backupWorker,
+		aipickerService:       aipickerService,
+		aipickerWorker:        aipickerWorker,
+		aiReportService:       aiReportService,
+		factorLabService:      factorLabService,
+		factorLabWorker:       factorLabWorker,
+		factorIndexService:    factorIndexService,
+		factorIndexWorker:     factorIndexWorker,
+		backtestService:       backtestService,
+		screenerService:       screenerService,
+		analyticsRepo:         analyticsRepo,
+		feedbackRepo:          feedbackRepo,
+		aiRateLimiter:         strategy.NewAIRateLimiter(20),
+		fundCacheRepo:         fundCacheRepo,
+		analysisHistoryRepo:   analysisHistoryRepo,
+		portfolioRiskRepo:     portfolioRiskRepo,
+		newsService:           newsService,
+		paymentService:        paymentService,
 	}
 
 	mux := http.NewServeMux()
@@ -4355,16 +4340,10 @@ func main() {
 	mux.HandleFunc("/api/admin/ranking-portfolio-repair", server.withSuperAdminAuth(server.handleAdminRankingPortfolioRepair))
 	mux.HandleFunc("/api/admin/ranking-portfolio-verify", server.withSuperAdminAuth(server.handleAdminRankingPortfolioVerify))
 	mux.HandleFunc("/api/admin/ranking-portfolio-fix", server.withSuperAdminAuth(server.handleAdminRankingPortfolioFix))
-	mux.HandleFunc("/api/admin/portfolio-tracking/status", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingStatus))
-	mux.HandleFunc("/api/admin/portfolio-tracking/verify", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingVerify))
-	mux.HandleFunc("/api/admin/portfolio-tracking/sync", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingSync))
-	mux.HandleFunc("/api/admin/portfolio-tracking/recompute", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingRecompute))
-	mux.HandleFunc("/api/admin/portfolio-tracking/reset", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingReset))
-	mux.HandleFunc("/api/admin/portfolio-tracking/backfill-open-prices", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingBackfillOpenPrices))
-	mux.HandleFunc("/api/admin/portfolio-tracking/backfill-close-prices", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingBackfillClosePrices))
-	mux.HandleFunc("/api/admin/portfolio-tracking/start-date/status", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingStartDateStatus))
-	mux.HandleFunc("/api/admin/portfolio-tracking/start-date/preview", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingStartDatePreview))
-	mux.HandleFunc("/api/admin/portfolio-tracking/start-date/apply", server.withSuperAdminAuth(server.handleAdminPortfolioTrackingStartDateApply))
+	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/overview", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Overview))
+	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/days", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Days))
+	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/initialize", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Initialize))
+	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/run", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Run))
 	mux.HandleFunc("/api/admin/company-profiles", server.withSuperAdminAuth(server.handleAdminCompanyProfiles))
 	mux.HandleFunc("/api/admin/company-profiles/refresh", server.withSuperAdminAuth(server.handleAdminCompanyProfileRefresh))
 	mux.HandleFunc("/api/admin/company-profiles/refresh-status", server.withSuperAdminAuth(server.handleAdminCompanyProfileRefreshStatus))

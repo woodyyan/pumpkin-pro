@@ -22,6 +22,7 @@ describe('resolveAdminSectionApis()', () => {
       '/api/admin/compute-status',
       '/api/admin/sim-portfolio-pipeline/overview',
       '/api/admin/sim-portfolio-pipeline/days',
+      '/api/admin/sim-portfolio-pipeline/calendars',
     ])
   })
 

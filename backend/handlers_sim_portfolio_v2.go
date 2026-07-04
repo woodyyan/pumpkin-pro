@@ -85,3 +85,81 @@ func (a *appServer) handleAdminSimPortfolioV2Run(w http.ResponseWriter, r *http.
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
+
+func (a *appServer) handleAdminSimPortfolioV2Calendars(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	if a.simPortfolioV2Service == nil {
+		writeError(w, http.StatusInternalServerError, "Sim Portfolio v2 服务未配置")
+		return
+	}
+	resp, err := a.simPortfolioV2Service.GetAdminCalendars(r.Context(), r.URL.Query().Get("month"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *appServer) handleAdminSimPortfolioV2CalendarDay(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	if a.simPortfolioV2Service == nil {
+		writeError(w, http.StatusInternalServerError, "Sim Portfolio v2 服务未配置")
+		return
+	}
+	resp, err := a.simPortfolioV2Service.GetAdminCalendarDay(r.Context(), r.URL.Query().Get("market"), r.URL.Query().Get("date"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *appServer) handleAdminSimPortfolioV2StartDatePreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	if a.simPortfolioV2Service == nil {
+		writeError(w, http.StatusInternalServerError, "Sim Portfolio v2 服务未配置")
+		return
+	}
+	var req quadrant.SimPortfolioV2StartDatePreviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	resp, err := a.simPortfolioV2Service.PreviewStartDate(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *appServer) handleAdminSimPortfolioV2StartDateApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	if a.simPortfolioV2Service == nil {
+		writeError(w, http.StatusInternalServerError, "Sim Portfolio v2 服务未配置")
+		return
+	}
+	var req quadrant.SimPortfolioV2StartDateApplyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	resp, err := a.simPortfolioV2Service.ApplyStartDate(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}

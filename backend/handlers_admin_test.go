@@ -232,6 +232,27 @@ func TestHandleAdminSimPortfolioV2Initialize(t *testing.T) {
 	}
 }
 
+func TestHandleAdminSimPortfolioV2Calendars(t *testing.T) {
+	repo, cleanup := quadrantSetupForAdminTest(t)
+	defer cleanup()
+	server := &appServer{simPortfolioV2Service: quadrant.NewSimPortfolioV2Service(repo)}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/sim-portfolio-pipeline/calendars?month=2026-07", nil)
+	resp := httptest.NewRecorder()
+	server.handleAdminSimPortfolioV2Calendars(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	markets, ok := body["markets"].([]any)
+	if !ok || len(markets) != 2 {
+		t.Fatalf("expected two market calendars, got %+v", body)
+	}
+}
+
 func quadrantSetupForAdminTest(t *testing.T) (*quadrant.Repository, func()) {
 	t.Helper()
 	db := testutil.InMemoryDB(t)
@@ -264,6 +285,7 @@ func quadrantSetupForAdminTest(t *testing.T) (*quadrant.Repository, func()) {
 		&quadrant.SimPortfolioV2Position{},
 		&quadrant.SimPortfolioV2Trade{},
 		&quadrant.SimPortfolioV2Metrics{},
+		&quadrant.SimPortfolioV2MarketConfig{},
 		&quadrant.SimPortfolioV2Watermark{},
 	)
 	return quadrant.NewRepository(db), func() {}

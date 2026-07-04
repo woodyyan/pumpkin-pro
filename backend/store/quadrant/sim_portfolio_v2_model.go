@@ -301,6 +301,20 @@ type SimPortfolioV2Metrics struct {
 
 func (SimPortfolioV2Metrics) TableName() string { return "sim_portfolio_v2_metrics" }
 
+type SimPortfolioV2MarketConfig struct {
+	ID                       int64     `gorm:"primaryKey;autoIncrement"`
+	Market                   string    `gorm:"size:16;not null;uniqueIndex"`
+	StartSignalDate          string    `gorm:"size:10;not null;default:''"`
+	PublishedJobID           string    `gorm:"size:64;not null;default:''"`
+	LatestPublishedTradeDate string    `gorm:"size:10;not null;default:''"`
+	Status                   string    `gorm:"size:24;not null;default:'pending'"`
+	UpdatedBy                string    `gorm:"size:128;not null;default:''"`
+	CreatedAt                time.Time `gorm:"not null"`
+	UpdatedAt                time.Time `gorm:"not null"`
+}
+
+func (SimPortfolioV2MarketConfig) TableName() string { return "sim_portfolio_v2_market_configs" }
+
 type SimPortfolioV2Watermark struct {
 	ID                      int64     `gorm:"primaryKey;autoIncrement"`
 	PortfolioID             string    `gorm:"size:64;not null;uniqueIndex"`

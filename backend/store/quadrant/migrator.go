@@ -40,6 +40,7 @@ func (Migrator) AutoMigrate(db *gorm.DB) error {
 		&SimPortfolioV2Position{},
 		&SimPortfolioV2Trade{},
 		&SimPortfolioV2Metrics{},
+		&SimPortfolioV2MarketConfig{},
 		&SimPortfolioV2Watermark{},
 	)
 }

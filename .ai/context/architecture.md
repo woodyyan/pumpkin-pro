@@ -173,5 +173,7 @@ frontend/
 - `/portfolio-tracking` 的长期目标数据源切换为 `Sim Portfolio v2`：`sim_portfolio_v2_daily`、`sim_portfolio_v2_positions`、`sim_portfolio_v2_trades`、`sim_portfolio_v2_metrics`。
 - v2 链路由市场交易日历驱动：`market_calendars` 决定 A 股/港股某日期是否交易、上一交易日和下一交易日。
 - Pipeline 阶段固定为：`calendar -> signal -> selection -> price_requirements -> entry_open -> valuation_close -> facts -> verify`。
-- Admin 数据页中的模拟组合区域升级为“模拟组合 Pipeline”独立区块，展示市场状态、阶段矩阵、缺口诊断和运行日志。
+- Admin 数据页中的模拟组合区域升级为“模拟组合 Pipeline”独立区块，展示市场状态、阶段矩阵、缺口诊断、运行日志和双市场日历驾驶舱。
+- A 股和港股在 Admin 中分别展示市场日历；每个日期可查看信号、组合 A/B、开盘价、收盘价、facts 和修复建议。
+- v2 开始信号日采用市场级配置：A 股和港股可独立启动，但同一市场内组合 A/B 必须同一起点；配置保存于 `sim_portfolio_v2_market_configs`。
 - 旧 `quadrant_ranking_portfolio_market_prices`、旧补价按钮、旧全局开始信号日和旧事实表同步链路仅作为历史遗留，不再作为 v2 的推进依据。

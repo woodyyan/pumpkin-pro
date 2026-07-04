@@ -20,6 +20,9 @@ describe('admin quadrant panel migration hints', () => {
   it('surfaces the calendar-driven v2 pipeline entry and removes legacy repair buttons', () => {
     assert.match(adminSectionsSource, /模拟组合 Pipeline/)
     assert.match(adminSectionsSource, /交易日历驱动的严格模式链路/)
+    assert.match(adminSectionsSource, /市场日历驾驶舱/)
+    assert.match(adminSectionsSource, /设为该市场开始信号日/)
+    assert.match(adminSectionsSource, /确认应用并重建该市场/)
     assert.match(adminSectionsSource, /初始化 v2 定义/)
     assert.match(adminSectionsSource, /运行 A 股 Pipeline/)
     assert.match(adminSectionsSource, /运行港股 Pipeline/)

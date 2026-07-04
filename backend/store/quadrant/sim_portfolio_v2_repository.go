@@ -235,3 +235,61 @@ func (r *Repository) GetLatestSimPortfolioV2Metrics(ctx context.Context, portfol
 	}
 	return &row, err
 }
+
+func (r *Repository) UpsertSimPortfolioV2MarketConfig(ctx context.Context, row SimPortfolioV2MarketConfig) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "market"}}, DoUpdates: clause.AssignmentColumns([]string{"start_signal_date", "published_job_id", "latest_published_trade_date", "status", "updated_by", "updated_at"})}).Create(&row).Error
+}
+
+func (r *Repository) GetSimPortfolioV2MarketConfig(ctx context.Context, market string) (*SimPortfolioV2MarketConfig, error) {
+	var row SimPortfolioV2MarketConfig
+	err := r.db.WithContext(ctx).Where("market = ?", normalizeSimPortfolioV2Market(market)).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &row, err
+}
+
+func (r *Repository) ListSimPortfolioV2SelectionBatches(ctx context.Context, market, fromDate, toDate string) ([]SimPortfolioV2SelectionBatch, error) {
+	q := r.db.WithContext(ctx).Model(&SimPortfolioV2SelectionBatch{}).Where("market = ?", normalizeSimPortfolioV2Market(market))
+	if strings.TrimSpace(fromDate) != "" {
+		q = q.Where("signal_date >= ?", strings.TrimSpace(fromDate))
+	}
+	if strings.TrimSpace(toDate) != "" {
+		q = q.Where("signal_date <= ?", strings.TrimSpace(toDate))
+	}
+	var rows []SimPortfolioV2SelectionBatch
+	err := q.Order("signal_date ASC, portfolio_id ASC").Find(&rows).Error
+	return rows, err
+}
+
+func (r *Repository) ListSimPortfolioV2PriceRequirementsByMarketDate(ctx context.Context, market, signalDate string) ([]SimPortfolioV2PriceRequirement, error) {
+	var rows []SimPortfolioV2PriceRequirement
+	err := r.db.WithContext(ctx).Where("market = ? AND signal_date = ?", normalizeSimPortfolioV2Market(market), strings.TrimSpace(signalDate)).Order("portfolio_id ASC, price_type ASC, code ASC").Find(&rows).Error
+	return rows, err
+}
+
+func (r *Repository) CountSimPortfolioV2DailyByMarketSignalDate(ctx context.Context, market, signalDate string) (int, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&SimPortfolioV2Daily{}).Where("market = ? AND signal_date = ? AND status = ?", normalizeSimPortfolioV2Market(market), strings.TrimSpace(signalDate), "verified").Count(&count).Error
+	return int(count), err
+}
+
+func (r *Repository) DeleteSimPortfolioV2FactsForMarketFromSignalDate(ctx context.Context, market, startSignalDate string) error {
+	market = normalizeSimPortfolioV2Market(market)
+	startSignalDate = strings.TrimSpace(startSignalDate)
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("market = ? AND signal_date >= ?", market, startSignalDate).Delete(&SimPortfolioV2Position{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("market = ? AND signal_date >= ?", market, startSignalDate).Delete(&SimPortfolioV2Trade{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("market = ? AND signal_date >= ?", market, startSignalDate).Delete(&SimPortfolioV2Metrics{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("market = ? AND signal_date >= ?", market, startSignalDate).Delete(&SimPortfolioV2Daily{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+}

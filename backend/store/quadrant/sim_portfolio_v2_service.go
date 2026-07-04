@@ -632,3 +632,479 @@ func (s *SimPortfolioV2Service) GetPortfolioMetrics(ctx context.Context, portfol
 	}
 	return &SimPortfolioMetricsResponse{PortfolioID: portfolioID, TradeDate: row.TradeDate, NAV: row.NAV, AnnualReturn: row.AnnualReturn, MaxDrawdown: row.MaxDrawdown, SharpeRatio: row.SharpeRatio, Volatility: row.Volatility, WinRate: row.WinRate, TurnoverRate: row.TurnoverRate}, nil
 }
+
+type SimPortfolioV2CalendarResponse struct {
+	Month   string                         `json:"month"`
+	Today   string                         `json:"today"`
+	Markets []SimPortfolioV2MarketCalendar `json:"markets"`
+}
+
+type SimPortfolioV2MarketCalendar struct {
+	Market                   string                      `json:"market"`
+	Label                    string                      `json:"label"`
+	StartSignalDate          string                      `json:"start_signal_date,omitempty"`
+	LatestPublishedTradeDate string                      `json:"latest_published_trade_date,omitempty"`
+	Days                     []SimPortfolioV2CalendarDay `json:"days"`
+}
+
+type SimPortfolioV2CalendarDay struct {
+	Date                string                            `json:"date"`
+	IsFuture            bool                              `json:"is_future"`
+	IsTradingDay        bool                              `json:"is_trading_day"`
+	HolidayName         string                            `json:"holiday_name,omitempty"`
+	OverallStatus       string                            `json:"overall_status"`
+	BlockingCount       int                               `json:"blocking_count"`
+	CanSelectAsStart    bool                              `json:"can_select_as_start"`
+	StartDisabledReason string                            `json:"start_disabled_reason,omitempty"`
+	Portfolios          []SimPortfolioV2CalendarPortfolio `json:"portfolios,omitempty"`
+}
+
+type SimPortfolioV2CalendarPortfolio struct {
+	PortfolioID          string `json:"portfolio_id"`
+	Variant              string `json:"variant"`
+	Status               string `json:"status"`
+	SelectedCount        int    `json:"selected_count"`
+	RequiredCount        int    `json:"required_count"`
+	EntryOpenStatus      string `json:"entry_open_status"`
+	ValuationCloseStatus string `json:"valuation_close_status"`
+}
+
+type SimPortfolioV2DayDetailResponse struct {
+	Market            string                           `json:"market"`
+	Date              string                           `json:"date"`
+	IsFuture          bool                             `json:"is_future"`
+	IsTradingDay      bool                             `json:"is_trading_day"`
+	HolidayName       string                           `json:"holiday_name,omitempty"`
+	Signal            SimPortfolioV2SignalDetail       `json:"signal"`
+	Portfolios        []SimPortfolioV2PortfolioDetail  `json:"portfolios"`
+	RepairSuggestions []SimPortfolioV2RepairSuggestion `json:"repair_suggestions,omitempty"`
+}
+
+type SimPortfolioV2SignalDetail struct {
+	Status            string `json:"status"`
+	CandidateCount    int    `json:"candidate_count"`
+	SignalCount       int    `json:"signal_count"`
+	MissingPriceCount int    `json:"missing_price_count"`
+	Message           string `json:"message,omitempty"`
+}
+
+type SimPortfolioV2PortfolioDetail struct {
+	PortfolioID       string                           `json:"portfolio_id"`
+	Name              string                           `json:"name"`
+	Variant           string                           `json:"variant"`
+	Status            string                           `json:"status"`
+	SelectedCount     int                              `json:"selected_count"`
+	RequiredCount     int                              `json:"required_count"`
+	EntryTradeDate    string                           `json:"entry_trade_date,omitempty"`
+	EntryOpen         SimPortfolioV2PriceGroupDetail   `json:"entry_open"`
+	ValuationClose    SimPortfolioV2PriceGroupDetail   `json:"valuation_close"`
+	Facts             SimPortfolioV2FactsDetail        `json:"facts"`
+	RepairSuggestions []SimPortfolioV2RepairSuggestion `json:"repair_suggestions,omitempty"`
+}
+
+type SimPortfolioV2PriceGroupDetail struct {
+	Status         string                           `json:"status"`
+	RequiredCount  int                              `json:"required_count"`
+	SatisfiedCount int                              `json:"satisfied_count"`
+	MissingCount   int                              `json:"missing_count"`
+	MissingItems   []SimPortfolioV2MissingPriceItem `json:"missing_items,omitempty"`
+}
+
+type SimPortfolioV2MissingPriceItem struct {
+	Code       string `json:"code"`
+	Name       string `json:"name,omitempty"`
+	Exchange   string `json:"exchange"`
+	TradeDate  string `json:"trade_date"`
+	PriceType  string `json:"price_type"`
+	ReasonCode string `json:"reason_code"`
+	Message    string `json:"message"`
+}
+
+type SimPortfolioV2FactsDetail struct {
+	Status        string `json:"status"`
+	DailyCount    int    `json:"daily_count"`
+	PositionCount int    `json:"position_count"`
+	TradeCount    int    `json:"trade_count"`
+}
+
+type SimPortfolioV2RepairSuggestion struct {
+	Type  string `json:"type"`
+	Label string `json:"label"`
+	Hint  string `json:"hint,omitempty"`
+}
+
+type SimPortfolioV2StartDatePreviewRequest struct {
+	Market          string `json:"market"`
+	StartSignalDate string `json:"start_signal_date"`
+}
+
+type SimPortfolioV2StartDatePreviewResponse struct {
+	Market             string                         `json:"market"`
+	StartSignalDate    string                         `json:"start_signal_date"`
+	CanApply           bool                           `json:"can_apply"`
+	Message            string                         `json:"message"`
+	AffectedPortfolios []string                       `json:"affected_portfolios"`
+	Estimated          SimPortfolioV2StartEstimate    `json:"estimated"`
+	BlockingReasons    []SimPortfolioV2BlockingReason `json:"blocking_reasons,omitempty"`
+}
+
+type SimPortfolioV2StartEstimate struct {
+	SignalDays                 int    `json:"signal_days"`
+	EntryDays                  int    `json:"entry_days"`
+	DailyRows                  int    `json:"daily_rows"`
+	PositionRows               int    `json:"position_rows"`
+	LatestGeneratableTradeDate string `json:"latest_generatable_trade_date,omitempty"`
+}
+
+type SimPortfolioV2BlockingReason struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Action  string `json:"action,omitempty"`
+}
+
+type SimPortfolioV2StartDateApplyRequest struct {
+	Market          string `json:"market"`
+	StartSignalDate string `json:"start_signal_date"`
+	Confirm         bool   `json:"confirm"`
+	Note            string `json:"note"`
+}
+
+type SimPortfolioV2StartDateApplyResponse struct {
+	OK              bool   `json:"ok"`
+	JobID           string `json:"job_id"`
+	Status          string `json:"status"`
+	Message         string `json:"message"`
+	StartSignalDate string `json:"start_signal_date"`
+	Market          string `json:"market"`
+}
+
+func (s *SimPortfolioV2Service) GetAdminCalendars(ctx context.Context, month string) (*SimPortfolioV2CalendarResponse, error) {
+	if err := s.repo.EnsureSimPortfolioV2Definitions(ctx); err != nil {
+		return nil, err
+	}
+	month = strings.TrimSpace(month)
+	if month == "" {
+		month = time.Now().In(beijingLocation()).Format("2006-01")
+	}
+	start, ok := parseYMD(month + "-01")
+	if !ok {
+		return nil, fmt.Errorf("invalid month")
+	}
+	end := start.AddDate(0, 1, -1)
+	today := time.Now().In(beijingLocation()).Format("2006-01-02")
+	resp := &SimPortfolioV2CalendarResponse{Month: month, Today: today}
+	for _, market := range []string{SimPortfolioV2MarketAShare, SimPortfolioV2MarketHKEX} {
+		cal := SimPortfolioV2MarketCalendar{Market: market, Label: simPortfolioV2MarketLabel(market)}
+		if cfg, _ := s.repo.GetSimPortfolioV2MarketConfig(ctx, market); cfg != nil {
+			cal.StartSignalDate = cfg.StartSignalDate
+			cal.LatestPublishedTradeDate = cfg.LatestPublishedTradeDate
+		}
+		for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+			date := formatYMD(d)
+			day, err := s.buildCalendarDay(ctx, market, date, today)
+			if err != nil {
+				return nil, err
+			}
+			cal.Days = append(cal.Days, day)
+		}
+		resp.Markets = append(resp.Markets, cal)
+	}
+	return resp, nil
+}
+
+func (s *SimPortfolioV2Service) buildCalendarDay(ctx context.Context, market, date, today string) (SimPortfolioV2CalendarDay, error) {
+	row := s.calendar.CalendarRow(market, date)
+	_ = s.repo.UpsertMarketCalendar(ctx, row)
+	day := SimPortfolioV2CalendarDay{Date: date, IsFuture: date > today, IsTradingDay: row.IsTradingDay, HolidayName: row.HolidayName, OverallStatus: SimPortfolioV2StatusPending, CanSelectAsStart: row.IsTradingDay && date <= today}
+	if day.IsFuture {
+		day.OverallStatus = "future"
+		day.CanSelectAsStart = false
+		day.StartDisabledReason = "不能选择未来日期。"
+		return day, nil
+	}
+	if !row.IsTradingDay {
+		day.OverallStatus = SimPortfolioV2StatusSkipped
+		day.CanSelectAsStart = false
+		day.StartDisabledReason = "该市场休市，不能作为开始信号日。"
+		return day, nil
+	}
+	defs, err := s.repo.ListActiveSimPortfolioV2Definitions(ctx)
+	if err != nil {
+		return day, err
+	}
+	batch, _ := s.repo.GetSimPortfolioV2SignalBatch(ctx, market, date)
+	if batch == nil {
+		day.OverallStatus = SimPortfolioV2StatusPending
+	}
+	if batch != nil && batch.Status == SimPortfolioV2StatusBlocked {
+		day.OverallStatus = SimPortfolioV2StatusBlocked
+		day.BlockingCount++
+	}
+	for _, def := range defs {
+		if def.Market != market {
+			continue
+		}
+		p, err := s.buildCalendarPortfolio(ctx, def, date)
+		if err != nil {
+			return day, err
+		}
+		if p.Status == SimPortfolioV2StatusBlocked || p.Status == SimPortfolioV2StatusFailed {
+			day.BlockingCount++
+		}
+		day.Portfolios = append(day.Portfolios, p)
+	}
+	day.OverallStatus = aggregateSimPortfolioV2DayStatus(day.OverallStatus, day.Portfolios, day.BlockingCount)
+	return day, nil
+}
+
+func (s *SimPortfolioV2Service) buildCalendarPortfolio(ctx context.Context, def SimPortfolioV2Definition, signalDate string) (SimPortfolioV2CalendarPortfolio, error) {
+	p := SimPortfolioV2CalendarPortfolio{PortfolioID: def.ID, Variant: def.PortfolioVariant, Status: SimPortfolioV2StatusPending, RequiredCount: def.MaxHoldings, EntryOpenStatus: SimPortfolioV2StatusPending, ValuationCloseStatus: SimPortfolioV2StatusPending}
+	items, err := s.repo.ListSimPortfolioV2SelectionItems(ctx, def.ID, signalDate)
+	if err != nil {
+		return p, err
+	}
+	p.SelectedCount = len(items)
+	if p.SelectedCount > 0 && p.SelectedCount < def.MaxHoldings {
+		p.Status = SimPortfolioV2StatusBlocked
+	}
+	reqs, err := s.repo.ListSimPortfolioV2PriceRequirements(ctx, def.ID, signalDate)
+	if err != nil {
+		return p, err
+	}
+	p.EntryOpenStatus = priceGroupStatus(reqs, SimPortfolioV2PriceTypeEntryOpen)
+	p.ValuationCloseStatus = priceGroupStatus(reqs, SimPortfolioV2PriceTypeValuationClose)
+	if p.EntryOpenStatus == SimPortfolioV2PriceStatusMissing || p.ValuationCloseStatus == SimPortfolioV2PriceStatusMissing {
+		p.Status = SimPortfolioV2StatusBlocked
+	}
+	if count, _ := s.repo.CountSimPortfolioV2DailyByMarketSignalDate(ctx, def.Market, signalDate); count > 0 && p.Status != SimPortfolioV2StatusBlocked {
+		p.Status = "verified"
+	}
+	return p, nil
+}
+
+func priceGroupStatus(reqs []SimPortfolioV2PriceRequirement, priceType string) string {
+	total, satisfied, missing := 0, 0, 0
+	for _, req := range reqs {
+		if req.PriceType == priceType {
+			total++
+			if req.Status == SimPortfolioV2PriceStatusSatisfied {
+				satisfied++
+			} else if req.Status == SimPortfolioV2PriceStatusMissing || req.Status == SimPortfolioV2PriceStatusFailed {
+				missing++
+			}
+		}
+	}
+	if total == 0 {
+		return SimPortfolioV2StatusPending
+	}
+	if missing > 0 {
+		return SimPortfolioV2PriceStatusMissing
+	}
+	if satisfied == total {
+		return SimPortfolioV2StatusOK
+	}
+	return SimPortfolioV2StatusPending
+}
+
+func aggregateSimPortfolioV2DayStatus(seed string, portfolios []SimPortfolioV2CalendarPortfolio, blocking int) string {
+	if blocking > 0 {
+		return SimPortfolioV2StatusBlocked
+	}
+	verified := 0
+	for _, p := range portfolios {
+		if p.Status == "verified" {
+			verified++
+		}
+	}
+	if len(portfolios) > 0 && verified == len(portfolios) {
+		return "verified"
+	}
+	if seed == SimPortfolioV2StatusOK {
+		return SimPortfolioV2StatusOK
+	}
+	return seed
+}
+
+func (s *SimPortfolioV2Service) GetAdminCalendarDay(ctx context.Context, market, date string) (*SimPortfolioV2DayDetailResponse, error) {
+	market = normalizeSimPortfolioV2Market(market)
+	date = strings.TrimSpace(date)
+	if _, ok := parseYMD(date); !ok {
+		return nil, fmt.Errorf("invalid date")
+	}
+	today := time.Now().In(beijingLocation()).Format("2006-01-02")
+	cal := s.calendar.CalendarRow(market, date)
+	_ = s.repo.UpsertMarketCalendar(ctx, cal)
+	resp := &SimPortfolioV2DayDetailResponse{Market: market, Date: date, IsFuture: date > today, IsTradingDay: cal.IsTradingDay, HolidayName: cal.HolidayName}
+	batch, _ := s.repo.GetSimPortfolioV2SignalBatch(ctx, market, date)
+	if batch != nil {
+		resp.Signal = SimPortfolioV2SignalDetail{Status: batch.Status, CandidateCount: batch.CandidateCount, SignalCount: batch.SignalCount, MissingPriceCount: batch.MissingPriceCount, Message: batch.Message}
+	} else if cal.IsTradingDay && date <= today {
+		resp.Signal = SimPortfolioV2SignalDetail{Status: SimPortfolioV2StatusBlocked, Message: "缺少该市场该交易日四象限/排行榜快照。"}
+		resp.RepairSuggestions = append(resp.RepairSuggestions, SimPortfolioV2RepairSuggestion{Type: "recompute_quadrant", Label: "重建该日四象限", Hint: "请在四象限板块按 market + source_trade_date 重建上游快照。"})
+	} else {
+		resp.Signal = SimPortfolioV2SignalDetail{Status: SimPortfolioV2StatusSkipped, Message: "休市或未来日期。"}
+	}
+	defs, err := s.repo.ListActiveSimPortfolioV2Definitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, def := range defs {
+		if def.Market == market {
+			detail, err := s.buildPortfolioDetail(ctx, def, date)
+			if err != nil {
+				return nil, err
+			}
+			resp.Portfolios = append(resp.Portfolios, detail)
+		}
+	}
+	return resp, nil
+}
+
+func (s *SimPortfolioV2Service) buildPortfolioDetail(ctx context.Context, def SimPortfolioV2Definition, signalDate string) (SimPortfolioV2PortfolioDetail, error) {
+	out := SimPortfolioV2PortfolioDetail{PortfolioID: def.ID, Name: def.Name, Variant: def.PortfolioVariant, Status: SimPortfolioV2StatusPending, RequiredCount: def.MaxHoldings}
+	items, err := s.repo.ListSimPortfolioV2SelectionItems(ctx, def.ID, signalDate)
+	if err != nil {
+		return out, err
+	}
+	out.SelectedCount = len(items)
+	if len(items) > 0 {
+		out.EntryTradeDate = items[0].EntryTradeDate
+	}
+	reqs, err := s.repo.ListSimPortfolioV2PriceRequirements(ctx, def.ID, signalDate)
+	if err != nil {
+		return out, err
+	}
+	nameByKey := map[string]string{}
+	for _, item := range items {
+		nameByKey[item.Code+"\x00"+item.Exchange] = item.Name
+	}
+	out.EntryOpen = buildPriceGroupDetail(reqs, SimPortfolioV2PriceTypeEntryOpen, nameByKey)
+	out.ValuationClose = buildPriceGroupDetail(reqs, SimPortfolioV2PriceTypeValuationClose, nameByKey)
+	factsCount, _ := s.repo.CountSimPortfolioV2DailyByMarketSignalDate(ctx, def.Market, signalDate)
+	out.Facts.DailyCount = factsCount
+	if factsCount > 0 {
+		out.Facts.Status = "verified"
+		out.Status = "verified"
+	} else {
+		out.Facts.Status = SimPortfolioV2StatusPending
+	}
+	if out.SelectedCount > 0 && out.SelectedCount < out.RequiredCount {
+		out.Status = SimPortfolioV2StatusBlocked
+		out.RepairSuggestions = append(out.RepairSuggestions, SimPortfolioV2RepairSuggestion{Type: "repair_selection", Label: "检查选股规则或补齐信号快照"})
+	}
+	if out.EntryOpen.MissingCount > 0 || out.ValuationClose.MissingCount > 0 {
+		out.Status = SimPortfolioV2StatusBlocked
+		out.Facts.Status = SimPortfolioV2StatusBlocked
+		out.RepairSuggestions = append(out.RepairSuggestions, SimPortfolioV2RepairSuggestion{Type: "retry_price_resolve", Label: "重新解析该日价格", Hint: "先重新调用价格 resolver，不直接修改收益 facts。"}, SimPortfolioV2RepairSuggestion{Type: "backfill_daily_bars", Label: "重拉该日缺失价格", Hint: "补齐标准历史日线后再重新运行 pipeline。"})
+	}
+	return out, nil
+}
+
+func buildPriceGroupDetail(reqs []SimPortfolioV2PriceRequirement, priceType string, nameByKey map[string]string) SimPortfolioV2PriceGroupDetail {
+	out := SimPortfolioV2PriceGroupDetail{Status: SimPortfolioV2StatusPending}
+	for _, req := range reqs {
+		if req.PriceType != priceType {
+			continue
+		}
+		out.RequiredCount++
+		if req.Status == SimPortfolioV2PriceStatusSatisfied {
+			out.SatisfiedCount++
+		} else {
+			out.MissingCount++
+			out.MissingItems = append(out.MissingItems, SimPortfolioV2MissingPriceItem{Code: req.Code, Name: nameByKey[req.Code+"\x00"+req.Exchange], Exchange: req.Exchange, TradeDate: req.TradeDate, PriceType: req.PriceType, ReasonCode: "source_not_loaded", Message: req.MissingReason})
+		}
+	}
+	if out.RequiredCount == 0 {
+		out.Status = SimPortfolioV2StatusPending
+	} else if out.MissingCount > 0 {
+		out.Status = SimPortfolioV2PriceStatusMissing
+	} else {
+		out.Status = SimPortfolioV2StatusOK
+	}
+	return out
+}
+
+func (s *SimPortfolioV2Service) PreviewStartDate(ctx context.Context, req SimPortfolioV2StartDatePreviewRequest) (*SimPortfolioV2StartDatePreviewResponse, error) {
+	market := normalizeSimPortfolioV2Market(req.Market)
+	date := strings.TrimSpace(req.StartSignalDate)
+	if _, ok := parseYMD(date); !ok {
+		return nil, fmt.Errorf("invalid start_signal_date")
+	}
+	today := time.Now().In(beijingLocation()).Format("2006-01-02")
+	resp := &SimPortfolioV2StartDatePreviewResponse{Market: market, StartSignalDate: date, CanApply: true}
+	if date > today {
+		resp.CanApply = false
+		resp.BlockingReasons = append(resp.BlockingReasons, SimPortfolioV2BlockingReason{Code: "future_date", Message: "不能选择未来日期。"})
+	}
+	cal := s.calendar.CalendarRow(market, date)
+	if !cal.IsTradingDay {
+		resp.CanApply = false
+		resp.BlockingReasons = append(resp.BlockingReasons, SimPortfolioV2BlockingReason{Code: "market_closed", Message: "该市场当日休市，不能作为开始信号日。"})
+	}
+	batch, _ := s.repo.GetSimPortfolioV2SignalBatch(ctx, market, date)
+	if batch == nil || batch.Status != SimPortfolioV2StatusOK {
+		resp.CanApply = false
+		resp.BlockingReasons = append(resp.BlockingReasons, SimPortfolioV2BlockingReason{Code: "missing_signal", Message: "缺少可用四象限/排行榜信号。", Action: "先重建该日四象限。"})
+	}
+	defs, _ := s.repo.ListActiveSimPortfolioV2Definitions(ctx)
+	for _, def := range defs {
+		if def.Market == market {
+			resp.AffectedPortfolios = append(resp.AffectedPortfolios, def.ID)
+		}
+	}
+	days := 0
+	latest := ""
+	for _, d := range enumerateDates(date, today) {
+		if s.calendar.IsTradingDay(market, d) {
+			days++
+			latest = s.calendar.NextTradingDay(market, d)
+		}
+	}
+	resp.Estimated.SignalDays = days
+	resp.Estimated.EntryDays = days
+	resp.Estimated.DailyRows = days * len(resp.AffectedPortfolios)
+	if len(resp.AffectedPortfolios) > 0 {
+		resp.Estimated.PositionRows = resp.Estimated.DailyRows * 4
+	}
+	resp.Estimated.LatestGeneratableTradeDate = latest
+	if resp.CanApply {
+		resp.Message = fmt.Sprintf("可以从该信号日重建%s模拟组合。", simPortfolioV2MarketLabel(market))
+	} else {
+		resp.Message = "该日期暂不能作为开始信号日。"
+	}
+	return resp, nil
+}
+
+func (s *SimPortfolioV2Service) ApplyStartDate(ctx context.Context, req SimPortfolioV2StartDateApplyRequest) (*SimPortfolioV2StartDateApplyResponse, error) {
+	if !req.Confirm {
+		return nil, fmt.Errorf("请确认后再执行市场起点重建")
+	}
+	preview, err := s.PreviewStartDate(ctx, SimPortfolioV2StartDatePreviewRequest{Market: req.Market, StartSignalDate: req.StartSignalDate})
+	if err != nil {
+		return nil, err
+	}
+	if !preview.CanApply {
+		return nil, fmt.Errorf(preview.Message)
+	}
+	market := preview.Market
+	jobID := fmt.Sprintf("spv2-rebuild-%s-%d", strings.ToLower(market), time.Now().UnixNano())
+	if err := s.repo.DeleteSimPortfolioV2FactsForMarketFromSignalDate(ctx, market, preview.StartSignalDate); err != nil {
+		return nil, err
+	}
+	runResp, err := s.Run(ctx, SimPortfolioV2RunRequest{Market: market, FromDate: preview.StartSignalDate, ToDate: time.Now().In(beijingLocation()).Format("2006-01-02")})
+	if err != nil {
+		return nil, err
+	}
+	status := runResp.Status
+	latest := preview.Estimated.LatestGeneratableTradeDate
+	now := time.Now().UTC()
+	_ = s.repo.UpsertSimPortfolioV2MarketConfig(ctx, SimPortfolioV2MarketConfig{Market: market, StartSignalDate: preview.StartSignalDate, PublishedJobID: jobID, LatestPublishedTradeDate: latest, Status: status, UpdatedBy: "admin", CreatedAt: now, UpdatedAt: now})
+	return &SimPortfolioV2StartDateApplyResponse{OK: true, JobID: jobID, Status: status, Market: market, StartSignalDate: preview.StartSignalDate, Message: "已按市场起点重建模拟组合 v2 pipeline。"}, nil
+}
+
+func simPortfolioV2MarketLabel(market string) string {
+	if normalizeSimPortfolioV2Market(market) == SimPortfolioV2MarketHKEX {
+		return "港股"
+	}
+	return "A 股"
+}

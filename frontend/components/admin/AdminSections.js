@@ -1608,6 +1608,167 @@ export function AIPickerAdminPanel({ onUnauthorized }) {
   )
 }
 
+
+function getSimPipelineStatusClass(status) {
+  switch (status) {
+    case 'ok':
+    case 'verified':
+      return 'bg-positive/10 text-positive border-positive/20'
+    case 'blocked':
+    case 'failed':
+    case 'missing':
+      return 'bg-negative/10 text-negative border-negative/20'
+    case 'skipped':
+      return 'bg-[var(--color-bg-secondary)] text-foreground-dim border-border'
+    case 'future':
+      return 'bg-[var(--color-bg-secondary)] text-foreground-disabled border-border'
+    default:
+      return 'bg-[var(--color-bg-secondary)] text-foreground-muted border-border'
+  }
+}
+
+function SimPipelineStatusPill({ status, children }) {
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${getSimPipelineStatusClass(status)}`}>
+      {children || status || 'pending'}
+    </span>
+  )
+}
+
+function formatSimPipelineMonthLabel(month) {
+  if (!month) return '--'
+  const [year, mon] = month.split('-')
+  return `${year}年${Number(mon || 1)}月`
+}
+
+function shiftMonth(month, delta) {
+  const base = month ? new Date(`${month}-01T00:00:00`) : new Date()
+  base.setMonth(base.getMonth() + delta)
+  return base.toISOString().slice(0, 7)
+}
+
+function SimPipelineMarketCalendar({ market, onSelectDay, onPreviewStart }) {
+  const days = market?.days || []
+  const leading = days[0] ? new Date(`${days[0].date}T00:00:00`).getDay() : 0
+  const cells = [...Array(leading).fill(null), ...days]
+  return (
+    <div className="rounded-xl border border-border bg-background p-3">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-foreground">{market?.label || market?.market}</div>
+          <div className="mt-1 text-[11px] text-foreground-dim">
+            起点：<span className="tabular-nums text-foreground">{market?.start_signal_date || '--'}</span>
+            <span className="mx-1">·</span>
+            最新发布：<span className="tabular-nums text-foreground">{market?.latest_published_trade_date || '--'}</span>
+          </div>
+        </div>
+        <button
+          onClick={() => onPreviewStart?.(market?.market)}
+          className="rounded-lg border border-border px-2 py-1 text-[11px] font-medium text-foreground-muted hover:bg-background-alt"
+        >
+          设起点
+        </button>
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-foreground-dim">
+        {['日', '一', '二', '三', '四', '五', '六'].map((label) => <div key={label}>{label}</div>)}
+      </div>
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {cells.map((day, index) => day ? (
+          <button
+            key={day.date}
+            onClick={() => onSelectDay?.(market.market, day.date)}
+            className={`min-h-[74px] rounded-lg border p-1 text-left transition hover:border-primary/40 ${getSimPipelineStatusClass(day.overall_status)}`}
+            title={day.start_disabled_reason || day.date}
+          >
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[11px] font-semibold tabular-nums">{day.date.slice(-2)}</span>
+              {day.blocking_count > 0 ? <span className="text-[10px] font-medium">!{day.blocking_count}</span> : null}
+            </div>
+            {!day.is_trading_day ? (
+              <div className="mt-2 text-[10px] text-foreground-dim">休市</div>
+            ) : (
+              <div className="mt-2 space-y-1">
+                {(day.portfolios || []).slice(0, 2).map((p) => (
+                  <div key={p.portfolio_id} className="flex items-center justify-between gap-1 text-[10px]">
+                    <span>{p.variant}</span>
+                    <span className="font-medium">{p.status === 'verified' ? '✓' : p.status === 'blocked' ? '!' : p.selected_count ? `${p.selected_count}/${p.required_count}` : '--'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </button>
+        ) : <div key={`blank-${index}`} />)}
+      </div>
+    </div>
+  )
+}
+
+function SimPipelineDayDetail({ detail, onClose }) {
+  if (!detail) return null
+  return (
+    <div className="mt-4 rounded-xl border border-border bg-background p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-foreground">{detail.market === 'HKEX' ? '港股' : 'A 股'} · {detail.date}</div>
+          <div className="mt-1 text-xs text-foreground-dim">{detail.is_trading_day ? '交易日' : `休市${detail.holiday_name ? ` · ${detail.holiday_name}` : ''}`}</div>
+        </div>
+        <button onClick={onClose} className="text-xs text-foreground-dim hover:text-foreground">关闭</button>
+      </div>
+      <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-medium text-foreground">信号快照</span>
+          <SimPipelineStatusPill status={detail.signal?.status}>{detail.signal?.status || 'pending'}</SimPipelineStatusPill>
+        </div>
+        <div className="mt-2 grid gap-2 text-foreground-muted sm:grid-cols-3">
+          <div>候选：{detail.signal?.candidate_count ?? 0}</div>
+          <div>信号：{detail.signal?.signal_count ?? 0}</div>
+          <div>缺收盘价：{detail.signal?.missing_price_count ?? 0}</div>
+        </div>
+        {detail.signal?.message ? <div className="mt-1 text-foreground-dim">{detail.signal.message}</div> : null}
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        {(detail.portfolios || []).map((portfolio) => (
+          <div key={portfolio.portfolio_id} className="rounded-lg border border-border bg-card px-3 py-2 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium text-foreground">{portfolio.name} · {portfolio.variant}</span>
+              <SimPipelineStatusPill status={portfolio.status}>{portfolio.status}</SimPipelineStatusPill>
+            </div>
+            <div className="mt-2 grid gap-2 text-foreground-muted sm:grid-cols-2">
+              <div>成分股：{portfolio.selected_count ?? 0} / {portfolio.required_count ?? 0}</div>
+              <div>建仓日：{portfolio.entry_trade_date || '--'}</div>
+              <div>开盘价：{portfolio.entry_open?.satisfied_count ?? 0} / {portfolio.entry_open?.required_count ?? 0}</div>
+              <div>收盘价：{portfolio.valuation_close?.satisfied_count ?? 0} / {portfolio.valuation_close?.required_count ?? 0}</div>
+              <div>Facts：{portfolio.facts?.status || '--'}</div>
+            </div>
+            {[...(portfolio.entry_open?.missing_items || []), ...(portfolio.valuation_close?.missing_items || [])].length > 0 ? (
+              <div className="mt-3 rounded-lg border border-negative/20 bg-negative/10 px-3 py-2 text-[11px] text-negative">
+                <div className="font-medium">缺失价格</div>
+                <ul className="mt-1 list-disc space-y-1 pl-4">
+                  {[...(portfolio.entry_open?.missing_items || []), ...(portfolio.valuation_close?.missing_items || [])].map((item, index) => (
+                    <li key={`${item.code}-${item.price_type}-${index}`}>{item.code} {item.name || ''} · {item.trade_date} · {item.price_type}：{item.message}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {portfolio.repair_suggestions?.length ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {portfolio.repair_suggestions.map((suggestion) => (
+                  <span key={`${portfolio.portfolio_id}-${suggestion.type}`} className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-foreground-muted" title={suggestion.hint || ''}>{suggestion.label}</span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      {detail.repair_suggestions?.length ? (
+        <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
+          {detail.repair_suggestions.map((item) => item.label).join(' / ')}：{detail.repair_suggestions[0]?.hint || ''}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export function QuadrantAdminPanel({ onUnauthorized }) {
   const [expandedLog, setExpandedLog] = useState(null)
   const [triggering, setTriggering] = useState(false)
@@ -1615,16 +1776,24 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
   const [initializingPipeline, setInitializingPipeline] = useState(false)
   const [pipelineRunResult, setPipelineRunResult] = useState(null)
   const [pipelineNotice, setPipelineNotice] = useState('')
+  const [pipelineMonth, setPipelineMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [selectedPipelineDay, setSelectedPipelineDay] = useState(null)
+  const [pipelineDayDetail, setPipelineDayDetail] = useState(null)
+  const [loadingPipelineDay, setLoadingPipelineDay] = useState(false)
+  const [previewingStartDate, setPreviewingStartDate] = useState(false)
+  const [pipelineStartPreview, setPipelineStartPreview] = useState(null)
+  const [applyingStartDate, setApplyingStartDate] = useState(false)
   const [actionError, setActionError] = useState('')
   const resource = useAdminResource({
-    key: 'admin:quadrant',
+    key: `admin:quadrant:${pipelineMonth}`,
     request: async () => {
-      const [overview, logsPayload, progress, simPipelineOverview, simPipelineDays] = await Promise.all([
+      const [overview, logsPayload, progress, simPipelineOverview, simPipelineDays, simPipelineCalendars] = await Promise.all([
         adminFetch('/api/admin/quadrant-overview').catch(() => null),
         adminFetch('/api/admin/quadrant-logs').catch(() => ({ items: [] })),
         adminFetch('/api/admin/compute-status').catch(() => null),
         adminFetch('/api/admin/sim-portfolio-pipeline/overview').catch(() => ({ items: [], runs: [] })),
         adminFetch('/api/admin/sim-portfolio-pipeline/days').catch(() => ({ items: [] })),
+        adminFetch(`/api/admin/sim-portfolio-pipeline/calendars?month=${pipelineMonth}`).catch(() => ({ markets: [] })),
       ])
       return {
         overview,
@@ -1632,6 +1801,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
         progress,
         simPipelineOverview,
         simPipelineDays: simPipelineDays?.items || [],
+        simPipelineCalendars,
       }
     },
     staleMs: 5_000,
@@ -1648,6 +1818,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
   const progress = resource.data?.progress || null
   const simPipelineOverview = resource.data?.simPipelineOverview || { items: [], runs: [] }
   const simPipelineDays = resource.data?.simPipelineDays || []
+  const simPipelineCalendars = resource.data?.simPipelineCalendars || { markets: [] }
 
   // ── Manual trigger ──
   const handleTrigger = async (exchange) => {
@@ -1710,6 +1881,77 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
       if (message) setActionError(message)
     } finally {
       setRunningPipeline(false)
+    }
+  }
+
+
+  const handleSelectPipelineDay = async (market, date) => {
+    setSelectedPipelineDay({ market, date })
+    setLoadingPipelineDay(true)
+    setActionError('')
+    try {
+      const detail = await adminFetch(`/api/admin/sim-portfolio-pipeline/calendar/day?market=${market}&date=${date}`)
+      setPipelineDayDetail(detail)
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '加载模拟组合日期详情失败')
+      if (message) setActionError(message)
+    } finally {
+      setLoadingPipelineDay(false)
+    }
+  }
+
+  const handlePreviewPipelineStart = async (market, date) => {
+    const targetDate = date || selectedPipelineDay?.date
+    if (!market || !targetDate) {
+      setActionError('请先在对应市场日历中选择一个信号日。')
+      return
+    }
+    setPreviewingStartDate(true)
+    setPipelineStartPreview(null)
+    setPipelineNotice('')
+    setActionError('')
+    try {
+      const resp = await adminFetch('/api/admin/sim-portfolio-pipeline/start-date/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ market, start_signal_date: targetDate }),
+      })
+      setPipelineStartPreview(resp)
+      setPipelineNotice(resp?.message || '开始信号日预检完成。')
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '预检开始信号日失败')
+      if (message) setActionError(message)
+    } finally {
+      setPreviewingStartDate(false)
+    }
+  }
+
+  const handleApplyPipelineStart = async () => {
+    if (!pipelineStartPreview?.can_apply) {
+      setActionError('当前预检未通过，不能应用为开始信号日。')
+      return
+    }
+    setApplyingStartDate(true)
+    setActionError('')
+    try {
+      const resp = await adminFetch('/api/admin/sim-portfolio-pipeline/start-date/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          market: pipelineStartPreview.market,
+          start_signal_date: pipelineStartPreview.start_signal_date,
+          confirm: true,
+          note: 'Admin 市场独立开始信号日重建',
+        }),
+      })
+      setPipelineRunResult(resp)
+      setPipelineNotice(resp?.message || '已按市场起点重建。')
+      await resource.refresh()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '应用开始信号日失败')
+      if (message) setActionError(message)
+    } finally {
+      setApplyingStartDate(false)
     }
   }
 
@@ -1856,8 +2098,73 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
         </div>
 
         <div className="mb-3 rounded-xl border border-dashed border-border bg-background px-4 py-3 text-xs leading-6 text-foreground-muted">
-          严格模式：应交易日如果缺信号、缺选股、缺精确开盘价/收盘价或验证失败，不生成正式收益；休市日会标记为 skipped，不会报缺价格。Public 页面只读取 verified 事实表。
+          严格模式：应交易日如果缺信号、缺选股、缺精确开盘价/收盘价或验证失败，不生成正式收益；休市日会标记为 skipped，不会报缺价格。A 股和港股按市场独立起点启动，市场内组合 A/B 使用同一开始信号日。
         </div>
+
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs font-medium text-foreground">市场日历驾驶舱 · {formatSimPipelineMonthLabel(pipelineMonth)}</div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setPipelineMonth(shiftMonth(pipelineMonth, -1))} className="rounded-lg border border-border px-2 py-1 text-xs text-foreground-muted hover:bg-background-alt">上一月</button>
+            <button onClick={() => setPipelineMonth(new Date().toISOString().slice(0, 7))} className="rounded-lg border border-border px-2 py-1 text-xs text-foreground-muted hover:bg-background-alt">本月</button>
+            <button onClick={() => setPipelineMonth(shiftMonth(pipelineMonth, 1))} className="rounded-lg border border-border px-2 py-1 text-xs text-foreground-muted hover:bg-background-alt">下一月</button>
+          </div>
+        </div>
+
+        <div className="mb-4 grid gap-3 xl:grid-cols-2">
+          {(simPipelineCalendars.markets || []).map((market) => (
+            <SimPipelineMarketCalendar
+              key={market.market}
+              market={market}
+              onSelectDay={handleSelectPipelineDay}
+              onPreviewStart={(marketCode) => handlePreviewPipelineStart(marketCode, selectedPipelineDay?.market === marketCode ? selectedPipelineDay.date : null)}
+            />
+          ))}
+        </div>
+
+        {loadingPipelineDay ? (
+          <div className="mb-3 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground-dim">加载日期详情中…</div>
+        ) : null}
+
+        <SimPipelineDayDetail detail={pipelineDayDetail} onClose={() => { setPipelineDayDetail(null); setSelectedPipelineDay(null) }} />
+
+        {selectedPipelineDay ? (
+          <div className="my-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground-muted">
+            <span>已选择 {selectedPipelineDay.market === 'HKEX' ? '港股' : 'A 股'} · {selectedPipelineDay.date}</span>
+            <button
+              onClick={() => handlePreviewPipelineStart(selectedPipelineDay.market, selectedPipelineDay.date)}
+              disabled={previewingStartDate}
+              className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/15 disabled:opacity-60"
+            >
+              {previewingStartDate ? '预检中…' : '设为该市场开始信号日'}
+            </button>
+          </div>
+        ) : null}
+
+        {pipelineStartPreview ? (
+          <div className={`mb-3 rounded-lg border px-3 py-2 text-xs ${pipelineStartPreview.can_apply ? 'border-positive/20 bg-positive/10 text-positive' : 'border-negative/20 bg-negative/10 text-negative'}`}>
+            <div className="font-medium">{pipelineStartPreview.message}</div>
+            <div className="mt-2 grid gap-2 text-foreground-muted sm:grid-cols-4">
+              <div>市场：{pipelineStartPreview.market === 'HKEX' ? '港股' : 'A 股'}</div>
+              <div>信号日：{pipelineStartPreview.start_signal_date}</div>
+              <div>预计日收益：{pipelineStartPreview.estimated?.daily_rows ?? 0}</div>
+              <div>预计持仓：{pipelineStartPreview.estimated?.position_rows ?? 0}</div>
+            </div>
+            {pipelineStartPreview.blocking_reasons?.length ? (
+              <ul className="mt-2 list-disc space-y-1 pl-4">
+                {pipelineStartPreview.blocking_reasons.map((reason, index) => <li key={`${reason.code}-${index}`}>{reason.message}{reason.action ? ` · ${reason.action}` : ''}</li>)}
+              </ul>
+            ) : null}
+            {pipelineStartPreview.can_apply ? (
+              <button
+                onClick={handleApplyPipelineStart}
+                disabled={applyingStartDate}
+                className="mt-3 rounded-lg border border-positive/30 bg-positive/10 px-3 py-1.5 text-xs font-medium text-positive hover:bg-positive/15 disabled:opacity-60"
+              >
+                {applyingStartDate ? '应用中…' : '确认应用并重建该市场'}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         {pipelineNotice ? (
           <div className="mb-3 rounded-lg border border-positive/20 bg-positive/10 px-3 py-2 text-xs text-positive">

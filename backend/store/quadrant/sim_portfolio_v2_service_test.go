@@ -11,7 +11,7 @@ func setupSimPortfolioV2Test(t *testing.T) (*Repository, *SimPortfolioV2Service)
 	t.Helper()
 	repo, cleanup := setupQuadrantTest(t)
 	t.Cleanup(cleanup)
-	if err := repo.DB().AutoMigrate(&MarketCalendar{}, &SimPortfolioV2Definition{}, &SimPortfolioV2PipelineRun{}, &SimPortfolioV2PipelineDayStatus{}, &SimPortfolioV2SignalBatch{}, &SimPortfolioV2SignalItem{}, &SimPortfolioV2SelectionBatch{}, &SimPortfolioV2SelectionItem{}, &SimPortfolioV2PriceRequirement{}, &SimPortfolioV2Daily{}, &SimPortfolioV2Position{}, &SimPortfolioV2Trade{}, &SimPortfolioV2Metrics{}, &SimPortfolioV2Watermark{}); err != nil {
+	if err := repo.DB().AutoMigrate(&MarketCalendar{}, &SimPortfolioV2Definition{}, &SimPortfolioV2PipelineRun{}, &SimPortfolioV2PipelineDayStatus{}, &SimPortfolioV2SignalBatch{}, &SimPortfolioV2SignalItem{}, &SimPortfolioV2SelectionBatch{}, &SimPortfolioV2SelectionItem{}, &SimPortfolioV2PriceRequirement{}, &SimPortfolioV2Daily{}, &SimPortfolioV2Position{}, &SimPortfolioV2Trade{}, &SimPortfolioV2Metrics{}, &SimPortfolioV2MarketConfig{}, &SimPortfolioV2Watermark{}); err != nil {
 		t.Fatalf("migrate v2: %v", err)
 	}
 	svc := NewSimPortfolioV2Service(repo)
@@ -109,5 +109,75 @@ func TestSimPortfolioV2GeneratesVerifiedFacts(t *testing.T) {
 	}
 	if overview.AsOfTradeDate != "2026-07-03" {
 		t.Fatalf("as_of = %s", overview.AsOfTradeDate)
+	}
+}
+
+func TestSimPortfolioV2AdminCalendarsExposeMarketSplitAndPriceGap(t *testing.T) {
+	repo, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	seedV2RankingSnapshots(t, repo, SimPortfolioV2MarketAShare, "2026-07-02", 4)
+	svc.SetOpenPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
+		if code == "600000" {
+			return 0
+		}
+		return 10
+	})
+	svc.SetPriceLookupResolver(func(ctx context.Context, code string, exchange string, tradeDate string) PriceLookupResult {
+		return PriceLookupResult{ClosePrice: 11, TradeDate: tradeDate}
+	})
+	if _, err := svc.Run(ctx, SimPortfolioV2RunRequest{Market: SimPortfolioV2MarketAShare, FromDate: "2026-07-02", ToDate: "2026-07-02"}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	cal, err := svc.GetAdminCalendars(ctx, "2026-07")
+	if err != nil {
+		t.Fatalf("GetAdminCalendars: %v", err)
+	}
+	if len(cal.Markets) != 2 {
+		t.Fatalf("markets = %d, want 2", len(cal.Markets))
+	}
+	var ashareDay *SimPortfolioV2CalendarDay
+	for i := range cal.Markets {
+		if cal.Markets[i].Market == SimPortfolioV2MarketAShare {
+			for j := range cal.Markets[i].Days {
+				if cal.Markets[i].Days[j].Date == "2026-07-02" {
+					ashareDay = &cal.Markets[i].Days[j]
+				}
+			}
+		}
+	}
+	if ashareDay == nil || ashareDay.OverallStatus != SimPortfolioV2StatusBlocked || ashareDay.BlockingCount == 0 {
+		t.Fatalf("unexpected ashare day: %+v", ashareDay)
+	}
+	detail, err := svc.GetAdminCalendarDay(ctx, SimPortfolioV2MarketAShare, "2026-07-02")
+	if err != nil {
+		t.Fatalf("GetAdminCalendarDay: %v", err)
+	}
+	foundMissing := false
+	for _, p := range detail.Portfolios {
+		if p.EntryOpen.MissingCount > 0 && len(p.RepairSuggestions) > 0 {
+			foundMissing = true
+		}
+	}
+	if !foundMissing {
+		t.Fatalf("expected missing price details, got %+v", detail.Portfolios)
+	}
+}
+
+func TestSimPortfolioV2StartDatePreviewRejectsFutureAndHoliday(t *testing.T) {
+	_, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	future, err := svc.PreviewStartDate(ctx, SimPortfolioV2StartDatePreviewRequest{Market: SimPortfolioV2MarketAShare, StartSignalDate: "2099-01-01"})
+	if err != nil {
+		t.Fatalf("future preview: %v", err)
+	}
+	if future.CanApply {
+		t.Fatalf("future date should not be applicable: %+v", future)
+	}
+	holiday, err := svc.PreviewStartDate(ctx, SimPortfolioV2StartDatePreviewRequest{Market: SimPortfolioV2MarketHKEX, StartSignalDate: "2026-07-01"})
+	if err != nil {
+		t.Fatalf("holiday preview: %v", err)
+	}
+	if holiday.CanApply {
+		t.Fatalf("holiday should not be applicable: %+v", holiday)
 	}
 }

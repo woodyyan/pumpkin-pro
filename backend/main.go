@@ -4252,6 +4252,10 @@ func main() {
 	mux.HandleFunc("/api/admin/ranking-portfolio-fix", server.withSuperAdminAuth(server.handleAdminRankingPortfolioFix))
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/overview", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Overview))
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/days", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Days))
+	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/calendars", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Calendars))
+	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/calendar/day", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2CalendarDay))
+	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/start-date/preview", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2StartDatePreview))
+	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/start-date/apply", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2StartDateApply))
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/initialize", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Initialize))
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/run", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Run))
 

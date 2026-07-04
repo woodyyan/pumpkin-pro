@@ -36,3 +36,13 @@
 - [x] 后端单测覆盖价格需求精确日期匹配。
 - [x] 后端单测覆盖 v2 public overview 只读 verified 数据。
 - [x] 前端测试覆盖 Admin 新区块和旧按钮删除。
+
+## Phase 6: Admin 市场日历驾驶舱
+
+- [x] 新增按月双市场日历接口，A 股和港股分开展示。
+- [x] 新增日期详情接口，展示信号、组合 A/B、开盘价、收盘价、facts 和修复建议。
+- [x] 新增市场级开始信号日 preview/apply 基础接口，A 股和港股可独立启动。
+- [x] Admin 模拟组合 Pipeline 区块新增市场日历驾驶舱、日期详情和市场级起点预检/应用入口。
+- [ ] Admin 四象限板块新增指定 `market + source_trade_date` 历史四象限重建。
+- [ ] 价格修复实现三层动作：重新解析价格、重拉历史日线、人工价格覆盖。
+- [ ] 重建 job 改为异步 staging + publish，避免 HTTP 内同步重建和 public 读到半成品。

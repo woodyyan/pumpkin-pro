@@ -15,7 +15,6 @@ describe('resolveAdminSectionApis()', () => {
 
   it('returns data job APIs for data page', () => {
     assert.deepEqual(resolveAdminSectionApis('data'), [
-      '/api/admin/company-profiles',
       '/api/admin/factor-lab/pipeline/status',
       '/api/admin/factor-index/status',
       '/api/admin/quadrant-overview',

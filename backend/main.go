@@ -25,7 +25,6 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backup"
 	"github.com/woodyyan/pumpkin-pro/backend/store/capitalmap"
-	"github.com/woodyyan/pumpkin-pro/backend/store/companyprofile"
 	"github.com/woodyyan/pumpkin-pro/backend/store/factorindex"
 	"github.com/woodyyan/pumpkin-pro/backend/store/factorlab"
 	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
@@ -275,7 +274,6 @@ type appServer struct {
 	signalService         *signal.Service
 	portfolioService      *portfolio.Service
 	portfolioWorker       *portfolio.Worker
-	companyProfileService *companyprofile.Service
 	capitalMapService     *capitalmap.Service
 	quadrantService       *quadrant.Service
 	simPortfolioV2Service *quadrant.SimPortfolioV2Service
@@ -1717,17 +1715,6 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 			return
 		}
 		a.handleFundamentalsWithCache(w, r, strings.ToUpper(symbol))
-	case "about":
-		if r.Method != http.MethodGet {
-			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
-			return
-		}
-		payload, err := a.companyProfileService.GetAbout(r.Context(), symbol)
-		if err != nil {
-			a.writeLiveError(w, err)
-			return
-		}
-		writeLiveJSON(w, http.StatusOK, payload)
 	case "support-levels":
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
@@ -2094,39 +2081,6 @@ func chinaMarketLocation() *time.Location {
 	return loc
 }
 
-// handleStockAIAnalysis 处理 AI 个股诊断请求
-// POST /api/live/symbols/{symbol}/ai-analysis
-func (a *appServer) enrichStockAnalysisCompanyProfile(ctx context.Context, symbol string, input *strategy.StockAnalysisInput) {
-	if a == nil || a.companyProfileService == nil || input == nil {
-		return
-	}
-	payload, err := a.companyProfileService.GetAbout(ctx, symbol)
-	if err != nil || payload == nil || !payload.HasProfile || payload.Profile == nil {
-		return
-	}
-	if input.SymbolMeta == nil {
-		input.SymbolMeta = map[string]any{}
-	}
-	setSymbolMetaIfBlank(input.SymbolMeta, "business_summary", payload.Profile.BusinessSummary)
-	setSymbolMetaIfBlank(input.SymbolMeta, "business_summary_source", payload.Profile.BusinessSummarySource)
-	setSymbolMetaIfBlank(input.SymbolMeta, "industry_name", payload.Profile.IndustryName)
-	setSymbolMetaIfBlank(input.SymbolMeta, "raw_industry_name", payload.Profile.RawIndustryName)
-	setSymbolMetaIfBlank(input.SymbolMeta, "industry_source", payload.Profile.IndustrySource)
-	setSymbolMetaIfBlank(input.SymbolMeta, "board_name", payload.Profile.BoardName)
-	setSymbolMetaIfBlank(input.SymbolMeta, "listing_status", payload.Profile.ListingStatus)
-}
-
-func setSymbolMetaIfBlank(meta map[string]any, key string, value string) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return
-	}
-	if existing, ok := meta[key]; ok && strings.TrimSpace(fmt.Sprint(existing)) != "" {
-		return
-	}
-	meta[key] = value
-}
-
 func (a *appServer) handleStockAIAnalysis(w http.ResponseWriter, r *http.Request, symbol string) {
 	userID := currentUserID(r)
 	if userID == "" {
@@ -2146,9 +2100,6 @@ func (a *appServer) handleStockAIAnalysis(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "请求数据格式错误")
 		return
 	}
-
-	// 补充静态公司资料到 AI 上下文（容错：查不到不阻断）
-	a.enrichStockAnalysisCompanyProfile(r.Context(), symbol, &input)
 
 	// 查询投资画像（容错：查不到不阻断）
 	var profile *portfolio.InvestmentProfile
@@ -3824,42 +3775,6 @@ func (a *appServer) handleAdminFeedbackSubroutes(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": suffix, "status": status})
 }
 
-func (a *appServer) handleAdminCompanyProfiles(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
-		return
-	}
-	payload, err := a.companyProfileService.AdminOverview(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, payload)
-}
-
-func (a *appServer) handleAdminCompanyProfileRefresh(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
-		return
-	}
-	var req companyprofile.CompanyProfileRefreshRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	status, err := a.companyProfileService.StartManualRefresh(r.Context(), req)
-	if err != nil {
-		writeError(w, http.StatusConflict, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusAccepted, status)
-}
-
-func (a *appServer) handleAdminCompanyProfileRefreshStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
-		return
-	}
-	writeJSON(w, http.StatusOK, a.companyProfileService.RefreshStatus())
-}
-
 func (a *appServer) handleAdminFactorLabPipelineStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
@@ -4048,10 +3963,6 @@ func main() {
 	})
 	portfolioWorker.Start(context.Background())
 
-	companyProfileRepo := companyprofile.NewRepository(storeInstance.DB)
-	companyProfileService := companyprofile.NewService(companyProfileRepo)
-	companyProfileService.SetQuantServiceURL(cfg.QuantServiceURL)
-
 	var portfolioRiskRepo *portfolio.RiskRepository
 	riskDBRepo, err := portfolio.NewRiskDBRepositoryFromPaths(cfg.Backup.CacheADir, cfg.Backup.CacheHKDir)
 	if err != nil {
@@ -4211,7 +4122,6 @@ func main() {
 		signalService:         signalService,
 		portfolioService:      portfolioService,
 		portfolioWorker:       portfolioWorker,
-		companyProfileService: companyProfileService,
 		capitalMapService:     capitalMapService,
 		quadrantService:       quadrantService,
 		simPortfolioV2Service: simPortfolioV2Service,
@@ -4344,9 +4254,6 @@ func main() {
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/days", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Days))
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/initialize", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Initialize))
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/run", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Run))
-	mux.HandleFunc("/api/admin/company-profiles", server.withSuperAdminAuth(server.handleAdminCompanyProfiles))
-	mux.HandleFunc("/api/admin/company-profiles/refresh", server.withSuperAdminAuth(server.handleAdminCompanyProfileRefresh))
-	mux.HandleFunc("/api/admin/company-profiles/refresh-status", server.withSuperAdminAuth(server.handleAdminCompanyProfileRefreshStatus))
 
 	// ── Quadrant Monitoring (progress + manual trigger) ──
 	mux.HandleFunc("/api/quadrant/progress", server.handleQuadrantProgress)

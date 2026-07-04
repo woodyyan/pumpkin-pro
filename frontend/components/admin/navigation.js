@@ -38,7 +38,6 @@ export const ADMIN_TAB_ROUTE_MAP = {
   aipicker: '/admin/ai',
   factor: '/admin/data',
   quadrant: '/admin/data',
-  company_profiles: '/admin/data',
 }
 
 export function findAdminNavItem(section) {

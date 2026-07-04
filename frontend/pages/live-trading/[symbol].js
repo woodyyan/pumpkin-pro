@@ -9,9 +9,7 @@ import AIAnalysisShareCard from '../../components/AIAnalysisShareCard'
 import { notifyAIAnalysisFinished } from '../../components/AIAnalysisWorkspace'
 import SymbolNewsSummaryCard from '../../components/SymbolNewsSummaryCard'
 import { useTheme } from '../../lib/theme-context'
-import CompanyAboutPanel from '../../components/CompanyAboutPanel'
 import { requestJson } from '../../lib/api'
-import { fetchCompanyAbout } from '../../lib/company-about'
 import {
   buildAINewsContext,
   buildNewsEmptyState,
@@ -81,7 +79,6 @@ const SUPPORT_LOOKBACK_DAYS = 120
 const MA_LOOKBACK_DAYS = 240
 const SIGNAL_MAX_ATTEMPTS = 4
 const SIGNAL_BACKOFF_STEPS = ['1 分钟', '5 分钟', '15 分钟']
-const SHOW_COMPANY_ABOUT_ENTRY = false
 const AI_ENTRY_COPY_DESKTOP = 'AI 会给出看多/看空判断、交易建议、执行条件和风险提示'
 const AI_ENTRY_COPY_MOBILE = '看方向、给建议、提条件、控风险'
 const AI_HISTORY_SUBTITLE = '最近一次观点 + 5日验证'
@@ -168,11 +165,6 @@ export default function LiveTradingDetailPage() {
   const [error, setError] = useState('')
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState('')
-  const [aboutOpen, setAboutOpen] = useState(false)
-  const [aboutPayload, setAboutPayload] = useState(null)
-  const [aboutLoading, setAboutLoading] = useState(false)
-  const [aboutError, setAboutError] = useState('')
-  const [aboutLoadedSymbol, setAboutLoadedSymbol] = useState('')
 
   // ── AI 分析状态 ──
   const [aiAnalyzing, setAiAnalyzing] = useState(false)
@@ -391,31 +383,6 @@ export default function LiveTradingDetailPage() {
     } catch {
       setPortfolioData(null)
     }
-  }
-
-  const loadCompanyAbout = async (sym) => {
-    if (!sym) return
-    if (aboutLoadedSymbol === sym && aboutPayload) return
-    setAboutLoading(true)
-    try {
-      const data = await fetchCompanyAbout(sym)
-      setAboutPayload(data)
-      setAboutLoadedSymbol(sym)
-      setAboutError('')
-    } catch (err) {
-      setAboutError(err.message || '关于信息暂不可用')
-      if (aboutLoadedSymbol !== sym) setAboutPayload(null)
-    } finally {
-      setAboutLoading(false)
-    }
-  }
-
-  const toggleCompanyAbout = () => {
-    setAboutOpen((prev) => {
-      const next = !prev
-      if (next) loadCompanyAbout(symbol)
-      return next
-    })
   }
 
   const loadNewsSummary = async (sym, { force = false } = {}) => {
@@ -986,11 +953,6 @@ export default function LiveTradingDetailPage() {
     setNewsSummary(null)
     setNewsError('')
     setNewsUpdatedAt('')
-    setAboutOpen(false)
-    setAboutPayload(null)
-    setAboutLoading(false)
-    setAboutError('')
-    setAboutLoadedSymbol('')
     newsSummaryRefreshRef.current = { symbol: '', refreshedAt: 0 }
     newsItemsRefreshRef.current = 0
   }, [symbol, authIdentityKey, exchange])
@@ -1276,16 +1238,6 @@ export default function LiveTradingDetailPage() {
                     + 关注
                   </button>
                 ) : null}
-                {SHOW_COMPANY_ABOUT_ENTRY ? (
-                  <button
-                    type="button"
-                    aria-expanded={aboutOpen ? 'true' : 'false'}
-                    onClick={toggleCompanyAbout}
-                    className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${aboutOpen ? 'border-primary/45 bg-primary/12 text-primary' : 'border-border bg-[var(--color-bg-hover)] text-foreground-disabled8 hover:border-[var(--color-border-strong)] hover:text-foreground/78'}`}
-                  >
-                    关于
-                  </button>
-                ) : null}
               </div>
               <div className="mt-1 flex items-center gap-3 text-xs text-foreground-dim">
                 <span>{detectExchangeLabel(symbol)}</span>
@@ -1349,15 +1301,6 @@ export default function LiveTradingDetailPage() {
           )}
 
         </section>
-
-        {aboutOpen && (
-          <CompanyAboutPanel
-            payload={aboutPayload}
-            loading={aboutLoading}
-            error={aboutError}
-            onClose={() => setAboutOpen(false)}
-          />
-        )}
 
         {error ? (
           <div className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-negative">

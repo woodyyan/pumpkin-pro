@@ -1703,8 +1703,11 @@ function SimPipelineMarketCalendar({ market, onSelectDay, onPreviewStart }) {
   )
 }
 
-function SimPipelineDayDetail({ detail, onClose }) {
+function SimPipelineDayDetail({ detail, onClose, onRecomputeSignal, onRepairPrices, onOpenOverride }) {
   if (!detail) return null
+  const hasMissingPrices = (detail.portfolios || []).some((portfolio) => (
+    [...(portfolio.entry_open?.missing_items || []), ...(portfolio.valuation_close?.missing_items || [])].length > 0
+  ))
   return (
     <div className="mt-4 rounded-xl border border-border bg-background p-4">
       <div className="mb-3 flex items-start justify-between gap-3">
@@ -1725,6 +1728,15 @@ function SimPipelineDayDetail({ detail, onClose }) {
           <div>缺收盘价：{detail.signal?.missing_price_count ?? 0}</div>
         </div>
         {detail.signal?.message ? <div className="mt-1 text-foreground-dim">{detail.signal.message}</div> : null}
+        {detail.repair_suggestions?.some((item) => item.type === 'recompute_quadrant') ? (
+          <button
+            type="button"
+            onClick={() => onRecomputeSignal?.(detail.market, detail.date)}
+            className="mt-3 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-[11px] font-medium text-primary hover:bg-primary/15"
+          >
+            重建该日四象限
+          </button>
+        ) : null}
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         {(detail.portfolios || []).map((portfolio) => (
@@ -1753,7 +1765,18 @@ function SimPipelineDayDetail({ detail, onClose }) {
             {portfolio.repair_suggestions?.length ? (
               <div className="mt-3 flex flex-wrap gap-2">
                 {portfolio.repair_suggestions.map((suggestion) => (
-                  <span key={`${portfolio.portfolio_id}-${suggestion.type}`} className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-foreground-muted" title={suggestion.hint || ''}>{suggestion.label}</span>
+                  <button
+                    type="button"
+                    key={`${portfolio.portfolio_id}-${suggestion.type}`}
+                    onClick={() => {
+                      if (suggestion.type === 'retry_price_resolve') onRepairPrices?.('resolve', detail.market, detail.date, portfolio.portfolio_id)
+                      if (suggestion.type === 'backfill_daily_bars') onRepairPrices?.('backfill', detail.market, detail.date, portfolio.portfolio_id)
+                    }}
+                    className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-foreground-muted hover:border-primary/40 hover:text-primary"
+                    title={suggestion.hint || ''}
+                  >
+                    {suggestion.label}
+                  </button>
                 ))}
               </div>
             ) : null}
@@ -1763,6 +1786,14 @@ function SimPipelineDayDetail({ detail, onClose }) {
       {detail.repair_suggestions?.length ? (
         <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
           {detail.repair_suggestions.map((item) => item.label).join(' / ')}：{detail.repair_suggestions[0]?.hint || ''}
+        </div>
+      ) : null}
+      {hasMissingPrices ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground-muted">
+          <span>价格修复三层动作：</span>
+          <button type="button" onClick={() => onRepairPrices?.('resolve', detail.market, detail.date, '')} className="rounded-lg border border-border px-3 py-1.5 hover:border-primary/40 hover:text-primary">重新解析价格</button>
+          <button type="button" onClick={() => onRepairPrices?.('backfill', detail.market, detail.date, '')} className="rounded-lg border border-border px-3 py-1.5 hover:border-primary/40 hover:text-primary">重拉该日缺失历史日线</button>
+          <button type="button" onClick={() => onOpenOverride?.(detail)} className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-1.5 text-negative hover:bg-negative/15">人工覆盖价格（审计）</button>
         </div>
       ) : null}
     </div>
@@ -1783,6 +1814,8 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
   const [previewingStartDate, setPreviewingStartDate] = useState(false)
   const [pipelineStartPreview, setPipelineStartPreview] = useState(null)
   const [applyingStartDate, setApplyingStartDate] = useState(false)
+  const [repairingPipeline, setRepairingPipeline] = useState(false)
+  const [priceOverrideDraft, setPriceOverrideDraft] = useState(null)
   const [actionError, setActionError] = useState('')
   const resource = useAdminResource({
     key: `admin:quadrant:${pipelineMonth}`,
@@ -1955,6 +1988,102 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
     }
   }
 
+  const refreshSelectedPipelineDay = async () => {
+    if (selectedPipelineDay?.market && selectedPipelineDay?.date) {
+      await handleSelectPipelineDay(selectedPipelineDay.market, selectedPipelineDay.date)
+    }
+  }
+
+  const handleRecomputeQuadrantDate = async (market, sourceTradeDate) => {
+    setRepairingPipeline(true)
+    setActionError('')
+    setPipelineNotice('')
+    try {
+      const resp = await adminFetch('/api/admin/quadrant/recompute-date', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ market, source_trade_date: sourceTradeDate, force_full: true }),
+      })
+      setPipelineNotice(resp?.message || '已触发指定日期四象限重建。')
+      await resource.refresh()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '重建该日四象限失败')
+      if (message) setActionError(message)
+    } finally {
+      setRepairingPipeline(false)
+    }
+  }
+
+  const handleRepairPrices = async (action, market, signalDate, portfolioId = '') => {
+    setRepairingPipeline(true)
+    setActionError('')
+    setPipelineNotice('')
+    const endpoint = action === 'backfill'
+      ? '/api/admin/sim-portfolio-pipeline/prices/backfill-daily-bars'
+      : '/api/admin/sim-portfolio-pipeline/prices/resolve'
+    try {
+      const resp = await adminFetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ market, signal_date: signalDate, portfolio_id: portfolioId, only_missing: true }),
+      })
+      setPipelineNotice(resp?.message || '价格修复动作已完成。')
+      await resource.refresh()
+      await refreshSelectedPipelineDay()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '价格修复失败')
+      if (message) setActionError(message)
+    } finally {
+      setRepairingPipeline(false)
+    }
+  }
+
+  const handleOpenPriceOverride = (detail) => {
+    const missing = (detail.portfolios || []).flatMap((portfolio) => [
+      ...(portfolio.entry_open?.missing_items || []).map((item) => ({ ...item, portfolio_id: portfolio.portfolio_id })),
+      ...(portfolio.valuation_close?.missing_items || []).map((item) => ({ ...item, portfolio_id: portfolio.portfolio_id })),
+    ])[0]
+    if (!missing) {
+      setActionError('当前日期没有可人工覆盖的缺失价格。')
+      return
+    }
+    setPriceOverrideDraft({
+      market: detail.market,
+      signal_date: detail.date,
+      portfolio_id: missing.portfolio_id || '',
+      code: missing.code || '',
+      exchange: missing.exchange || '',
+      trade_date: missing.trade_date || '',
+      price_type: missing.price_type || '',
+      price: '',
+      reason: '',
+      evidence: '',
+    })
+  }
+
+  const handleSubmitPriceOverride = async () => {
+    if (!priceOverrideDraft) return
+    setRepairingPipeline(true)
+    setActionError('')
+    setPipelineNotice('')
+    try {
+      const resp = await adminFetch('/api/admin/sim-portfolio-pipeline/prices/override', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...priceOverrideDraft, price: Number(priceOverrideDraft.price), confirm: true }),
+      })
+      setPriceOverrideDraft(null)
+      setPipelineNotice(resp?.message || '人工价格覆盖已记录审计。')
+      await resource.refresh()
+      await refreshSelectedPipelineDay()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '人工覆盖价格失败')
+      if (message) setActionError(message)
+    } finally {
+      setRepairingPipeline(false)
+    }
+  }
+
   // Helper: render a single exchange progress bar (defined before any conditional return — Rules of Hooks)
   const renderProgressBar = (exKey, label) => {
     const p = progress?.[exKey]
@@ -2068,31 +2197,31 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
           <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               onClick={handleSimPipelineInitialize}
-              disabled={initializingPipeline || runningPipeline}
+              disabled={initializingPipeline || runningPipeline || repairingPipeline}
               className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
             >
               {initializingPipeline ? '初始化中…' : '初始化 v2 定义'}
             </button>
             <button
               onClick={() => handleSimPipelineRun('ASHARE')}
-              disabled={runningPipeline || initializingPipeline}
+              disabled={runningPipeline || initializingPipeline || repairingPipeline}
               className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
             >
               运行 A 股 Pipeline
             </button>
             <button
               onClick={() => handleSimPipelineRun('HKEX')}
-              disabled={runningPipeline || initializingPipeline}
+              disabled={runningPipeline || initializingPipeline || repairingPipeline}
               className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-[var(--color-border-strong)] hover:bg-background-alt disabled:cursor-not-allowed disabled:opacity-60"
             >
               运行港股 Pipeline
             </button>
             <button
               onClick={() => handleSimPipelineRun('ALL')}
-              disabled={runningPipeline || initializingPipeline}
+              disabled={runningPipeline || initializingPipeline || repairingPipeline}
               className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {runningPipeline ? '运行中…' : '运行全部'}
+              {runningPipeline ? '运行中…' : repairingPipeline ? '修复中…' : '运行全部'}
             </button>
           </div>
         </div>
@@ -2125,7 +2254,13 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
           <div className="mb-3 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground-dim">加载日期详情中…</div>
         ) : null}
 
-        <SimPipelineDayDetail detail={pipelineDayDetail} onClose={() => { setPipelineDayDetail(null); setSelectedPipelineDay(null) }} />
+        <SimPipelineDayDetail
+          detail={pipelineDayDetail}
+          onClose={() => { setPipelineDayDetail(null); setSelectedPipelineDay(null) }}
+          onRecomputeSignal={handleRecomputeQuadrantDate}
+          onRepairPrices={handleRepairPrices}
+          onOpenOverride={handleOpenPriceOverride}
+        />
 
         {selectedPipelineDay ? (
           <div className="my-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground-muted">
@@ -2163,6 +2298,58 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
                 {applyingStartDate ? '应用中…' : '确认应用并重建该市场'}
               </button>
             ) : null}
+          </div>
+        ) : null}
+
+        {priceOverrideDraft ? (
+          <div className="mb-3 rounded-xl border border-negative/20 bg-negative/10 p-3 text-xs">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="font-semibold text-negative">人工覆盖价格（写入审计）</div>
+                <div className="mt-1 text-foreground-muted">
+                  {priceOverrideDraft.market} · {priceOverrideDraft.signal_date} · {priceOverrideDraft.code}/{priceOverrideDraft.exchange} · {priceOverrideDraft.trade_date} · {priceOverrideDraft.price_type}
+                </div>
+              </div>
+              <button type="button" onClick={() => setPriceOverrideDraft(null)} className="text-foreground-dim hover:text-foreground">取消</button>
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-3">
+              <label className="text-foreground-muted">
+                覆盖价格
+                <input
+                  value={priceOverrideDraft.price}
+                  onChange={(event) => setPriceOverrideDraft((draft) => ({ ...draft, price: event.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground outline-none focus:border-primary"
+                  inputMode="decimal"
+                  placeholder="必须大于 0"
+                />
+              </label>
+              <label className="text-foreground-muted md:col-span-2">
+                证据来源
+                <input
+                  value={priceOverrideDraft.evidence}
+                  onChange={(event) => setPriceOverrideDraft((draft) => ({ ...draft, evidence: event.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground outline-none focus:border-primary"
+                  placeholder="例如行情源链接、截图编号或人工核对记录"
+                />
+              </label>
+              <label className="text-foreground-muted md:col-span-3">
+                覆盖原因
+                <textarea
+                  value={priceOverrideDraft.reason}
+                  onChange={(event) => setPriceOverrideDraft((draft) => ({ ...draft, reason: event.target.value }))}
+                  className="mt-1 min-h-[72px] w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground outline-none focus:border-primary"
+                  placeholder="说明为什么需要人工覆盖，以及核对口径。"
+                />
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={handleSubmitPriceOverride}
+              disabled={repairingPipeline}
+              className="mt-3 rounded-lg border border-negative/30 bg-negative/10 px-3 py-1.5 text-xs font-medium text-negative hover:bg-negative/15 disabled:opacity-60"
+            >
+              {repairingPipeline ? '提交中…' : '确认人工覆盖并记录审计'}
+            </button>
           </div>
         ) : null}
 

@@ -45,6 +45,12 @@ const (
 	SimPortfolioV2TriggerSchedule = "schedule"
 )
 
+const (
+	SimPortfolioV2PriceRepairRetryResolve     = "retry_resolve"
+	SimPortfolioV2PriceRepairBackfillDailyBar = "backfill_daily_bars"
+	SimPortfolioV2PriceRepairManualOverride   = "manual_override"
+)
+
 type MarketCalendar struct {
 	ID            int64     `gorm:"primaryKey;autoIncrement"`
 	Market        string    `gorm:"size:16;not null;uniqueIndex:uidx_market_calendar,priority:1;index:idx_market_calendar_market_date,priority:1"`
@@ -211,6 +217,52 @@ type SimPortfolioV2PriceRequirement struct {
 
 func (SimPortfolioV2PriceRequirement) TableName() string {
 	return "sim_portfolio_v2_price_requirements"
+}
+
+type SimPortfolioV2PriceRepairAudit struct {
+	ID           int64     `gorm:"primaryKey;autoIncrement"`
+	Action       string    `gorm:"size:32;not null;index"`
+	Market       string    `gorm:"size:16;not null;index"`
+	PortfolioID  string    `gorm:"size:64;not null;default:'';index"`
+	SignalDate   string    `gorm:"size:10;not null;default:'';index"`
+	TradeDate    string    `gorm:"size:10;not null;default:'';index"`
+	Code         string    `gorm:"size:16;not null;default:'';index"`
+	Exchange     string    `gorm:"size:8;not null;default:''"`
+	PriceType    string    `gorm:"size:32;not null;default:'';index"`
+	Price        float64   `gorm:"not null;default:0"`
+	Source       string    `gorm:"size:64;not null;default:''"`
+	Reason       string    `gorm:"type:text;not null;default:''"`
+	Evidence     string    `gorm:"type:text;not null;default:''"`
+	Status       string    `gorm:"size:24;not null;index"`
+	SummaryJSON  string    `gorm:"type:text;not null;default:'{}'"`
+	ErrorMessage string    `gorm:"type:text;not null;default:''"`
+	Operator     string    `gorm:"size:128;not null;default:'admin'"`
+	CreatedAt    time.Time `gorm:"not null;index"`
+	UpdatedAt    time.Time `gorm:"not null"`
+}
+
+func (SimPortfolioV2PriceRepairAudit) TableName() string {
+	return "sim_portfolio_v2_price_repair_audits"
+}
+
+type SimPortfolioV2PriceOverride struct {
+	ID        int64     `gorm:"primaryKey;autoIncrement"`
+	Market    string    `gorm:"size:16;not null;uniqueIndex:uidx_spv2_price_override,priority:1;index"`
+	Code      string    `gorm:"size:16;not null;uniqueIndex:uidx_spv2_price_override,priority:2"`
+	Exchange  string    `gorm:"size:8;not null;uniqueIndex:uidx_spv2_price_override,priority:3"`
+	TradeDate string    `gorm:"size:10;not null;uniqueIndex:uidx_spv2_price_override,priority:4;index"`
+	PriceType string    `gorm:"size:32;not null;uniqueIndex:uidx_spv2_price_override,priority:5;index"`
+	Price     float64   `gorm:"not null"`
+	Reason    string    `gorm:"type:text;not null"`
+	Evidence  string    `gorm:"type:text;not null"`
+	Operator  string    `gorm:"size:128;not null;default:'admin'"`
+	AuditID   int64     `gorm:"not null;default:0"`
+	CreatedAt time.Time `gorm:"not null"`
+	UpdatedAt time.Time `gorm:"not null"`
+}
+
+func (SimPortfolioV2PriceOverride) TableName() string {
+	return "sim_portfolio_v2_price_overrides"
 }
 
 type SimPortfolioV2Daily struct {

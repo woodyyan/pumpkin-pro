@@ -43,6 +43,6 @@
 - [x] 新增日期详情接口，展示信号、组合 A/B、开盘价、收盘价、facts 和修复建议。
 - [x] 新增市场级开始信号日 preview/apply 基础接口，A 股和港股可独立启动。
 - [x] Admin 模拟组合 Pipeline 区块新增市场日历驾驶舱、日期详情和市场级起点预检/应用入口。
-- [ ] Admin 四象限板块新增指定 `market + source_trade_date` 历史四象限重建。
-- [ ] 价格修复实现三层动作：重新解析价格、重拉历史日线、人工价格覆盖。
+- [x] Admin 四象限板块新增指定 `market + source_trade_date` 历史四象限重建。
+- [x] 价格修复实现三层动作：重新解析价格、重拉历史日线、人工价格覆盖。
 - [ ] 重建 job 改为异步 staging + publish，避免 HTTP 内同步重建和 public 读到半成品。

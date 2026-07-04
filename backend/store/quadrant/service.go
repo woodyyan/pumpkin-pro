@@ -343,7 +343,15 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 		})
 	}
 
-	sourceTradeDate := s.resolveSourceTradeDate(ctx, exchange, computedAt, priceHints)
+	sourceTradeDate := ""
+	if input.Report != nil {
+		if requested, ok := input.Report["source_trade_date"].(string); ok {
+			sourceTradeDate = normalizeSourceTradeDate(requested)
+		}
+	}
+	if sourceTradeDate == "" {
+		sourceTradeDate = s.resolveSourceTradeDate(ctx, exchange, computedAt, priceHints)
+	}
 	if sourceTradeDate == "" {
 		sourceTradeDate = normalizeSourceTradeDate(inferSourceTradeDateFromItems(input.Items))
 	}
@@ -809,6 +817,9 @@ func (s *Service) saveRankingSnapshotsBestEffortWithHints(ctx context.Context, r
 	}
 	if sourceTradeDate == "" {
 		sourceTradeDate = dateStr
+	}
+	if sourceTradeDate != "" {
+		dateStr = sourceTradeDate
 	}
 	snaps := make([]RankingSnapshot, 0, len(selectedRecords))
 	missingPrices := 0

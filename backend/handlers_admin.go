@@ -378,6 +378,78 @@ func (a *appServer) handleAdminQuadrantTrigger(w http.ResponseWriter, r *http.Re
 	})
 }
 
+// handleAdminQuadrantRecomputeDate triggers a market/date-specific upstream
+// quadrant rebuild. Quant currently computes the latest available market data;
+// the backend passes source_trade_date so updated Quant workers can publish
+// the result back to /api/quadrant/bulk-save?source_trade_date=... without the
+// sim-portfolio pipeline guessing from computed_at.
+func (a *appServer) handleAdminQuadrantRecomputeDate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	var req struct {
+		Market          string `json:"market"`
+		SourceTradeDate string `json:"source_trade_date"`
+		ForceFull       bool   `json:"force_full"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	market := strings.ToUpper(strings.TrimSpace(req.Market))
+	if market == "A" || market == "A股" {
+		market = "ASHARE"
+	}
+	if market != "ASHARE" && market != "HKEX" {
+		writeError(w, http.StatusBadRequest, "market 仅支持 ASHARE/HKEX")
+		return
+	}
+	sourceTradeDate := strings.TrimSpace(req.SourceTradeDate)
+	if _, err := time.Parse("2006-01-02", sourceTradeDate); err != nil {
+		writeError(w, http.StatusBadRequest, "source_trade_date 必须为 YYYY-MM-DD")
+		return
+	}
+	if sourceTradeDate > time.Now().In(time.FixedZone("CST", 8*60*60)).Format("2006-01-02") {
+		writeError(w, http.StatusBadRequest, "不能重建未来日期四象限")
+		return
+	}
+	if cal := quadrant.NewSimPortfolioV2CalendarService().CalendarRow(market, sourceTradeDate); !cal.IsTradingDay {
+		writeError(w, http.StatusBadRequest, "该市场当日休市，不需要重建四象限")
+		return
+	}
+	quantURL := strings.TrimRight(a.cfg.QuantServiceURL, "/")
+	if quantURL == "" {
+		writeError(w, http.StatusInternalServerError, "Quant 服务地址未配置")
+		return
+	}
+	endpoint := "/api/quadrant/compute-all"
+	if market == "HKEX" {
+		endpoint = "/api/quadrant/compute-hk-all"
+	}
+	callback := strings.TrimRight(a.cfg.BackendCallbackURL, "/") + fmt.Sprintf("/api/quadrant/bulk-save?source_trade_date=%s", sourceTradeDate)
+	payload := map[string]any{"callback_url": callback, "force_full": req.ForceFull, "source_trade_date": sourceTradeDate}
+	body, _ := json.Marshal(payload)
+	httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, quantURL+endpoint, bytes.NewReader(body))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(httpReq)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("触发 Quant 重建失败: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("Quant 返回 HTTP %d: %s", resp.StatusCode, string(respBody)))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "market": market, "source_trade_date": sourceTradeDate, "status": "accepted", "message": "已触发指定日期四象限重建；完成后请重新运行对应日期模拟组合 pipeline。"})
+}
+
 // LEGACY: handleAdminRankingPortfolioVerify runs a read-only replay of the old
 // JSON NAV series and returns per-definition diff reports.
 // POST /api/admin/ranking-portfolio-verify

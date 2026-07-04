@@ -15,6 +15,7 @@ type SimPortfolioV2Service struct {
 	priceResolver       PriceResolver
 	priceLookupResolver PriceLookupResolver
 	openPriceResolver   OpenPriceResolver
+	dailyBarFetcher     SimPortfolioV2DailyBarFetcher
 }
 
 func NewSimPortfolioV2Service(repo *Repository) *SimPortfolioV2Service {
@@ -26,6 +27,17 @@ func (s *SimPortfolioV2Service) SetPriceLookupResolver(r PriceLookupResolver) {
 	s.priceLookupResolver = r
 }
 func (s *SimPortfolioV2Service) SetOpenPriceResolver(r OpenPriceResolver) { s.openPriceResolver = r }
+func (s *SimPortfolioV2Service) SetDailyBarFetcher(f SimPortfolioV2DailyBarFetcher) {
+	s.dailyBarFetcher = f
+}
+
+type SimPortfolioV2DailyBar struct {
+	Date  string
+	Open  float64
+	Close float64
+}
+
+type SimPortfolioV2DailyBarFetcher func(ctx context.Context, code string, exchange string, lookbackDays int) ([]SimPortfolioV2DailyBar, error)
 
 type SimPortfolioV2RunRequest struct {
 	Market   string   `json:"market"`
@@ -43,6 +55,55 @@ type SimPortfolioV2RunResponse struct {
 	ProcessedDays  int    `json:"processed_days"`
 	BlockedDays    int    `json:"blocked_days"`
 	GeneratedFacts int    `json:"generated_facts"`
+}
+
+type SimPortfolioV2PriceRepairRequest struct {
+	Market      string `json:"market"`
+	SignalDate  string `json:"signal_date"`
+	PortfolioID string `json:"portfolio_id,omitempty"`
+	PriceType   string `json:"price_type,omitempty"`
+	OnlyMissing bool   `json:"only_missing"`
+	Operator    string `json:"operator,omitempty"`
+}
+
+type SimPortfolioV2PriceBackfillRequest struct {
+	Market       string `json:"market"`
+	SignalDate   string `json:"signal_date"`
+	PortfolioID  string `json:"portfolio_id,omitempty"`
+	PriceType    string `json:"price_type,omitempty"`
+	OnlyMissing  bool   `json:"only_missing"`
+	LookbackDays int    `json:"lookback_days,omitempty"`
+	Operator     string `json:"operator,omitempty"`
+}
+
+type SimPortfolioV2PriceOverrideRequest struct {
+	Market      string  `json:"market"`
+	SignalDate  string  `json:"signal_date"`
+	PortfolioID string  `json:"portfolio_id,omitempty"`
+	Code        string  `json:"code"`
+	Exchange    string  `json:"exchange"`
+	TradeDate   string  `json:"trade_date"`
+	PriceType   string  `json:"price_type"`
+	Price       float64 `json:"price"`
+	Reason      string  `json:"reason"`
+	Evidence    string  `json:"evidence"`
+	Operator    string  `json:"operator,omitempty"`
+	Confirm     bool    `json:"confirm"`
+}
+
+type SimPortfolioV2PriceRepairResponse struct {
+	OK            bool     `json:"ok"`
+	Action        string   `json:"action"`
+	Status        string   `json:"status"`
+	AuditID       int64    `json:"audit_id,omitempty"`
+	Checked       int      `json:"checked"`
+	Satisfied     int      `json:"satisfied"`
+	StillMissing  int      `json:"still_missing"`
+	Updated       int      `json:"updated"`
+	Backfilled    int      `json:"backfilled,omitempty"`
+	Message       string   `json:"message,omitempty"`
+	MissingItems  []string `json:"missing_items,omitempty"`
+	RequiresRerun bool     `json:"requires_rerun"`
 }
 
 type SimPortfolioV2OverviewResponse struct {
@@ -363,40 +424,7 @@ func (s *SimPortfolioV2Service) resolvePriceRequirements(ctx context.Context, po
 	}
 	missingOpen, missingClose := 0, 0
 	for _, req := range reqs {
-		price := 0.0
-		source := ""
-		priceDate := req.TradeDate
-		if req.PriceType == SimPortfolioV2PriceTypeEntryOpen {
-			if s.openPriceResolver != nil {
-				price = s.openPriceResolver(ctx, req.Code, req.Exchange, req.TradeDate)
-				source = "open_price_resolver"
-			}
-		} else {
-			if s.priceLookupResolver != nil {
-				lookup := s.priceLookupResolver(ctx, req.Code, req.Exchange, req.TradeDate)
-				if lookup.ClosePrice > 0 && strings.TrimSpace(lookup.TradeDate) == req.TradeDate {
-					price = lookup.ClosePrice
-					priceDate = lookup.TradeDate
-					source = "price_lookup_resolver"
-				}
-			}
-			if price <= 0 && s.priceResolver != nil {
-				price = s.priceResolver(ctx, req.Code, req.Exchange, req.TradeDate)
-				source = "price_resolver"
-			}
-		}
-		req.UpdatedAt = time.Now().UTC()
-		if price > 0 {
-			req.Price = price
-			req.PriceTradeDate = priceDate
-			req.Source = source
-			req.Status = SimPortfolioV2PriceStatusSatisfied
-			req.ResolvedAt = req.UpdatedAt
-			req.MissingReason = ""
-		} else {
-			req.Status = SimPortfolioV2PriceStatusMissing
-			req.MissingReason = fmt.Sprintf("%s 在 %s 缺少 %s", req.Code, req.TradeDate, req.PriceType)
-		}
+		s.resolveSinglePriceRequirement(ctx, &req)
 		if err := s.repo.UpdateSimPortfolioV2PriceRequirement(ctx, req); err != nil {
 			return 0, 0, err
 		}
@@ -409,6 +437,50 @@ func (s *SimPortfolioV2Service) resolvePriceRequirements(ctx context.Context, po
 		}
 	}
 	return missingOpen, missingClose, nil
+}
+
+func (s *SimPortfolioV2Service) resolveSinglePriceRequirement(ctx context.Context, req *SimPortfolioV2PriceRequirement) {
+	price := 0.0
+	source := ""
+	priceDate := req.TradeDate
+	if override, _ := s.repo.GetSimPortfolioV2PriceOverride(ctx, req.Market, req.Code, req.Exchange, req.TradeDate, req.PriceType); override != nil && override.Price > 0 {
+		price = override.Price
+		priceDate = override.TradeDate
+		source = "admin_override"
+	} else if req.PriceType == SimPortfolioV2PriceTypeEntryOpen {
+		if s.openPriceResolver != nil {
+			price = s.openPriceResolver(ctx, req.Code, req.Exchange, req.TradeDate)
+			source = "open_price_resolver"
+		}
+	} else {
+		if s.priceLookupResolver != nil {
+			lookup := s.priceLookupResolver(ctx, req.Code, req.Exchange, req.TradeDate)
+			if lookup.ClosePrice > 0 && strings.TrimSpace(lookup.TradeDate) == req.TradeDate {
+				price = lookup.ClosePrice
+				priceDate = lookup.TradeDate
+				source = "price_lookup_resolver"
+			}
+		}
+		if price <= 0 && s.priceResolver != nil {
+			price = s.priceResolver(ctx, req.Code, req.Exchange, req.TradeDate)
+			source = "price_resolver"
+		}
+	}
+	req.UpdatedAt = time.Now().UTC()
+	if price > 0 {
+		req.Price = price
+		req.PriceTradeDate = priceDate
+		req.Source = source
+		req.Status = SimPortfolioV2PriceStatusSatisfied
+		req.ResolvedAt = req.UpdatedAt
+		req.MissingReason = ""
+	} else {
+		req.Price = 0
+		req.PriceTradeDate = ""
+		req.Source = ""
+		req.Status = SimPortfolioV2PriceStatusMissing
+		req.MissingReason = fmt.Sprintf("%s 在 %s 缺少 %s", req.Code, req.TradeDate, req.PriceType)
+	}
 }
 
 func (s *SimPortfolioV2Service) generateFacts(ctx context.Context, def SimPortfolioV2Definition, signalDate, tradeDate string) error {
@@ -457,6 +529,232 @@ func (s *SimPortfolioV2Service) generateFacts(ctx context.Context, def SimPortfo
 	daily := SimPortfolioV2Daily{PortfolioID: def.ID, Market: def.Market, TradeDate: tradeDate, SignalDate: signalDate, SourceTradeDate: tradeDate, NAV: roundTo(total/def.InitialAssets, simPortfolioNavPrecision), TotalAssets: total, PreviousAssets: previousAssets, DailyReturn: dailyReturn, TotalReturn: total/def.InitialAssets - 1, PositionCount: len(positions), Rebalance: true, Status: "verified", ComputedAt: now, CreatedAt: now, UpdatedAt: now}
 	metrics := SimPortfolioV2Metrics{PortfolioID: def.ID, Market: def.Market, TradeDate: tradeDate, NAV: daily.NAV, CreatedAt: now, UpdatedAt: now}
 	return s.repo.ReplaceSimPortfolioV2FactDate(ctx, daily, positions, trades, metrics)
+}
+
+func (s *SimPortfolioV2Service) RetryResolvePrices(ctx context.Context, req SimPortfolioV2PriceRepairRequest) (*SimPortfolioV2PriceRepairResponse, error) {
+	market, signalDate, priceType, err := validateSimPortfolioV2PriceRepairScope(req.Market, req.SignalDate, req.PriceType)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.repo.ListSimPortfolioV2PriceRequirementsForRepair(ctx, market, signalDate, req.PortfolioID, priceType, req.OnlyMissing)
+	if err != nil {
+		return nil, err
+	}
+	audit := newSimPortfolioV2PriceRepairAudit(SimPortfolioV2PriceRepairRetryResolve, market, signalDate, req.PortfolioID, priceType, req.Operator)
+	if err := s.repo.CreateSimPortfolioV2PriceRepairAudit(ctx, audit); err != nil {
+		return nil, err
+	}
+	resp := &SimPortfolioV2PriceRepairResponse{OK: true, Action: SimPortfolioV2PriceRepairRetryResolve, Status: SimPortfolioV2StatusOK, AuditID: audit.ID, RequiresRerun: true}
+	for _, row := range rows {
+		before := row.Status
+		s.resolveSinglePriceRequirement(ctx, &row)
+		if err := s.repo.UpdateSimPortfolioV2PriceRequirement(ctx, row); err != nil {
+			return nil, err
+		}
+		resp.Checked++
+		if row.Status == SimPortfolioV2PriceStatusSatisfied {
+			resp.Satisfied++
+			if before != SimPortfolioV2PriceStatusSatisfied {
+				resp.Updated++
+			}
+		} else {
+			resp.StillMissing++
+			resp.MissingItems = append(resp.MissingItems, simPortfolioV2MissingPriceText(row))
+		}
+	}
+	if resp.StillMissing > 0 {
+		resp.Status = SimPortfolioV2StatusBlocked
+	}
+	resp.Message = fmt.Sprintf("价格重新解析完成：检查 %d 条，满足 %d 条，仍缺 %d 条。请重新运行该日 pipeline 生成 facts。", resp.Checked, resp.Satisfied, resp.StillMissing)
+	finishSimPortfolioV2PriceRepairAudit(audit, resp, "")
+	_ = s.repo.UpdateSimPortfolioV2PriceRepairAudit(ctx, audit)
+	return resp, nil
+}
+
+func (s *SimPortfolioV2Service) BackfillDailyBars(ctx context.Context, req SimPortfolioV2PriceBackfillRequest) (*SimPortfolioV2PriceRepairResponse, error) {
+	market, signalDate, priceType, err := validateSimPortfolioV2PriceRepairScope(req.Market, req.SignalDate, req.PriceType)
+	if err != nil {
+		return nil, err
+	}
+	if s.dailyBarFetcher == nil {
+		return nil, fmt.Errorf("历史日线重拉器未配置")
+	}
+	lookback := req.LookbackDays
+	if lookback <= 0 {
+		lookback = 90
+	}
+	rows, err := s.repo.ListSimPortfolioV2PriceRequirementsForRepair(ctx, market, signalDate, req.PortfolioID, priceType, req.OnlyMissing)
+	if err != nil {
+		return nil, err
+	}
+	audit := newSimPortfolioV2PriceRepairAudit(SimPortfolioV2PriceRepairBackfillDailyBar, market, signalDate, req.PortfolioID, priceType, req.Operator)
+	if err := s.repo.CreateSimPortfolioV2PriceRepairAudit(ctx, audit); err != nil {
+		return nil, err
+	}
+	resp := &SimPortfolioV2PriceRepairResponse{OK: true, Action: SimPortfolioV2PriceRepairBackfillDailyBar, Status: SimPortfolioV2StatusOK, AuditID: audit.ID, RequiresRerun: true}
+	for _, row := range rows {
+		bars, fetchErr := s.dailyBarFetcher(ctx, row.Code, row.Exchange, lookback)
+		resp.Checked++
+		if fetchErr == nil {
+			if price := simPortfolioV2PriceFromBars(bars, row.TradeDate, row.PriceType); price > 0 {
+				row.Price = price
+				row.PriceTradeDate = row.TradeDate
+				row.Source = "daily_bar_backfill"
+				row.Status = SimPortfolioV2PriceStatusSatisfied
+				row.MissingReason = ""
+				now := time.Now().UTC()
+				row.ResolvedAt = now
+				row.UpdatedAt = now
+				resp.Satisfied++
+				resp.Updated++
+				resp.Backfilled++
+				if err := s.repo.UpdateSimPortfolioV2PriceRequirement(ctx, row); err != nil {
+					return nil, err
+				}
+				continue
+			}
+		}
+		row.Status = SimPortfolioV2PriceStatusMissing
+		row.MissingReason = fmt.Sprintf("%s 在 %s 重拉历史日线后仍缺少 %s", row.Code, row.TradeDate, row.PriceType)
+		row.UpdatedAt = time.Now().UTC()
+		_ = s.repo.UpdateSimPortfolioV2PriceRequirement(ctx, row)
+		resp.StillMissing++
+		resp.MissingItems = append(resp.MissingItems, simPortfolioV2MissingPriceText(row))
+	}
+	if resp.StillMissing > 0 {
+		resp.Status = SimPortfolioV2StatusBlocked
+	}
+	resp.Message = fmt.Sprintf("历史日线重拉完成：检查 %d 条，补齐 %d 条，仍缺 %d 条。请重新运行该日 pipeline 生成 facts。", resp.Checked, resp.Backfilled, resp.StillMissing)
+	finishSimPortfolioV2PriceRepairAudit(audit, resp, "")
+	_ = s.repo.UpdateSimPortfolioV2PriceRepairAudit(ctx, audit)
+	return resp, nil
+}
+
+func (s *SimPortfolioV2Service) OverridePrice(ctx context.Context, req SimPortfolioV2PriceOverrideRequest) (*SimPortfolioV2PriceRepairResponse, error) {
+	market, signalDate, priceType, err := validateSimPortfolioV2PriceRepairScope(req.Market, req.SignalDate, req.PriceType)
+	if err != nil {
+		return nil, err
+	}
+	if priceType == "" {
+		return nil, fmt.Errorf("人工覆盖必须指定 price_type")
+	}
+	code := strings.TrimSpace(req.Code)
+	exchange := strings.ToUpper(strings.TrimSpace(req.Exchange))
+	tradeDate := strings.TrimSpace(req.TradeDate)
+	if code == "" || exchange == "" || !isYMD(tradeDate) {
+		return nil, fmt.Errorf("code/exchange/trade_date 必填且日期格式必须为 YYYY-MM-DD")
+	}
+	if req.Price <= 0 {
+		return nil, fmt.Errorf("人工覆盖价格必须大于 0")
+	}
+	if strings.TrimSpace(req.Reason) == "" || strings.TrimSpace(req.Evidence) == "" {
+		return nil, fmt.Errorf("人工覆盖必须填写 reason 和 evidence")
+	}
+	if !req.Confirm {
+		return nil, fmt.Errorf("人工覆盖价格必须显式 confirm=true")
+	}
+	if tradeDate > time.Now().In(beijingLocation()).Format("2006-01-02") {
+		return nil, fmt.Errorf("不能覆盖未来日期价格")
+	}
+	rows, err := s.repo.ListSimPortfolioV2PriceRequirementsForRepair(ctx, market, signalDate, req.PortfolioID, priceType, false)
+	if err != nil {
+		return nil, err
+	}
+	audit := newSimPortfolioV2PriceRepairAudit(SimPortfolioV2PriceRepairManualOverride, market, signalDate, req.PortfolioID, priceType, req.Operator)
+	audit.Code, audit.Exchange, audit.TradeDate, audit.Price = code, exchange, tradeDate, req.Price
+	audit.Reason, audit.Evidence = strings.TrimSpace(req.Reason), strings.TrimSpace(req.Evidence)
+	if err := s.repo.CreateSimPortfolioV2PriceRepairAudit(ctx, audit); err != nil {
+		return nil, err
+	}
+	override := SimPortfolioV2PriceOverride{Market: market, Code: code, Exchange: exchange, TradeDate: tradeDate, PriceType: priceType, Price: req.Price, Reason: strings.TrimSpace(req.Reason), Evidence: strings.TrimSpace(req.Evidence), Operator: defaultSimPortfolioV2Operator(req.Operator), AuditID: audit.ID, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	if err := s.repo.UpsertSimPortfolioV2PriceOverride(ctx, override); err != nil {
+		return nil, err
+	}
+	resp := &SimPortfolioV2PriceRepairResponse{OK: true, Action: SimPortfolioV2PriceRepairManualOverride, Status: SimPortfolioV2StatusOK, AuditID: audit.ID, RequiresRerun: true}
+	for _, row := range rows {
+		if strings.TrimSpace(row.Code) != code || strings.ToUpper(strings.TrimSpace(row.Exchange)) != exchange || row.TradeDate != tradeDate || row.PriceType != priceType {
+			continue
+		}
+		row.Price = req.Price
+		row.PriceTradeDate = tradeDate
+		row.Source = "admin_override"
+		row.Status = SimPortfolioV2PriceStatusSatisfied
+		row.MissingReason = ""
+		now := time.Now().UTC()
+		row.ResolvedAt = now
+		row.UpdatedAt = now
+		if err := s.repo.UpdateSimPortfolioV2PriceRequirement(ctx, row); err != nil {
+			return nil, err
+		}
+		resp.Checked++
+		resp.Satisfied++
+		resp.Updated++
+	}
+	resp.Message = fmt.Sprintf("人工价格覆盖已记录审计并更新 %d 条价格需求。请重新运行该日 pipeline 生成 facts。", resp.Updated)
+	finishSimPortfolioV2PriceRepairAudit(audit, resp, "")
+	_ = s.repo.UpdateSimPortfolioV2PriceRepairAudit(ctx, audit)
+	return resp, nil
+}
+
+func validateSimPortfolioV2PriceRepairScope(market, signalDate, priceType string) (string, string, string, error) {
+	market = normalizeSimPortfolioV2Market(market)
+	signalDate = strings.TrimSpace(signalDate)
+	priceType = strings.TrimSpace(priceType)
+	if market != SimPortfolioV2MarketAShare && market != SimPortfolioV2MarketHKEX {
+		return "", "", "", fmt.Errorf("market 仅支持 ASHARE/HKEX")
+	}
+	if !isYMD(signalDate) {
+		return "", "", "", fmt.Errorf("signal_date 必须为 YYYY-MM-DD")
+	}
+	if priceType == "" {
+		return market, signalDate, priceType, nil
+	}
+	if priceType != SimPortfolioV2PriceTypeEntryOpen && priceType != SimPortfolioV2PriceTypeValuationClose {
+		return "", "", "", fmt.Errorf("price_type 仅支持 entry_open/valuation_close")
+	}
+	return market, signalDate, priceType, nil
+}
+
+func simPortfolioV2PriceFromBars(bars []SimPortfolioV2DailyBar, tradeDate, priceType string) float64 {
+	for _, bar := range bars {
+		if strings.TrimSpace(bar.Date) != tradeDate {
+			continue
+		}
+		if priceType == SimPortfolioV2PriceTypeEntryOpen {
+			return bar.Open
+		}
+		return bar.Close
+	}
+	return 0
+}
+
+func newSimPortfolioV2PriceRepairAudit(action, market, signalDate, portfolioID, priceType, operator string) *SimPortfolioV2PriceRepairAudit {
+	now := time.Now().UTC()
+	return &SimPortfolioV2PriceRepairAudit{Action: action, Market: market, SignalDate: signalDate, PortfolioID: strings.TrimSpace(portfolioID), PriceType: priceType, Status: SimPortfolioV2StatusRunning, Operator: defaultSimPortfolioV2Operator(operator), CreatedAt: now, UpdatedAt: now}
+}
+
+func finishSimPortfolioV2PriceRepairAudit(audit *SimPortfolioV2PriceRepairAudit, resp *SimPortfolioV2PriceRepairResponse, errMsg string) {
+	audit.Status = resp.Status
+	audit.ErrorMessage = errMsg
+	audit.UpdatedAt = time.Now().UTC()
+	summary, _ := json.Marshal(resp)
+	audit.SummaryJSON = string(summary)
+}
+
+func defaultSimPortfolioV2Operator(operator string) string {
+	if strings.TrimSpace(operator) == "" {
+		return "admin"
+	}
+	return strings.TrimSpace(operator)
+}
+
+func simPortfolioV2MissingPriceText(row SimPortfolioV2PriceRequirement) string {
+	return fmt.Sprintf("%s/%s %s %s", row.Code, row.Exchange, row.TradeDate, row.PriceType)
+}
+
+func isYMD(value string) bool {
+	_, ok := parseYMD(strings.TrimSpace(value))
+	return ok
 }
 
 func (s *SimPortfolioV2Service) GetAdminOverview(ctx context.Context) (*SimPortfolioV2OverviewResponse, error) {

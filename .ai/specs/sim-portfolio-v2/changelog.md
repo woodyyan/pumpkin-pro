@@ -23,3 +23,11 @@
 - **市场独立起点**: 新增市场级开始信号日 preview/apply 基础接口，A 股和港股可独立启动；同一市场内组合 A/B 共用起点。
 - **配置持久化**: 新增 `sim_portfolio_v2_market_configs` 保存市场级起点、发布 job 和最新发布估值日。
 - **测试**: 补充后端测试覆盖双市场日历、缺价详情、未来日期/休市日起点拒绝；前端测试覆盖日历驾驶舱文案和 API 映射。
+
+## 2026-07-04（缺口修复闭环）
+
+- **缺信号修复**: 新增 Admin 指定 `market + source_trade_date` 的四象限重建入口，用于修复模拟组合 v2 日历中的 `missing_signal`；触发后仍需重新运行对应日期 pipeline 才会生成正式 facts。
+- **价格三层修复**: 新增 `prices/resolve`、`prices/backfill-daily-bars`、`prices/override` 三类 Admin 动作：先重新解析已有价格源，再重拉该日缺失历史日线，最后才允许人工覆盖价格。
+- **审计约束**: 人工覆盖价格必须填写 reason/evidence 并 `confirm=true`；覆盖记录写入 `sim_portfolio_v2_price_overrides`，所有修复动作写入 `sim_portfolio_v2_price_repair_audits`。
+- **UI 实现**: Admin 日期详情中的修复建议从静态标签升级为可执行按钮，并提供人工覆盖价格表单；修复价格不会直接改 facts，需重新运行 pipeline。
+- **测试**: 后端覆盖重新解析、历史日线重拉、人工覆盖审计与 handler；前端静态测试覆盖新修复入口。

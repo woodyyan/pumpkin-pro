@@ -166,6 +166,27 @@ func newQuadrantOpenPriceResolver(marketClient *live.MarketClient) quadrant.Open
 	}
 }
 
+func newSimPortfolioV2DailyBarFetcher(marketClient *live.MarketClient) quadrant.SimPortfolioV2DailyBarFetcher {
+	return func(ctx context.Context, code string, exchange string, lookbackDays int) ([]quadrant.SimPortfolioV2DailyBar, error) {
+		if marketClient == nil {
+			return nil, fmt.Errorf("market client not configured")
+		}
+		symbol := buildQuadrantSnapshotSymbol(code, exchange)
+		if symbol == "" {
+			return nil, fmt.Errorf("unsupported symbol %s/%s", code, exchange)
+		}
+		bars, err := marketClient.FetchSymbolDailyBars(ctx, symbol, lookbackDays)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]quadrant.SimPortfolioV2DailyBar, 0, len(bars))
+		for _, bar := range bars {
+			out = append(out, quadrant.SimPortfolioV2DailyBar{Date: bar.Date, Open: bar.Open, Close: bar.Close})
+		}
+		return out, nil
+	}
+}
+
 func latestQuadrantTradeDateFromBars(tradeDate string, bars []live.DailyBar) string {
 	candidateDates := quadrantSnapshotTradeDates(tradeDate, "SSE")
 	for _, candidateDate := range candidateDates {
@@ -3575,6 +3596,12 @@ func (a *appServer) handleQuadrantBulkSave(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, errMsg)
 		return
 	}
+	if sourceTradeDate := strings.TrimSpace(r.URL.Query().Get("source_trade_date")); sourceTradeDate != "" {
+		if input.Report == nil {
+			input.Report = map[string]any{}
+		}
+		input.Report["source_trade_date"] = sourceTradeDate
+	}
 
 	t0 := time.Now()
 	count, err := a.quadrantService.BulkSave(r.Context(), input)
@@ -3981,6 +4008,7 @@ func main() {
 	simPortfolioV2Service.SetPriceResolver(newQuadrantPriceResolver(liveRepo))
 	simPortfolioV2Service.SetPriceLookupResolver(newQuadrantPriceLookupResolver(liveRepo))
 	simPortfolioV2Service.SetOpenPriceResolver(newQuadrantOpenPriceResolver(liveMarketClient))
+	simPortfolioV2Service.SetDailyBarFetcher(newSimPortfolioV2DailyBarFetcher(liveMarketClient))
 	quadrantWorker := quadrant.NewWorker(quadrantService, quadrant.WorkerConfig{
 		Enabled:            cfg.Quadrant.DailyComputeEnabled,
 		ComputeHour:        cfg.Quadrant.ComputeHour,
@@ -4258,10 +4286,14 @@ func main() {
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/start-date/apply", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2StartDateApply))
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/initialize", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Initialize))
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/run", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2Run))
+	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/prices/resolve", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2PriceResolve))
+	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/prices/backfill-daily-bars", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2PriceBackfillDailyBars))
+	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/prices/override", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2PriceOverride))
 
 	// ── Quadrant Monitoring (progress + manual trigger) ──
 	mux.HandleFunc("/api/quadrant/progress", server.handleQuadrantProgress)
 	mux.HandleFunc("/api/admin/compute-status", server.withSuperAdminAuth(server.handleAdminComputeStatus))
+	mux.HandleFunc("/api/admin/quadrant/recompute-date", server.withSuperAdminAuth(server.handleAdminQuadrantRecomputeDate))
 	mux.HandleFunc("/api/admin/quadrant-trigger", server.withSuperAdminAuth(server.handleAdminQuadrantTrigger))
 
 	mux.HandleFunc("/api/feedback", server.withRequiredAuth(server.handleFeedback))

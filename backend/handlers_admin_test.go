@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -281,6 +282,8 @@ func quadrantSetupForAdminTest(t *testing.T) (*quadrant.Repository, func()) {
 		&quadrant.SimPortfolioV2SelectionBatch{},
 		&quadrant.SimPortfolioV2SelectionItem{},
 		&quadrant.SimPortfolioV2PriceRequirement{},
+		&quadrant.SimPortfolioV2PriceRepairAudit{},
+		&quadrant.SimPortfolioV2PriceOverride{},
 		&quadrant.SimPortfolioV2Daily{},
 		&quadrant.SimPortfolioV2Position{},
 		&quadrant.SimPortfolioV2Trade{},
@@ -309,5 +312,42 @@ func TestHandleAdminSimPortfolioV2RunSkipsHKHoliday(t *testing.T) {
 	}
 	if body["blocked_days"].(float64) != 0 {
 		t.Fatalf("expected no blocked days on holiday, got %+v", body)
+	}
+}
+
+func TestHandleAdminSimPortfolioV2PriceOverrideValidatesAudit(t *testing.T) {
+	repo, cleanup := quadrantSetupForAdminTest(t)
+	defer cleanup()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	rows := []quadrant.RankingSnapshot{}
+	for i := 0; i < 4; i++ {
+		rows = append(rows, quadrant.RankingSnapshot{Code: fmt.Sprintf("600%03d", i), Name: "测试", Exchange: "SSE", Rank: i + 1, Opportunity: 90, Risk: 10, ClosePrice: 10, PriceTradeDate: "2026-07-02", SnapshotDate: "2026-07-02", CreatedAt: now})
+	}
+	if err := repo.UpsertSnapshots(ctx, rows); err != nil {
+		t.Fatalf("seed snapshots: %v", err)
+	}
+	svc := quadrant.NewSimPortfolioV2Service(repo)
+	svc.SetOpenPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 { return 0 })
+	svc.SetPriceLookupResolver(func(ctx context.Context, code string, exchange string, tradeDate string) quadrant.PriceLookupResult {
+		return quadrant.PriceLookupResult{ClosePrice: 11, TradeDate: tradeDate}
+	})
+	if _, err := svc.Run(ctx, quadrant.SimPortfolioV2RunRequest{Market: quadrant.SimPortfolioV2MarketAShare, FromDate: "2026-07-02", ToDate: "2026-07-02"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	server := &appServer{simPortfolioV2Service: svc}
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/sim-portfolio-pipeline/prices/override", strings.NewReader(`{"market":"ASHARE","signal_date":"2026-07-02","code":"600000","exchange":"SSE","trade_date":"2026-07-03","price_type":"entry_open","price":9.9,"reason":"人工核对","evidence":"ticket-1","confirm":true}`))
+	resp := httptest.NewRecorder()
+	server.handleAdminSimPortfolioV2PriceOverride(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["audit_id"].(float64) == 0 || body["updated"].(float64) == 0 {
+		t.Fatalf("unexpected body: %+v", body)
 	}
 }

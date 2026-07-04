@@ -36,6 +36,8 @@ func (Migrator) AutoMigrate(db *gorm.DB) error {
 		&SimPortfolioV2SelectionBatch{},
 		&SimPortfolioV2SelectionItem{},
 		&SimPortfolioV2PriceRequirement{},
+		&SimPortfolioV2PriceRepairAudit{},
+		&SimPortfolioV2PriceOverride{},
 		&SimPortfolioV2Daily{},
 		&SimPortfolioV2Position{},
 		&SimPortfolioV2Trade{},

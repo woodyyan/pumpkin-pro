@@ -176,4 +176,7 @@ frontend/
 - Admin 数据页中的模拟组合区域升级为“模拟组合 Pipeline”独立区块，展示市场状态、阶段矩阵、缺口诊断、运行日志和双市场日历驾驶舱。
 - A 股和港股在 Admin 中分别展示市场日历；每个日期可查看信号、组合 A/B、开盘价、收盘价、facts 和修复建议。
 - v2 开始信号日采用市场级配置：A 股和港股可独立启动，但同一市场内组合 A/B 必须同一起点；配置保存于 `sim_portfolio_v2_market_configs`。
-- 旧 `quadrant_ranking_portfolio_market_prices`、旧补价按钮、旧全局开始信号日和旧事实表同步链路仅作为历史遗留，不再作为 v2 的推进依据。
+- 缺信号修复通过 Admin 指定 `market + source_trade_date` 触发四象限重建，目标是补齐上游 `quadrant_ranking_snapshots` 后再重新运行对应日期 pipeline。
+- 缺价格修复固定为三层动作：重新解析已有价格源、重拉该日缺失历史日线、人工覆盖价格。人工覆盖必须写入 `sim_portfolio_v2_price_overrides`，所有修复动作写入 `sim_portfolio_v2_price_repair_audits`。
+- 价格修复只更新 price requirements / override，不直接改 verified facts；修复后必须重新运行 pipeline 才能生成正式收益。
+- 旧 `quadrant_ranking_portfolio_market_prices`、旧补价按钮、旧全局开始信号日和旧事实表同步链路仅作为历史遗留，不再作为 v2 的推进依据.

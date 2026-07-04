@@ -147,8 +147,53 @@ func (r *Repository) ListSimPortfolioV2PriceRequirements(ctx context.Context, po
 	return rows, err
 }
 
+func (r *Repository) ListSimPortfolioV2PriceRequirementsForRepair(ctx context.Context, market, signalDate, portfolioID, priceType string, onlyMissing bool) ([]SimPortfolioV2PriceRequirement, error) {
+	q := r.db.WithContext(ctx).Model(&SimPortfolioV2PriceRequirement{}).
+		Where("market = ? AND signal_date = ?", normalizeSimPortfolioV2Market(market), strings.TrimSpace(signalDate)).
+		Order("portfolio_id ASC, price_type ASC, code ASC")
+	if strings.TrimSpace(portfolioID) != "" {
+		q = q.Where("portfolio_id = ?", strings.TrimSpace(portfolioID))
+	}
+	if strings.TrimSpace(priceType) != "" {
+		q = q.Where("price_type = ?", strings.TrimSpace(priceType))
+	}
+	if onlyMissing {
+		q = q.Where("status <> ? OR price <= 0", SimPortfolioV2PriceStatusSatisfied)
+	}
+	var rows []SimPortfolioV2PriceRequirement
+	err := q.Find(&rows).Error
+	return rows, err
+}
+
 func (r *Repository) UpdateSimPortfolioV2PriceRequirement(ctx context.Context, row SimPortfolioV2PriceRequirement) error {
 	return r.db.WithContext(ctx).Save(&row).Error
+}
+
+func (r *Repository) CreateSimPortfolioV2PriceRepairAudit(ctx context.Context, row *SimPortfolioV2PriceRepairAudit) error {
+	return r.db.WithContext(ctx).Create(row).Error
+}
+
+func (r *Repository) UpdateSimPortfolioV2PriceRepairAudit(ctx context.Context, row *SimPortfolioV2PriceRepairAudit) error {
+	return r.db.WithContext(ctx).Save(row).Error
+}
+
+func (r *Repository) UpsertSimPortfolioV2PriceOverride(ctx context.Context, row SimPortfolioV2PriceOverride) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "market"}, {Name: "code"}, {Name: "exchange"}, {Name: "trade_date"}, {Name: "price_type"}},
+		DoUpdates: clause.AssignmentColumns([]string{"price", "reason", "evidence", "operator", "audit_id", "updated_at"}),
+	}).Create(&row).Error
+}
+
+func (r *Repository) GetSimPortfolioV2PriceOverride(ctx context.Context, market, code, exchange, tradeDate, priceType string) (*SimPortfolioV2PriceOverride, error) {
+	var row SimPortfolioV2PriceOverride
+	err := r.db.WithContext(ctx).Where(
+		"market = ? AND code = ? AND exchange = ? AND trade_date = ? AND price_type = ?",
+		normalizeSimPortfolioV2Market(market), strings.TrimSpace(code), strings.ToUpper(strings.TrimSpace(exchange)), strings.TrimSpace(tradeDate), strings.TrimSpace(priceType),
+	).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &row, err
 }
 
 func (r *Repository) GetLatestSimPortfolioV2Daily(ctx context.Context, portfolioID string) (*SimPortfolioV2Daily, error) {

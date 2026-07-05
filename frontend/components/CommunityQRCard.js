@@ -9,8 +9,15 @@ import { requestJson } from '../lib/api'
  *
  * Renders nothing when the config is disabled or not yet configured,
  * or when the API request fails (silent degradation).
+ *
+ * @param {object} props
+ * @param {'section'|'inline'} [props.variant='section']
+ *   - 'section': standalone <section> with padding + bordered card (homepage).
+ *   - 'inline':  compact layout without outer section wrapper, smaller QR image
+ *                — for embedding inside an existing title/hero section.
+ * @param {string} [props.className] — extra classes on the inner wrapper (inline mode only).
  */
-export default function CommunityQRCard() {
+export default function CommunityQRCard({ variant = 'section', className = '' }) {
   const [config, setConfig] = useState(null)
   const [loaded, setLoaded] = useState(false)
 
@@ -38,6 +45,30 @@ export default function CommunityQRCard() {
 
   const title = config.title || '卧龙AI量化交流群'
 
+  // ── Inline variant: compact, no section wrapper, small QR (72px). ──
+  if (variant === 'inline') {
+    return (
+      <div className={`flex items-center gap-3 ${className}`}>
+        <img
+          src={config.qr_image_base64}
+          alt={title}
+          width={72}
+          height={72}
+          className="h-[72px] w-[72px] shrink-0 rounded-lg border border-border object-contain"
+        />
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-foreground">{title}</div>
+          {config.description ? (
+            <div className="mt-0.5 text-xs leading-5 text-foreground-muted line-clamp-2">
+              {config.description}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Default section variant: standalone section with bordered card. ──
   return (
     <section className="mx-auto max-w-5xl px-4 py-10 md:py-14">
       <div className="flex flex-col items-center gap-6 rounded-2xl border border-border bg-card p-6 md:flex-row md:gap-8 md:p-8">

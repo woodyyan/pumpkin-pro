@@ -273,10 +273,11 @@ export default function SettingsPage() {
         <link rel="canonical" href="https://wolongtrader.top/settings" />
       </Head>
       <section className="rounded-2xl border border-border bg-card p-8">
-        <h1 className="text-2xl font-semibold tracking-tight">设置</h1>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <h1 className="text-2xl font-semibold tracking-tight">设置</h1>
+          <CommunityQRCard variant="inline" />
+        </div>
       </section>
-
-      <CommunityQRCard />
 
       {/* Investment Profile */}
       <section className="rounded-2xl border border-border bg-card p-5">

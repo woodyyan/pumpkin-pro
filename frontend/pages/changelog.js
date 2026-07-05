@@ -86,6 +86,10 @@ export default function ChangelogPage() {
             <p className="mt-5 max-w-2xl text-sm leading-7 text-foreground/68 md:text-base">
               如果你有什么想要的功能可以在设置页面提交反馈告诉我们
             </p>
+            <CommunityQRCard
+              variant="inline"
+              className="mt-6 max-w-md"
+            />
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[420px]">
@@ -99,8 +103,6 @@ export default function ChangelogPage() {
           </div>
         </div>
       </section>
-
-      <CommunityQRCard />
 
       <section className="rounded-[28px] border border-border bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
         <div className="border-b border-border pb-5">

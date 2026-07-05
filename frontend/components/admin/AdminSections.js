@@ -2705,7 +2705,7 @@ export function SystemHealthPanel({ onUnauthorized }) {
 
   const summary = data?.error_summary || {}
   const topEndpoints = data?.top_error_endpoints || []
-  const recentErrors = data?.recent_errors || []
+  const recentErrors = (data?.recent_errors || []).filter((e) => e.status_code !== 401)
   const trends = data?.error_trends || []
 
   return (
@@ -2808,7 +2808,7 @@ export function SystemHealthPanel({ onUnauthorized }) {
                 </tr>
               </thead>
               <tbody className="text-foreground-muted">
-                {(logsExpanded && logsData ? logsData.items : recentErrors).map((err) => (
+                {(logsExpanded && logsData ? logsData.items.filter((e) => e.status_code !== 401) : recentErrors).map((err) => (
                   <tr key={err.id} className="border-b border-border last:border-0 hover:bg-[var(--color-bg-hover)]">
                     <td className="py-1.5 pl-4 pr-3 whitespace-nowrap text-foreground-dim">
                       {new Date(err.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
@@ -3598,10 +3598,10 @@ export function AdminAIPage({ onUnauthorized }) {
 export function AdminOpsPage({ onUnauthorized }) {
   return (
     <div className="space-y-8">
+      <FeedbackPanel onUnauthorized={onUnauthorized} />
       <AdminPaymentsPanel onUnauthorized={onUnauthorized} />
       <BackupPanel onUnauthorized={onUnauthorized} />
       <SystemHealthPanel onUnauthorized={onUnauthorized} />
-      <FeedbackPanel onUnauthorized={onUnauthorized} />
     </div>
   )
 }

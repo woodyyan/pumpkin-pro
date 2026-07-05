@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha1"
@@ -19,9 +20,11 @@ import (
 )
 
 const (
-	cosUploadTimeout     = 20 * time.Minute
+	cosUploadTimeout     = 30 * time.Minute // 1800s，支持大文件上传
 	cosUploadRetryDelay  = 2 * time.Second
-	cosUploadMaxAttempts = 2
+	cosUploadMaxAttempts = 3
+	cosMultipartThreshold = 5 * 1024 * 1024 // 5MB，超过此大小使用分块上传
+	cosPartSize          = 5 * 1024 * 1024  // 5MB，每个分块大小
 )
 
 type COSCloudStorageClient struct {
@@ -45,18 +48,35 @@ func NewCOSCloudStorageClient(bucket, region, secretID, secretKey string) *COSCl
 }
 
 func (c *COSCloudStorageClient) Upload(ctx context.Context, objectKey, localPath, contentType string) error {
+	// 获取文件大小，决定使用简单上传还是分块上传
+	stat, err := os.Stat(localPath)
+	if err != nil {
+		return fmt.Errorf("stat local file: %w", err)
+	}
+
 	var lastErr error
-	for attempt := 1; attempt <= cosUploadMaxAttempts; attempt++ {
-		err := c.uploadOnce(ctx, objectKey, localPath, contentType)
+	maxAttempts := cosUploadMaxAttempts
+
+	// 根据文件大小选择上传方式
+	useMultipart := stat.Size() > cosMultipartThreshold
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		var err error
+		if useMultipart {
+				// 分块上传内部已有重试逻辑，这里只做外层重试
+			err = c.uploadMultipart(ctx, objectKey, localPath, contentType)
+		} else {
+			err = c.uploadOnce(ctx, objectKey, localPath, contentType)
+		}
 		if err == nil {
 			return nil
 		}
 		lastErr = err
-		if attempt == cosUploadMaxAttempts || errors.Is(err, context.Canceled) || ctx.Err() != nil {
+		if attempt == maxAttempts || errors.Is(err, context.Canceled) || ctx.Err() != nil {
 			break
 		}
-		log.Printf("[backup] COS upload attempt %d/%d failed for %s: %v; retrying in %s",
-			attempt, cosUploadMaxAttempts, objectKey, err, cosUploadRetryDelay)
+		log.Printf("[backup] COS upload attempt %d/%d failed for %s (multipart=%v): %v; retrying in %s",
+			attempt, maxAttempts, objectKey, useMultipart, err, cosUploadRetryDelay)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -171,10 +191,257 @@ type cosListBucketResult struct {
 	NextMarker  string `xml:"NextMarker"`
 }
 
+// cosCompletePart 分块上传的单个分块信息
+type cosCompletePart struct {
+	PartNumber int    `xml:"PartNumber"`
+	ETag       string `xml:"ETag"`
+}
+
+// 分块上传相关 XML 结构
+type cosInitMultipartUploadResult struct {
+	Bucket  string `xml:"Bucket"`
+	Key     string `xml:"Key"`
+	UploadID string `xml:"UploadId"`
+	StorageClass string `xml:"StorageClass"`
+}
+
+type cosCompleteMultipartUploadResult struct {
+	Location string `xml:"Location"`
+	Bucket   string `xml:"Bucket"`
+	Key      string `xml:"Key"`
+	ETag     string `xml:"ETag"`
+}
+
+type cosCompleteMultipartUploadRequest struct {
+	Parts []cosCompletePart `xml:"Part"`
+}
+
 func (c *COSCloudStorageClient) resolveObjectURL(objectKey string) *url.URL {
 	resolved := *c.baseURL
 	resolved.Path = "/" + strings.TrimLeft(objectKey, "/")
 	return &resolved
+}
+
+// initMultipartUpload 初始化分块上传
+func (c *COSCloudStorageClient) initMultipartUpload(ctx context.Context, objectKey, contentType string) (string, error) {
+	reqURL := c.resolveObjectURL(objectKey)
+	reqURL.RawQuery = "uploads="
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL.String(), nil)
+	if err != nil {
+		return "", fmt.Errorf("build init multipart request: %w", err)
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	req.Header.Set("Content-Type", contentType)
+	c.signRequest(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("init multipart upload request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return "", fmt.Errorf("init multipart upload failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var result cosInitMultipartUploadResult
+	if err := xml.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode init multipart response: %w", err)
+	}
+	if result.UploadID == "" {
+		return "", errors.New("init multipart upload returned empty upload id")
+	}
+	return result.UploadID, nil
+}
+
+// uploadPart 上传单个分块
+func (c *COSCloudStorageClient) uploadPart(ctx context.Context, objectKey, uploadID string, partNumber int, data []byte) (string, error) {
+	reqURL := c.resolveObjectURL(objectKey)
+	reqURL.RawQuery = fmt.Sprintf("partNumber=%d&uploadId=%s", partNumber, url.QueryEscape(uploadID))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqURL.String(), bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("build upload part request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.ContentLength = int64(len(data))
+	c.signRequest(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("upload part request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return "", fmt.Errorf("upload part failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	// 从响应头获取 ETag
+	return resp.Header.Get("ETag"), nil
+}
+
+// completeMultipartUpload 完成分块上传
+func (c *COSCloudStorageClient) completeMultipartUpload(ctx context.Context, objectKey, uploadID string, parts []cosCompletePart) error {
+	reqURL := c.resolveObjectURL(objectKey)
+	reqURL.RawQuery = fmt.Sprintf("uploadId=%s", url.QueryEscape(uploadID))
+
+	body, err := xml.Marshal(cosCompleteMultipartUploadRequest{
+		Parts: parts,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal complete request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL.String(), bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build complete multipart request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/xml")
+	req.ContentLength = int64(len(body))
+	c.signRequest(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("complete multipart upload request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyResp, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return fmt.Errorf("complete multipart upload failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(bodyResp)))
+	}
+	return nil
+}
+
+// abortMultipartUpload 取消分块上传
+func (c *COSCloudStorageClient) abortMultipartUpload(ctx context.Context, objectKey, uploadID string) error {
+	reqURL := c.resolveObjectURL(objectKey)
+	reqURL.RawQuery = fmt.Sprintf("uploadId=%s", url.QueryEscape(uploadID))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, reqURL.String(), nil)
+	if err != nil {
+		return fmt.Errorf("build abort multipart request: %w", err)
+	}
+	c.signRequest(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("abort multipart upload request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return fmt.Errorf("abort multipart upload failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+// uploadMultipart 分块上传主方法
+func (c *COSCloudStorageClient) uploadMultipart(ctx context.Context, objectKey, localPath, contentType string) error {
+	file, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("open local file: %w", err)
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat local file: %w", err)
+	}
+
+	fileSize := stat.Size()
+	totalParts := int((fileSize + int64(cosPartSize) - 1) / int64(cosPartSize))
+
+	log.Printf("[backup] COS multipart upload started: key=%s size=%d bytes parts=%d", objectKey, fileSize, totalParts)
+
+	uploadID, err := c.initMultipartUpload(ctx, objectKey, contentType)
+	if err != nil {
+		return fmt.Errorf("init multipart upload: %w", err)
+	}
+
+	// 收集所有分块的 ETag
+	type partResult struct {
+		PartNumber int
+		ETag       string
+	}
+	results := make([]partResult, 0, totalParts)
+
+	buf := make([]byte, cosPartSize)
+	for partNumber := 1; partNumber <= totalParts; partNumber++ {
+		// 读取当前分块数据
+		var partData []byte
+		if partNumber < totalParts {
+			// 非最后一块，读满
+			n, readErr := io.ReadFull(file, buf)
+			if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+				_ = c.abortMultipartUpload(ctx, objectKey, uploadID)
+				return fmt.Errorf("read part %d: %w", partNumber, readErr)
+			}
+			partData = buf[:n]
+		} else {
+			// 最后一块，读取剩余所有数据
+			remaining := int(fileSize) - (totalParts-1)*cosPartSize
+			if remaining <= 0 {
+				remaining = int(fileSize) % cosPartSize
+			}
+			partData = make([]byte, remaining)
+			n, readErr := io.ReadFull(file, partData)
+			if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+				_ = c.abortMultipartUpload(ctx, objectKey, uploadID)
+				return fmt.Errorf("read last part: %w", readErr)
+			}
+			partData = partData[:n]
+		}
+
+		// 上传分块（带重试）
+		var etag string
+		var lastErr error
+		for attempt := 1; attempt <= cosUploadMaxAttempts; attempt++ {
+		etag, lastErr = c.uploadPart(ctx, objectKey, uploadID, partNumber, partData)
+			if lastErr == nil {
+				break
+			}
+			if attempt == cosUploadMaxAttempts {
+				break
+			}
+			log.Printf("[backup] COS upload part %d/%d attempt %d/%d failed: %v; retrying in %s",
+				partNumber, totalParts, attempt, cosUploadMaxAttempts, lastErr, cosUploadRetryDelay)
+			select {
+			case <-ctx.Done():
+				_ = c.abortMultipartUpload(ctx, objectKey, uploadID)
+				return ctx.Err()
+			case <-time.After(cosUploadRetryDelay):
+			}
+		}
+		if lastErr != nil {
+			_ = c.abortMultipartUpload(ctx, objectKey, uploadID)
+			return fmt.Errorf("upload part %d/%d: %w", partNumber, totalParts, lastErr)
+		}
+
+		results = append(results, partResult{PartNumber: partNumber, ETag: etag})
+		log.Printf("[backup] COS uploaded part %d/%d", partNumber, totalParts)
+	}
+
+	// 完成分块上传
+	completeParts := make([]cosCompletePart, len(results))
+	for i, r := range results {
+		completeParts[i] = cosCompletePart{PartNumber: r.PartNumber, ETag: r.ETag}
+	}
+
+	if err := c.completeMultipartUpload(ctx, objectKey, uploadID, completeParts); err != nil {
+		_ = c.abortMultipartUpload(ctx, objectKey, uploadID)
+		return fmt.Errorf("complete multipart upload: %w", err)
+	}
+
+	log.Printf("[backup] COS multipart upload completed: key=%s", objectKey)
+	return nil
 }
 
 // PresignGetURL 为指定对象生成带签名的临时 GET 访问 URL。

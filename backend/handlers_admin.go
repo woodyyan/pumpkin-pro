@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -436,6 +437,11 @@ func (a *appServer) handleAdminQuadrantRecomputeDate(w http.ResponseWriter, r *h
 		Message:  fmt.Sprintf("正在重建 %s 四象限 (%s)…", market, sourceTradeDate),
 	})
 
+	// Timeout guard: if the progress is still "running" after recomputeTimeout
+	// (Quant callback lost / silently failed), flip it to "timeout" so the
+	// admin UI does not hang indefinitely.
+	startRecomputeTimeoutGuard(market, recomputeTimeout)
+
 	callback := strings.TrimRight(a.cfg.BackendCallbackURL, "/") + fmt.Sprintf("/api/quadrant/bulk-save?source_trade_date=%s", sourceTradeDate)
 	payload := map[string]any{"callback_url": callback, "force_full": req.ForceFull, "source_trade_date": sourceTradeDate}
 	body, _ := json.Marshal(payload)
@@ -461,6 +467,44 @@ func (a *appServer) handleAdminQuadrantRecomputeDate(w http.ResponseWriter, r *h
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "market": market, "source_trade_date": sourceTradeDate, "status": "accepted", "message": "已触发指定日期四象限重建，请在上方进度条查看实时状态；完成后请重新运行对应日期模拟组合 pipeline。"})
+}
+
+// recomputeTimeout is the maximum time the admin "recompute-date" path
+// waits for a Quant callback before flipping progress to "timeout".
+// Mirrors workerCallbackTimeout (30min) in the scheduled worker path.
+const recomputeTimeout = 30 * time.Minute
+
+// startRecomputeTimeoutGuard launches a goroutine that flips progress to
+// "timeout" after the given duration IF the exchange is still "running".
+// This prevents the admin UI progress bar from hanging indefinitely when
+// the Quant callback is lost or silently fails.
+func startRecomputeTimeoutGuard(market string, timeout time.Duration) {
+	go func(mkt string) {
+		time.Sleep(timeout)
+		if p, ok := quadrant.GetProgress()[mkt]; ok && p.Status == "running" {
+			quadrant.SetProgressTerminal(mkt, "timeout",
+				fmt.Sprintf("重建超时（%s），Quant 可能未完成回调", formatDurationCN(timeout)))
+			log.Printf("[quadrant] [recompute-date] %s timed out after %s, force-setting progress to timeout", mkt, timeout)
+		}
+	}(market)
+}
+
+// formatDurationCN renders a time.Duration in Chinese-friendly form for
+// progress messages (e.g. "30min", "1h0min").
+func formatDurationCN(d time.Duration) string {
+	minutes := int(d.Minutes())
+	if minutes%60 == 0 {
+		if minutes/60 > 0 {
+			return fmt.Sprintf("%dh0min", minutes/60)
+		}
+		return fmt.Sprintf("%dmin", minutes)
+	}
+	h := minutes / 60
+	m := minutes % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh%dmin", h, m)
+	}
+	return fmt.Sprintf("%dmin", m)
 }
 
 // LEGACY: handleAdminRankingPortfolioVerify runs a read-only replay of the old

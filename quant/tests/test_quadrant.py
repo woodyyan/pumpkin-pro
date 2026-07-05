@@ -4,7 +4,13 @@ import pytest
 
 pytest.importorskip("requests", reason="screener.quadrant 依赖 requests")
 
-from screener.quadrant import _classify_a_share_board, _compute_daily_metrics, _latest_cached_close, _safe_momentum
+from screener.quadrant import (
+    _classify_a_share_board,
+    _compute_daily_metrics,
+    _derive_progress_url,
+    _latest_cached_close,
+    _safe_momentum,
+)
 
 
 def test_classify_a_share_board():
@@ -119,3 +125,52 @@ def test_latest_cached_close_returns_empty_when_unavailable():
 
     assert close_price == 0
     assert trade_date == ""
+
+
+# ── _derive_progress_url ──
+
+
+def test_derive_progress_url_plain():
+    """无 query string 的 callback_url 应正确推导出 progress URL。"""
+    url = _derive_progress_url("http://backend:8080/api/quadrant/bulk-save")
+    assert url == "http://backend:8080/api/quadrant/progress"
+
+
+def test_derive_progress_url_with_query_string():
+    """带 query string 的 callback_url 应保留 query 并替换 path 末段。"""
+    url = _derive_progress_url(
+        "http://backend:8080/api/quadrant/bulk-save?source_trade_date=2026-07-02"
+    )
+    assert url == "http://backend:8080/api/quadrant/progress?source_trade_date=2026-07-02"
+
+
+def test_derive_progress_url_trailing_slash():
+    """尾部斜杠不应影响推导结果。"""
+    url = _derive_progress_url("http://backend:8080/api/quadrant/bulk-save/")
+    assert url == "http://backend:8080/api/quadrant/progress"
+
+
+def test_derive_progress_url_trailing_slash_with_query():
+    """尾部斜杠 + query string 的组合应正确处理。"""
+    url = _derive_progress_url(
+        "http://backend:8080/api/quadrant/bulk-save/?source_trade_date=2026-07-02"
+    )
+    assert url == "http://backend:8080/api/quadrant/progress?source_trade_date=2026-07-02"
+
+
+def test_derive_progress_url_none():
+    """传入 None 应返回 None。"""
+    assert _derive_progress_url(None) is None
+
+
+def test_derive_progress_url_empty():
+    """传入空字符串应返回 None。"""
+    assert _derive_progress_url("") is None
+
+
+def test_derive_progress_url_preserves_multiple_params():
+    """多个 query 参数都应保留。"""
+    url = _derive_progress_url(
+        "http://backend:8080/api/quadrant/bulk-save?source_trade_date=2026-07-02&force_full=true"
+    )
+    assert url == "http://backend:8080/api/quadrant/progress?source_trade_date=2026-07-02&force_full=true"

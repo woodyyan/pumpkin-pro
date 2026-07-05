@@ -351,3 +351,77 @@ func TestHandleAdminSimPortfolioV2PriceOverrideValidatesAudit(t *testing.T) {
 		t.Fatalf("unexpected body: %+v", body)
 	}
 }
+
+// ── startRecomputeTimeoutGuard tests ──
+
+func TestStartRecomputeTimeoutGuard_FlipsRunningToTimeout(t *testing.T) {
+	// Reset ASHARE progress to a clean "running" state.
+	quadrant.UpdateProgress("ASHARE", quadrant.ComputeProgress{
+		Exchange: "ASHARE",
+		Status:   "running",
+		Message:  "test running",
+	})
+
+	// Use a very short timeout so the test runs fast.
+	startRecomputeTimeoutGuard("ASHARE", 50*time.Millisecond)
+
+	// Wait for the goroutine to fire.
+	time.Sleep(200 * time.Millisecond)
+
+	p := quadrant.GetProgress()["ASHARE"]
+	if p.Status != "timeout" {
+		t.Fatalf("expected status=timeout, got %s (msg=%s)", p.Status, p.Message)
+	}
+	if p.ErrorMsg == "" {
+		t.Fatalf("expected non-empty error_msg")
+	}
+}
+
+func TestStartRecomputeTimeoutGuard_DoesNotOverwriteTerminalState(t *testing.T) {
+	// Simulate: Quant callback already set progress to "success" before
+	// the timeout guard fires. The guard must NOT overwrite it.
+	quadrant.UpdateProgress("ASHARE", quadrant.ComputeProgress{
+		Exchange: "ASHARE",
+		Status:   "success",
+		Current:  100,
+		Total:    100,
+	})
+
+	startRecomputeTimeoutGuard("ASHARE", 50*time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
+
+	p := quadrant.GetProgress()["ASHARE"]
+	if p.Status != "success" {
+		t.Fatalf("guard should not overwrite terminal status; got %s", p.Status)
+	}
+}
+
+func TestStartRecomputeTimeoutGuard_DoesNotOverwriteFailedState(t *testing.T) {
+	quadrant.SetProgressTerminal("ASHARE", "failed", "DB error")
+
+	startRecomputeTimeoutGuard("ASHARE", 50*time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
+
+	p := quadrant.GetProgress()["ASHARE"]
+	if p.Status != "failed" {
+		t.Fatalf("guard should not overwrite failed status; got %s", p.Status)
+	}
+}
+
+func TestFormatDurationCN(t *testing.T) {
+	cases := []struct {
+		d        time.Duration
+		expected string
+	}{
+		{30 * time.Minute, "30min"},
+		{60 * time.Minute, "1h0min"},
+		{90 * time.Minute, "1h30min"},
+		{15 * time.Minute, "15min"},
+	}
+	for _, tc := range cases {
+		got := formatDurationCN(tc.d)
+		if got != tc.expected {
+			t.Errorf("formatDurationCN(%v) = %q, want %q", tc.d, got, tc.expected)
+		}
+	}
+}

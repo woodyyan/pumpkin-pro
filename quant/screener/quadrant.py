@@ -1674,13 +1674,25 @@ _PROGRESS_REPORT_INTERVAL = 100  # 每 N 只股票上报一次进度
 
 def _derive_progress_url(callback_url: Optional[str]) -> Optional[str]:
     """从 bulk-save callback URL 推导出 progress URL。
-    
-    例如: http://backend:8080/api/quadrant/bulk-save
-       → http://backend:8080/api/quadrant/progress
+
+    正确处理带 query string 的 URL，例如:
+      http://backend:8080/api/quadrant/bulk-save?source_trade_date=2026-07-02
+      → http://backend:8080/api/quadrant/progress?source_trade_date=2026-07-02
+
+    也兼容无 query string 的 URL，例如:
+      http://backend:8080/api/quadrant/bulk-save
+      → http://backend:8080/api/quadrant/progress
     """
     if not callback_url:
         return None
-    return callback_url.rstrip("/").removesuffix("/bulk-save") + "/progress"
+    from urllib.parse import urlsplit, urlunsplit
+    parts = urlsplit(callback_url)
+    path = parts.path.rstrip("/")
+    if path.endswith("/bulk-save"):
+        path = path[: -len("/bulk-save")] + "/progress"
+    else:
+        path = path + "/progress"
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
 
 
 def _send_progress(progress_url: Optional[str], exchange: str,

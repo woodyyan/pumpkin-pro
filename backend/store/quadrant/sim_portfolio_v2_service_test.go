@@ -280,3 +280,101 @@ func TestSimPortfolioV2ManualOverrideRequiresAuditAndUpdatesRequirement(t *testi
 		t.Fatalf("expected overridden requirement in %+v", reqs)
 	}
 }
+
+// TestSimPortfolioV2RebuildPreservesBackfilledPrices verifies that after
+// BackfillDailyBars satisfies a price requirement, a subsequent Run (e.g.
+// triggered by ApplyStartDate) does NOT regress those rows back to "missing".
+// This is the core regression test for the "rebuild discards backfilled
+// prices" bug.
+func TestSimPortfolioV2RebuildPreservesBackfilledPrices(t *testing.T) {
+	repo, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	seedV2RankingSnapshots(t, repo, SimPortfolioV2MarketAShare, "2026-07-02", 4)
+
+	// First run: open price resolver returns 0 → entry_open blocked.
+	// priceLookupResolver returns a valid close → valuation_close satisfied.
+	svc.SetOpenPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 { return 0 })
+	svc.SetPriceLookupResolver(func(ctx context.Context, code string, exchange string, tradeDate string) PriceLookupResult {
+		return PriceLookupResult{ClosePrice: 11, TradeDate: tradeDate}
+	})
+	if _, err := svc.Run(ctx, SimPortfolioV2RunRequest{Market: SimPortfolioV2MarketAShare, FromDate: "2026-07-02", ToDate: "2026-07-02"}); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	// Backfill entry_open prices via daily bars.
+	svc.SetDailyBarFetcher(func(ctx context.Context, code string, exchange string, lookbackDays int) ([]SimPortfolioV2DailyBar, error) {
+		return []SimPortfolioV2DailyBar{{Date: "2026-07-03", Open: 9.8, Close: 10.8}}, nil
+	})
+	if _, err := svc.BackfillDailyBars(ctx, SimPortfolioV2PriceBackfillRequest{Market: SimPortfolioV2MarketAShare, SignalDate: "2026-07-02", PriceType: SimPortfolioV2PriceTypeEntryOpen, OnlyMissing: true}); err != nil {
+		t.Fatalf("BackfillDailyBars: %v", err)
+	}
+
+	// Verify all entry_open rows are now satisfied.
+	reqs, _ := repo.ListSimPortfolioV2PriceRequirementsForRepair(ctx, SimPortfolioV2MarketAShare, "2026-07-02", "", SimPortfolioV2PriceTypeEntryOpen, false)
+	for _, req := range reqs {
+		if req.Status != SimPortfolioV2PriceStatusSatisfied {
+			t.Fatalf("expected satisfied after backfill, got %+v", req)
+		}
+	}
+
+	// Second run (simulates ApplyStartDate → Run rebuild).
+	// openPriceResolver still returns 0 — WITHOUT the fix, the rebuild would
+	// delete the backfilled rows and they'd regress to "missing".
+	if _, err := svc.Run(ctx, SimPortfolioV2RunRequest{Market: SimPortfolioV2MarketAShare, FromDate: "2026-07-02", ToDate: "2026-07-02"}); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	// Verify entry_open rows are STILL satisfied after rebuild.
+	reqs, _ = repo.ListSimPortfolioV2PriceRequirementsForRepair(ctx, SimPortfolioV2MarketAShare, "2026-07-02", "", SimPortfolioV2PriceTypeEntryOpen, false)
+	if len(reqs) == 0 {
+		t.Fatalf("expected price requirements to exist after rebuild, got 0")
+	}
+	for _, req := range reqs {
+		if req.Status != SimPortfolioV2PriceStatusSatisfied || req.Price != 9.8 {
+			t.Fatalf("expected satisfied price=9.8 preserved after rebuild, got %+v", req)
+		}
+	}
+}
+
+// TestSimPortfolioV2ResolveUsesDailyBarFallback verifies that
+// resolveSinglePriceRequirement falls back to dailyBarFetcher when all other
+// resolvers return 0.  This ensures the pipeline can resolve prices from the
+// market API even when the local snapshot table has no data for the target
+// trade date.
+func TestSimPortfolioV2ResolveUsesDailyBarFallback(t *testing.T) {
+	repo, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	seedV2RankingSnapshots(t, repo, SimPortfolioV2MarketAShare, "2026-07-02", 4)
+
+	// All resolvers return 0 — only the dailyBarFetcher can provide prices.
+	svc.SetOpenPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 { return 0 })
+	svc.SetPriceLookupResolver(func(ctx context.Context, code string, exchange string, tradeDate string) PriceLookupResult {
+		return PriceLookupResult{}
+	})
+	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 { return 0 })
+	svc.SetDailyBarFetcher(func(ctx context.Context, code string, exchange string, lookbackDays int) ([]SimPortfolioV2DailyBar, error) {
+		return []SimPortfolioV2DailyBar{
+			{Date: "2026-07-03", Open: 9.8, Close: 10.8},
+		}, nil
+	})
+
+	resp, err := svc.Run(ctx, SimPortfolioV2RunRequest{Market: SimPortfolioV2MarketAShare, FromDate: "2026-07-02", ToDate: "2026-07-02"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if resp.GeneratedFacts < 1 {
+		t.Fatalf("expected facts generated via daily_bar_fallback, got %+v", resp)
+	}
+
+	// Verify that the resolved prices came from daily_bar_fallback.
+	reqs, _ := repo.ListSimPortfolioV2PriceRequirementsForRepair(ctx, SimPortfolioV2MarketAShare, "2026-07-02", "", "", false)
+	foundFallback := false
+	for _, req := range reqs {
+		if req.Source == "daily_bar_fallback" && req.Status == SimPortfolioV2PriceStatusSatisfied {
+			foundFallback = true
+		}
+	}
+	if !foundFallback {
+		t.Fatalf("expected at least one requirement resolved via daily_bar_fallback, got %+v", reqs)
+	}
+}

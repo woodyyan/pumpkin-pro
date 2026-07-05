@@ -1,5 +1,30 @@
 # 设计决策记录
 
+## 决策 27: 重建市场时保留已修复价格需求 + dailyBarFetcher 兜底解析
+
+**日期**: 2026-07-05
+
+**背景**: Admin 模拟组合板块中，用户通过「重拉该日缺失价格」修复的价格在点击「确认应用并重建该市场」后会回退为缺失。根因有二：(1) `ReplaceSimPortfolioV2PriceRequirements` 破坏性 DELETE+INSERT 丢弃已 satisfied 行；(2) `resolveSinglePriceRequirement` 解析链不含 `dailyBarFetcher`，无法从腾讯 API 兜底。
+
+**决策**:
+1. `ReplaceSimPortfolioV2PriceRequirements`（repository.go）改为保留 satisfied 行：先查出已有 satisfied 行 → 删除全部 → 合并插入（satisfied 行保留原 Price/Source/Status，新行插入 pending）。
+2. `resolveSinglePriceRequirement`（service.go）在 priceResolver 之后增加 `dailyBarFetcher` 兜底，source 标记为 `daily_bar_fallback`。
+
+**原因**:
+1. 已修复的价格需求（无论来自 BackfillDailyBars 还是 RetryResolvePrices）代表运维已确认的数据，重建时不应丢弃。
+2. 解析链与修复链的数据源不一致是根因之一；加入 dailyBarFetcher 兜底确保两条路径都能从腾讯 API 获取价格。
+
+**替代方案**:
+- BackfillDailyBars 成功时同时写入 `price_overrides` 表（持久化）：否决。这会改变 overrides 表的语义（本应只存人工覆盖），且 backfill 价格可能随 API 数据修正而变化，不适合持久化。
+- 重建时不调用 ReplaceSimPortfolioV2PriceRequirements，只对新增股票创建行：否决。selection 变化时需要清理旧股票的行，Replace 的清理职责仍需保留。
+
+**风险与代价**:
+- Replace 逻辑增加一次 SELECT 查询（仅查 satisfied 行），当前每组合每天最多 4×2=8 行，成本可忽略。
+- dailyBarFetcher 兜底会增加重建时的 API 调用，但仅在 priceLookupResolver/priceResolver 都返回 0 时触发，正常情况下不增加调用。
+- satisfied 行保留意味着 selection 变化（股票换出）时，旧股票的 satisfied 行不会自动清理——但这些行的 TradeDate/Code 不在新的 selection 范围内，不会影响 facts 生成（generateFacts 只读 selection items 对应的 reqs）。
+
+**测试**: `TestSimPortfolioV2RebuildPreservesBackfilledPrices`（方案一回归）、`TestSimPortfolioV2ResolveUsesDailyBarFallback`（方案二回归）。
+
 ## 决策 26: 模拟组合事实表 Admin 必须同时暴露流程阶段与同步结果
 
 **日期**: 2026-07-01

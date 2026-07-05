@@ -466,6 +466,20 @@ func (s *SimPortfolioV2Service) resolveSinglePriceRequirement(ctx context.Contex
 			source = "price_resolver"
 		}
 	}
+	// Fallback: if all resolvers above returned 0, try fetching daily bars from
+	// the market data API (e.g. Tencent daily-line).  This ensures that prices
+	// available via BackfillDailyBars can also be resolved during a normal
+	// pipeline run / rebuild, preventing a "missing after rebuild" regression.
+	if price <= 0 && s.dailyBarFetcher != nil {
+		bars, fetchErr := s.dailyBarFetcher(ctx, req.Code, req.Exchange, 30)
+		if fetchErr == nil {
+			if p := simPortfolioV2PriceFromBars(bars, req.TradeDate, req.PriceType); p > 0 {
+				price = p
+				priceDate = req.TradeDate
+				source = "daily_bar_fallback"
+			}
+		}
+	}
 	req.UpdatedAt = time.Now().UTC()
 	if price > 0 {
 		req.Price = price

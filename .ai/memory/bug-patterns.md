@@ -238,3 +238,25 @@
 - 休市日应标记 `skipped`，不应生成价格需求，也不应报缺价格。
 
 **适用场景**: 所有按交易日推进的离线策略、模拟组合、回测建仓、排行榜和收盘后事实表链路。
+
+## BP-018: 重建市场丢弃已修复价格需求导致回退为缺失
+
+**模式**: `ReplaceSimPortfolioV2PriceRequirements` 在重建市场（`ApplyStartDate` → `Run`）时执行破坏性 `DELETE + INSERT`，把之前通过 `BackfillDailyBars` 或 `RetryResolvePrices` 修复为 satisfied 的价格需求行全部丢弃，重新插入 pending 行。同时 `resolveSinglePriceRequirement` 解析链不含 `dailyBarFetcher`，无法从腾讯 API 兜底，导致重建后价格回退为 missing。
+
+**案例**: Admin 模拟组合板块选择 7 月 1 日作为市场开始信号日 → 7 月 2 日显示 `688220 valuation_close` 缺失 → 点击「重拉该日缺失价格」价格变正常 → 点击「确认应用并重建该市场」→ 7 月 2 日同一股票同一价格类型再次变为缺失。
+
+**根因链**:
+1. `ReplaceSimPortfolioV2PriceRequirements`（repository.go:132）盲删所有行再重新插入 pending 行，不保留已 resolved 的 satisfied 行。
+2. `resolveSinglePriceRequirement`（service.go:442）解析链：admin_override → priceLookupResolver → priceResolver，三者都查本地 `closing_snapshots` 表，不含 `dailyBarFetcher`（腾讯日线 API）。
+3. `BackfillDailyBars` 写入的是临时性 `price_requirements` 行（会被 Replace 重建），而非持久性 `price_overrides` 表（重建后仍生效）。
+
+**修复**:
+1. `ReplaceSimPortfolioV2PriceRequirements` 改为先查出已有 satisfied 行 → 删除全部 → 合并插入（satisfied 行保留原状态，新行插入 pending）。
+2. `resolveSinglePriceRequirement` 在 priceResolver 之后增加 `dailyBarFetcher` 兜底，source 标记为 `daily_bar_fallback`。
+
+**教训**:
+- 任何 `Replace*` / DELETE+INSERT 模式在涉及"已修复/已解析"状态时，必须保留 satisfied 状态的行，不能盲删。
+- 修复写入路径（BackfillDailyBars）和正常解析路径（resolveSinglePriceRequirement）的数据源必须一致或可互通，否则修复结果会在下一次正常流程中丢失。
+- 临时性数据（price_requirements）和持久性数据（price_overrides）要区分清楚：需要跨重建生效的修复结果应写入持久表，或确保重建逻辑保留临时表中的已修复行。
+
+**适用场景**: 所有含"修复 → 重建"循环的 pipeline，尤其是价格需求管理、信号快照重建、事实表重算场景。

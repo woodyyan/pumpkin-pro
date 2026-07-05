@@ -131,11 +131,37 @@ func (r *Repository) ListSimPortfolioV2SelectionItems(ctx context.Context, portf
 
 func (r *Repository) ReplaceSimPortfolioV2PriceRequirements(ctx context.Context, portfolioID, signalDate string, rows []SimPortfolioV2PriceRequirement) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Preserve already-resolved (satisfied) rows from prior pipeline runs or
+		// admin repair actions (e.g. BackfillDailyBars).  Without this, a rebuild
+		// via ApplyStartDate → Run would blindly DELETE all rows and discard
+		// prices that were manually backfilled, causing them to regress to
+		// "missing" on the next resolve cycle.
+		var existing []SimPortfolioV2PriceRequirement
+		if err := tx.Where("portfolio_id = ? AND signal_date = ? AND status = ?", portfolioID, signalDate, SimPortfolioV2PriceStatusSatisfied).Find(&existing).Error; err != nil {
+			return err
+		}
+		satisfiedByKey := make(map[string]SimPortfolioV2PriceRequirement, len(existing))
+		for _, row := range existing {
+			key := row.TradeDate + "\x00" + row.Code + "\x00" + row.Exchange + "\x00" + row.PriceType
+			satisfiedByKey[key] = row
+		}
+		// Delete all existing rows for this portfolio + signal date.
 		if err := tx.Where("portfolio_id = ? AND signal_date = ?", portfolioID, signalDate).Delete(&SimPortfolioV2PriceRequirement{}).Error; err != nil {
 			return err
 		}
-		if len(rows) > 0 {
-			return tx.Create(&rows).Error
+		// Merge: carry forward satisfied rows; insert new rows as pending.
+		merged := make([]SimPortfolioV2PriceRequirement, 0, len(rows))
+		for _, row := range rows {
+			key := row.TradeDate + "\x00" + row.Code + "\x00" + row.Exchange + "\x00" + row.PriceType
+			if sat, ok := satisfiedByKey[key]; ok {
+				sat.ID = 0 // let autoIncrement assign a fresh primary key
+				merged = append(merged, sat)
+			} else {
+				merged = append(merged, row)
+			}
+		}
+		if len(merged) > 0 {
+			return tx.Create(&merged).Error
 		}
 		return nil
 	})

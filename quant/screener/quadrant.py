@@ -343,17 +343,31 @@ _QQ_DAILY_HEADERS = {
 }
 
 
+def _resolve_end_date(source_trade_date: Optional[str] = None) -> str:
+    """统一日期解析：传入 source_trade_date 则用它，否则默认今天。
+
+    用于重建历史日期四象限时，确保日线拉取和 benchmark 拉取的
+    end_date 与目标交易日一致，而非硬编码 pd.Timestamp.today()。
+    """
+    if source_trade_date:
+        try:
+            return pd.Timestamp(source_trade_date).strftime("%Y-%m-%d")
+        except Exception:
+            logger.warning("[quadrant] 无效的 source_trade_date=%s，回退到今天", source_trade_date)
+    return pd.Timestamp.today().strftime("%Y-%m-%d")
+
+
 def _code_to_qq_daily(code: str) -> str:
     c = str(code).zfill(6)
     return f"sh{c}" if c.startswith(("6", "9")) else f"sz{c}"
 
 
-def _fetch_bars_tencent(symbol: str, days: int) -> Optional[List[Dict]]:
+def _fetch_bars_tencent(symbol: str, days: int, source_trade_date: Optional[str] = None) -> Optional[List[Dict]]:
     """通过腾讯财经日线接口拉取前复权日线。"""
     try:
         qq_code = _code_to_qq_daily(symbol)
-        end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
-        start_date = (pd.Timestamp.today() - pd.Timedelta(days=days + 30)).strftime("%Y-%m-%d")
+        end_date = _resolve_end_date(source_trade_date)
+        start_date = (pd.Timestamp(end_date) - pd.Timedelta(days=days + 30)).strftime("%Y-%m-%d")
 
         url = (
             f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
@@ -388,12 +402,12 @@ def _fetch_bars_tencent(symbol: str, days: int) -> Optional[List[Dict]]:
 
 # ── Data source: AKShare / Eastmoney (fallback) ────────────────
 
-def _fetch_bars_akshare(symbol: str, days: int) -> Optional[List[Dict]]:
+def _fetch_bars_akshare(symbol: str, days: int, source_trade_date: Optional[str] = None) -> Optional[List[Dict]]:
     """通过 AKShare 东财接口拉取日线（降级数据源）。"""
     try:
         import akshare as ak
-        end_date = pd.Timestamp.today().strftime("%Y%m%d")
-        start_date = (pd.Timestamp.today() - pd.Timedelta(days=days + 30)).strftime("%Y%m%d")
+        end_date = _resolve_end_date(source_trade_date).replace("-", "")
+        start_date = (pd.Timestamp(_resolve_end_date(source_trade_date)) - pd.Timedelta(days=days + 30)).strftime("%Y%m%d")
         df = ak.stock_zh_a_hist(
             symbol=symbol, period="daily",
             start_date=start_date, end_date=end_date, adjust="qfq",
@@ -433,22 +447,22 @@ def _fetch_bars_akshare(symbol: str, days: int) -> Optional[List[Dict]]:
 
 # ── Dual-source fetch with fallback ────────────────────────────
 
-def _fetch_daily_bars(symbol: str, days: int = DAILY_LOOKBACK_DAYS) -> Optional[List[Dict]]:
+def _fetch_daily_bars(symbol: str, days: int = DAILY_LOOKBACK_DAYS, source_trade_date: Optional[str] = None) -> Optional[List[Dict]]:
     """腾讯优先，东财降级。"""
-    bars = _fetch_bars_tencent(symbol, days)
+    bars = _fetch_bars_tencent(symbol, days, source_trade_date=source_trade_date)
     if bars:
         return bars
     # Fallback to AKShare
     time.sleep(SINGLE_RETRY_DELAY_MS / 1000.0)
-    bars = _fetch_bars_akshare(symbol, days)
+    bars = _fetch_bars_akshare(symbol, days, source_trade_date=source_trade_date)
     return bars
 
 
-def _fetch_benchmark_60d_return() -> float:
+def _fetch_benchmark_60d_return(source_trade_date: Optional[str] = None) -> float:
     """通过腾讯财经获取上证指数近 60 个交易日的收益率。"""
     try:
-        end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
-        start_date = (pd.Timestamp.today() - pd.Timedelta(days=120)).strftime("%Y-%m-%d")
+        end_date = _resolve_end_date(source_trade_date)
+        start_date = (pd.Timestamp(end_date) - pd.Timedelta(days=120)).strftime("%Y-%m-%d")
         url = (
             f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
             f"?param=sh000001,day,{start_date},{end_date},90,"
@@ -478,12 +492,12 @@ def _code_to_qq_hk(code: str) -> str:
     return f"hk{c}"
 
 
-def _fetch_bars_tencent_hk(symbol: str, days: int) -> Optional[List[Dict]]:
+def _fetch_bars_tencent_hk(symbol: str, days: int, source_trade_date: Optional[str] = None) -> Optional[List[Dict]]:
     """通过腾讯财经日线接口拉取港股前复权日线。"""
     try:
         qq_code = _code_to_qq_hk(symbol)
-        end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
-        start_date = (pd.Timestamp.today() - pd.Timedelta(days=days + 30)).strftime("%Y-%m-%d")
+        end_date = _resolve_end_date(source_trade_date)
+        start_date = (pd.Timestamp(end_date) - pd.Timedelta(days=days + 30)).strftime("%Y-%m-%d")
 
         url = (
             f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
@@ -517,12 +531,12 @@ def _fetch_bars_tencent_hk(symbol: str, days: int) -> Optional[List[Dict]]:
         return None
 
 
-def _fetch_bars_akshare_hk(symbol: str, days: int) -> Optional[List[Dict]]:
+def _fetch_bars_akshare_hk(symbol: str, days: int, source_trade_date: Optional[str] = None) -> Optional[List[Dict]]:
     """通过 AKShare 东财接口拉取港股日线（降级数据源）。"""
     try:
         import akshare as ak
-        end_date = pd.Timestamp.today().strftime("%Y%m%d")
-        start_date = (pd.Timestamp.today() - pd.Timedelta(days=days + 30)).strftime("%Y%m%d")
+        end_date = _resolve_end_date(source_trade_date).replace("-", "")
+        start_date = (pd.Timestamp(_resolve_end_date(source_trade_date)) - pd.Timedelta(days=days + 30)).strftime("%Y%m%d")
         df = ak.stock_hk_hist(
             symbol=symbol, period="daily",
             start_date=start_date, end_date=end_date, adjust="qfq",
@@ -560,24 +574,24 @@ def _fetch_bars_akshare_hk(symbol: str, days: int) -> Optional[List[Dict]]:
         return None
 
 
-def _fetch_daily_bars_hk(symbol: str, days: int = DAILY_LOOKBACK_DAYS) -> Optional[List[Dict]]:
+def _fetch_daily_bars_hk(symbol: str, days: int = DAILY_LOOKBACK_DAYS, source_trade_date: Optional[str] = None) -> Optional[List[Dict]]:
     """港股日线拉取：腾讯优先，东财降级。"""
-    bars = _fetch_bars_tencent_hk(symbol, days)
+    bars = _fetch_bars_tencent_hk(symbol, days, source_trade_date=source_trade_date)
     if bars:
         return bars
     time.sleep(SINGLE_RETRY_DELAY_MS / 1000.0)
-    bars = _fetch_bars_akshare_hk(symbol, days)
+    bars = _fetch_bars_akshare_hk(symbol, days, source_trade_date=source_trade_date)
     return bars
 
 
-def _fetch_hsi_60d_return() -> float:
+def _fetch_hsi_60d_return(source_trade_date: Optional[str] = None) -> float:
     """通过腾讯财经获取恒生指数近 60 个交易日的收益率。"""
     # 恒生指数在腾讯的代码格式为 hkHSI
     hsi_codes = ["hkHSI", "hkHSI"]
     for code in hsi_codes:
         try:
-            end_date = pd.Timestamp.today().strftime("%Y-%m-%d")
-            start_date = (pd.Timestamp.today() - pd.Timedelta(days=180)).strftime("%Y-%m-%d")
+            end_date = _resolve_end_date(source_trade_date)
+            start_date = (pd.Timestamp(end_date) - pd.Timedelta(days=180)).strftime("%Y-%m-%d")
             url = (
                 f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
                 f"?param={code},day,{start_date},{end_date},180,"
@@ -784,6 +798,7 @@ def _compute_daily_metrics(daily_df: pd.DataFrame) -> Dict[str, float]:
 def compute_all_quadrant_scores(
     callback_url: Optional[str] = None,
     force_full: bool = False,
+    source_trade_date: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     全市场 A 股四象限评分。
@@ -791,6 +806,10 @@ def compute_all_quadrant_scores(
     支持两种模式：
     - 全量刷新：首次运行 / 缓存过期 / force_full=True
     - 增量更新：有缓存时只拉最新 2 天日线，追加到缓存
+
+    Args:
+        source_trade_date: 目标交易日 (YYYY-MM-DD)。用于重建历史日期四象限时，
+            确保日线和 benchmark 数据截止到该日期而非今天。None 时默认今天。
 
     Returns:
         List of dicts with code, name, opportunity, risk, quadrant, sub-scores
@@ -868,7 +887,7 @@ def compute_all_quadrant_scores(
         failed_codes: List[str] = []
 
         def fetch_with_interval(code: str) -> Tuple[str, Optional[List[Dict]]]:
-            bars = _fetch_daily_bars(code, fetch_days)
+            bars = _fetch_daily_bars(code, fetch_days, source_trade_date=source_trade_date)
             if REQUEST_INTERVAL_MS > 0:
                 time.sleep(REQUEST_INTERVAL_MS / 1000.0)
             return code, bars
@@ -915,7 +934,8 @@ def compute_all_quadrant_scores(
             if cached_ratio < MIN_SUCCESS_RATIO:
                 logger.warning("[quadrant] 缓存覆盖率不足，尝试全量刷新...")
                 # Fallback: trigger full refresh
-                return compute_all_quadrant_scores(callback_url=callback_url, force_full=True)
+                return compute_all_quadrant_scores(callback_url=callback_url, force_full=True,
+                                                   source_trade_date=source_trade_date)
 
         # Update cache metadata
         if is_full:
@@ -926,7 +946,7 @@ def compute_all_quadrant_scores(
 
         # ── Step 4: 上证指数 60 日收益 ──
         logger.info("[quadrant] Step 4: 拉取上证指数 60 日收益...")
-        bench_60d = _fetch_benchmark_60d_return()
+        bench_60d = _fetch_benchmark_60d_return(source_trade_date=source_trade_date)
         logger.info("[quadrant] 上证 60 日收益: %.2f%%", bench_60d)
 
         # ── Step 4.5: 将快照 turnover_rate 注入日线缓存 ──
@@ -1278,6 +1298,7 @@ class HkDailyBarCache(DailyBarCache):
 def compute_hk_quadrant_scores(
     callback_url: Optional[str] = None,
     force_full: bool = False,
+    source_trade_date: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     全市场港股四象限评分。
@@ -1363,7 +1384,7 @@ def compute_hk_quadrant_scores(
     failed_codes: List[str] = []
 
     def fetch_with_interval_hk(code: str) -> Tuple[str, Optional[List[Dict]]]:
-        bars = _fetch_daily_bars_hk(code, fetch_days)
+        bars = _fetch_daily_bars_hk(code, fetch_days, source_trade_date=source_trade_date)
         if REQUEST_INTERVAL_MS > 0:
             time.sleep(REQUEST_INTERVAL_MS / 1000.0)
         return code, bars
@@ -1415,7 +1436,7 @@ def compute_hk_quadrant_scores(
 
     # ── Step 4: 恒生指数 60 日收益 ──
     logger.info("[hk-quadrant] Step 4: 拉取恒生指数 60 日收益...")
-    bench_60d = _fetch_hsi_60d_return()
+    bench_60d = _fetch_hsi_60d_return(source_trade_date=source_trade_date)
     logger.info("[hk-quadrant] 恒生 60 日收益: %.2f%%", bench_60d)
 
     # ── Step 4.5: 将快照 turnover_rate 注入日线缓存 ──

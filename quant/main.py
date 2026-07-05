@@ -724,6 +724,7 @@ def dict_to_json_safe(data: Dict) -> Dict:
 class QuadrantComputeRequest(BaseModel):
     callback_url: str = Field(default="http://backend:8080/api/quadrant/bulk-save", description="Go 后端回调 URL")
     force_full: bool = Field(default=False, description="是否强制全量刷新（忽略缓存）")
+    source_trade_date: Optional[str] = Field(default=None, description="目标交易日 (YYYY-MM-DD)，用于重建历史日期四象限")
 
 
 @app.post("/api/quadrant/compute-all")
@@ -737,10 +738,12 @@ def quadrant_compute_all(req: QuadrantComputeRequest):
 
     callback = req.callback_url.strip() if req.callback_url else None
     force_full = req.force_full
+    source_trade_date = req.source_trade_date.strip() if req.source_trade_date else None
 
     def _run():
         try:
-            compute_all_quadrant_scores(callback_url=callback, force_full=force_full)
+            compute_all_quadrant_scores(callback_url=callback, force_full=force_full,
+                                        source_trade_date=source_trade_date)
         except Exception as exc:
             logger.exception("[quadrant] compute-all 后台任务失败: %s", exc)
             # 上报终态：让前端知道任务失败了
@@ -759,6 +762,7 @@ def quadrant_compute_all(req: QuadrantComputeRequest):
 class HkQuadrantComputeRequest(BaseModel):
     callback_url: str = Field(default="http://backend:8080/api/quadrant/bulk-save", description="Go 后端回调 URL")
     force_full: bool = Field(default=False, description="是否强制全量刷新（忽略缓存）")
+    source_trade_date: Optional[str] = Field(default=None, description="目标交易日 (YYYY-MM-DD)，用于重建历史日期四象限")
 
 
 @app.post("/api/quadrant/compute-hk-all")
@@ -772,10 +776,12 @@ def quadrant_hk_compute_all(req: HkQuadrantComputeRequest):
 
     callback = req.callback_url.strip() if req.callback_url else None
     force_full = req.force_full
+    source_trade_date = req.source_trade_date.strip() if req.source_trade_date else None
 
     def _run():
         try:
-            compute_hk_quadrant_scores(callback_url=callback, force_full=force_full)
+            compute_hk_quadrant_scores(callback_url=callback, force_full=force_full,
+                                       source_trade_date=source_trade_date)
         except Exception as exc:
             logger.exception("[hk-quadrant] compute-hk-all 后台任务失败: %s", exc)
             # 上报终态：让前端知道任务失败了

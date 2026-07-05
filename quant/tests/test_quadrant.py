@@ -9,6 +9,7 @@ from screener.quadrant import (
     _compute_daily_metrics,
     _derive_progress_url,
     _latest_cached_close,
+    _resolve_end_date,
     _safe_momentum,
 )
 
@@ -174,3 +175,35 @@ def test_derive_progress_url_preserves_multiple_params():
         "http://backend:8080/api/quadrant/bulk-save?source_trade_date=2026-07-02&force_full=true"
     )
     assert url == "http://backend:8080/api/quadrant/progress?source_trade_date=2026-07-02&force_full=true"
+
+
+# ── _resolve_end_date ──
+
+
+def test_resolve_end_date_uses_source_trade_date():
+    """传入合法日期应原样返回。"""
+    assert _resolve_end_date("2026-06-15") == "2026-06-15"
+
+
+def test_resolve_end_date_none_defaults_to_today():
+    """传入 None 应返回今天。"""
+    today = pd.Timestamp.today().strftime("%Y-%m-%d")
+    assert _resolve_end_date(None) == today
+
+
+def test_resolve_end_date_empty_string_defaults_to_today():
+    """传入空字符串应返回今天。"""
+    today = pd.Timestamp.today().strftime("%Y-%m-%d")
+    assert _resolve_end_date("") == today
+
+
+def test_resolve_end_date_invalid_falls_back_to_today():
+    """传入无效日期应回退到今天并发出 warning。"""
+    today = pd.Timestamp.today().strftime("%Y-%m-%d")
+    result = _resolve_end_date("not-a-date")
+    assert result == today
+
+
+def test_resolve_end_date_normalizes_format():
+    """传入 Timestamp 可解析的格式应统一输出 YYYY-MM-DD。"""
+    assert _resolve_end_date("2026-01-05") == "2026-01-05"

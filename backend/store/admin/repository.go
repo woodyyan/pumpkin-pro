@@ -576,3 +576,31 @@ func (r *Repository) CountAIUniqueUsersSince(ctx context.Context, since time.Tim
 		Distinct("user_id").Count(&count).Error
 	return count, err
 }
+
+// ── Site Config (generic KV) ──
+
+// GetSiteConfig returns the raw JSON value for a given config key.
+// Returns empty string and nil error if the key does not exist.
+func (r *Repository) GetSiteConfig(ctx context.Context, key string) (value string, updatedAt time.Time, updatedBy string, found bool, err error) {
+	var record SiteConfigRecord
+	result := r.db.WithContext(ctx).First(&record, "key = ?", key)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return "", time.Time{}, "", false, nil
+		}
+		return "", time.Time{}, "", false, result.Error
+	}
+	return record.Value, record.UpdatedAt, record.UpdatedBy, true, nil
+}
+
+// UpsertSiteConfig inserts or updates a site config entry.
+func (r *Repository) UpsertSiteConfig(ctx context.Context, key, value, updatedBy string) error {
+	now := time.Now().UTC()
+	record := SiteConfigRecord{
+		Key:       key,
+		Value:     value,
+		UpdatedBy: updatedBy,
+		UpdatedAt: now,
+	}
+	return r.db.WithContext(ctx).Save(&record).Error
+}

@@ -4300,6 +4300,10 @@ func main() {
 	mux.HandleFunc("/api/admin/feedback", server.withSuperAdminAuth(server.handleAdminFeedback))
 	mux.HandleFunc("/api/admin/feedback/", server.withSuperAdminAuth(server.handleAdminFeedbackSubroutes))
 
+	// ── Site Config (public read, admin write) ──
+	mux.HandleFunc("/api/site-config/community", server.handlePublicCommunityQRConfig)
+	mux.HandleFunc("/api/admin/site-config/community", server.withSuperAdminAuth(server.handleAdminCommunityQRConfig))
+
 	// ── Backup Admin (super-admin only) ──
 	mux.HandleFunc("/api/admin/backup-status", server.withSuperAdminAuth(server.handleAdminBackupStatus))
 	mux.HandleFunc("/api/admin/backup-history", server.withSuperAdminAuth(server.handleAdminBackupHistory))

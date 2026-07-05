@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import Head from 'next/head'
 import changelogData from '../data/changelog.json'
+import CommunityQRCard from '../components/CommunityQRCard'
 
 const TYPE_STYLES = {
   新功能: 'border-sky-500/30 dark:border-sky-400/50 bg-sky-100 dark:bg-sky-500/30 text-sky-700 dark:text-sky-100 shadow-none dark:shadow-[0_10px_30px_rgba(56,189,248,0.12)]',
@@ -98,6 +99,8 @@ export default function ChangelogPage() {
           </div>
         </div>
       </section>
+
+      <CommunityQRCard />
 
       <section className="rounded-[28px] border border-border bg-card/95 p-5 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
         <div className="border-b border-border pb-5">

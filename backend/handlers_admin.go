@@ -602,3 +602,55 @@ func (a *appServer) handleAdminDeviceAnalytics(w http.ResponseWriter, r *http.Re
 
 	writeJSON(w, http.StatusOK, result)
 }
+
+// ── Site Config: Community QR ──
+
+// handlePublicCommunityQRConfig returns the community QR config (public, no auth).
+// GET /api/site-config/community
+func (a *appServer) handlePublicCommunityQRConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	config, err := a.adminService.GetCommunityQRConfig(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "获取交流群二维码配置失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, config)
+}
+
+// handleAdminCommunityQRConfig manages the community QR config (super-admin only).
+// GET  /api/admin/site-config/community
+// PUT  /api/admin/site-config/community
+func (a *appServer) handleAdminCommunityQRConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		view, err := a.adminService.GetCommunityQRConfigAdminView(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "获取交流群二维码配置失败")
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
+
+	case http.MethodPut:
+		var input admin.SaveCommunityQRConfigInput
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, http.StatusBadRequest, "请求格式错误")
+			return
+		}
+		view, err := a.adminService.SaveCommunityQRConfig(r.Context(), input)
+		if err != nil {
+			if errors.Is(err, admin.ErrSiteConfigInvalid) {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "保存交流群二维码配置失败")
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Only GET and PUT methods are allowed")
+	}
+}

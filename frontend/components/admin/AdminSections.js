@@ -2643,6 +2643,283 @@ export function FeedbackPanel({ onUnauthorized }) {
   )
 }
 
+// ── Community QR Config Panel ──
+
+function createCommunityQRDraft(view) {
+  return {
+    is_enabled: Boolean(view?.is_enabled),
+    title: view?.title || '',
+    description: view?.description || '',
+    qr_image_base64: view?.qr_image_base64 || '',
+  }
+}
+
+export function CommunityQRConfigPanel({ onUnauthorized }) {
+  const [draft, setDraft] = useState(() => createCommunityQRDraft(null))
+  const [saving, setSaving] = useState(false)
+  const [banner, setBanner] = useState(null)
+  const [fileInputKey, setFileInputKey] = useState(0)
+  const initializedRef = useRef(false)
+
+  const resource = useAdminResource({
+    key: 'admin:community-qr',
+    request: () => adminFetch('/api/admin/site-config/community'),
+    staleMs: 30_000,
+    minIntervalMs: 3_000,
+    onUnauthorized,
+    errorMessage: '加载交流群二维码配置失败',
+  })
+  const view = resource.data
+
+  useEffect(() => {
+    if (!view) return
+    if (!initializedRef.current) {
+      setDraft(createCommunityQRDraft(view))
+      initializedRef.current = true
+    }
+  }, [view])
+
+  useEffect(() => {
+    if (resource.error) {
+      setBanner({ tone: 'error', text: resource.error })
+    }
+  }, [resource.error])
+
+  const updateDraft = (key, value) => {
+    setDraft((current) => ({ ...current, [key]: value }))
+  }
+
+  const restoreSaved = () => {
+    setDraft(createCommunityQRDraft(view))
+    setBanner(null)
+  }
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (file.size > 2 * 1024 * 1024) {
+      setBanner({ tone: 'error', text: '图片不能超过 2MB' })
+      e.target.value = ''
+      return
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setBanner({ tone: 'error', text: '请选择图片文件' })
+      e.target.value = ''
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      updateDraft('qr_image_base64', reader.result)
+      setBanner(null)
+    }
+    reader.onerror = () => {
+      setBanner({ tone: 'error', text: '读取图片失败' })
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleClearImage = () => {
+    updateDraft('qr_image_base64', '')
+    setFileInputKey((k) => k + 1)
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setBanner(null)
+    try {
+      const data = await adminFetch('/api/admin/site-config/community', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          is_enabled: draft.is_enabled,
+          title: draft.title.trim(),
+          description: draft.description.trim(),
+          qr_image_base64: draft.qr_image_base64,
+        }),
+      })
+      resource.mutate(data)
+      setDraft(createCommunityQRDraft(data))
+      setBanner({ tone: 'success', text: '交流群二维码配置已保存' })
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '保存交流群二维码配置失败')
+      if (message) {
+        setBanner({ tone: 'error', text: message })
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (resource.loading && !view) {
+    return (
+      <section className="rounded-2xl border border-border bg-card p-5">
+        <div className="text-sm text-foreground-dim">加载交流群二维码配置中…</div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+      <div>
+        <h2 className="text-base font-semibold text-foreground-muted">📱 交流群二维码配置</h2>
+        <p className="mt-1 text-xs text-foreground-dim">管理首页、设置页、更新日志页展示的卧龙AI量化交流群二维码。</p>
+      </div>
+
+      {banner ? (
+        <div
+          className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${
+            banner.tone === 'success'
+              ? 'border-positive/20 bg-positive/10 text-emerald-100'
+              : 'border-rose-400/20 bg-negative/10 text-negative'
+          }`}
+        >
+          {banner.text}
+        </div>
+      ) : null}
+
+      <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
+        {/* Preview */}
+        <div className="rounded-2xl border border-border bg-[var(--color-bg-hover)] p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="text-xs font-medium text-foreground-dim">当前预览</div>
+            <span
+              className={`inline-flex rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${
+                draft.is_enabled
+                  ? 'border-positive/30 bg-positive/10 text-positive'
+                  : 'border-border bg-[var(--color-bg-hover)] text-foreground-dim'
+              }`}
+            >
+              {draft.is_enabled ? '● 已启用' : '○ 未启用'}
+            </span>
+          </div>
+          {draft.qr_image_base64 ? (
+            <div className="flex flex-col items-center gap-3">
+              <img
+                src={draft.qr_image_base64}
+                alt={draft.title || '卧龙AI量化交流群'}
+                width={140}
+                height={140}
+                className="h-[140px] w-[140px] rounded-xl border border-border object-contain bg-white p-1"
+              />
+              <div className="text-center">
+                <div className="text-sm font-medium text-foreground">{draft.title || '卧龙AI量化交流群'}</div>
+                {draft.description ? (
+                  <div className="mt-1 text-xs text-foreground-dim">{draft.description}</div>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <div className="flex h-[180px] items-center justify-center rounded-xl border border-dashed border-border text-xs text-foreground-dim">
+              尚未上传二维码图片
+            </div>
+          )}
+          {view?.updated_at ? (
+            <div className="mt-3 text-[11px] text-foreground-dim">
+              更新时间：{formatAdminDateTime(view.updated_at)}
+              {view.updated_by ? ` · 操作人：${view.updated_by}` : ''}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Form */}
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1.5 block text-xs text-foreground-dim">标题</label>
+            <input
+              type="text"
+              value={draft.title}
+              onChange={(e) => updateDraft('title', e.target.value)}
+              maxLength={50}
+              placeholder="留空则默认为「卧龙AI量化交流群」"
+              className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-foreground-disabled focus:border-primary/60"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs text-foreground-dim">描述（选填）</label>
+            <textarea
+              value={draft.description}
+              onChange={(e) => updateDraft('description', e.target.value)}
+              maxLength={200}
+              rows={2}
+              className="w-full resize-none rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-foreground-disabled focus:border-primary/60"
+              placeholder="扫码加入交流群，与更多量化爱好者一起讨论策略与市场机会"
+            />
+            <div className="mt-1 text-right text-[10px] text-foreground-dim">
+              {draft.description.length}/200
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs text-foreground-dim">二维码图片</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                key={fileInputKey}
+                type="file"
+                accept="image/png,image/jpeg,image/jpg,image/webp"
+                onChange={handleFileChange}
+                className="hidden"
+                id="community-qr-file"
+              />
+              <label
+                htmlFor="community-qr-file"
+                className="cursor-pointer rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:border-primary hover:text-primary"
+              >
+                选择图片
+              </label>
+              {draft.qr_image_base64 ? (
+                <button
+                  type="button"
+                  onClick={handleClearImage}
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground-dim transition hover:border-negative hover:text-negative"
+                >
+                  清除
+                </button>
+              ) : null}
+              <span className="text-[11px] text-foreground-dim">PNG / JPG / WebP，≤ 2MB</span>
+            </div>
+          </div>
+
+          <label className="flex items-start gap-3 rounded-2xl border border-border bg-card px-4 py-3">
+            <input
+              type="checkbox"
+              checked={draft.is_enabled}
+              onChange={(e) => updateDraft('is_enabled', e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-[var(--color-border-strong)] bg-transparent text-amber-400 focus:ring-amber-400"
+            />
+            <div>
+              <div className="text-sm font-medium text-foreground">启用展示</div>
+              <div className="mt-1 text-xs text-foreground-dim">开启后，二维码将在首页、设置页和更新日志页展示。</div>
+            </div>
+          </label>
+
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="rounded-2xl border border-amber-500/30 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 transition hover:bg-amber-100 dark:border-amber-400/30 dark:bg-amber-500/12 dark:text-amber-100 dark:hover:bg-amber-500/18 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {saving ? '保存中…' : '保存配置'}
+            </button>
+            <button
+              type="button"
+              onClick={restoreSaved}
+              disabled={!view}
+              className="rounded-2xl border border-[var(--color-border-strong)] bg-[var(--color-bg-hover)] px-4 py-3 text-sm font-medium text-foreground/72 transition hover:bg-[var(--color-bg-secondary)] disabled:opacity-60"
+            >
+              恢复已保存值
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 // ── System Health Panel (Error Monitoring) ──
 
 function statusColor(code) {
@@ -3599,6 +3876,7 @@ export function AdminOpsPage({ onUnauthorized }) {
   return (
     <div className="space-y-8">
       <FeedbackPanel onUnauthorized={onUnauthorized} />
+      <CommunityQRConfigPanel onUnauthorized={onUnauthorized} />
       <AdminPaymentsPanel onUnauthorized={onUnauthorized} />
       <BackupPanel onUnauthorized={onUnauthorized} />
       <SystemHealthPanel onUnauthorized={onUnauthorized} />

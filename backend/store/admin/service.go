@@ -548,3 +548,184 @@ func signPayload(payloadPart string, secret string) string {
 	sig := mac.Sum(nil)
 	return base64.RawURLEncoding.EncodeToString(sig)
 }
+
+// ── Community QR Config ──
+
+const (
+	siteConfigKeyCommunityQR = "community_qr"
+
+	communityQRTitleDefault       = "卧龙AI量化交流群"
+	communityQRTitleMaxLen        = 50
+	communityQRDescriptionMaxLen  = 200
+	communityQRBase64MaxBytes     = 2 * 1024 * 1024 // 2 MB decoded
+)
+
+// communityQRStoredValue is the JSON shape persisted in site_config.value.
+type communityQRStoredValue struct {
+	IsEnabled     bool   `json:"is_enabled"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+	QRImageBase64 string `json:"qr_image_base64"`
+}
+
+// GetCommunityQRConfig returns the public-facing community QR config.
+// Returns a zero-valued (disabled) config if not yet configured.
+func (s *Service) GetCommunityQRConfig(ctx context.Context) (CommunityQRConfig, error) {
+	raw, updatedAt, _, found, err := s.repo.GetSiteConfig(ctx, siteConfigKeyCommunityQR)
+	if err != nil {
+		return CommunityQRConfig{}, fmt.Errorf("get community qr config: %w", err)
+	}
+	if !found {
+		return CommunityQRConfig{IsEnabled: false}, nil
+	}
+
+	var stored communityQRStoredValue
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+		return CommunityQRConfig{IsEnabled: false}, nil
+	}
+
+	return CommunityQRConfig{
+		IsEnabled:     stored.IsEnabled,
+		Title:         stored.Title,
+		Description:   stored.Description,
+		QRImageBase64: stored.QRImageBase64,
+		UpdatedAt:     formatAdminTimestamp(updatedAt),
+	}, nil
+}
+
+// GetCommunityQRConfigAdminView returns the admin view including updated_by.
+func (s *Service) GetCommunityQRConfigAdminView(ctx context.Context) (CommunityQRConfigAdminView, error) {
+	raw, updatedAt, updatedBy, found, err := s.repo.GetSiteConfig(ctx, siteConfigKeyCommunityQR)
+	if err != nil {
+		return CommunityQRConfigAdminView{}, fmt.Errorf("get community qr config (admin): %w", err)
+	}
+	if !found {
+		return CommunityQRConfigAdminView{
+			CommunityQRConfig: CommunityQRConfig{IsEnabled: false},
+			UpdatedBy:         "",
+		}, nil
+	}
+
+	var stored communityQRStoredValue
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+		return CommunityQRConfigAdminView{
+			CommunityQRConfig: CommunityQRConfig{IsEnabled: false},
+			UpdatedBy:         updatedBy,
+		}, nil
+	}
+
+	return CommunityQRConfigAdminView{
+		CommunityQRConfig: CommunityQRConfig{
+			IsEnabled:     stored.IsEnabled,
+			Title:         stored.Title,
+			Description:   stored.Description,
+			QRImageBase64: stored.QRImageBase64,
+			UpdatedAt:     formatAdminTimestamp(updatedAt),
+		},
+		UpdatedBy: updatedBy,
+	}, nil
+}
+
+// SaveCommunityQRConfig validates, persists, and returns the updated admin view.
+func (s *Service) SaveCommunityQRConfig(ctx context.Context, input SaveCommunityQRConfigInput) (CommunityQRConfigAdminView, error) {
+	// Resolve admin email for audit.
+	adminEmail := ""
+	if admin, ok := CurrentAdminFromContext(ctx); ok {
+		adminEmail = admin.Email
+	}
+
+	// ── Validation ──
+	title := strings.TrimSpace(input.Title)
+	if title == "" {
+		title = communityQRTitleDefault
+	}
+	if len([]rune(title)) > communityQRTitleMaxLen {
+		return CommunityQRConfigAdminView{}, fmt.Errorf("%w: 标题不能超过 %d 字符", ErrSiteConfigInvalid, communityQRTitleMaxLen)
+	}
+
+	description := strings.TrimSpace(input.Description)
+	if len([]rune(description)) > communityQRDescriptionMaxLen {
+		return CommunityQRConfigAdminView{}, fmt.Errorf("%w: 描述不能超过 %d 字符", ErrSiteConfigInvalid, communityQRDescriptionMaxLen)
+	}
+
+	qrImage := strings.TrimSpace(input.QRImageBase64)
+
+	// If enabling, the QR image must be present and valid.
+	if input.IsEnabled {
+		if qrImage == "" {
+			return CommunityQRConfigAdminView{}, fmt.Errorf("%w: 启用展示时必须上传二维码图片", ErrSiteConfigInvalid)
+		}
+		if err := validateQRBase64Image(qrImage); err != nil {
+			return CommunityQRConfigAdminView{}, fmt.Errorf("%w: %s", ErrSiteConfigInvalid, err.Error())
+		}
+	}
+
+	// If the image is provided (even when disabled), validate it.
+	if qrImage != "" {
+		if err := validateQRBase64Image(qrImage); err != nil {
+			return CommunityQRConfigAdminView{}, fmt.Errorf("%w: %s", ErrSiteConfigInvalid, err.Error())
+		}
+	}
+
+	// If no new image is provided but we are saving, preserve the existing one.
+	if qrImage == "" {
+		existingRaw, _, _, found, _ := s.repo.GetSiteConfig(ctx, siteConfigKeyCommunityQR)
+		if found {
+			var existing communityQRStoredValue
+			if err := json.Unmarshal([]byte(existingRaw), &existing); err == nil {
+				qrImage = existing.QRImageBase64
+			}
+		}
+	}
+
+	stored := communityQRStoredValue{
+		IsEnabled:     input.IsEnabled,
+		Title:         title,
+		Description:   description,
+		QRImageBase64: qrImage,
+	}
+
+	payloadBytes, err := json.Marshal(stored)
+	if err != nil {
+		return CommunityQRConfigAdminView{}, fmt.Errorf("marshal community qr config: %w", err)
+	}
+
+	if err := s.repo.UpsertSiteConfig(ctx, siteConfigKeyCommunityQR, string(payloadBytes), adminEmail); err != nil {
+		return CommunityQRConfigAdminView{}, fmt.Errorf("save community qr config: %w", err)
+	}
+
+	return s.GetCommunityQRConfigAdminView(ctx)
+}
+
+// validateQRBase64Image validates the data URL prefix and decoded size.
+func validateQRBase64Image(dataURL string) error {
+	// Must start with data:image/ prefix.
+	if !strings.HasPrefix(dataURL, "data:image/") {
+		return fmt.Errorf("二维码图片必须为 data:image/ 开头的 base64 格式")
+	}
+
+	// Extract the base64 portion after the comma.
+	commaIdx := strings.Index(dataURL, ",")
+	if commaIdx < 0 {
+		return fmt.Errorf("二维码图片 base64 数据格式不正确")
+	}
+	b64Data := dataURL[commaIdx+1:]
+
+	// Decode to check actual size.
+	decoded, err := base64.StdEncoding.DecodeString(b64Data)
+	if err != nil {
+		return fmt.Errorf("二维码图片 base64 解码失败")
+	}
+	if len(decoded) > communityQRBase64MaxBytes {
+		return fmt.Errorf("二维码图片不能超过 %d MB", communityQRBase64MaxBytes/(1024*1024))
+	}
+	return nil
+}
+
+// formatAdminTimestamp formats a time value for API response (ISO 8601 UTC).
+func formatAdminTimestamp(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format("2006-01-02T15:04:05Z")
+}

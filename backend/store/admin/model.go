@@ -218,3 +218,41 @@ type FunnelStats struct {
 	Steps       []FunnelStep `json:"steps"` // ordered funnel steps
 	GeneratedAt string       `json:"generated_at"`
 }
+
+// ── Site Config (generic KV for site-wide settings) ──
+
+type SiteConfigRecord struct {
+	Key       string    `gorm:"primaryKey;size:64"`
+	Value     string    `gorm:"type:text;not null;default:'{}'"`
+	UpdatedBy string    `gorm:"size:128;not null;default:''"`
+	UpdatedAt time.Time `gorm:"not null"`
+}
+
+func (SiteConfigRecord) TableName() string {
+	return "site_config"
+}
+
+// ── Community QR Config ──
+
+// CommunityQRConfig is the public-facing view (no admin metadata).
+type CommunityQRConfig struct {
+	IsEnabled     bool   `json:"is_enabled"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+	QRImageBase64 string `json:"qr_image_base64"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
+// CommunityQRConfigAdminView includes admin-only metadata.
+type CommunityQRConfigAdminView struct {
+	CommunityQRConfig
+	UpdatedBy string `json:"updated_by"`
+}
+
+// SaveCommunityQRConfigInput is the PUT request payload for admin.
+type SaveCommunityQRConfigInput struct {
+	IsEnabled     bool   `json:"is_enabled"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+	QRImageBase64 string `json:"qr_image_base64"`
+}

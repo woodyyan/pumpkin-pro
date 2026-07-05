@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import Head from 'next/head'
 
+import CommunityQRCard from '../components/CommunityQRCard'
 import { useAuth } from '../lib/auth-context'
 import {
   CORE_SELLING_POINTS,
@@ -231,6 +232,8 @@ export default function HomePage() {
           {FEATURE_CATEGORIES.map((category) => <FeatureCategory key={category.key} category={category} />)}
         </div>
       </section>
+
+      <CommunityQRCard />
 
       <section className="mx-auto max-w-5xl px-4 py-14 md:py-20">
         <div className="mb-10 text-center">

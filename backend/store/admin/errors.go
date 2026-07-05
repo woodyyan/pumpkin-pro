@@ -10,4 +10,5 @@ var (
 	ErrUnauthorized           = errors.New("admin unauthorized")
 	ErrAIConfigInvalid        = errors.New("invalid ai provider config")
 	ErrAIConfigCipherKeyUnset = errors.New("ai config cipher key is not configured")
+	ErrSiteConfigInvalid      = errors.New("invalid site config")
 )

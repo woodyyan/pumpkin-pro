@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { requestJson } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
 import { isAuthRequiredError } from '../lib/auth-storage'
+import CommunityQRCard from '../components/CommunityQRCard'
 import {
   describeFeeRate,
   formatFeeRatePercent,
@@ -274,6 +275,8 @@ export default function SettingsPage() {
       <section className="rounded-2xl border border-border bg-card p-8">
         <h1 className="text-2xl font-semibold tracking-tight">设置</h1>
       </section>
+
+      <CommunityQRCard />
 
       {/* Investment Profile */}
       <section className="rounded-2xl border border-border bg-card p-5">

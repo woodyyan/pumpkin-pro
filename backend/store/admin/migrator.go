@@ -17,7 +17,7 @@ func (Migrator) Name() string {
 }
 
 func (Migrator) AutoMigrate(db *gorm.DB) error {
-	if err := db.AutoMigrate(&SuperAdminRecord{}, &AIProviderConfigRecord{}); err != nil {
+	if err := db.AutoMigrate(&SuperAdminRecord{}, &AIProviderConfigRecord{}, &SiteConfigRecord{}); err != nil {
 		return err
 	}
 	// api_errors uses raw SQL to avoid potential GORM+SQLite issues with large tables

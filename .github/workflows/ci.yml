@@ -6,6 +6,23 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag from local release (for audit)'
+        required: false
+        type: string
+      services:
+        description: 'Comma-separated services (for audit)'
+        required: false
+        type: string
+      git_sha:
+        description: 'Git commit SHA from build (for audit)'
+        required: false
+        type: string
+      git_branch:
+        description: 'Git branch from build (for audit)'
+        required: false
+        type: string
 
 permissions:
   contents: read

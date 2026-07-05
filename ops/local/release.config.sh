@@ -17,6 +17,12 @@ RELEASE_DEPLOY_REF="${RELEASE_DEPLOY_REF:-main}"
 # GitHub repo in "owner/repo" format; empty = auto-infer from git remote origin
 RELEASE_GITHUB_REPO="${RELEASE_GITHUB_REPO:-}"
 
+# ── CI trigger ──
+# Whether to trigger GitHub Actions CI workflow after successful push
+RELEASE_TRIGGER_CI="${RELEASE_TRIGGER_CI:-true}"
+# Target CI workflow file name in .github/workflows/
+RELEASE_CI_WORKFLOW="${RELEASE_CI_WORKFLOW:-ci.yml}"
+
 release_service_repo() {
   case "$1" in
     backend) printf '%s' 'pumpkin-pro-backend' ;;

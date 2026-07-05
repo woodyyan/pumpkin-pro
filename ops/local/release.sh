@@ -59,6 +59,7 @@ Options:
   --push-latest            Also push :latest for selected services
   --no-verify-local-image  Skip docker image inspect after build
   --no-deploy              Do not trigger GitHub Actions deploy workflow after push
+  --no-ci                  Do not trigger GitHub Actions CI workflow after push
   -h, --help               Show help
 
 Examples:
@@ -542,6 +543,87 @@ trigger_deploy() {
   esac
 }
 
+trigger_ci() {
+  # Skip if disabled by flag or config
+  if [ "$TRIGGER_CI" -eq 0 ]; then
+    log "CI trigger skipped (--no-ci)"
+    return 0
+  fi
+  if [ "${RELEASE_TRIGGER_CI:-true}" != "true" ]; then
+    log "CI trigger skipped (RELEASE_TRIGGER_CI != true)"
+    return 0
+  fi
+  # Only trigger in build_push mode
+  if [ "$MODE" != "build_push" ]; then
+    log "CI trigger skipped (mode: $MODE)"
+    return 0
+  fi
+  # Dry-run: print what would be sent
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[dry-run] Would trigger CI workflow:"
+    log "[dry-run]   workflow: $RELEASE_CI_WORKFLOW"
+    log "[dry-run]   ref:      $RELEASE_DEPLOY_REF"
+    log "[dry-run]   tag:      $TAG"
+    log "[dry-run]   services: $(join_by ',' "${SELECTED_SERVICES[@]}")"
+    return 0
+  fi
+  # Require GITHUB_TOKEN
+  if [ -z "${GITHUB_TOKEN:-}" ]; then
+    warn "GITHUB_TOKEN not set, skipping CI trigger."
+    warn "Set GITHUB_TOKEN env var (PAT with repo+workflow scope) to enable auto-CI."
+    return 0
+  fi
+  # Resolve GitHub repo
+  local github_repo
+  if ! github_repo="$(resolve_github_repo)"; then
+    warn "Could not resolve GitHub repo from git remote; skipping CI trigger."
+    return 0
+  fi
+  local services_str
+  services_str="$(join_by ',' "${SELECTED_SERVICES[@]}")"
+  local git_sha git_branch
+  git_sha="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+  git_branch="$(git -C "$ROOT_DIR" branch --show-current 2>/dev/null || echo unknown)"
+
+  log "Triggering CI workflow..."
+  log "  repo:     $github_repo"
+  log "  workflow: $RELEASE_CI_WORKFLOW"
+  log "  ref:      $RELEASE_DEPLOY_REF"
+  log "  tag:      $TAG"
+  log "  services: $services_str"
+
+  local api_url="https://api.github.com/repos/${github_repo}/actions/workflows/${RELEASE_CI_WORKFLOW}/dispatches"
+  local http_code
+  http_code="$(curl -s -o /dev/null -w '%{http_code}' \
+    -X POST \
+    -H "Accept: application/vnd.github+json" \
+    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+    -d "$(printf '{"ref":"%s","inputs":{"tag":"%s","services":"%s","git_sha":"%s","git_branch":"%s"}}' \
+      "$RELEASE_DEPLOY_REF" "$TAG" "$services_str" "$git_sha" "$git_branch")" \
+    "$api_url" 2>/dev/null)" || true
+
+  case "$http_code" in
+    204)
+      log "CI workflow triggered successfully (HTTP 204)."
+      log "Check: https://github.com/${github_repo}/actions/workflows/${RELEASE_CI_WORKFLOW}"
+      ;;
+    401|403)
+      warn "CI trigger failed (HTTP ${http_code}): GITHUB_TOKEN may be expired or lack permissions."
+      warn "Need PAT with repo + workflow scope (or fine-grained: Actions:write, Contents:read)."
+      ;;
+    404)
+      warn "CI trigger failed (HTTP 404): workflow '${RELEASE_CI_WORKFLOW}' not found in repo ${github_repo}."
+      ;;
+    422)
+      warn "CI trigger failed (HTTP 422): workflow_dispatch not enabled or inputs invalid."
+      ;;
+    *)
+      warn "CI trigger failed (HTTP ${http_code:-unknown})."
+      warn "API: $api_url"
+      ;;
+  esac
+}
+
 IMAGE_REGISTRY="$DEFAULT_IMAGE_REGISTRY"
 IMAGE_NAMESPACE="$DEFAULT_IMAGE_NAMESPACE"
 IMAGE_PLATFORM="$DEFAULT_IMAGE_PLATFORM"
@@ -703,3 +785,4 @@ finalize_manifest "$manifest_path"
 print_summary "$manifest_path"
 
 trigger_deploy
+trigger_ci

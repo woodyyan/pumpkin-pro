@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef } from 'react'
 import {
   buildPortfolioTrackingChart,
   buildPortfolioTrackingDetailHref,
-  buildPortfolioTrackingMarketSections,
   formatPortfolioTrackingCurrency,
   formatPortfolioTrackingDate,
   formatPortfolioTrackingNav,
@@ -40,11 +39,44 @@ function StatusBadge({ status, text }) {
   )
 }
 
-function SummaryMetric({ label, value, valueClass = 'text-foreground' }) {
+function CompactInfoPanel({ selectedItem, metrics }) {
+  const metricRows = [
+    { label: '最新净值', value: formatPortfolioTrackingNav(selectedItem?.nav) },
+    { label: '累计收益', value: formatPortfolioTrackingPercent(selectedItem?.total_return), valueClass: getPortfolioTrackingPerformanceClass(selectedItem?.total_return) },
+    { label: '日收益', value: formatPortfolioTrackingPercent(selectedItem?.daily_return), valueClass: getPortfolioTrackingPerformanceClass(selectedItem?.daily_return) },
+    { label: '总资产', value: formatPortfolioTrackingCurrency(selectedItem?.total_assets, selectedItem?.exchange) },
+    { label: '最大回撤', value: formatPortfolioTrackingPercent(metrics?.max_drawdown ?? selectedItem?.max_drawdown) },
+    { label: '年化波动率', value: formatPortfolioTrackingPercent(metrics?.volatility ?? selectedItem?.volatility) },
+    { label: '胜率', value: formatPortfolioTrackingPercent(metrics?.win_rate ?? selectedItem?.win_rate) },
+    { label: '换手率', value: formatPortfolioTrackingPercent(metrics?.turnover_rate ?? selectedItem?.turnover_rate) },
+  ]
+  const statusRows = [
+    { label: '最新信号日', value: formatPortfolioTrackingDate(selectedItem?.latest_signal_date) },
+    { label: '待执行信号', value: formatPortfolioTrackingDate(selectedItem?.pending_signal_date) },
+    { label: '下一次开盘', value: formatPortfolioTrackingDate(selectedItem?.next_entry_trade_date) },
+    { label: '最新估值日', value: formatPortfolioTrackingDate(selectedItem?.latest_trade_date) },
+  ]
   return (
     <div className="rounded-2xl border border-border bg-card px-4 py-4">
-      <div className="text-xs text-foreground-muted">{label}</div>
-      <div className={`mt-2 text-xl font-semibold ${valueClass}`}>{value}</div>
+      <div className="text-sm font-medium text-foreground">绩效指标</div>
+      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+        {metricRows.map((row) => (
+          <div key={row.label} className="flex items-center justify-between gap-2">
+            <span className="text-foreground-muted">{row.label}</span>
+            <span className={`font-semibold ${row.valueClass || 'text-foreground'}`}>{row.value}</span>
+          </div>
+        ))}
+      </div>
+      <div className="my-3 border-t border-border" />
+      <div className="text-sm font-medium text-foreground">执行状态</div>
+      <div className="mt-3 space-y-2 text-sm">
+        {statusRows.map((row) => (
+          <div key={row.label} className="flex items-center justify-between gap-4">
+            <span className="text-foreground-muted">{row.label}</span>
+            <span className="font-medium text-foreground">{row.value}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -98,58 +130,48 @@ function PortfolioChart({ series, portfolioLabel }) {
   )
 }
 
-function PortfolioCard({ item, active, onSelect }) {
+function PortfolioTab({ item, active, onSelect }) {
+  const isHK = String(item?.exchange || '').toUpperCase() === 'HKEX'
+  const dotClass = isHK ? 'bg-sky-500' : 'bg-negative'
+  const isPending = String(item?.status || '').toLowerCase().startsWith('pending')
   return (
     <button
       type="button"
       aria-pressed={active}
       onClick={() => onSelect?.(item?.portfolio_id)}
-      className={`rounded-2xl border bg-card px-4 py-4 text-left transition hover:border-negative/40 hover:shadow-sm ${active ? 'border-negative/60 ring-2 ring-negative/15 shadow-md' : 'border-border'} cursor-pointer`}
+      className={`flex-1 shrink-0 rounded-xl border px-4 py-3 text-left transition cursor-pointer lg:min-w-0 min-w-[120px] ${
+        active
+          ? 'border-negative/60 bg-negative/5 ring-2 ring-negative/15'
+          : 'border-border bg-card hover:border-negative/30 hover:shadow-sm'
+      }`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-foreground">{item?.name || '模拟组合'}</span>
-            <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-foreground-muted">{item?.portfolio_variant || '--'}</span>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${active ? 'bg-negative/10 text-negative' : 'bg-background text-foreground-muted'}`}>
-              {active ? '当前查看' : '点击切换'}
-            </span>
-          </div>
-          <div className="mt-1 text-xs text-foreground-muted">{item?.selection_rule === 'top10_by_consecutive_days' ? `TOP${item?.selection_window || 10} 连续上榜优先` : 'TOP4 等权'}</div>
-        </div>
-        <StatusBadge status={item?.status} text={item?.status_text} />
+      <div className="flex items-center gap-1.5">
+        <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${dotClass}`} />
+        <span className="truncate text-sm font-semibold text-foreground">{item?.name || '模拟组合'}</span>
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <div>
-          <div className="text-xs text-foreground-muted">最新净值</div>
-          <div className="mt-1 text-lg font-semibold text-foreground">{formatPortfolioTrackingNav(item?.nav)}</div>
-        </div>
-        <div>
-          <div className="text-xs text-foreground-muted">总资产</div>
-          <div className="mt-1 text-lg font-semibold text-foreground">{formatPortfolioTrackingCurrency(item?.total_assets, item?.exchange)}</div>
-        </div>
-        <div>
-          <div className="text-xs text-foreground-muted">日收益</div>
-          <div className={`mt-1 text-sm font-medium ${getPortfolioTrackingPerformanceClass(item?.daily_return)}`}>
-            {formatPortfolioTrackingPercent(item?.daily_return)}
-          </div>
-        </div>
-        <div>
-          <div className="text-xs text-foreground-muted">累计收益</div>
-          <div className={`mt-1 text-sm font-medium ${getPortfolioTrackingPerformanceClass(item?.total_return)}`}>
-            {formatPortfolioTrackingPercent(item?.total_return)}
-          </div>
-        </div>
+      <div className={`mt-1 text-base font-bold ${getPortfolioTrackingPerformanceClass(item?.total_return)}`}>
+        {formatPortfolioTrackingPercent(item?.total_return)}
       </div>
-      <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-foreground-muted">
-        <span>最新估值日：{formatPortfolioTrackingDate(item?.latest_trade_date)}</span>
-        {item?.pending_signal_date ? <span>待执行信号：{formatPortfolioTrackingDate(item.pending_signal_date)}</span> : null}
-        {item?.next_entry_trade_date ? <span>下一次开盘：{formatPortfolioTrackingDate(item.next_entry_trade_date)}</span> : null}
-      </div>
-      <div className={`mt-4 rounded-xl px-3 py-2 text-xs ${active ? 'bg-negative/10 text-negative' : 'bg-background text-foreground-muted'}`}>
-        {active ? '下方净值曲线、指标、持仓和调仓记录当前都在展示这个组合。' : '点击这张卡片，可切换下方净值曲线、指标、持仓和调仓记录。'}
+      <div className="mt-0.5 flex items-center gap-1 text-[11px] text-foreground-muted">
+        <span className={`inline-block h-1.5 w-1.5 rounded-full ${isPending ? 'bg-amber-500' : 'bg-positive'}`} />
+        <span>{isPending ? '待执行' : '运行中'}</span>
       </div>
     </button>
+  )
+}
+
+function PortfolioTabBar({ items, selectedPortfolioId, onSelectPortfolio }) {
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-1">
+      {items.map((item) => (
+        <PortfolioTab
+          key={item.portfolio_id}
+          item={item}
+          active={item.portfolio_id === selectedPortfolioId}
+          onSelect={onSelectPortfolio}
+        />
+      ))}
+    </div>
   )
 }
 
@@ -166,7 +188,10 @@ function PositionTable({ item, loading, portfolioLabel }) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-medium text-foreground">当前持仓</div>
-          <div className="mt-1 text-xs text-foreground-muted">当前查看：{portfolioLabel || '模拟组合'} · 四只股票市值合计应等于组合总资产，支持按日人工验算。</div>
+          <div className="mt-1 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
+            <span className="mt-0.5 shrink-0 font-bold">ⓘ</span>
+            <span>理论股数含小数以保证 25% 等权。本组合用于验证策略逻辑而非交易系统，100万资金下取整误差对收益可忽略。</span>
+          </div>
         </div>
         <div className="text-xs text-foreground-muted">估值日：{formatPortfolioTrackingDate(item?.latest_trade_date)}</div>
       </div>
@@ -304,7 +329,6 @@ export default function PortfolioTrackingDashboard({
 }) {
   const items = Array.isArray(overview?.items) ? overview.items : []
   const selectedItem = items.find((item) => item.portfolio_id === selectedPortfolioId) || items[0] || null
-  const sections = buildPortfolioTrackingMarketSections(items)
   const detailSectionRef = useRef(null)
   const hasMountedSelectionRef = useRef(false)
   const selectedPortfolioLabel = buildPortfolioTrackingSelectionLabel(selectedItem)
@@ -342,27 +366,8 @@ export default function PortfolioTrackingDashboard({
         <EmptyState title="模拟组合已切换到新口径" description="当前还没有完成第一笔 T+1 收盘估值。系统会从新的起点开始累计净值，不再展示旧 JSON 结果表。" />
       ) : null}
 
-      {!overviewLoading && sections.length ? (
-        <div className="space-y-4">
-          {sections.map((section) => (
-            <section key={section.market.key} className="space-y-3">
-              <div className="flex items-center gap-2">
-                <div className={`text-sm font-semibold ${section.market.accentClass}`}>{section.market.label}组合</div>
-                <div className={`rounded-full border px-2 py-0.5 text-[11px] ${section.market.badgeClass}`}>{section.items.length} 个组合</div>
-              </div>
-              <div className="grid gap-4 xl:grid-cols-2">
-                {section.items.map((item) => (
-                  <PortfolioCard
-                    key={item.portfolio_id}
-                    item={item}
-                    active={item.portfolio_id === selectedItem?.portfolio_id}
-                    onSelect={onSelectPortfolio}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
+      {!overviewLoading && items.length ? (
+        <PortfolioTabBar items={items} selectedPortfolioId={selectedItem?.portfolio_id} onSelectPortfolio={onSelectPortfolio} />
       ) : null}
 
       {selectedItem ? (
@@ -372,7 +377,7 @@ export default function PortfolioTrackingDashboard({
               <div>
                 <div className="text-xs font-medium tracking-wide text-negative">当前查看</div>
                 <div className="mt-1 text-lg font-semibold text-foreground">{selectedPortfolioLabel}</div>
-                <div className="mt-1 text-sm leading-6 text-foreground-muted">下方净值曲线、绩效指标、持仓明细和调仓记录都会随上方选中的组合卡片一起切换。</div>
+                <div className="mt-1 text-sm leading-6 text-foreground-muted">下方净值曲线、绩效指标、持仓明细和调仓记录会随上方选中的组合切换。</div>
               </div>
               <div className="flex flex-wrap gap-2 text-xs text-foreground-muted">
                 <span className="rounded-full border border-border bg-background px-3 py-1">最新信号：{formatPortfolioTrackingDate(selectedItem.latest_signal_date)}</span>
@@ -382,41 +387,9 @@ export default function PortfolioTrackingDashboard({
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <SummaryMetric label="最新净值" value={formatPortfolioTrackingNav(selectedItem.nav)} />
-            <SummaryMetric label="累计收益" value={formatPortfolioTrackingPercent(selectedItem.total_return)} valueClass={getPortfolioTrackingPerformanceClass(selectedItem.total_return)} />
-            <SummaryMetric label="日收益" value={formatPortfolioTrackingPercent(selectedItem.daily_return)} valueClass={getPortfolioTrackingPerformanceClass(selectedItem.daily_return)} />
-            <SummaryMetric label="总资产" value={formatPortfolioTrackingCurrency(selectedItem.total_assets, selectedItem.exchange)} />
-            <SummaryMetric label="最大回撤" value={formatPortfolioTrackingPercent(metrics?.max_drawdown ?? selectedItem.max_drawdown)} valueClass="text-foreground" />
-            <SummaryMetric label="年化波动率" value={formatPortfolioTrackingPercent(metrics?.volatility ?? selectedItem.volatility)} valueClass="text-foreground" />
-            <SummaryMetric label="胜率" value={formatPortfolioTrackingPercent(metrics?.win_rate ?? selectedItem.win_rate)} valueClass="text-foreground" />
-            <SummaryMetric label="换手率" value={formatPortfolioTrackingPercent(metrics?.turnover_rate ?? selectedItem.turnover_rate)} valueClass="text-foreground" />
-          </div>
-
           <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
             <PortfolioChart series={daily?.items || []} portfolioLabel={selectedPortfolioLabel} />
-            <div className="rounded-2xl border border-border bg-card px-4 py-4">
-              <div className="text-sm font-medium text-foreground">执行状态</div>
-              <div className="mt-1 text-xs text-foreground-muted">当前查看：{selectedPortfolioLabel}</div>
-              <div className="mt-4 space-y-3 text-sm text-foreground-muted">
-                <div className="flex items-center justify-between gap-4">
-                  <span>最新信号日</span>
-                  <span className="font-medium text-foreground">{formatPortfolioTrackingDate(selectedItem.latest_signal_date)}</span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span>待执行信号</span>
-                  <span className="font-medium text-foreground">{formatPortfolioTrackingDate(selectedItem.pending_signal_date)}</span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span>下一次开盘</span>
-                  <span className="font-medium text-foreground">{formatPortfolioTrackingDate(selectedItem.next_entry_trade_date)}</span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span>最新估值日</span>
-                  <span className="font-medium text-foreground">{formatPortfolioTrackingDate(selectedItem.latest_trade_date)}</span>
-                </div>
-              </div>
-            </div>
+            <CompactInfoPanel selectedItem={selectedItem} metrics={metrics} />
           </div>
 
           <PositionTable item={{ ...selectedItem, current_positions: positions?.items || selectedItem.current_positions || [] }} loading={detailLoading} portfolioLabel={selectedPortfolioLabel} />

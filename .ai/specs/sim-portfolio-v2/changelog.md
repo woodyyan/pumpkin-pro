@@ -1,5 +1,13 @@
 # Changelog: 模拟组合 v2 Calendar-driven Pipeline
 
+## 2026-07-06（缺陷修复：A 股组合科创板排除失效）
+
+- **问题**: v2 重构首个提交起，`defaultSimPortfolioV2Definitions()` 中 A 股 `模拟组合A`（`spv2_ashare_a`）、`模拟组合B`（`spv2_ashare_b`）遗漏了 `ExcludedBoards: [aShareBoardStar]`，导致科创板（688/689）个股未被排除，选股口径与旧版 `portfolio_service.go` 不一致。港股两个组合（`spv2_hkex_a`/`spv2_hkex_b`）本身不涉及科创板，无需处理，行为不受影响。
+- **修复**: 在 `sim_portfolio_v2_repository.go` 为 A 股组合 A/B 显式补上 `ExcludedBoards: mustMarshal([]string{aShareBoardStar})`；`EnsureSimPortfolioV2Definitions` 的 upsert 已覆盖 `excluded_boards` 列，服务下次触发定义初始化即可生效，无需额外迁移脚本。
+- **测试**: 新增 `TestSimPortfolioV2DefinitionsExcludeStarBoardForAShareOnly`（校验默认定义本身的 `ExcludedBoards` 值）与 `TestSimPortfolioV2SelectionExcludesStarBoardForAShare`（端到端校验混合科创板/主板信号时，A 股组合 A 选股结果不含科创板代码）。
+- **历史数据**: 本次修复仅影响代码默认定义与后续新交易日的选股口径；已生成的历史 `sim_portfolio_v2_daily/positions/trades` 是否需要针对历史交易日重跑 pipeline 回溯修正，由业务方另行处理，不在本次修复范围内。
+- **参见**: `.ai/memory/bug-patterns.md` BP-019。
+
 ## 2026-07-04
 
 - **架构决策**: 确认废弃旧模拟组合补价/快照推交易日链路，改为 Calendar-driven Portfolio Pipeline。

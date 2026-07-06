@@ -12,8 +12,8 @@ import (
 
 func defaultSimPortfolioV2Definitions(now time.Time) []SimPortfolioV2Definition {
 	return []SimPortfolioV2Definition{
-		{ID: "spv2_ashare_a", Code: "sim-v2-ashare-a", Name: "模拟组合A", Market: SimPortfolioV2MarketAShare, PortfolioVariant: "A", MaxHoldings: 4, SelectionRule: rankingPortfolioSelectionRuleTop4, WeightingMethod: "equal", InitialAssets: simPortfolioInitialAssets, IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "spv2_ashare_b", Code: "sim-v2-ashare-b", Name: "模拟组合B", Market: SimPortfolioV2MarketAShare, PortfolioVariant: "B", MaxHoldings: 4, SelectionRule: rankingPortfolioSelectionRuleTop10ByStreak, SelectionWindow: 10, WeightingMethod: "equal", InitialAssets: simPortfolioInitialAssets, IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "spv2_ashare_a", Code: "sim-v2-ashare-a", Name: "模拟组合A", Market: SimPortfolioV2MarketAShare, PortfolioVariant: "A", MaxHoldings: 4, SelectionRule: rankingPortfolioSelectionRuleTop4, ExcludedBoards: mustMarshal([]string{aShareBoardStar}), WeightingMethod: "equal", InitialAssets: simPortfolioInitialAssets, IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "spv2_ashare_b", Code: "sim-v2-ashare-b", Name: "模拟组合B", Market: SimPortfolioV2MarketAShare, PortfolioVariant: "B", MaxHoldings: 4, SelectionRule: rankingPortfolioSelectionRuleTop10ByStreak, SelectionWindow: 10, ExcludedBoards: mustMarshal([]string{aShareBoardStar}), WeightingMethod: "equal", InitialAssets: simPortfolioInitialAssets, IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "spv2_hkex_a", Code: "sim-v2-hkex-a", Name: "模拟组合A", Market: SimPortfolioV2MarketHKEX, PortfolioVariant: "A", MaxHoldings: 4, SelectionRule: rankingPortfolioSelectionRuleTop4, WeightingMethod: "equal", InitialAssets: simPortfolioInitialAssets, IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "spv2_hkex_b", Code: "sim-v2-hkex-b", Name: "模拟组合B", Market: SimPortfolioV2MarketHKEX, PortfolioVariant: "B", MaxHoldings: 4, SelectionRule: rankingPortfolioSelectionRuleTop10ByStreak, SelectionWindow: 10, WeightingMethod: "equal", InitialAssets: simPortfolioInitialAssets, IsActive: true, CreatedAt: now, UpdatedAt: now},
 	}

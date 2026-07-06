@@ -260,3 +260,16 @@
 - 临时性数据（price_requirements）和持久性数据（price_overrides）要区分清楚：需要跨重建生效的修复结果应写入持久表，或确保重建逻辑保留临时表中的已修复行。
 
 **适用场景**: 所有含"修复 → 重建"循环的 pipeline，尤其是价格需求管理、信号快照重建、事实表重算场景。
+
+## BP-019: 旧链路重写为新结构体时，字段迁移遗漏（隐式默认值掩盖错误）
+
+**模式**: 从旧数据结构（`rankingPortfolioDefinitionSpec` + `[]string` 字段）重写为新结构体字面量（`SimPortfolioV2Definition{...}`）时，逐字段手工搬运，遗漏了非核心字段；由于该字段在 Go 里零值为空字符串，且数据库列有 `default:'[]'`，问题不会在编译期或首次运行时报错，而是悄悄以"空排除名单"的形式落库，长期不被发现。
+
+**案例**: `sim_portfolio_v2_repository.go` 的 `defaultSimPortfolioV2Definitions()` 在 v2 重构首个提交（`0b3db1d`，2026-07-04）就只搬运了 `SelectionRule`/`SelectionWindow`/`MaxHoldings`，遗漏了 A 股组合 A/B 的 `ExcludedBoards: mustMarshal([]string{aShareBoardStar})`（科创板排除名单）。旧版 `portfolio_service.go` 里这个字段是写了的。此后 4 次相关提交（日历驾驶舱、价格修复等）都没有再碰这段定义代码，缺陷持续到被人工排查发现（2026-07-06）。修复方式：为 `spv2_ashare_a`/`spv2_ashare_b` 显式补上 `ExcludedBoards`；港股两个组合本身不涉及科创板，保持不变。
+
+**教训**:
+- 结构体重写/新旧链路切换时，必须显式对照"旧字段 → 新字段"迁移映射表，而不是凭记忆手写字面量，尤其是非"看起来核心"的字段（如排除名单、白名单类配置）。
+- 对有零值 + DB 默认值兜底的字段，团队应养成"关键配置一律显式赋值，不依赖隐式默认"的习惯，防止遗漏被悄悄"正确掩盖"。
+- 新链路上线后应有一个针对"默认配置定义"本身的快照/断言测试（不依赖 pipeline 运行，只校验 `defaultXxxDefinitions()` 返回值），能在 CI 阶段直接捕获此类遗漏。
+
+**适用场景**: 任何"v1 → v2 全量重写数据定义/配置" 的重构任务，尤其是选股规则、白名单/黑名单、排除条件等业务口径类配置字段。

@@ -3,6 +3,7 @@ package quadrant
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -332,6 +333,91 @@ func TestSimPortfolioV2RebuildPreservesBackfilledPrices(t *testing.T) {
 	for _, req := range reqs {
 		if req.Status != SimPortfolioV2PriceStatusSatisfied || req.Price != 9.8 {
 			t.Fatalf("expected satisfied price=9.8 preserved after rebuild, got %+v", req)
+		}
+	}
+}
+
+// TestSimPortfolioV2DefinitionsExcludeStarBoardForAShareOnly is the
+// regression test for the "ExcludedBoards missing on v2 A-share
+// definitions" bug: spv2_ashare_a/spv2_ashare_b must exclude the STAR
+// (科创板) board, while HKEX definitions must NOT declare any excluded
+// board (港股不涉及科创板).
+func TestSimPortfolioV2DefinitionsExcludeStarBoardForAShareOnly(t *testing.T) {
+	defs := defaultSimPortfolioV2Definitions(time.Now().UTC())
+	got := map[string]string{}
+	for _, def := range defs {
+		got[def.ID] = def.ExcludedBoards
+	}
+	// A-share portfolios must explicitly exclude the STAR (科创板) board.
+	wantAShare := mustMarshal([]string{aShareBoardStar})
+	for _, id := range []string{"spv2_ashare_a", "spv2_ashare_b"} {
+		if got[id] != wantAShare {
+			t.Fatalf("definition %s excluded_boards = %q, want %q", id, got[id], wantAShare)
+		}
+	}
+	// HKEX portfolios have no STAR board concept and must NOT declare any
+	// excluded board (kept as-is per business decision).
+	excluded := decodeSimPortfolioExcludedBoards("")
+	for _, id := range []string{"spv2_hkex_a", "spv2_hkex_b"} {
+		if hkexExcluded := decodeSimPortfolioExcludedBoards(got[id]); len(hkexExcluded) != len(excluded) {
+			t.Fatalf("definition %s excluded_boards = %q, want no excluded boards", id, got[id])
+		}
+		if _, ok := decodeSimPortfolioExcludedBoards(got[id])[aShareBoardStar]; ok {
+			t.Fatalf("definition %s must not exclude STAR board", id)
+		}
+	}
+}
+
+// TestSimPortfolioV2SelectionExcludesStarBoardForAShare verifies the
+// end-to-end selection path: when the A-share signal batch contains STAR
+// (688/689) board candidates mixed with MAIN board candidates, the A-share
+// portfolio A definition (top4) must skip the STAR candidates entirely.
+func TestSimPortfolioV2SelectionExcludesStarBoardForAShare(t *testing.T) {
+	repo, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	if err := repo.EnsureSimPortfolioV2Definitions(ctx); err != nil {
+		t.Fatalf("EnsureSimPortfolioV2Definitions: %v", err)
+	}
+	now := time.Now().UTC()
+	rows := []RankingSnapshot{
+		{Code: "688001", Name: "star1", Exchange: "SSE", Rank: 1, Opportunity: 95, Risk: 5, ClosePrice: 10, PriceTradeDate: "2026-07-02", SnapshotDate: "2026-07-02", CreatedAt: now},
+		{Code: "689001", Name: "star2", Exchange: "SSE", Rank: 2, Opportunity: 94, Risk: 6, ClosePrice: 10, PriceTradeDate: "2026-07-02", SnapshotDate: "2026-07-02", CreatedAt: now},
+		{Code: "600002", Name: "main1", Exchange: "SSE", Rank: 3, Opportunity: 93, Risk: 7, ClosePrice: 10, PriceTradeDate: "2026-07-02", SnapshotDate: "2026-07-02", CreatedAt: now},
+		{Code: "600003", Name: "main2", Exchange: "SSE", Rank: 4, Opportunity: 92, Risk: 8, ClosePrice: 10, PriceTradeDate: "2026-07-02", SnapshotDate: "2026-07-02", CreatedAt: now},
+		{Code: "600004", Name: "main3", Exchange: "SSE", Rank: 5, Opportunity: 91, Risk: 9, ClosePrice: 10, PriceTradeDate: "2026-07-02", SnapshotDate: "2026-07-02", CreatedAt: now},
+		{Code: "600005", Name: "main4", Exchange: "SSE", Rank: 6, Opportunity: 90, Risk: 10, ClosePrice: 10, PriceTradeDate: "2026-07-02", SnapshotDate: "2026-07-02", CreatedAt: now},
+	}
+	if err := repo.UpsertSnapshots(ctx, rows); err != nil {
+		t.Fatalf("seed snapshots: %v", err)
+	}
+	if _, err := svc.buildSignalBatch(ctx, "", SimPortfolioV2MarketAShare, "2026-07-02"); err != nil {
+		t.Fatalf("buildSignalBatch: %v", err)
+	}
+	defs, err := repo.ListActiveSimPortfolioV2Definitions(ctx)
+	if err != nil {
+		t.Fatalf("ListActiveSimPortfolioV2Definitions: %v", err)
+	}
+	var defA SimPortfolioV2Definition
+	found := false
+	for _, def := range defs {
+		if def.ID == "spv2_ashare_a" {
+			defA = def
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("spv2_ashare_a definition not found")
+	}
+	items, err := svc.selectV2Items(ctx, defA, "2026-07-02")
+	if err != nil {
+		t.Fatalf("selectV2Items: %v", err)
+	}
+	if len(items) != 4 {
+		t.Fatalf("selected items = %d, want 4: %+v", len(items), items)
+	}
+	for _, item := range items {
+		if strings.HasPrefix(item.Code, "688") || strings.HasPrefix(item.Code, "689") {
+			t.Fatalf("expected STAR board code to be excluded, got %+v", items)
 		}
 	}
 }

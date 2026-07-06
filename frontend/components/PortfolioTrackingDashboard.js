@@ -40,10 +40,12 @@ function StatusBadge({ status, text }) {
 }
 
 function CompactInfoPanel({ selectedItem, metrics }) {
-  const metricRows = [
+  const highlightMetrics = [
+    { label: '累计收益', value: formatPortfolioTrackingPercent(selectedItem?.total_return), raw: selectedItem?.total_return },
+    { label: '日收益', value: formatPortfolioTrackingPercent(selectedItem?.daily_return), raw: selectedItem?.daily_return },
+  ]
+  const standardMetrics = [
     { label: '最新净值', value: formatPortfolioTrackingNav(selectedItem?.nav) },
-    { label: '累计收益', value: formatPortfolioTrackingPercent(selectedItem?.total_return), valueClass: getPortfolioTrackingPerformanceClass(selectedItem?.total_return) },
-    { label: '日收益', value: formatPortfolioTrackingPercent(selectedItem?.daily_return), valueClass: getPortfolioTrackingPerformanceClass(selectedItem?.daily_return) },
     { label: '总资产', value: formatPortfolioTrackingCurrency(selectedItem?.total_assets, selectedItem?.exchange) },
     { label: '最大回撤', value: formatPortfolioTrackingPercent(metrics?.max_drawdown ?? selectedItem?.max_drawdown) },
     { label: '年化波动率', value: formatPortfolioTrackingPercent(metrics?.volatility ?? selectedItem?.volatility) },
@@ -53,11 +55,25 @@ function CompactInfoPanel({ selectedItem, metrics }) {
   return (
     <div className="rounded-2xl border border-border bg-card px-4 py-4">
       <div className="text-sm font-medium text-foreground">绩效指标</div>
-      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        {metricRows.map((row) => (
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        {highlightMetrics.map((metric) => {
+          const isGain = Number(metric.raw) >= 0
+          const tintClass = isGain ? 'bg-negative/10 border-negative/20' : 'bg-positive/10 border-positive/20'
+          const valueClass = isGain ? 'text-negative' : 'text-positive'
+          return (
+            <div key={metric.label} className={`rounded-xl border px-3 py-2.5 ${tintClass}`}>
+              <div className="text-xs text-foreground-muted">{metric.label}</div>
+              <div className={`mt-1 text-xl font-bold ${valueClass}`}>{metric.value}</div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="my-3 border-t border-border" />
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+        {standardMetrics.map((row) => (
           <div key={row.label} className="flex items-center justify-between gap-2">
             <span className="text-foreground-muted">{row.label}</span>
-            <span className={`font-semibold ${row.valueClass || 'text-foreground'}`}>{row.value}</span>
+            <span className="font-semibold text-foreground">{row.value}</span>
           </div>
         ))}
       </div>

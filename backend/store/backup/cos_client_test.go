@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -241,7 +243,25 @@ func TestMultipartUploadMock(t *testing.T) {
 				w.Header().Set("ETag", `"test-etag"`)
 				w.WriteHeader(http.StatusOK)
 			} else {
-				// 完成分块上传
+				// 完成分块上传：校验请求体是否符合 COS Schema
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("read complete request body: %v", err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				bodyStr := string(body)
+				if !strings.HasPrefix(bodyStr, "<CompleteMultipartUpload>") {
+					t.Errorf("complete request body should start with <CompleteMultipartUpload>, got: %s", bodyStr)
+				}
+				if !strings.HasSuffix(bodyStr, "</CompleteMultipartUpload>") {
+					t.Errorf("complete request body should end with </CompleteMultipartUpload>, got: %s", bodyStr)
+				}
+				var parsed cosCompleteMultipartUploadRequest
+				if err := xml.Unmarshal(body, &parsed); err != nil {
+					t.Errorf("complete request body is not valid XML matching schema: %v; body=%s", err, bodyStr)
+				}
+
 				w.Header().Set("Content-Type", "application/xml")
 				w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><CompleteMultipartUploadResult><Location>https://test-bucket.cos.ap-guangzhou.myqcloud.com/test.db</Location><Bucket>test-bucket</Bucket><Key>test.db</Key><ETag>"test-final-etag"</ETag></CompleteMultipartUploadResult>`))
 			}
@@ -252,7 +272,79 @@ func TestMultipartUploadMock(t *testing.T) {
 	}))
 	defer server.Close()
 
-	t.Logf("Mock server URL: %s", server.URL)
+	client := NewCOSCloudStorageClient("test-bucket", "ap-guangzhou", "test-id", "test-key")
+	serverURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("failed to parse mock server URL: %v", err)
+	}
+	client.baseURL = serverURL
+
+	if err := client.completeMultipartUpload(context.Background(), "test.db", "test-upload-id", []cosCompletePart{
+		{PartNumber: 1, ETag: `"39270a968a357d24207e9911162507eb"`},
+		{PartNumber: 2, ETag: `"d899fbd1e06109ea2e4550f5751c88d6"`},
+	}); err != nil {
+		t.Fatalf("completeMultipartUpload failed: %v", err)
+	}
+}
+
+// TestCompleteMultipartUploadRequestXML 直接验证 CompleteMultipartUpload 请求体
+// 的 XML 序列化结果是否符合 COS 官方 Schema：
+// https://cloud.tencent.com/document/product/436/7742
+func TestCompleteMultipartUploadRequestXML(t *testing.T) {
+	reqBody := cosCompleteMultipartUploadRequest{
+		Parts: []cosCompletePart{
+			{PartNumber: 1, ETag: `"39270a968a357d24207e9911162507eb"`},
+			{PartNumber: 2, ETag: `"d899fbd1e06109ea2e4550f5751c88d6"`},
+		},
+	}
+
+	body, err := xml.Marshal(reqBody)
+	if err != nil {
+		t.Fatalf("marshal complete multipart upload request: %v", err)
+	}
+	bodyStr := string(body)
+
+	// 根节点必须是 <CompleteMultipartUpload>，否则 COS 会返回 400 MalformedXML。
+	if !strings.HasPrefix(bodyStr, "<CompleteMultipartUpload>") {
+		t.Errorf("expected root element <CompleteMultipartUpload>, got: %s", bodyStr)
+	}
+	if !strings.HasSuffix(bodyStr, "</CompleteMultipartUpload>") {
+		t.Errorf("expected closing root element </CompleteMultipartUpload>, got: %s", bodyStr)
+	}
+	if strings.Contains(bodyStr, "cosCompleteMultipartUploadRequest") {
+		t.Errorf("body should not leak Go struct type name as XML tag, got: %s", bodyStr)
+	}
+
+	// 反序列化回来，确认字段与内容一致（Part 数量、PartNumber、ETag）。
+	var decoded cosCompleteMultipartUploadRequest
+	if err := xml.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("unmarshal generated body: %v", err)
+	}
+	if len(decoded.Parts) != len(reqBody.Parts) {
+		t.Fatalf("expected %d parts, got %d", len(reqBody.Parts), len(decoded.Parts))
+	}
+	for i, part := range decoded.Parts {
+		if part.PartNumber != reqBody.Parts[i].PartNumber {
+			t.Errorf("part %d: expected PartNumber=%d, got %d", i, reqBody.Parts[i].PartNumber, part.PartNumber)
+		}
+		if part.ETag != reqBody.Parts[i].ETag {
+			t.Errorf("part %d: expected ETag=%s, got %s", i, reqBody.Parts[i].ETag, part.ETag)
+		}
+	}
+}
+
+// TestCompleteMultipartUploadRequestXML_EmptyParts 边界情况：Part 列表为空时，
+// 仍应生成合法的 <CompleteMultipartUpload></CompleteMultipartUpload> 结构，
+// 而不是产生畸形 XML（真实场景下调用方应避免传空列表，这里只验证序列化健壮性）。
+func TestCompleteMultipartUploadRequestXML_EmptyParts(t *testing.T) {
+	body, err := xml.Marshal(cosCompleteMultipartUploadRequest{})
+	if err != nil {
+		t.Fatalf("marshal empty parts request: %v", err)
+	}
+	bodyStr := string(body)
+	if bodyStr != "<CompleteMultipartUpload></CompleteMultipartUpload>" {
+		t.Errorf("unexpected empty-parts XML: %s", bodyStr)
+	}
 }
 
 // TestErrorHandling 测试错误处理

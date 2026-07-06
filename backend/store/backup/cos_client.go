@@ -212,8 +212,15 @@ type cosCompleteMultipartUploadResult struct {
 	ETag     string `xml:"ETag"`
 }
 
+// cosCompleteMultipartUploadRequest 对应 COS CompleteMultipartUpload 请求体。
+// 必须显式声明 XMLName 为 CompleteMultipartUpload，否则 encoding/xml 会用
+// Go 结构体类型名作为根节点标签（如 <cosCompleteMultipartUploadRequest>），
+// 不符合 COS 官方 Schema（要求根节点为 <CompleteMultipartUpload>），
+// 从而导致 COS 返回 400 MalformedXML。
+// 参考：https://cloud.tencent.com/document/product/436/7742
 type cosCompleteMultipartUploadRequest struct {
-	Parts []cosCompletePart `xml:"Part"`
+	XMLName xml.Name          `xml:"CompleteMultipartUpload"`
+	Parts   []cosCompletePart `xml:"Part"`
 }
 
 func (c *COSCloudStorageClient) resolveObjectURL(objectKey string) *url.URL {

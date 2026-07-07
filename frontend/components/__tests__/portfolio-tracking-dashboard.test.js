@@ -9,7 +9,7 @@ describe('portfolio tracking dashboard discoverability', () => {
   it('keeps clickable card affordance and uses 港股 naming', () => {
     assert.doesNotMatch(dashboardSource, /先选一个组合/)
     assert.match(dashboardSource, /当前查看/)
-    assert.match(dashboardSource, /点击这张卡片，可切换下方净值曲线、指标、持仓和调仓记录/)
+    assert.match(dashboardSource, /下方净值曲线、绩效指标、持仓明细和调仓记录会随上方选中的组合切换/)
     assert.match(dashboardSource, /'港股'/)
     assert.doesNotMatch(dashboardSource, /中国香港组合/)
     assert.match(dashboardSource, /scrollIntoView/)

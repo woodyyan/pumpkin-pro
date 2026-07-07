@@ -450,9 +450,18 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 	SetProgressTerminal(exchange, status, errorMsg)
 	log.Printf("[quadrant] BulkSave COMPLETE: exchange=%s status=%s log_id=%s", exchange, status, logID)
 
-	// Save ranking snapshots (best-effort; failure does not affect BulkSave result)
-	s.saveRankingSnapshotsBestEffortWithHints(ctx, records, computedAt, priceHints)
-	s.saveRankingPortfolioBestEffort(ctx, records, computedAt, priceHints, taskLog.ID)
+	// Save ranking snapshots and portfolio asynchronously.
+	// These are best-effort operations that must not block the BulkSave response.
+	// Running them synchronously caused HTTP timeouts (>120s) when price resolution
+	// was slow, even though the core quadrant data had already been persisted.
+	// A detached context is used so the goroutine survives request cancellation.
+	go func() {
+		asyncCtx := context.Background()
+		log.Printf("[quadrant] async best-effort tasks START: exchange=%s log_id=%s", exchange, logID)
+		s.saveRankingSnapshotsBestEffortWithHints(asyncCtx, records, computedAt, priceHints)
+		s.saveRankingPortfolioBestEffort(asyncCtx, records, computedAt, priceHints, taskLog.ID)
+		log.Printf("[quadrant] async best-effort tasks DONE: exchange=%s log_id=%s", exchange, logID)
+	}()
 
 	return totalCount, nil
 }

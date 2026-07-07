@@ -164,6 +164,53 @@ func TestSimPortfolioV2AdminCalendarsExposeMarketSplitAndPriceGap(t *testing.T) 
 	}
 }
 
+// TestSimPortfolioV2CalendarDaySuggestsBackfillWhenCandidatesExistButPriceMissing
+// covers the regression where candidates exist (CandidateCount > 0) but their
+// close price is missing/misaligned (MissingPriceCount > 0). Before the fix,
+// GetAdminCalendarDay only surfaced the "recompute_quadrant" repair suggestion
+// when CandidateCount == 0, so this common case ("缺收盘价:N" with no button)
+// left the admin UI with no actionable repair suggestion at all.
+func TestSimPortfolioV2CalendarDaySuggestsBackfillWhenCandidatesExistButPriceMissing(t *testing.T) {
+	repo, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	date := "2026-07-06"
+	now := time.Now().UTC()
+	rows := []RankingSnapshot{}
+	for i := 0; i < 7; i++ {
+		// ClosePrice <= 0 simulates the "缺收盘价" scenario: candidates exist
+		// but their close price has not been resolved yet.
+		rows = append(rows, RankingSnapshot{Code: fmt.Sprintf("600%03d", i), Name: fmt.Sprintf("600%03d", i), Exchange: "SSE", Rank: i + 1, Opportunity: 90 - float64(i), Risk: 10 + float64(i), ClosePrice: 0, PriceTradeDate: "", SnapshotDate: date, CreatedAt: now})
+	}
+	if err := repo.UpsertSnapshots(ctx, rows); err != nil {
+		t.Fatalf("seed snapshots: %v", err)
+	}
+	detail, err := svc.GetAdminCalendarDay(ctx, SimPortfolioV2MarketAShare, date)
+	if err != nil {
+		t.Fatalf("GetAdminCalendarDay: %v", err)
+	}
+	if detail.Signal.CandidateCount != 7 {
+		t.Fatalf("candidate_count = %d, want 7", detail.Signal.CandidateCount)
+	}
+	if detail.Signal.MissingPriceCount != 7 {
+		t.Fatalf("missing_price_count = %d, want 7", detail.Signal.MissingPriceCount)
+	}
+	if detail.Signal.Status != SimPortfolioV2StatusBlocked {
+		t.Fatalf("signal status = %s, want blocked", detail.Signal.Status)
+	}
+	found := false
+	for _, s := range detail.RepairSuggestions {
+		if s.Type == "backfill_signal_close_price" {
+			found = true
+		}
+		if s.Type == "recompute_quadrant" {
+			t.Fatalf("did not expect recompute_quadrant when candidates already exist: %+v", detail.RepairSuggestions)
+		}
+	}
+	if !found {
+		t.Fatalf("expected backfill_signal_close_price repair suggestion, got %+v", detail.RepairSuggestions)
+	}
+}
+
 func TestSimPortfolioV2StartDatePreviewRejectsFutureAndHoliday(t *testing.T) {
 	_, svc := setupSimPortfolioV2Test(t)
 	ctx := context.Background()

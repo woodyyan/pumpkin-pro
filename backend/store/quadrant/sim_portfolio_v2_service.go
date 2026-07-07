@@ -1262,12 +1262,21 @@ func (s *SimPortfolioV2Service) GetAdminCalendarDay(ctx context.Context, market,
 	if batch != nil {
 		resp.Signal = SimPortfolioV2SignalDetail{Status: batch.Status, CandidateCount: batch.CandidateCount, SignalCount: batch.SignalCount, MissingPriceCount: batch.MissingPriceCount, Message: batch.Message}
 		// Even though buildSignalBatch always returns a non-nil batch, the batch
-		// may be in "blocked" status because the underlying quadrant ranking
-		// snapshots are missing (CandidateCount == 0). In that case we must
-		// still surface the "recompute_quadrant" repair suggestion so the admin
-		// UI can render the "重建该日四象限" button.
-		if batch.Status == SimPortfolioV2StatusBlocked && batch.CandidateCount == 0 && cal.IsTradingDay && date <= today {
-			resp.RepairSuggestions = append(resp.RepairSuggestions, SimPortfolioV2RepairSuggestion{Type: "recompute_quadrant", Label: "重建该日四象限", Hint: "请在四象限板块按 market + source_trade_date 重建上游快照。"})
+		// may be in "blocked" status for two distinct reasons that need two
+		// distinct repair actions surfaced to the admin UI:
+		//   1) CandidateCount == 0: the underlying quadrant ranking snapshots
+		//      are entirely missing for this day -> "重建该日四象限".
+		//   2) CandidateCount > 0 but MissingPriceCount > 0: candidates exist
+		//      but their close price is missing/misaligned (e.g. the "缺收盘价:N"
+		//      case reported by users) -> "补齐收盘价". Previously this branch
+		//      was NOT covered, so the admin page showed the missing-price count
+		//      with no actionable button at all.
+		if batch.Status == SimPortfolioV2StatusBlocked && cal.IsTradingDay && date <= today {
+			if batch.CandidateCount == 0 {
+				resp.RepairSuggestions = append(resp.RepairSuggestions, SimPortfolioV2RepairSuggestion{Type: "recompute_quadrant", Label: "重建该日四象限", Hint: "请在四象限板块按 market + source_trade_date 重建上游快照。"})
+			} else if batch.MissingPriceCount > 0 {
+				resp.RepairSuggestions = append(resp.RepairSuggestions, SimPortfolioV2RepairSuggestion{Type: "backfill_signal_close_price", Label: "补齐收盘价", Hint: fmt.Sprintf("该日候选股已存在（%d 只），但其中 %d 只收盘价缺失或未对齐当日交易日，请重建该日四象限以回填精确收盘价。", batch.CandidateCount, batch.MissingPriceCount)})
+			}
 		}
 	} else if cal.IsTradingDay && date <= today {
 		resp.Signal = SimPortfolioV2SignalDetail{Status: SimPortfolioV2StatusBlocked, Message: "缺少该市场该交易日四象限/排行榜快照。"}

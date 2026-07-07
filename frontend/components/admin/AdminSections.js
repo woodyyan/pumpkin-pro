@@ -1737,6 +1737,23 @@ function SimPipelineDayDetail({ detail, onClose, onRecomputeSignal, onRepairPric
             重建该日四象限
           </button>
         ) : null}
+        {(() => {
+          const closePriceSuggestion = detail.repair_suggestions?.find((item) => item.type === 'backfill_signal_close_price')
+          if (!closePriceSuggestion) return null
+          return (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => onRecomputeSignal?.(detail.market, detail.date)}
+                className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-medium text-amber-700 hover:bg-amber-500/15"
+                title={closePriceSuggestion.hint || ''}
+              >
+                补齐收盘价
+              </button>
+              {closePriceSuggestion.hint ? <div className="mt-1 text-[11px] text-foreground-dim">{closePriceSuggestion.hint}</div> : null}
+            </div>
+          )
+        })()}
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         {(detail.portfolios || []).map((portfolio) => (
@@ -2382,7 +2399,9 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
                 </span>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-foreground-muted">
-                <div>最新信号日：<span className="tabular-nums text-foreground">{item.latest_signal_date || '--'}</span></div>
+                <div title="该日期为 pipeline 已成功生成 verified 事实表的最新交易日水位线，不等于「开始信号日」；若中间某日被阻断（如缺收盘价），水位线会停在阻断日之前，需先解除阻断才会继续前进。">
+                  最新已验证信号日 <span className="text-foreground-dim">ⓘ</span>：<span className="tabular-nums text-foreground">{item.latest_signal_date || '--'}</span>
+                </div>
                 <div>最新 verified：<span className="tabular-nums text-foreground">{item.latest_verified_trade_date || '--'}</span></div>
                 <div>阻断阶段：<span className="text-foreground">{item.blocking_stage || '--'}</span></div>
                 <div className="truncate" title={item.blocking_message || ''}>原因：{item.blocking_message || '--'}</div>

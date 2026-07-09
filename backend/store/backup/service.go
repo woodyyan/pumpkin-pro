@@ -495,19 +495,19 @@ func (s *Service) hotBackupPumpkin(timestamp string) (string, int64, error) {
 	_ = os.Remove(destPath + "-wal")
 	_ = os.Remove(destPath + "-shm")
 
-	sourceDB := s.db
-	if sourceDB == nil {
-		var err error
-		sourceDB, err = gorm.Open(sqlite.Open(s.dbPath+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)"), &gorm.Config{})
-		if err != nil {
-			return "", 0, fmt.Errorf("open source db: %w", err)
-		}
-		if sqlDB, sqlErr := sourceDB.DB(); sqlErr == nil {
-			defer sqlDB.Close()
-		}
+	// Always use a dedicated connection for VACUUM INTO to avoid blocking the
+	// main connection pool (MaxOpenConns=1). VACUUM acquires an exclusive lock
+	// and can take 30+ seconds on a large database; running it on the shared
+	// connection starves all other DB operations, causing API timeouts (524).
+	vacuumDB, err := gorm.Open(sqlite.Open(s.dbPath+"?_pragma=busy_timeout(15000)&_pragma=foreign_keys(ON)"), &gorm.Config{})
+	if err != nil {
+		return "", 0, fmt.Errorf("open vacuum source db: %w", err)
+	}
+	if sqlDB, sqlErr := vacuumDB.DB(); sqlErr == nil {
+		defer sqlDB.Close()
 	}
 
-	if err := sourceDB.Exec("VACUUM INTO ?", destPath).Error; err != nil {
+	if err := vacuumDB.Exec("VACUUM INTO ?", destPath).Error; err != nil {
 		_ = os.Remove(destPath)
 		return "", 0, fmt.Errorf("vacuum into: %w", err)
 	}

@@ -4328,7 +4328,20 @@ func main() {
 
 	handler := corsMiddleware(server.loggingMiddleware(mux))
 	log.Printf("🚀 Wolong Pro Backend is running on port %s (db=%s)", cfg.Port, cfg.DB.Type)
-	if err := http.ListenAndServe(fmt.Sprintf(":%s", cfg.Port), handler); err != nil {
+
+	// Use explicit http.Server with timeouts to prevent requests from hanging
+	// indefinitely when the DB connection pool is saturated. Without these
+	// timeouts, a blocked request keeps its goroutine alive forever, which
+	// compounds the problem under load.
+	srv := &http.Server{
+		Addr:              fmt.Sprintf(":%s", cfg.Port),
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
 }

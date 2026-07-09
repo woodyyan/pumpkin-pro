@@ -273,3 +273,30 @@
 - 新链路上线后应有一个针对"默认配置定义"本身的快照/断言测试（不依赖 pipeline 运行，只校验 `defaultXxxDefinitions()` 返回值），能在 CI 阶段直接捕获此类遗漏。
 
 **适用场景**: 任何"v1 → v2 全量重写数据定义/配置" 的重构任务，尤其是选股规则、白名单/黑名单、排除条件等业务口径类配置字段。
+
+## BP-020: 单连接池 + 长排他操作导致连接池饿死
+
+**模式**: SQLite（或任何单写多读数据库）连接池 `MaxOpenConns=1` 时，如果有一个操作长时间持有该唯一连接（如 `VACUUM INTO` 791MB 数据库耗时 30s+），所有其他 DB 查询将排队等待，API 请求因无法获取 DB 连接而超时，最终被反向代理（如 Cloudflare 524）边缘超时。
+
+**案例**: 2026-07-08 生产事故。四象限计算（`QUADRANT_COMPUTE_HOUR=20`）完成后异步触发 backup，backup 的 `VACUUM INTO` 通过共享的 `s.db` 连接执行，独占唯一连接 30s+。所有 API 请求排队等待 ~300s，Cloudflare 边缘 524 超时。事故窗口 UTC 12:55~13:02（北京 20:55~21:02）与 quadrant 计算时间吻合。
+
+**根因链**:
+1. `MaxOpenConns=1`：连接池只有 1 个连接，任何长操作都会阻塞所有其他操作。
+2. VACUUM 复用主连接：`hotBackupPumpkin` 使用 `s.db`（共享连接）执行 `VACUUM INTO`，而非创建独立连接。
+3. 无 HTTP 超时：`http.ListenAndServe` 无显式超时，被阻塞的请求无限期等待，goroutine 堆积。
+4. 异步任务无超时：异步 goroutine 使用 `context.Background()`，无超时上限。
+
+**修复**:
+1. VACUUM 改用独立 `gorm.Open` 连接（`store/backup/service.go`）。
+2. `MaxOpenConns` 1→4，`MaxIdleConns` 1→2，`busy_timeout` 5s→15s（`store/gorm.go`）。
+3. HTTP Server 加显式超时：`ReadHeaderTimeout=10s`、`ReadTimeout=30s`、`WriteTimeout=120s`、`IdleTimeout=120s`（`main.go`）。
+4. 异步 goroutine 加 `context.WithTimeout(..., 10*time.Minute)`（`store/quadrant/service.go`）。
+
+**教训**:
+- 任何全库级排他操作（VACUUM、DDL、大批量迁移）绝不能在共享连接池上执行，必须使用独立连接。
+- `MaxOpenConns=1` 对 WAL 模式的 SQLite 过于保守——WAL 支持并发读，应设 `MaxOpenConns>=4` 以允许读操作在写事务进行时继续。
+- HTTP Server 必须设置显式超时，否则被阻塞的请求会无限堆积 goroutine，把 DB 问题放大为 OOM。
+- 异步 goroutine 即使脱离请求 context，也必须有自己的超时，防止外部依赖故障导致永久阻塞。
+- 定时任务（如 backup、quadrant compute）的时间窗口可能重叠，必须确保它们不会通过共享资源（连接池、文件锁）互相饿死。
+
+**适用场景**: 所有使用 SQLite WAL 模式 + 连接池 + 定时长操作（backup、VACUUM、批处理）+ HTTP API 的生产架构。

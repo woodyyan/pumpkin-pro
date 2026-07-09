@@ -591,3 +591,35 @@
 - 修复按钮只能改变上游快照、price requirements 或 override/audit 表。
 - 修复完成后必须重新运行对应市场/日期 pipeline，正式收益只能由 pipeline facts 阶段生成。
 - 人工覆盖必须包含 `reason`、`evidence`、`operator` 和 `confirm=true`。
+
+## 决策 32: SQLite 连接池扩容 + VACUUM 独立连接 + HTTP 显式超时 + 异步任务限时
+
+**日期**: 2026-07-08
+
+**背景**: 生产环境发生 Cloudflare 524 超时事故。根因是 `MaxOpenConns=1` 的 SQLite 连接池在四象限计算完成后触发的 backup `VACUUM INTO`（791MB 数据库，耗时 30s+）中被长时间独占，所有 API 查询排队等待 ~300s 后被 Cloudflare 边缘超时。事故窗口（UTC 12:55~13:02 = 北京时间 20:55~21:02）与 `QUADRANT_COMPUTE_HOUR=20` 吻合：quadrant 计算完成后异步触发 backup，backup 的 VACUUM 饿死连接池。
+
+**决策**:
+1. **VACUUM 独立连接**（`store/backup/service.go`）：`hotBackupPumpkin` 不再复用 `s.db`，而是通过 `gorm.Open(sqlite.Open(...))` 创建独立连接执行 `VACUUM INTO`，完成后关闭。确保 VACUUM 的排他锁不占用主连接池。
+2. **连接池扩容**（`store/gorm.go`）：`MaxOpenConns` 1→4，`MaxIdleConns` 1→2，`busy_timeout` 5s→15s。SQLite WAL 模式支持并发读 + 单写，4 连接池允许读查询在写事务进行时继续执行。
+3. **HTTP Server 显式超时**（`main.go`）：从 `http.ListenAndServe` 改为 `http.Server{}` 显式设置 `ReadHeaderTimeout=10s`、`ReadTimeout=30s`、`WriteTimeout=120s`、`IdleTimeout=120s`。防止被阻塞的请求无限期占用 goroutine。
+4. **异步任务限时**（`store/quadrant/service.go`）：异步 goroutine 的 context 从 `context.Background()` 改为 `context.WithTimeout(context.Background(), 10*time.Minute)`，确保异步任务不会因外部依赖故障而无限运行。
+
+**原因**:
+1. VACUUM 是 SQLite 全库排他操作，在 791MB 数据库上耗时 30s+，绝不能在共享连接上执行。
+2. `MaxOpenConns=1` 对 WAL 模式过于保守——WAL 允许并发读，单连接池会导致所有读查询被写操作串行化。
+3. 无超时的 HTTP Server 在连接池被饿死时会产生无限堆积的 goroutine，加剧问题而非自愈。
+4. 脱离请求 context 的异步任务如果没有自己的超时，可能因外部依赖（如价格解析 API）卡死而永久占用资源。
+
+**替代方案**:
+- 将 backup 改为离线模式（先停服再复制 DB 文件）：否决，会导致服务停机。
+- 切换到 PostgreSQL：暂缓，当前数据量和写入频率不需要，且迁移成本高。
+- 用 `.backup()` 命令替代 `VACUUM INTO`：否决，`.backup()` 会复制 WAL 依赖文件，不如 `VACUUM INTO` 产出干净的独立 DB 文件。
+- `MaxOpenConns` 设更高（如 10）：否决，SQLite 本质单写，过高连接数会增加 `SQLITE_BUSY` 概率，4 是 WAL 模式的合理平衡点。
+
+**风险与代价**:
+- `MaxOpenConns=4` 在极端并发写入时可能产生更多 `SQLITE_BUSY`，但 `busy_timeout=15s` 提供了足够重试窗口。
+- VACUUM 独立连接会短暂持有 DB 级排他锁，但与主连接池隔离后不会导致 API 请求排队——VACUUM 期间主连接池的读请求仍可正常执行（WAL 快照隔离）。
+- HTTP WriteTimeout=120s 对极慢的 admin 操作可能不够，但这类操作已改为异步，120s 足够覆盖所有正常同步请求。
+- 异步任务 10 分钟超时对极端情况可能不够，但比无限等待更安全；超时后日志可追踪。
+
+**测试**: backup 模块全部测试通过；quadrant 模块 3 个测试失败为修改前已存在的异步竞态问题（goroutine 未执行完即查询 DB），非本次引入。

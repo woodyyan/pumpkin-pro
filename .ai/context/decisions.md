@@ -623,3 +623,31 @@
 - 异步任务 10 分钟超时对极端情况可能不够，但比无限等待更安全；超时后日志可追踪。
 
 **测试**: backup 模块全部测试通过；quadrant 模块 3 个测试失败为修改前已存在的异步竞态问题（goroutine 未执行完即查询 DB），非本次引入。
+
+## D-021: Quant 外部数据源统一收敛到 Data Source Gateway
+
+**日期**: 2026-07-11
+
+**决策**:
+- quant 新增 `quant/data_sources/` 作为 Tencent、EastMoney、AkShare 等外部数据源的统一入口。
+- 数据源优先级按 capability + market 在 `policy.py` 中用代码常量维护，第一期不引入 env、数据库配置或 Admin 可编辑配置。
+- Provider 能力通过 `registry.py` 声明；manager 遇到不支持当前 market/capability 的 provider 必须 skip 并记录 trace。
+- Provider adapter 只负责取数；normalizer 负责字段归一；validator 负责数据有效性；manager 负责 fallback 和 partial response。
+- 价格类数据（如 `daily_bars` / `index_bars`）在传入 `target_trade_date` 时必须精确命中目标交易日，不允许用其他日期价格兜底。
+
+**原因**:
+1. 项目已有 akshare、东方财富、腾讯等多个外部源，调用和降级逻辑散落在四象限、因子、基础面、资金星图等模块中，继续扩展会导致重复 fallback 和字段口径漂移。
+2. 数据源优先级是低频变更，代码常量 + 测试比 env / Admin 可编辑配置更简单、更可审查，也避免运维面变重。
+3. 历史问题表明“请求成功”不等于“字段可用”；统一 validator 能在入口处防止空字段、错误日期和无效价格被当作成功。
+4. backend 应保持纯粹，未来资金星图等行情计算应迁移到 quant，backend 只做 API 代理、鉴权和缓存。
+
+**替代方案**:
+- 使用 env 配置 provider 顺序：否决。变更低频且配置和 normalizer/validator 兼容性强相关，env 会增加部署和排障复杂度。
+- 使用数据库或 Admin 可编辑配置：否决。第一期会引入权限、审计、热更新和误操作风险，收益不足。
+- 独立 data-service 微服务：暂缓。当前项目规模用 quant 内部模块即可，独立服务会增加部署复杂度。
+- 继续各业务模块自行 fallback：否决。会扩大重复逻辑，且无法形成统一 trace 和健康观测。
+
+**风险与代价**:
+- 迁移期间会短期存在旧直连 provider 和新 Gateway 双轨，后续每迁移一个 capability 应逐步删除旧路径。
+- Policy 常量变更需要发版，不能热调整；这是第一期为降低运维复杂度接受的代价。
+- Gateway 返回 partial 数据时，上层业务必须检查 `ok` / `partial` / `trace` / `errors`，不能默认当作完整成功。

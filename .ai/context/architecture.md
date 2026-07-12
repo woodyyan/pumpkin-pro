@@ -180,3 +180,16 @@ frontend/
 - 缺价格修复固定为三层动作：重新解析已有价格源、重拉该日缺失历史日线、人工覆盖价格。人工覆盖必须写入 `sim_portfolio_v2_price_overrides`，所有修复动作写入 `sim_portfolio_v2_price_repair_audits`。
 - 价格修复只更新 price requirements / override，不直接改 verified facts；修复后必须重新运行 pipeline 才能生成正式收益。
 - 旧 `quadrant_ranking_portfolio_market_prices`、旧补价按钮、旧全局开始信号日和旧事实表同步链路仅作为历史遗留，不再作为 v2 的推进依据.
+
+## Quant Data Source Gateway（2026-07-11）
+
+- quant 新增 `quant/data_sources/` 作为外部数据源统一入口，后续业务模块应优先通过 `DataSourceManager` 获取标准化数据，不再直接在业务代码中编排 Tencent / EastMoney / AkShare fallback。
+- 第一期能力覆盖：`daily_bars`、`index_bars`；市场覆盖：A 股 `ASHARE`、港股 `HKEX`。
+- 模块边界：
+  - `policy.py`：按 capability + market 定义 provider 顺序，第一期仅使用代码常量，不新增 env / DB / Admin 可编辑配置。
+  - `registry.py`：声明 provider 支持的 market + capability，manager 会跳过不支持的 provider。
+  - `providers/`：只负责外部源调用。
+  - `normalizers/`：只负责字段和单位归一。
+  - `validators.py`：负责防止假成功，价格类数据必须精确匹配目标交易日。
+  - `manager.py`：统一执行 fallback、trace、partial failure 返回。
+- backend 长期边界保持不变：backend 只调用 quant API，不直接理解底层 provider 字段。资金星图后续应迁移为 backend proxy → quant `/api/capital-map`。

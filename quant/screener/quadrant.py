@@ -29,8 +29,19 @@ import pandas as pd
 import requests
 
 from screener.scanner import get_a_share_snapshot
+from data_sources import DataSourceManager
+from data_sources.models import Market
+
 
 logger = logging.getLogger(__name__)
+_DATA_SOURCE_MANAGER = DataSourceManager()
+
+
+def set_data_source_manager(manager: DataSourceManager) -> None:
+    """Test hook for injecting a stub data source manager."""
+    global _DATA_SOURCE_MANAGER
+    _DATA_SOURCE_MANAGER = manager
+
 
 # ── Configuration ──────────────────────────────────────────────
 DAILY_LOOKBACK_DAYS = 90           # 需要的历史日线天数
@@ -447,41 +458,55 @@ def _fetch_bars_akshare(symbol: str, days: int, source_trade_date: Optional[str]
 
 # ── Dual-source fetch with fallback ────────────────────────────
 
-def _fetch_daily_bars(symbol: str, days: int = DAILY_LOOKBACK_DAYS, source_trade_date: Optional[str] = None) -> Optional[List[Dict]]:
-    """腾讯优先，东财降级。"""
-    bars = _fetch_bars_tencent(symbol, days, source_trade_date=source_trade_date)
-    if bars:
-        return bars
-    # Fallback to AKShare
-    time.sleep(SINGLE_RETRY_DELAY_MS / 1000.0)
-    bars = _fetch_bars_akshare(symbol, days, source_trade_date=source_trade_date)
-    return bars
-
-
-def _fetch_benchmark_60d_return(source_trade_date: Optional[str] = None) -> float:
-    """通过腾讯财经获取上证指数近 60 个交易日的收益率。"""
-    try:
-        end_date = _resolve_end_date(source_trade_date)
-        start_date = (pd.Timestamp(end_date) - pd.Timedelta(days=120)).strftime("%Y-%m-%d")
-        url = (
-            f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-            f"?param=sh000001,day,{start_date},{end_date},90,"
+def _daily_bar_dicts_from_gateway(symbol: str, market: str, days: int, source_trade_date: Optional[str]) -> Optional[List[Dict]]:
+    target_trade_date = _resolve_end_date(source_trade_date) if source_trade_date else ""
+    response = _DATA_SOURCE_MANAGER.fetch_daily_bars(
+        symbol=symbol,
+        market=market,
+        target_trade_date=target_trade_date,
+        lookback_days=days,
+        adjust="qfq",
+    )
+    if not response.ok:
+        logger.warning(
+            "[quadrant] Data Source Gateway daily_bars failed symbol=%s market=%s errors=%s",
+            symbol, market, response.errors,
         )
-        resp = requests.get(url, headers=_QQ_DAILY_HEADERS, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-        stock_data = data.get("data", {}).get("sh000001", {})
-        klines = stock_data.get("day") or stock_data.get("qfqday") or []
-        if len(klines) < 2:
+        return None
+    return [bar.to_dict() for bar in response.data]
+
+
+def _fetch_daily_bars(symbol: str, days: int = DAILY_LOOKBACK_DAYS, source_trade_date: Optional[str] = None) -> Optional[List[Dict]]:
+    """Fetch A-share daily bars through the unified Data Source Gateway."""
+    return _daily_bar_dicts_from_gateway(symbol, Market.ASHARE, days, source_trade_date)
+
+
+def _index_60d_return(symbol: str, market: str, source_trade_date: Optional[str] = None) -> float:
+    target_trade_date = _resolve_end_date(source_trade_date) if source_trade_date else ""
+    try:
+        response = _DATA_SOURCE_MANAGER.fetch_index_bars(
+            symbol=symbol,
+            market=market,
+            target_trade_date=target_trade_date,
+            lookback_days=120,
+            adjust="",
+        )
+        if not response.ok:
+            logger.warning("[quadrant] Data Source Gateway index_bars failed symbol=%s market=%s errors=%s", symbol, market, response.errors)
             return 0.0
-        closes = [float(k[2]) for k in klines if len(k) >= 3 and float(k[2]) > 0]
+        closes = [bar.close for bar in response.data if bar.close > 0]
         if len(closes) < 2:
             return 0.0
         lookback = min(60, len(closes))
         return (closes[-1] / closes[-lookback] - 1) * 100
     except Exception as exc:
-        logger.warning("Failed to fetch benchmark 60d return: %s", exc)
+        logger.warning("Failed to fetch benchmark index return via Data Source Gateway: %s", exc)
         return 0.0
+
+
+def _fetch_benchmark_60d_return(source_trade_date: Optional[str] = None) -> float:
+    """通过统一数据源网关获取上证指数近 60 个交易日收益率。"""
+    return _index_60d_return("000001", Market.ASHARE, source_trade_date=source_trade_date)
 
 
 # ── HK-specific data sources ───────────────────────────────────
@@ -575,46 +600,13 @@ def _fetch_bars_akshare_hk(symbol: str, days: int, source_trade_date: Optional[s
 
 
 def _fetch_daily_bars_hk(symbol: str, days: int = DAILY_LOOKBACK_DAYS, source_trade_date: Optional[str] = None) -> Optional[List[Dict]]:
-    """港股日线拉取：腾讯优先，东财降级。"""
-    bars = _fetch_bars_tencent_hk(symbol, days, source_trade_date=source_trade_date)
-    if bars:
-        return bars
-    time.sleep(SINGLE_RETRY_DELAY_MS / 1000.0)
-    bars = _fetch_bars_akshare_hk(symbol, days, source_trade_date=source_trade_date)
-    return bars
+    """Fetch HK daily bars through the unified Data Source Gateway."""
+    return _daily_bar_dicts_from_gateway(symbol, Market.HKEX, days, source_trade_date)
 
 
 def _fetch_hsi_60d_return(source_trade_date: Optional[str] = None) -> float:
-    """通过腾讯财经获取恒生指数近 60 个交易日的收益率。"""
-    # 恒生指数在腾讯的代码格式为 hkHSI
-    hsi_codes = ["hkHSI", "hkHSI"]
-    for code in hsi_codes:
-        try:
-            end_date = _resolve_end_date(source_trade_date)
-            start_date = (pd.Timestamp(end_date) - pd.Timedelta(days=180)).strftime("%Y-%m-%d")
-            url = (
-                f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-                f"?param={code},day,{start_date},{end_date},180,"
-            )
-            resp = requests.get(url, headers=_QQ_DAILY_HEADERS, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
-            idx_data = data.get("data", {}).get(code, {})
-            klines = idx_data.get("day") or idx_data.get("qfqday") or []
-            if len(klines) < 2:
-                continue
-            closes = [float(k[2]) for k in klines if len(k) >= 3 and float(k[2]) > 0]
-            if len(closes) < 2:
-                continue
-            lookback = min(60, len(closes))
-            ret = (closes[-1] / closes[-lookback] - 1) * 100
-            logger.info("恒生指数 60 日收益: %.2f%% (code=%s)", ret, code)
-            return ret
-        except Exception as exc:
-            logger.debug("[hsi] failed for %s: %s", code, exc)
-
-    logger.warning("恒生指数获取失败，基准收益默认 0.0")
-    return 0.0
+    """通过统一数据源网关获取恒生指数近 60 个交易日收益率。"""
+    return _index_60d_return("HSI", Market.HKEX, source_trade_date=source_trade_date)
 
 
 # ── Metrics computation ────────────────────────────────────────

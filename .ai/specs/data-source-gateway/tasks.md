@@ -13,6 +13,15 @@
 - [x] 新增 `health.py`，记录最近 trace 供后续 Admin 使用。
 - [x] 新增 `quant/tests/test_data_sources_gateway.py`。
 
+## Phase 1.5: 四象限接入 Gateway
+
+- [x] A 股四象限 `_fetch_daily_bars` 改为通过 `DataSourceManager.fetch_daily_bars`。
+- [x] 港股四象限 `_fetch_daily_bars_hk` 改为通过 `DataSourceManager.fetch_daily_bars`。
+- [x] A 股 benchmark 60 日收益改为通过 `DataSourceManager.fetch_index_bars` 获取上证指数日线后计算。
+- [x] 港股 benchmark 60 日收益改为通过 `DataSourceManager.fetch_index_bars` 获取恒生指数日线后计算。
+- [x] 保留四象限现有缓存、并发、成功率阈值和 compute report 结构。
+- [x] 新增测试覆盖四象限日线和 benchmark 调用 Gateway。
+
 ## Phase 2: 资金星图迁移到 quant
 
 - [ ] quant 新增 `/api/capital-map`。

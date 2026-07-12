@@ -207,3 +207,117 @@ def test_resolve_end_date_invalid_falls_back_to_today():
 def test_resolve_end_date_normalizes_format():
     """传入 Timestamp 可解析的格式应统一输出 YYYY-MM-DD。"""
     assert _resolve_end_date("2026-01-05") == "2026-01-05"
+
+# ── Data Source Gateway integration ──
+
+class StubQuadrantDataSourceManager:
+    def __init__(self):
+        self.daily_requests = []
+        self.index_requests = []
+
+    def fetch_daily_bars(self, **kwargs):
+        from data_sources.models import DataSourceResponse, DailyBar
+
+        self.daily_requests.append(kwargs)
+        market = kwargs["market"]
+        symbol = kwargs["symbol"]
+        return DataSourceResponse(
+            ok=True,
+            capability="daily_bars",
+            market=market,
+            symbol=symbol,
+            data=[
+                DailyBar(symbol=symbol, market=market, trade_date="2026-07-09", open=10, close=10, high=11, low=9, volume=100),
+                DailyBar(symbol=symbol, market=market, trade_date="2026-07-10", open=10, close=12, high=13, low=9, volume=120),
+            ],
+            used_sources=["stub"],
+        )
+
+    def fetch_index_bars(self, **kwargs):
+        from data_sources.models import DataSourceResponse, DailyBar
+
+        self.index_requests.append(kwargs)
+        market = kwargs["market"]
+        symbol = kwargs["symbol"]
+        return DataSourceResponse(
+            ok=True,
+            capability="index_bars",
+            market=market,
+            symbol=symbol,
+            data=[
+                DailyBar(symbol=symbol, market=market, trade_date="2026-05-01", open=100, close=100, high=101, low=99),
+                DailyBar(symbol=symbol, market=market, trade_date="2026-07-10", open=110, close=120, high=121, low=109),
+            ],
+            used_sources=["stub"],
+        )
+
+
+def test_quadrant_a_share_daily_bars_use_data_source_gateway(monkeypatch):
+    import screener.quadrant as quadrant
+
+    original = quadrant._DATA_SOURCE_MANAGER
+    stub = StubQuadrantDataSourceManager()
+    quadrant.set_data_source_manager(stub)
+    try:
+        bars = quadrant._fetch_daily_bars("000001", days=90, source_trade_date="2026-07-10")
+    finally:
+        quadrant.set_data_source_manager(original)
+
+    assert bars[-1]["date"] == "2026-07-10"
+    assert stub.daily_requests == [{
+        "symbol": "000001",
+        "market": "ASHARE",
+        "target_trade_date": "2026-07-10",
+        "lookback_days": 90,
+        "adjust": "qfq",
+    }]
+
+
+def test_quadrant_hk_daily_bars_use_data_source_gateway(monkeypatch):
+    import screener.quadrant as quadrant
+
+    original = quadrant._DATA_SOURCE_MANAGER
+    stub = StubQuadrantDataSourceManager()
+    quadrant.set_data_source_manager(stub)
+    try:
+        bars = quadrant._fetch_daily_bars_hk("00700", days=30, source_trade_date="2026-07-10")
+    finally:
+        quadrant.set_data_source_manager(original)
+
+    assert bars[0]["provider"] == ""
+    assert stub.daily_requests[0]["market"] == "HKEX"
+    assert stub.daily_requests[0]["symbol"] == "00700"
+    assert stub.daily_requests[0]["target_trade_date"] == "2026-07-10"
+
+
+def test_quadrant_benchmark_uses_data_source_gateway():
+    import screener.quadrant as quadrant
+
+    original = quadrant._DATA_SOURCE_MANAGER
+    stub = StubQuadrantDataSourceManager()
+    quadrant.set_data_source_manager(stub)
+    try:
+        ret = quadrant._fetch_benchmark_60d_return(source_trade_date="2026-07-10")
+    finally:
+        quadrant.set_data_source_manager(original)
+
+    assert ret == pytest.approx(20.0)
+    assert stub.index_requests[0]["symbol"] == "000001"
+    assert stub.index_requests[0]["market"] == "ASHARE"
+    assert stub.index_requests[0]["target_trade_date"] == "2026-07-10"
+
+
+def test_quadrant_hsi_benchmark_uses_data_source_gateway():
+    import screener.quadrant as quadrant
+
+    original = quadrant._DATA_SOURCE_MANAGER
+    stub = StubQuadrantDataSourceManager()
+    quadrant.set_data_source_manager(stub)
+    try:
+        ret = quadrant._fetch_hsi_60d_return(source_trade_date="2026-07-10")
+    finally:
+        quadrant.set_data_source_manager(original)
+
+    assert ret == pytest.approx(20.0)
+    assert stub.index_requests[0]["symbol"] == "HSI"
+    assert stub.index_requests[0]["market"] == "HKEX"

@@ -1748,7 +1748,7 @@ function SimPipelineDayDetail({ detail, onClose, onRecomputeSignal, onRepairPric
                 className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-medium text-amber-700 hover:bg-amber-500/15"
                 title={closePriceSuggestion.hint || ''}
               >
-                补齐收盘价
+                重拉该日收盘价
               </button>
               {closePriceSuggestion.hint ? <div className="mt-1 text-[11px] text-foreground-dim">{closePriceSuggestion.hint}</div> : null}
             </div>

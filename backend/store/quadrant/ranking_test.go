@@ -1385,7 +1385,7 @@ func TestSaveRankingSnapshotsBestEffort_UsesResolverAndShanghaiDate(t *testing.T
 	}
 }
 
-func TestBulkSaveRankingSnapshots_UsesCallbackClosePriceBeforeResolverWhenTradeDateMatches(t *testing.T) {
+func TestSaveRankingSnapshots_UsesCallbackClosePriceBeforeResolverWhenTradeDateMatches(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -1396,23 +1396,14 @@ func TestBulkSaveRankingSnapshots_UsesCallbackClosePriceBeforeResolverWhenTradeD
 		return 999
 	})
 
-	_, err := svc.BulkSave(ctx, BulkSaveInput{
-		ComputedAt: "2026-04-30T12:30:00Z", // 上海时间 2026-04-30
-		Items: []BulkSaveItem{{
-			Code:           "600519",
-			Name:           "贵州茅台",
-			Exchange:       "SSE",
-			Opportunity:    95,
-			Risk:           20,
-			Quadrant:       "机会",
-			AvgAmount5d:    10000,
-			ClosePrice:     88.8,
-			PriceTradeDate: "2026-04-30",
-		}},
-	})
-	if err != nil {
-		t.Fatalf("BulkSave failed: %v", err)
+	record := makeRankingRecord("600519", "SSE", 95, 20)
+	record.SourceTradeDate = "2026-04-30"
+	computedAt := time.Date(2026, 4, 30, 4, 30, 0, 0, time.UTC) // 上海时间 2026-04-30 12:30
+	priceHints := map[string]snapshotPriceHint{
+		snapshotPriceHintKey("600519", "SSE"): {ClosePrice: 88.8, TradeDate: "2026-04-30"},
 	}
+	svc.saveRankingSnapshotsBestEffortWithHints(ctx, []QuadrantScoreRecord{record}, computedAt, priceHints)
+
 	if resolverCalls != 0 {
 		t.Fatalf("resolver should not be called when callback close_price is available, got %d calls", resolverCalls)
 	}
@@ -1429,7 +1420,7 @@ func TestBulkSaveRankingSnapshots_UsesCallbackClosePriceBeforeResolverWhenTradeD
 	}
 }
 
-func TestBulkSaveRankingSnapshots_RejectsStaleCallbackClosePrice(t *testing.T) {
+func TestSaveRankingSnapshots_RejectsStaleCallbackClosePrice(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -1446,23 +1437,14 @@ func TestBulkSaveRankingSnapshots_RejectsStaleCallbackClosePrice(t *testing.T) {
 		return "2026-07-01"
 	})
 
-	_, err := svc.BulkSave(ctx, BulkSaveInput{
-		ComputedAt: "2026-07-01T13:00:00Z",
-		Items: []BulkSaveItem{{
-			Code:           "688260",
-			Name:           "昀冢科技",
-			Exchange:       "SSE",
-			Opportunity:    99,
-			Risk:           20,
-			Quadrant:       "机会",
-			AvgAmount5d:    10000,
-			ClosePrice:     144,
-			PriceTradeDate: "2026-06-25",
-		}},
-	})
-	if err != nil {
-		t.Fatalf("BulkSave failed: %v", err)
+	record := makeRankingRecord("688260", "SSE", 99, 20)
+	record.SourceTradeDate = "2026-07-01"
+	computedAt := time.Date(2026, 7, 1, 5, 0, 0, 0, time.UTC) // 上海时间 2026-07-01 13:00
+	priceHints := map[string]snapshotPriceHint{
+		snapshotPriceHintKey("688260", "SSE"): {ClosePrice: 144, TradeDate: "2026-06-25"},
 	}
+	svc.saveRankingSnapshotsBestEffortWithHints(ctx, []QuadrantScoreRecord{record}, computedAt, priceHints)
+
 	if resolverCalls != 1 {
 		t.Fatalf("resolver calls = %d; want 1", resolverCalls)
 	}
@@ -1479,7 +1461,7 @@ func TestBulkSaveRankingSnapshots_RejectsStaleCallbackClosePrice(t *testing.T) {
 	}
 }
 
-func TestBulkSaveRankingSnapshots_MarksMissingWhenStaleCallbackAndNoExactPrice(t *testing.T) {
+func TestSaveRankingSnapshots_MarksMissingWhenStaleCallbackAndNoExactPrice(t *testing.T) {
 	repo, cleanup := setupQuadrantTest(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -1491,23 +1473,13 @@ func TestBulkSaveRankingSnapshots_MarksMissingWhenStaleCallbackAndNoExactPrice(t
 		return "2026-07-01"
 	})
 
-	_, err := svc.BulkSave(ctx, BulkSaveInput{
-		ComputedAt: "2026-07-01T13:00:00Z",
-		Items: []BulkSaveItem{{
-			Code:           "688260",
-			Name:           "昀冢科技",
-			Exchange:       "SSE",
-			Opportunity:    99,
-			Risk:           20,
-			Quadrant:       "机会",
-			AvgAmount5d:    10000,
-			ClosePrice:     144,
-			PriceTradeDate: "2026-06-25",
-		}},
-	})
-	if err != nil {
-		t.Fatalf("BulkSave failed: %v", err)
+	record := makeRankingRecord("688260", "SSE", 99, 20)
+	record.SourceTradeDate = "2026-07-01"
+	computedAt := time.Date(2026, 7, 1, 5, 0, 0, 0, time.UTC) // 上海时间 2026-07-01 13:00
+	priceHints := map[string]snapshotPriceHint{
+		snapshotPriceHintKey("688260", "SSE"): {ClosePrice: 144, TradeDate: "2026-06-25"},
 	}
+	svc.saveRankingSnapshotsBestEffortWithHints(ctx, []QuadrantScoreRecord{record}, computedAt, priceHints)
 
 	var snap RankingSnapshot
 	if err := repo.db.WithContext(ctx).Where("code = ? AND snapshot_date = ?", "688260", "2026-07-01").First(&snap).Error; err != nil {

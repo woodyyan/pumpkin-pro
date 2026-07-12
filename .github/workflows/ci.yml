@@ -102,7 +102,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies (math only, no akshare)
-        run: pip install pandas numpy pytest matplotlib pytest-cov pydantic
+        run: pip install pandas numpy pytest matplotlib pytest-cov pydantic requests
 
       - name: Syntax check
         run: python -m compileall -q .

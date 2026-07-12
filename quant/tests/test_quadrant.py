@@ -267,7 +267,7 @@ def test_quadrant_a_share_daily_bars_use_data_source_gateway(monkeypatch):
     assert stub.daily_requests == [{
         "symbol": "000001",
         "market": "ASHARE",
-        "target_trade_date": "2026-07-10",
+        "end_date": "2026-07-10",
         "lookback_days": 90,
         "adjust": "qfq",
     }]
@@ -287,7 +287,8 @@ def test_quadrant_hk_daily_bars_use_data_source_gateway(monkeypatch):
     assert bars[0]["provider"] == ""
     assert stub.daily_requests[0]["market"] == "HKEX"
     assert stub.daily_requests[0]["symbol"] == "00700"
-    assert stub.daily_requests[0]["target_trade_date"] == "2026-07-10"
+    assert stub.daily_requests[0]["end_date"] == "2026-07-10"
+    assert "target_trade_date" not in stub.daily_requests[0]
 
 
 def test_quadrant_benchmark_uses_data_source_gateway():
@@ -304,7 +305,8 @@ def test_quadrant_benchmark_uses_data_source_gateway():
     assert ret == pytest.approx(20.0)
     assert stub.index_requests[0]["symbol"] == "000001"
     assert stub.index_requests[0]["market"] == "ASHARE"
-    assert stub.index_requests[0]["target_trade_date"] == "2026-07-10"
+    assert stub.index_requests[0]["end_date"] == "2026-07-10"
+    assert "target_trade_date" not in stub.index_requests[0]
 
 
 def test_quadrant_hsi_benchmark_uses_data_source_gateway():
@@ -321,3 +323,5 @@ def test_quadrant_hsi_benchmark_uses_data_source_gateway():
     assert ret == pytest.approx(20.0)
     assert stub.index_requests[0]["symbol"] == "HSI"
     assert stub.index_requests[0]["market"] == "HKEX"
+    assert stub.index_requests[0]["end_date"] == "2026-07-10"
+    assert "target_trade_date" not in stub.index_requests[0]

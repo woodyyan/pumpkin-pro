@@ -112,6 +112,23 @@ def test_validate_daily_bars_requires_exact_trade_date():
         validate_daily_bars([bar("2026-07-09")], target_trade_date="2026-07-10", require_exact_trade_date=True)
 
 
+def test_manager_end_date_does_not_require_exact_trade_date():
+    manager = DataSourceManager(providers={
+        "tencent": StubProvider(rows=[bar("2026-07-09", provider="tencent")]),
+    })
+
+    resp = manager.fetch_daily_bars(
+        symbol="000001",
+        market=Market.ASHARE,
+        end_date="2026-07-10",
+        lookback_days=120,
+    )
+
+    assert resp.ok is True
+    assert resp.data[0].trade_date == "2026-07-09"
+    assert resp.source_trade_date == "2026-07-09"
+
+
 def test_validate_daily_bars_rejects_invalid_price():
     bad = DailyBar(symbol="000001", market=Market.ASHARE, trade_date="2026-07-10", open=0, close=11, high=12, low=9)
     with pytest.raises(ValidationError):

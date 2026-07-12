@@ -459,11 +459,11 @@ def _fetch_bars_akshare(symbol: str, days: int, source_trade_date: Optional[str]
 # ── Dual-source fetch with fallback ────────────────────────────
 
 def _daily_bar_dicts_from_gateway(symbol: str, market: str, days: int, source_trade_date: Optional[str]) -> Optional[List[Dict]]:
-    target_trade_date = _resolve_end_date(source_trade_date) if source_trade_date else ""
+    end_date = _resolve_end_date(source_trade_date) if source_trade_date else ""
     response = _DATA_SOURCE_MANAGER.fetch_daily_bars(
         symbol=symbol,
         market=market,
-        target_trade_date=target_trade_date,
+        end_date=end_date,
         lookback_days=days,
         adjust="qfq",
     )
@@ -482,12 +482,12 @@ def _fetch_daily_bars(symbol: str, days: int = DAILY_LOOKBACK_DAYS, source_trade
 
 
 def _index_60d_return(symbol: str, market: str, source_trade_date: Optional[str] = None) -> float:
-    target_trade_date = _resolve_end_date(source_trade_date) if source_trade_date else ""
+    end_date = _resolve_end_date(source_trade_date) if source_trade_date else ""
     try:
         response = _DATA_SOURCE_MANAGER.fetch_index_bars(
             symbol=symbol,
             market=market,
-            target_trade_date=target_trade_date,
+            end_date=end_date,
             lookback_days=120,
             adjust="",
         )

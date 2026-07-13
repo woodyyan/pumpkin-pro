@@ -300,3 +300,32 @@
 - 定时任务（如 backup、quadrant compute）的时间窗口可能重叠，必须确保它们不会通过共享资源（连接池、文件锁）互相饿死。
 
 **适用场景**: 所有使用 SQLite WAL 模式 + 连接池 + 定时长操作（backup、VACUUM、批处理）+ HTTP API 的生产架构。
+
+## BP-021: Python 函数默认参数在定义时绑定，导致 monkeypatch 配置不生效
+
+**模式**: 类方法 `def __init__(self, db_path: str = CACHE_DB_PATH)` 的默认值 `CACHE_DB_PATH` 在**模块加载（函数定义）时**即被求值并冻结。后续即使测试/运行时 `monkeypatch.setattr(mod, "CACHE_DB_PATH", tmp)` 改了模块属性，`super().__init__()`（不带参数）仍会使用旧的、定义在导入时刻的真实路径。表现：测试本想用临时 db 做隔离，实际悄悄读写生产/真实 db，造成测试间数据污染与「缓存看似有数据」的假象。
+
+**案例**: 2026-07-12 修复四象限日线缓存降级测试时发现：`test_a_share_full_refresh_raises_with_dominant_reason_when_cache_empty` 期望空缓存报错，却误读真实 db（含上一测试残留的 8 只股票）→ 缓存覆盖率 80% → 走降级而非报错。
+
+**教训**:
+- 配置型默认值（路径、阈值、开关）不要在签名里直接写模块全局，改为 `def __init__(self, db_path: Optional[str] = None): self.db_path = db_path or CACHE_DB_PATH`，在**调用时**解析。
+- 任何依赖 monkeypatch 做路径隔离的测试，都要先确认被 patch 的全局真的会被读路径使用（而非被冻结的默认值）。
+- 此类 bug 在 pytest 下极易被「恰好真实 db 有数据」掩盖，CI 换机器/空 db 时才会暴露。
+
+**适用场景**: 所有在 `__init__`/函数签名里引用模块级配置常量（路径、env、全局开关）的 Python 代码，尤其是带缓存/DB 连接的类。
+
+## BP-022: SQLite WAL 模式下「同进程独立连接」数据不可见 + 空缓存全量刷新死循环
+
+**模式**（两个相关联的坑，均出现在四象限 `DailyBarCache`）：
+1. **WAL 跨连接不可见（实测）**: 同一进程内，一个 `sqlite3.connect` 连接 `commit()` 写入的数据，另一个**独立打开**的连接（即使同一 db 文件、WAL 模式）在读取时可能看不到（daily_bars 行数返回 0）。`meta` 表相对更易见，但不可依赖。生产无影响（每个运行用单一 cache 实例、进程间运行不共享）。**测试不能靠「先开连接 A 写、再开连接 B 读」来验证**。
+2. **空缓存全量刷新死循环**: 旧 `needs_full_refresh()` 逻辑是 `count==0 → return True`，而失败的全量刷新从不写缓存 → 下次又是空缓存 → 又全量 → 又被限流。腾讯限流场景下形成永久死循环。
+
+**案例**: 2026-07-12。admin 手动跑四象限，腾讯主源限流，全量刷新成功率 17%(A)/0%(HK)，旧逻辑直接 `RuntimeError` 且缓存从未写入，每次都重新全量。
+
+**教训**:
+- 测试需要预置缓存数据时，**在被测函数自身使用的同一个 cache 实例内**写（让 cache 子类在 `__init__` 里 `set_stock_bars` + `save`，并捕获该实例验证副作用），不要另开连接预置。
+- 全量刷新失败也要 `cache.save()` + `cache.mark_full_refresh()`，把「已尝试全量」记下来；`needs_full_refresh()` 应尊重「近期已标记全量」→ 返回 `False` 走增量，逐步补齐缺口而非反复全量。
+- 增量模式不要因部分失败就强制回退全量（同样会死循环）。
+- 阈值不足时：缓存覆盖 ≥80% → 降级继续（缺失股票中性分 50 参与）；覆盖仍不足 → 报错文案带「主数据源异常」+ dominant provider reason，便于定位。
+
+**适用场景**: 任何带本地 SQLite 缓存、需要 full/incremental 刷新、且上游可能限流的离线计算任务。

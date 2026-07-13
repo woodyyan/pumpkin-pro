@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+import logging
+import time
 from datetime import datetime, timedelta
-from typing import Any, List
+from typing import Any, List, Optional
 
 import requests
 
 from ..models import Capability, DataSourceRequest, DailyBar, Market
 from ..normalizers.daily_bars import normalize_tencent_klines
 
+logger = logging.getLogger(__name__)
+
 TENCENT_KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
     "Referer": "https://stockapp.finance.qq.com/",
 }
+
+# 限流自愈：对 HTTP 403/429 退避重试，避免全量刷新时单批次请求把 IP 打进封禁。
+TENCENT_MAX_RETRIES = 3
+TENCENT_BACKOFF_BASE_S = 2.0
 
 
 class TencentProvider:
@@ -25,12 +33,49 @@ class TencentProvider:
         start, end = _date_range(request)
         fq = "qfq" if request.adjust == "qfq" else ""
         url = f"{TENCENT_KLINE_URL}?param={symbol},day,{start},{end},500,{fq}"
-        response = requests.get(url, headers=HEADERS, timeout=15)
-        response.raise_for_status()
-        data: dict[str, Any] = response.json().get("data") or {}
-        stock_data = data.get(symbol) or {}
-        klines = stock_data.get("qfqday") or stock_data.get("day") or []
-        return normalize_tencent_klines(klines, symbol=request.symbol, market=request.market, provider=self.name)
+
+        last_exc: Optional[Exception] = None
+        for attempt in range(TENCENT_MAX_RETRIES):
+            try:
+                response = requests.get(url, headers=HEADERS, timeout=15)
+                if response.status_code in (403, 429):
+                    wait = self._backoff_seconds(response, attempt)
+                    logger.warning(
+                        "[tencent] 被限流 (HTTP %d) symbol=%s，第 %d/%d 次重试前等待 %.1fs",
+                        response.status_code, request.symbol, attempt + 1, TENCENT_MAX_RETRIES, wait,
+                    )
+                    if attempt < TENCENT_MAX_RETRIES - 1:
+                        time.sleep(wait)
+                        continue
+                    # 最后一次仍被限流：显式失败，让 manager 走 fallback
+                    response.raise_for_status()
+                response.raise_for_status()
+                data: dict[str, Any] = response.json().get("data") or {}
+                stock_data = data.get(symbol) or {}
+                klines = stock_data.get("qfqday") or stock_data.get("day") or []
+                return normalize_tencent_klines(klines, symbol=request.symbol, market=request.market, provider=self.name)
+            except requests.RequestException as exc:
+                last_exc = exc
+                # 连接/超时类错误也退避重试一次，最后一次直接抛出走 fallback
+                if attempt < TENCENT_MAX_RETRIES - 1:
+                    time.sleep(self._backoff_seconds(None, attempt))
+                    continue
+                raise
+        if last_exc is not None:
+            raise last_exc
+        return []
+
+    @staticmethod
+    def _backoff_seconds(response, attempt: int) -> float:
+        # 优先尊重服务端 Retry-After（秒），否则指数退避 2/4/8...
+        if response is not None:
+            retry_after = response.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    return float(retry_after)
+                except (TypeError, ValueError):
+                    pass
+        return TENCENT_BACKOFF_BASE_S * (2 ** attempt)
 
 
 def _to_tencent_symbol(symbol: str, market: str, capability: str) -> str:

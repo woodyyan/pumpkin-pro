@@ -36,11 +36,36 @@ from data_sources.models import Market
 logger = logging.getLogger(__name__)
 _DATA_SOURCE_MANAGER = DataSourceManager()
 
+# 跨股票聚合「主数据源异常原因」，用于把可读性更好的失败主因写进最终报错。
+_FETCH_FAILURE_REASONS: Dict[str, str] = {}
+
 
 def set_data_source_manager(manager: DataSourceManager) -> None:
     """Test hook for injecting a stub data source manager."""
     global _DATA_SOURCE_MANAGER
     _DATA_SOURCE_MANAGER = manager
+
+
+def _summarize_response_errors(response) -> str:
+    """将一次 fetch 的 provider 错误压缩成可观测的简短主因。"""
+    if getattr(response, "errors", None):
+        return "; ".join(response.errors[:3])
+    trace = getattr(response, "trace", None) or []
+    failed = [t for t in trace if getattr(t, "status", "") == "failed"]
+    if failed:
+        return "; ".join(f"{t.provider}: {t.reason}" for t in failed[:3])
+    return "未知数据源错误"
+
+
+def _dominant_fetch_reason() -> str:
+    """跨所有失败股票聚合主数据源异常原因，用于报错与降级日志。"""
+    if not _FETCH_FAILURE_REASONS:
+        return "无失败记录"
+    from collections import Counter
+    providers = Counter(r.split(":")[0].strip() for r in _FETCH_FAILURE_REASONS.values())
+    top_provider, top_count = providers.most_common(1)[0]
+    sample = next((r for r in _FETCH_FAILURE_REASONS.values() if r.startswith(top_provider)), "")
+    return f"主数据源 {top_provider} 异常（影响 {top_count}/{len(_FETCH_FAILURE_REASONS)} 只）: {sample}"
 
 
 # ── Configuration ──────────────────────────────────────────────
@@ -76,8 +101,10 @@ class DailyBarCache:
     _CONNECT_RETRIES = 3
     _CONNECT_RETRY_DELAY = 1
 
-    def __init__(self, db_path: str = CACHE_DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        # 注意：db_path 在调用时解析，而非作为默认值绑定——否则 monkeypatch
+        # CACHE_DB_PATH/HK_CACHE_DB_PATH 不会生效（默认值在定义时即被冻结）。
+        self.db_path = db_path or CACHE_DB_PATH
         self._conn: Optional[sqlite3.Connection] = None
         self._ensure_db()
         self._maybe_migrate_from_json()
@@ -263,15 +290,24 @@ class DailyBarCache:
     def needs_full_refresh(self, force_full: bool = False) -> bool:
         if force_full:
             return True
+        last_full = self._get_meta("last_full_refresh")
+        # 近期（< 间隔）已尝试全量刷新（含失败）→ 走增量，避免数据源不可用时
+        # 每次都重新全量刷新陷入死循环。缺失的股票由增量模式逐步补齐。
+        if last_full:
+            try:
+                days_since = (pd.Timestamp.today() - pd.Timestamp(last_full)).days
+                if days_since < FULL_REFRESH_INTERVAL_DAYS:
+                    return False
+            except Exception:
+                pass
         count = self._conn.execute("SELECT COUNT(*) FROM daily_bars").fetchone()[0]
         if count == 0:
             return True
-        last_full = self._get_meta("last_full_refresh")
+        # 有数据但没有 last_full 标记 → 仍视为需要全量
         if not last_full:
             return True
         try:
-            last_date = pd.Timestamp(last_full)
-            days_since = (pd.Timestamp.today() - last_date).days
+            days_since = (pd.Timestamp.today() - pd.Timestamp(last_full)).days
             return days_since >= FULL_REFRESH_INTERVAL_DAYS
         except Exception:
             return True
@@ -468,9 +504,11 @@ def _daily_bar_dicts_from_gateway(symbol: str, market: str, days: int, source_tr
         adjust="qfq",
     )
     if not response.ok:
+        reason = _summarize_response_errors(response)
+        _FETCH_FAILURE_REASONS[symbol] = reason
         logger.warning(
-            "[quadrant] Data Source Gateway daily_bars failed symbol=%s market=%s errors=%s",
-            symbol, market, response.errors,
+            "[quadrant] Data Source Gateway daily_bars failed symbol=%s market=%s reason=%s errors=%s",
+            symbol, market, reason, response.errors,
         )
         return None
     return [bar.to_dict() for bar in response.data]
@@ -809,6 +847,8 @@ def compute_all_quadrant_scores(
     start_time = time.time()
     # ── 进度上报 URL（从 callback_url 派生）──
     _progress_url = _derive_progress_url(callback_url)
+    # 清空上一轮的失败原因聚合，避免跨运行污染
+    _FETCH_FAILURE_REASONS.clear()
 
     # 上报：即将开始（让前端立刻知道任务已启动）
     _send_progress(_progress_url, "ASHARE", 0, 0, "running", error_msg=None,
@@ -857,8 +897,6 @@ def compute_all_quadrant_scores(
     result_items: list = []
     _compute_error: Optional[str] = None
     try:
-        # ── Step 2: 决定全量 vs 增量 ──
-        is_full = cache.needs_full_refresh(force_full=force_full)
         # ── Step 2: 决定全量 vs 增量 ──
         is_full = cache.needs_full_refresh(force_full=force_full)
         if is_full:
@@ -911,23 +949,42 @@ def compute_all_quadrant_scores(
         logger.info("[quadrant] 日线完成: 成功 %d / 总 %d (%.1f%%)",
                     success_count, total_stocks, fetch_ratio * 100)
 
-        # For full mode, check success ratio strictly
+        # For full mode: 即使成功率不足，也要把已拉取的部分写入缓存，
+        # 否则下次仍走全量刷新形成死循环。缓存覆盖充足则降级继续，否则带主因报错。
         if is_full and fetch_ratio < MIN_SUCCESS_RATIO:
-            raise RuntimeError(
-                f"日线拉取成功率过低: {success_count}/{total_stocks} ({fetch_ratio:.1%})，"
-                f"阈值 {MIN_SUCCESS_RATIO:.0%}"
-            )
+            # 持久化本次已成功拉取的部分日线，并标记为已全量刷新，
+            # 使下次运行进入增量模式（轻量），逐步补齐缺口而非反复全量。
+            cache.save()
+            cache.mark_full_refresh()
+            cached_count = cache.stock_count()
+            cached_ratio = cached_count / total_stocks if total_stocks > 0 else 0
+            dominant = _dominant_fetch_reason()
+            if cached_ratio >= MIN_SUCCESS_RATIO:
+                logger.warning(
+                    "[quadrant] 日线拉取成功率 %.1f%% 低于阈值 %.0f%%，但缓存已覆盖 %.1f%%，"
+                    "降级继续计算（缺失股票以中性分参与）。主因: %s",
+                    fetch_ratio * 100, MIN_SUCCESS_RATIO * 100, cached_ratio * 100, dominant,
+                )
+                # 不中止：继续走后续计算，缺失股票会被赋予中性分
+            else:
+                raise RuntimeError(
+                    f"日线拉取成功率过低: {success_count}/{total_stocks} ({fetch_ratio:.1%})，"
+                    f"阈值 {MIN_SUCCESS_RATIO:.0%}；缓存覆盖 {cached_ratio:.1%} 仍不足。"
+                    f"主数据源异常: {dominant}"
+                )
 
-        # For incremental mode, even if many fail, we still have cached data
+        # For incremental mode, even if many fail, we still have cached data.
+        # 不再强制全量刷新（数据源不可用时会陷入死循环），改为降级继续计算。
         if not is_full:
             cached_count = cache.stock_count()
             cached_ratio = cached_count / total_stocks if total_stocks > 0 else 0
             logger.info("[quadrant] 缓存覆盖: %d / %d (%.1f%%)", cached_count, total_stocks, cached_ratio * 100)
             if cached_ratio < MIN_SUCCESS_RATIO:
-                logger.warning("[quadrant] 缓存覆盖率不足，尝试全量刷新...")
-                # Fallback: trigger full refresh
-                return compute_all_quadrant_scores(callback_url=callback_url, force_full=True,
-                                                   source_trade_date=source_trade_date)
+                logger.warning(
+                    "[quadrant] 缓存覆盖率 %.1f%% 低于阈值 %.0f%%，降级继续计算"
+                    "（缺失股票以中性分参与，下次增量会逐步补齐）。主因: %s",
+                    cached_ratio * 100, MIN_SUCCESS_RATIO * 100, _dominant_fetch_reason(),
+                )
 
         # Update cache metadata
         if is_full:
@@ -1011,11 +1068,14 @@ def compute_all_quadrant_scores(
         excess_rank = _percentile_rank(excess_return).fillna(50)
         merged["trend"] = 0.5 * change_60d_rank + 0.5 * excess_rank
 
-        # ── Flow (NaN-tolerant) ──
-        volume_ratio_rank = _percentile_rank(merged["volume_ratio"]).fillna(50)
-        turnover_rate_rank = _percentile_rank(merged["turnover_rate"]).fillna(50)
-        turnover_ratio = merged["turnover"] / merged["turnover_20d_avg"]
-        turnover_ratio_rank = _percentile_rank(turnover_ratio).fillna(50)
+        # ── Flow (NaN-tolerant, 列可能因数据源不同而缺失) ──
+        volume_ratio_rank = _percentile_rank(merged["volume_ratio"]).fillna(50) if "volume_ratio" in merged.columns else pd.Series(50.0, index=merged.index)
+        turnover_rate_rank = _percentile_rank(merged["turnover_rate"]).fillna(50) if "turnover_rate" in merged.columns else pd.Series(50.0, index=merged.index)
+        if "turnover" in merged.columns and "turnover_20d_avg" in merged.columns:
+            turnover_ratio = merged["turnover"] / merged["turnover_20d_avg"].replace(0, np.nan)
+            turnover_ratio_rank = _percentile_rank(turnover_ratio).fillna(50)
+        else:
+            turnover_ratio_rank = pd.Series(50.0, index=merged.index)
         merged["flow"] = 0.4 * volume_ratio_rank + 0.3 * turnover_rate_rank + 0.3 * turnover_ratio_rank
 
         # ── Revision (NaN-tolerant, field-missing-safe) ──
@@ -1305,6 +1365,8 @@ def compute_hk_quadrant_scores(
         List of dicts with code, name, opportunity, risk, quadrant, sub-scores
     """
     start_time = time.time()
+    # 清空上一轮的失败原因聚合，避免跨运行污染
+    _FETCH_FAILURE_REASONS.clear()
 
     # Import here to avoid circular dependency at module level
     from screener.scanner import get_hk_snapshot
@@ -1408,16 +1470,37 @@ def compute_hk_quadrant_scores(
     logger.info("[hk-quadrant] 日线完成: 成功 %d / 总 %d (%.1f%%)",
                 success_count, total_stocks, fetch_ratio * 100)
 
+    # 全量模式：即便成功率不足也要持久化已拉取的部分并标记为已全量刷新，
+    # 避免下次仍走全量刷新形成死循环；缓存覆盖充足则降级继续，否则带主因报错。
     if is_full and fetch_ratio < MIN_SUCCESS_RATIO:
-        raise RuntimeError(
-            f"港股日线拉取成功率过低: {success_count}/{total_stocks} ({fetch_ratio:.1%})，"
-            f"阈值 {MIN_SUCCESS_RATIO:.0%}"
-        )
+        cache.save()
+        cache.mark_full_refresh()
+        cached_count = cache.stock_count()
+        cached_ratio = cached_count / total_stocks if total_stocks > 0 else 0
+        dominant = _dominant_fetch_reason()
+        if cached_ratio >= MIN_SUCCESS_RATIO:
+            logger.warning(
+                "[hk-quadrant] 日线拉取成功率 %.1f%% 低于阈值 %.0f%%，但缓存已覆盖 %.1f%%，"
+                "降级继续计算（缺失股票以中性分参与）。主因: %s",
+                fetch_ratio * 100, MIN_SUCCESS_RATIO * 100, cached_ratio * 100, dominant,
+            )
+        else:
+            raise RuntimeError(
+                f"港股日线拉取成功率过低: {success_count}/{total_stocks} ({fetch_ratio:.1%})，"
+                f"阈值 {MIN_SUCCESS_RATIO:.0%}；缓存覆盖 {cached_ratio:.1%} 仍不足。"
+                f"主数据源异常: {dominant}"
+            )
 
     if not is_full:
         cached_count = cache.stock_count()
         cached_ratio = cached_count / total_stocks if total_stocks > 0 else 0
         logger.info("[hk-quadrant] 缓存覆盖: %d / %d (%.1f%%)", cached_count, total_stocks, cached_ratio * 100)
+        if cached_ratio < MIN_SUCCESS_RATIO:
+            logger.warning(
+                "[hk-quadrant] 缓存覆盖率 %.1f%% 低于阈值 %.0f%%，降级继续计算"
+                "（缺失股票以中性分参与，下次增量会逐步补齐）。主因: %s",
+                cached_ratio * 100, MIN_SUCCESS_RATIO * 100, _dominant_fetch_reason(),
+            )
 
     # Update cache metadata
     if is_full:

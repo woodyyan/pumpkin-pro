@@ -19,6 +19,7 @@ PROVIDER_CAPABILITIES = (
     ProviderCapability("tencent", Market.ASHARE, Capability.INDEX_BARS),
     ProviderCapability("tencent", Market.HKEX, Capability.INDEX_BARS),
     ProviderCapability("eastmoney", Market.ASHARE, Capability.DAILY_BARS),
+    ProviderCapability("eastmoney", Market.HKEX, Capability.DAILY_BARS),
     ProviderCapability("eastmoney", Market.ASHARE, Capability.INDEX_BARS),
     ProviderCapability("akshare", Market.ASHARE, Capability.DAILY_BARS),
     ProviderCapability("akshare", Market.HKEX, Capability.DAILY_BARS),

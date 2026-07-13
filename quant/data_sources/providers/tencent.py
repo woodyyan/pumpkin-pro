@@ -9,6 +9,7 @@ import requests
 
 from ..models import Capability, DataSourceRequest, DailyBar, Market
 from ..normalizers.daily_bars import normalize_tencent_klines
+from .fundamentals_legacy import LegacyFundamentalsProvider
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,21 @@ class TencentProvider:
     name = "tencent"
 
     def fetch(self, request: DataSourceRequest) -> List[DailyBar]:
+        if request.capability in {Capability.FUNDAMENTALS, Capability.FINANCIALS, Capability.DIVIDENDS}:
+            legacy = LegacyFundamentalsProvider()
+            return legacy.fetch(DataSourceRequest(
+                capability=request.capability,
+                market=request.market,
+                symbol=request.symbol,
+                start_date=request.start_date,
+                end_date=request.end_date,
+                target_trade_date=request.target_trade_date,
+                lookback_days=request.lookback_days,
+                adjust=request.adjust,
+                require_exact_trade_date=request.require_exact_trade_date,
+                allow_partial=request.allow_partial,
+                extras={**request.extras, "provider": self.name, "provider_label": self.name},
+            ))
         if request.capability not in {Capability.DAILY_BARS, Capability.INDEX_BARS}:
             raise ValueError(f"Tencent 不支持能力 {request.capability}")
         symbol = _to_tencent_symbol(request.symbol, request.market, request.capability)

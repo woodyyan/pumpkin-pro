@@ -32,10 +32,12 @@
 
 ## Phase 3: financials / dividends / company_profile
 
-- [ ] 新增 financials、dividends、company_profile、quote_snapshot capabilities。
-- [ ] 将 `quant/data/fundamentals.py` provider fallback 收敛到 Gateway。
+- [x] 新增 financials、dividends capability。
+- [x] 将 `quant/data/fundamentals.py` 基础面入口通过 Gateway provider 复用。
 - [ ] 将 `quant/data/company_profile.py` provider 调用收敛到 Gateway。
-- [ ] 将 factor Phase0 financials/dividends 逐步收敛到 Gateway。
+- [x] 将 factor Phase0 `daily-bars` / `financials` / `dividends` 收敛到 Gateway 编排。
+- [ ] fundamentals / financials / dividends 继续从 legacy adapter / Phase0 helper 细化为独立 adapter + normalizer。
+- [ ] 新增 company_profile、quote_snapshot capabilities。
 
 ## Phase 4: 核心任务接入 trace
 

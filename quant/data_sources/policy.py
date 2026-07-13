@@ -18,6 +18,26 @@ class SourcePolicy:
 
 # First phase: low-frequency policy changes are code-reviewed constants, not env/admin config.
 POLICIES: Dict[Tuple[str, str], SourcePolicy] = {
+    (Capability.FUNDAMENTALS, Market.ASHARE): SourcePolicy(
+        capability=Capability.FUNDAMENTALS,
+        market=Market.ASHARE,
+        providers=["akshare", "eastmoney", "tencent"],
+    ),
+    (Capability.FUNDAMENTALS, Market.HKEX): SourcePolicy(
+        capability=Capability.FUNDAMENTALS,
+        market=Market.HKEX,
+        providers=["eastmoney", "tencent", "akshare"],
+    ),
+    (Capability.FINANCIALS, Market.ASHARE): SourcePolicy(
+        capability=Capability.FINANCIALS,
+        market=Market.ASHARE,
+        providers=["akshare", "eastmoney", "tencent"],
+    ),
+    (Capability.DIVIDENDS, Market.ASHARE): SourcePolicy(
+        capability=Capability.DIVIDENDS,
+        market=Market.ASHARE,
+        providers=["akshare", "eastmoney", "tencent"],
+    ),
     (Capability.DAILY_BARS, Market.ASHARE): SourcePolicy(
         capability=Capability.DAILY_BARS,
         market=Market.ASHARE,

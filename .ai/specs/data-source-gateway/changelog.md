@@ -23,3 +23,7 @@
 - Phase 2 资金星图迁移到 quant：新增 `capital_map` capability，A 股资金星图由 EastMoney provider 统一出入口提供。
 - 新增 quant `capital_map` 模块，承载字段归一、PE 选择、成交额排序、PoC 分箱、板块资金排序和 `/api/capital-map` payload 构造。
 - backend `/api/capital-map` 从直接请求东方财富改为 quant proxy，并保留 30 秒缓存与 stale 降级。
+- Gateway 新增 `fundamentals`、`financials`、`dividends` capability。
+- 因子 Phase0 的 `daily-bars`、`financials`、`dividends` 改为通过 Gateway 统一编排 provider 顺序与 fallback，同时保持原有表结构和 CLI 参数兼容。
+- `fundamentals` / `financials` / `dividends` 第一阶段复用既有基础面/Phase0 抓取逻辑作为 adapter，避免一次性重写财报与分红字段映射。
+- 补充 Gateway 与 Phase0 接入测试；`cd quant && pytest -q` 通过。

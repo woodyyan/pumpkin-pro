@@ -37,6 +37,7 @@ from data.industry_standardization import (
     build_a_share_mapping_rows,
     standardize_a_share_industry,
 )
+from data_sources import Capability, DataSourceManager, DataSourceRequest, Market
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB_CANDIDATES = [
@@ -1298,6 +1299,97 @@ def tencent_symbol(code: str, is_index: bool = False) -> str:
     return tencent_quote_code(code)
 
 
+def get_data_source_manager() -> DataSourceManager:
+    return DataSourceManager()
+
+
+def build_gateway_request(
+    *,
+    capability: str,
+    symbol: str,
+    market: str,
+    selected_source: str,
+    start_date: str = "",
+    end_date: str = "",
+    lookback_days: int = 120,
+    adjust: str = "qfq",
+) -> DataSourceRequest:
+    extras: dict[str, Any] = {"providers_override": source_order(selected_source, EXTERNAL_SOURCE_ORDER)}
+    return DataSourceRequest(
+        capability=capability,
+        market=market,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+        lookback_days=lookback_days,
+        adjust=adjust,
+        extras=extras,
+    )
+
+
+def daily_bar_rows_from_gateway(
+    code: str,
+    bars: list[Any],
+    *,
+    adjusted: str,
+    source: str,
+) -> list[tuple[Any, ...]]:
+    now = utc_now()
+    rows: list[tuple[Any, ...]] = []
+    for bar in bars:
+        rows.append((
+            code,
+            bar.trade_date,
+            safe_float(getattr(bar, "open", None)) or 0.0,
+            safe_float(getattr(bar, "close", None)) or 0.0,
+            safe_float(getattr(bar, "high", None)) or 0.0,
+            safe_float(getattr(bar, "low", None)) or 0.0,
+            safe_float(getattr(bar, "volume", None)) or 0.0,
+            safe_float(getattr(bar, "amount", None)) or 0.0,
+            safe_float(getattr(bar, "turnover_rate", None)),
+            adjusted,
+            source,
+            now,
+        ))
+    return rows
+
+
+def resolve_gateway_error(response: Any) -> str:
+    errors = list(getattr(response, "errors", []) or [])
+    if errors:
+        return " | ".join(errors)
+    trace = list(getattr(response, "trace", []) or [])
+    failed = [f"{item.provider}: {item.reason}" for item in trace if getattr(item, "status", "") == "failed"]
+    if failed:
+        return " | ".join(failed)
+    return "gateway returned no data"
+
+
+class _Phase0FinancialsGatewayProvider:
+    def __init__(self, name: str, fetcher):
+        self.name = name
+        self._fetcher = fetcher
+
+    def fetch(self, request: DataSourceRequest):
+        args = request.extras["args"]
+        conn = request.extras["conn"]
+        report_dates = request.extras["report_dates"]
+        target_codes = request.extras["target_codes"]
+        if self.name == "tencent":
+            return self._fetcher(conn, args)
+        return self._fetcher(report_dates, target_codes, args)
+
+
+class _Phase0DividendsGatewayProvider:
+    def __init__(self, name: str, fetcher):
+        self.name = name
+        self._fetcher = fetcher
+
+    def fetch(self, request: DataSourceRequest):
+        code = request.extras["code"]
+        return self._fetcher(code)
+
+
 def load_code_list_file(path: str) -> list[str]:
     if not path:
         return []
@@ -1825,27 +1917,31 @@ def fetch_daily_bars_tencent(code: str, start_date: str, end_date: str, args: ar
 
 def fetch_daily_bars_with_fallback(code: str, start_date: str, end_date: str, args: argparse.Namespace, is_index: bool = False) -> tuple[list[tuple[Any, ...]], str]:
     mode_label = "index-bars" if is_index else "daily-bars"
-    failures: list[str] = []
-    for item in source_order(args.index_bars_source if is_index else args.daily_bars_source, EXTERNAL_SOURCE_ORDER):
-        try:
-            log_step(f"{mode_label}: {code} 尝试数据源 {item}")
-            if item == "akshare":
-                if is_index:
-                    rows = fetch_index_bars_akshare(code, start_date, end_date, args)
-                else:
-                    rows = fetch_daily_bars_akshare(code, start_date, end_date, args)
-            elif item == "eastmoney":
-                rows = fetch_daily_bars_eastmoney(code, start_date, end_date, args, is_index=is_index)
-            elif item == "tencent":
-                rows = fetch_daily_bars_tencent(code, start_date, end_date, args, is_index=is_index)
-            else:
-                raise ValueError(f"未知 source: {item}")
-            log_step(f"{mode_label}: {code} 数据源 {item} 成功，行数 {len(rows)}")
-            return rows, item
-        except Exception as exc:  # noqa: BLE001
-            failures.append(f"{item}: {exc}")
-            log_source_failure(mode_label, item, exc, args)
-    raise RuntimeError("; ".join(failures))
+    selected_source = args.index_bars_source if is_index else args.daily_bars_source
+    manager = get_data_source_manager()
+    capability = Capability.INDEX_BARS if is_index else Capability.DAILY_BARS
+    request = build_gateway_request(
+        capability=capability,
+        symbol=code,
+        market=Market.ASHARE,
+        selected_source=selected_source,
+        start_date=start_date,
+        end_date=end_date,
+        lookback_days=args.lookback_days,
+        adjust=args.adjust,
+    )
+    response = manager.fetch(request)
+    if not response.ok:
+        message = resolve_gateway_error(response)
+        if args.verbose:
+            for item in response.trace:
+                if item.status == "failed":
+                    log_step(f"{mode_label}: 数据源 {item.provider} 失败：{item.reason}")
+        raise RuntimeError(message)
+    used_source = response.used_sources[0] if response.used_sources else "gateway"
+    rows = daily_bar_rows_from_gateway(code, response.data, adjusted=args.adjust, source=used_source)
+    log_step(f"{mode_label}: {code} 数据源 {used_source} 成功，行数 {len(rows)}")
+    return rows, used_source
 
 
 def backfill_daily_bars(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) -> TaskStats:
@@ -2155,25 +2251,31 @@ def fetch_financials_tencent(conn: sqlite3.Connection, args: argparse.Namespace)
 def fetch_financial_rows_with_fallback(conn: sqlite3.Connection, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
     report_dates = build_report_date_candidates(args.report_limit)
     target_codes = set(get_target_codes(conn, args.code, args.limit, args.code_list_file))
-    failures: list[str] = []
-    for item in source_order(args.financials_source, EXTERNAL_SOURCE_ORDER):
-        try:
-            if item == "akshare":
-                rows = fetch_financials_akshare(report_dates, target_codes, args)
-            elif item == "eastmoney":
-                rows = fetch_financials_eastmoney(report_dates, target_codes, args)
-            elif item == "tencent":
-                rows = fetch_financials_tencent(conn, args)
-            else:
-                raise ValueError(f"未知 source: {item}")
-            if args.require_fcfm_inputs and not any(row[3] is not None and row[9] is not None and row[10] is not None for row in rows):
-                raise RuntimeError(f"{item} 未返回 FCFM 所需字段（revenue/operating_cash_flow/capex）")
-            log_step(f"financials: 数据源 {item} 成功，记录 {len(rows)} 条")
-            return rows, item
-        except Exception as exc:  # noqa: BLE001
-            failures.append(f"{item}: {exc}")
-            log_source_failure("financials", item, exc, args)
-    raise RuntimeError("financials 所有数据源均失败：" + " | ".join(failures))
+    manager = DataSourceManager(providers={
+        "akshare": _Phase0FinancialsGatewayProvider("akshare", fetch_financials_akshare),
+        "eastmoney": _Phase0FinancialsGatewayProvider("eastmoney", fetch_financials_eastmoney),
+        "tencent": _Phase0FinancialsGatewayProvider("tencent", fetch_financials_tencent),
+    })
+    response = manager.fetch(DataSourceRequest(
+        capability=Capability.FINANCIALS,
+        market=Market.ASHARE,
+        symbol=args.code or "phase0_financials",
+        extras={
+            "providers_override": source_order(args.financials_source, EXTERNAL_SOURCE_ORDER),
+            "args": args,
+            "conn": conn,
+            "report_dates": report_dates,
+            "target_codes": target_codes,
+        },
+    ))
+    if not response.ok:
+        raise RuntimeError("financials 所有数据源均失败：" + resolve_gateway_error(response))
+    rows = list(response.data or [])
+    used_source = response.used_sources[0] if response.used_sources else "gateway"
+    if args.require_fcfm_inputs and not any(row[3] is not None and row[9] is not None and row[10] is not None for row in rows):
+        raise RuntimeError(f"{used_source} 未返回 FCFM 所需字段（revenue/operating_cash_flow/capex）")
+    log_step(f"financials: 数据源 {used_source} 成功，记录 {len(rows)} 条")
+    return rows, used_source
 
 
 def backfill_financials(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) -> TaskStats:
@@ -2331,23 +2433,26 @@ def fetch_dividend_rows_tencent(code: str) -> list[tuple[Any, ...]]:
 
 
 def fetch_dividend_rows_with_fallback(code: str, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
-    failures: list[str] = []
-    for item in source_order(args.dividends_source, EXTERNAL_SOURCE_ORDER):
-        try:
-            log_step(f"dividends: {code} 尝试数据源 {item}")
-            if item == "akshare":
-                rows = fetch_dividend_rows_akshare(code)
-            elif item == "eastmoney":
-                rows = fetch_dividend_rows_eastmoney(code)
-            elif item == "tencent":
-                rows = fetch_dividend_rows_tencent(code)
-            else:
-                raise ValueError(f"未知 source: {item}")
-            return rows, item
-        except Exception as exc:  # noqa: BLE001
-            failures.append(f"{item}: {exc}")
-            log_source_failure("dividends", item, exc, args)
-    raise RuntimeError("; ".join(failures))
+    manager = DataSourceManager(providers={
+        "akshare": _Phase0DividendsGatewayProvider("akshare", fetch_dividend_rows_akshare),
+        "eastmoney": _Phase0DividendsGatewayProvider("eastmoney", fetch_dividend_rows_eastmoney),
+        "tencent": _Phase0DividendsGatewayProvider("tencent", fetch_dividend_rows_tencent),
+    })
+    response = manager.fetch(DataSourceRequest(
+        capability=Capability.DIVIDENDS,
+        market=Market.ASHARE,
+        symbol=code,
+        extras={
+            "providers_override": source_order(args.dividends_source, EXTERNAL_SOURCE_ORDER),
+            "code": code,
+        },
+    ))
+    if not response.ok:
+        raise RuntimeError(resolve_gateway_error(response))
+    rows = list(response.data or [])
+    used_source = response.used_sources[0] if response.used_sources else "gateway"
+    log_step(f"dividends: {code} 数据源 {used_source} 成功，记录 {len(rows)} 条")
+    return rows, used_source
 
 
 def backfill_dividends(conn: sqlite3.Connection, args: argparse.Namespace, run_id: str) -> TaskStats:

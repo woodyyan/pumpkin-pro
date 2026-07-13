@@ -6,6 +6,9 @@ from typing import Any, Dict, List, Optional
 
 
 class Capability:
+    FUNDAMENTALS = "fundamentals"
+    FINANCIALS = "financials"
+    DIVIDENDS = "dividends"
     DAILY_BARS = "daily_bars"
     INDEX_BARS = "index_bars"
     CAPITAL_MAP = "capital_map"
@@ -28,6 +31,7 @@ class DataSourceRequest:
     adjust: str = "qfq"
     require_exact_trade_date: bool = False
     allow_partial: bool = True
+    extras: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

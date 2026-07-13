@@ -651,6 +651,7 @@
 - 迁移期间会短期存在旧直连 provider 和新 Gateway 双轨，后续每迁移一个 capability 应逐步删除旧路径。
 - Policy 常量变更需要发版，不能热调整；这是第一期为降低运维复杂度接受的代价。
 - Gateway 返回 partial 数据时，上层业务必须检查 `ok` / `partial` / `trace` / `errors`，不能默认当作完整成功。
+- 对结构化离线表（如 Phase0 `financials` / `dividends`），迁移初期允许 Gateway 复用既有抓取/解析函数生成最终行结构，只把 provider 顺序、fallback、trace 收敛到 Gateway；待 capability 稳定后再继续拆分成独立 adapter + normalizer。
 
 ## D-022: 资金星图迁移为 backend proxy → quant 计算链路
 

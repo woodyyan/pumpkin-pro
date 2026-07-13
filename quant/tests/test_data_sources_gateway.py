@@ -40,6 +40,8 @@ def test_policy_is_code_constant_for_daily_and_index_bars():
     assert get_policy(Capability.DAILY_BARS, Market.ASHARE).providers == ["tencent", "eastmoney", "akshare"]
     assert get_policy(Capability.INDEX_BARS, Market.HKEX).providers == ["tencent", "eastmoney", "akshare"]
     assert get_policy(Capability.DAILY_BARS, Market.ASHARE).require_exact_trade_date is True
+    assert get_policy(Capability.FINANCIALS, Market.ASHARE).providers == ["akshare", "eastmoney", "tencent"]
+    assert get_policy(Capability.DIVIDENDS, Market.ASHARE).providers == ["akshare", "eastmoney", "tencent"]
 
 
 def test_registry_support_matrix():
@@ -48,6 +50,8 @@ def test_registry_support_matrix():
     assert registry.supports("akshare", Market.HKEX, Capability.DAILY_BARS)
     # 港股日线现已注册 eastmoney 作为 fallback，消除「港股单点依赖腾讯」
     assert registry.supports("eastmoney", Market.HKEX, Capability.DAILY_BARS)
+    assert registry.supports("akshare", Market.ASHARE, Capability.FINANCIALS)
+    assert registry.supports("eastmoney", Market.ASHARE, Capability.DIVIDENDS)
 
 
 def test_manager_fallbacks_after_provider_failure():
@@ -107,6 +111,42 @@ def test_manager_returns_partial_failure_when_all_providers_fail():
     assert resp.partial is True
     assert len(resp.errors) == 3
     assert all(t.status == "failed" for t in resp.trace)
+
+
+def test_manager_supports_financials_fallback():
+    manager = DataSourceManager(providers={
+        "akshare": StubProvider(exc=RuntimeError("ak fail")),
+        "eastmoney": StubProvider(rows=[{"code": "000001", "report_period": "2026-03-31"}]),
+        "tencent": StubProvider(rows=[{"code": "000001", "report_period": "2026-03-31"}]),
+    })
+
+    resp = manager.fetch(DataSourceRequest(
+        capability=Capability.FINANCIALS,
+        market=Market.ASHARE,
+        symbol="000001",
+    ))
+
+    assert resp.ok is True
+    assert resp.used_sources == ["eastmoney"]
+    assert resp.data[0]["code"] == "000001"
+
+
+def test_manager_supports_dividends_fallback():
+    manager = DataSourceManager(providers={
+        "akshare": StubProvider(exc=RuntimeError("ak fail")),
+        "eastmoney": StubProvider(exc=RuntimeError("em fail")),
+        "tencent": StubProvider(rows=[{"code": "000001", "report_period": "2025-12-31"}]),
+    })
+
+    resp = manager.fetch(DataSourceRequest(
+        capability=Capability.DIVIDENDS,
+        market=Market.ASHARE,
+        symbol="000001",
+    ))
+
+    assert resp.ok is True
+    assert resp.used_sources == ["tencent"]
+    assert resp.data[0]["report_period"] == "2025-12-31"
 
 
 def test_validate_daily_bars_requires_exact_trade_date():

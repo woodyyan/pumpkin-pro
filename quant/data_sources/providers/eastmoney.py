@@ -9,6 +9,7 @@ from capital_map.models import CapitalMapSnapshot
 from capital_map.normalizer import normalize_capital_map_sector, normalize_capital_map_stock
 from ..models import Capability, DataSourceRequest, DailyBar, Market
 from ..normalizers.daily_bars import normalize_eastmoney_klines
+from .fundamentals_legacy import LegacyFundamentalsProvider
 
 EASTMONEY_KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 EASTMONEY_CLIST_URL = "https://82.push2.eastmoney.com/api/qt/clist/get"
@@ -26,6 +27,21 @@ class EastMoneyProvider:
     def fetch(self, request: DataSourceRequest):
         if request.capability == Capability.CAPITAL_MAP:
             return self.fetch_capital_map(request)
+        if request.capability in {Capability.FUNDAMENTALS, Capability.FINANCIALS, Capability.DIVIDENDS}:
+            legacy = LegacyFundamentalsProvider()
+            return legacy.fetch(DataSourceRequest(
+                capability=request.capability,
+                market=request.market,
+                symbol=request.symbol,
+                start_date=request.start_date,
+                end_date=request.end_date,
+                target_trade_date=request.target_trade_date,
+                lookback_days=request.lookback_days,
+                adjust=request.adjust,
+                require_exact_trade_date=request.require_exact_trade_date,
+                allow_partial=request.allow_partial,
+                extras={**request.extras, "provider": self.name, "provider_label": self.name},
+            ))
         if request.capability not in {Capability.DAILY_BARS, Capability.INDEX_BARS}:
             raise ValueError(f"东方财富不支持能力 {request.capability}")
         # 港股仅开放日线（指数待验证）；A 股日线 + 指数均支持。

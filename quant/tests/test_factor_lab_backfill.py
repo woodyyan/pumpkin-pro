@@ -500,19 +500,91 @@ def test_index_rows_from_daily_rows_calculates_pct_change():
 
 
 def test_daily_bars_fallback_uses_second_source(monkeypatch):
-    args = module.parse_args(["--mode", "daily-bars", "--daily-bars-source", "auto"])
+    args = module.parse_args(["--mode", "daily-bars", "--daily-bars-source", "auto", "--lookback-days", "30"])
 
-    def fail_akshare(code, start_date, end_date, args):
-        raise RuntimeError("akshare down")
+    class TraceItem:
+        def __init__(self, provider, status, reason=""):
+            self.provider = provider
+            self.status = status
+            self.reason = reason
 
-    def ok_eastmoney(code, start_date, end_date, args, is_index=False):
-        return [(code, "2026-05-08", 1, 2, 3, 4, 5, 6, None, "qfq", "eastmoney:kline", "now")]
+    class Response:
+        ok = True
+        used_sources = ["eastmoney"]
+        trace = [TraceItem("akshare", "failed", "akshare down"), TraceItem("eastmoney", "success")]
+        data = [
+            type("Bar", (), {
+                "trade_date": "2026-05-08",
+                "open": 1,
+                "close": 2,
+                "high": 3,
+                "low": 4,
+                "volume": 5,
+                "amount": 6,
+                "turnover_rate": None,
+            })()
+        ]
 
-    monkeypatch.setattr(module, "fetch_daily_bars_akshare", fail_akshare)
-    monkeypatch.setattr(module, "fetch_daily_bars_eastmoney", ok_eastmoney)
+    class StubManager:
+        def fetch(self, request):
+            assert request.capability == module.Capability.DAILY_BARS
+            assert request.extras["providers_override"] == ["akshare", "eastmoney", "tencent"]
+            return Response()
+
+    monkeypatch.setattr(module, "get_data_source_manager", lambda: StubManager())
     rows, source = module.fetch_daily_bars_with_fallback("000001", "20260501", "20260508", args)
     assert source == "eastmoney"
     assert rows[0][0] == "000001"
+
+
+def test_financial_rows_with_fallback_uses_gateway(monkeypatch, tmp_path):
+    db_path = tmp_path / "factor.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("CREATE TABLE factor_securities (code TEXT, is_active INTEGER, is_st INTEGER, board TEXT)")
+        conn.execute("INSERT INTO factor_securities VALUES ('000001',1,0,'MAIN')")
+
+        class Response:
+            ok = True
+            used_sources = ["eastmoney"]
+            trace = []
+            data = [("000001", "2026-03-31", "2026-04-30", 100.0, 10.0, 20.0, 5.0, 30.0, 15.0, 12.0, 6.0, "eastmoney:test", "now")]
+
+        class StubManager:
+            def fetch(self, request):
+                assert request.capability == module.Capability.FINANCIALS
+                assert request.extras["providers_override"] == ["eastmoney"]
+                assert request.extras["target_codes"] == {"000001"}
+                return Response()
+
+        monkeypatch.setattr(module, "DataSourceManager", lambda providers=None: StubManager())
+        args = module.parse_args(["--mode", "financials", "--financials-source", "eastmoney", "--report-limit", "2"])
+        rows, source = module.fetch_financial_rows_with_fallback(conn, args)
+        assert source == "eastmoney"
+        assert rows[0][0] == "000001"
+    finally:
+        conn.close()
+
+
+def test_dividend_rows_with_fallback_uses_gateway(monkeypatch):
+    class Response:
+        ok = True
+        used_sources = ["tencent"]
+        trace = []
+        data = [("000001", "2025-12-31", "unknown", None, None, 0.03, "items.dividend_yield", "", "tencent:test", "now")]
+
+    class StubManager:
+        def fetch(self, request):
+            assert request.capability == module.Capability.DIVIDENDS
+            assert request.extras["providers_override"] == ["tencent"]
+            assert request.extras["code"] == "000001"
+            return Response()
+
+    monkeypatch.setattr(module, "DataSourceManager", lambda providers=None: StubManager())
+    args = module.parse_args(["--mode", "dividends", "--dividends-source", "tencent"])
+    rows, source = module.fetch_dividend_rows_with_fallback("000001", args)
+    assert source == "tencent"
+    assert rows[0][5] == 0.03
 
 
 def test_source_args_are_available_for_all_modes():

@@ -24,9 +24,10 @@ class DataSourceManager:
 
     def fetch(self, request: DataSourceRequest) -> DataSourceResponse:
         policy = get_policy(request.capability, request.market)
+        provider_order = list(request.extras.get("providers_override") or policy.providers)
         traces: List[SourceTrace] = []
         errors: List[str] = []
-        for provider_name in policy.providers:
+        for provider_name in provider_order:
             if not self.registry.supports(provider_name, request.market, request.capability):
                 traces.append(SourceTrace(
                     provider=provider_name,
@@ -134,9 +135,30 @@ class DataSourceManager:
             symbol="capital_map",
         ))
 
+    def fetch_fundamentals(self, *, symbol: str, market: str) -> DataSourceResponse:
+        return self.fetch(DataSourceRequest(
+            capability=Capability.FUNDAMENTALS,
+            market=market,
+            symbol=symbol,
+        ))
+
+    def fetch_financials(self, *, symbol: str, market: str) -> DataSourceResponse:
+        return self.fetch(DataSourceRequest(
+            capability=Capability.FINANCIALS,
+            market=market,
+            symbol=symbol,
+        ))
+
+    def fetch_dividends(self, *, symbol: str, market: str) -> DataSourceResponse:
+        return self.fetch(DataSourceRequest(
+            capability=Capability.DIVIDENDS,
+            market=market,
+            symbol=symbol,
+        ))
+
     @staticmethod
     def _validate(rows, request: DataSourceRequest, policy: SourcePolicy):
-        if request.capability == Capability.CAPITAL_MAP:
+        if request.capability in {Capability.CAPITAL_MAP, Capability.FUNDAMENTALS, Capability.FINANCIALS, Capability.DIVIDENDS}:
             return rows
         if request.capability not in {Capability.DAILY_BARS, Capability.INDEX_BARS}:
             raise UnsupportedCapabilityError(f"unsupported capability: {request.capability}")

@@ -181,10 +181,21 @@ frontend/
 - 价格修复只更新 price requirements / override，不直接改 verified facts；修复后必须重新运行 pipeline 才能生成正式收益。
 - 旧 `quadrant_ranking_portfolio_market_prices`、旧补价按钮、旧全局开始信号日和旧事实表同步链路仅作为历史遗留，不再作为 v2 的推进依据.
 
-## Quant Data Source Gateway（2026-07-11）
+## Quant Data Source Gateway（2026-07-11 / 2026-07-13）
 
 - quant 新增 `quant/data_sources/` 作为外部数据源统一入口，后续业务模块应优先通过 `DataSourceManager` 获取标准化数据，不再直接在业务代码中编排 Tencent / EastMoney / AkShare fallback。
-- 第一期能力覆盖：`daily_bars`、`index_bars`；市场覆盖：A 股 `ASHARE`、港股 `HKEX`。
+- 当前已落地能力覆盖：
+  - `daily_bars`
+  - `index_bars`
+  - `capital_map`
+  - `fundamentals`
+  - `financials`
+  - `dividends`
+- 市场覆盖：
+  - `daily_bars` / `index_bars`: A 股 `ASHARE`、港股 `HKEX`
+  - `capital_map`: 当前仅 A 股 `ASHARE`
+  - `fundamentals`: A 股 `ASHARE`、港股 `HKEX`
+  - `financials` / `dividends`: 当前仅 A 股 `ASHARE`
 - 模块边界：
   - `policy.py`：按 capability + market 定义 provider 顺序，第一期仅使用代码常量，不新增 env / DB / Admin 可编辑配置。
   - `registry.py`：声明 provider 支持的 market + capability，manager 会跳过不支持的 provider。
@@ -192,7 +203,10 @@ frontend/
   - `normalizers/`：只负责字段和单位归一。
   - `validators.py`：负责防止假成功，价格类数据必须精确匹配目标交易日。
   - `manager.py`：统一执行 fallback、trace、partial failure 返回。
-- backend 长期边界保持不变：backend 只调用 quant API，不直接理解底层 provider 字段。资金星图后续应迁移为 backend proxy → quant `/api/capital-map`。
+- Phase0 接入状态：
+  - 四象限 A 股 / 港股日线、benchmark 指数日线已走 Gateway。
+  - 因子 Phase0 的 `daily-bars`、`financials`、`dividends` 已走 Gateway 统一编排；其中 `financials` / `dividends` 现阶段仍复用原有 Phase0 抓取函数生成结构化行，Gateway 负责 provider 顺序、fallback 和 trace。
+- backend 长期边界保持不变：backend 只调用 quant API，不直接理解底层 provider 字段。资金星图已迁移为 backend proxy → quant `/api/capital-map`。
 
 ### 资金星图 quant 化链路（2026-07-13）
 

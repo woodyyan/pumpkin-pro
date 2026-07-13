@@ -135,6 +135,13 @@ class DataSourceManager:
             symbol="capital_map",
         ))
 
+    def fetch_company_profile(self, *, symbol: str, market: str) -> DataSourceResponse:
+        return self.fetch(DataSourceRequest(
+            capability=Capability.COMPANY_PROFILE,
+            market=market,
+            symbol=symbol,
+        ))
+
     def fetch_fundamentals(self, *, symbol: str, market: str) -> DataSourceResponse:
         return self.fetch(DataSourceRequest(
             capability=Capability.FUNDAMENTALS,
@@ -158,7 +165,7 @@ class DataSourceManager:
 
     @staticmethod
     def _validate(rows, request: DataSourceRequest, policy: SourcePolicy):
-        if request.capability in {Capability.CAPITAL_MAP, Capability.FUNDAMENTALS, Capability.FINANCIALS, Capability.DIVIDENDS}:
+        if request.capability in {Capability.CAPITAL_MAP, Capability.COMPANY_PROFILE, Capability.FUNDAMENTALS, Capability.FINANCIALS, Capability.DIVIDENDS}:
             return rows
         if request.capability not in {Capability.DAILY_BARS, Capability.INDEX_BARS}:
             raise UnsupportedCapabilityError(f"unsupported capability: {request.capability}")

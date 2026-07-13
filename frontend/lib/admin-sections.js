@@ -9,6 +9,7 @@ export function resolveAdminSectionApis(section) {
   }
   if (section === 'data') {
     return [
+      '/api/admin/data-source-health',
       '/api/admin/factor-lab/pipeline/status',
       '/api/admin/factor-index/status',
       '/api/admin/quadrant-overview',

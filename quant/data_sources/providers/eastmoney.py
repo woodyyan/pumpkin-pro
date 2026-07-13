@@ -9,6 +9,7 @@ from capital_map.models import CapitalMapSnapshot
 from capital_map.normalizer import normalize_capital_map_sector, normalize_capital_map_stock
 from ..models import Capability, DataSourceRequest, DailyBar, Market
 from ..normalizers.daily_bars import normalize_eastmoney_klines
+from .company_profile_legacy import LegacyCompanyProfileProvider
 from .fundamentals_legacy import LegacyFundamentalsProvider
 
 EASTMONEY_KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
@@ -27,6 +28,8 @@ class EastMoneyProvider:
     def fetch(self, request: DataSourceRequest):
         if request.capability == Capability.CAPITAL_MAP:
             return self.fetch_capital_map(request)
+        if request.capability == Capability.COMPANY_PROFILE:
+            return LegacyCompanyProfileProvider().fetch(request.symbol, request.market)
         if request.capability in {Capability.FUNDAMENTALS, Capability.FINANCIALS, Capability.DIVIDENDS}:
             legacy = LegacyFundamentalsProvider()
             return legacy.fetch(DataSourceRequest(

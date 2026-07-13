@@ -56,7 +56,8 @@ func (s *Service) AdminOverview(ctx context.Context) (*AdminCompanyProfileOvervi
 	if err != nil {
 		return nil, err
 	}
-	return &AdminCompanyProfileOverview{Coverage: coverage, Failures: failures, Refresh: s.RefreshStatus(), UpdatedAt: time.Now().UTC().Format(time.RFC3339)}, nil
+	health, _ := s.fetchDataSourceHealth(ctx)
+	return &AdminCompanyProfileOverview{Coverage: coverage, Failures: failures, Refresh: s.RefreshStatus(), DataSourceHealth: health, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}, nil
 }
 
 func (s *Service) RefreshStatus() CompanyProfileRefreshStatus {
@@ -186,6 +187,37 @@ func (s *Service) fetchFromQuant(ctx context.Context, symbols []string) ([]Compa
 		return nil, fmt.Errorf("decode quant company profile sync response: %w", decodeErr)
 	}
 	return payload.Items, nil
+}
+
+func (s *Service) fetchDataSourceHealth(ctx context.Context) (map[string]any, error) {
+	if strings.TrimSpace(s.quantURL) == "" {
+		return nil, fmt.Errorf("quant service url is empty")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.quantURL+"/api/data-sources/health", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		text := strings.TrimSpace(string(body))
+		if text == "" {
+			text = fmt.Sprintf("quant data source health returned %d", resp.StatusCode)
+		}
+		return nil, fmt.Errorf(text)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func pendingPayload(symbol, exchange string) *CompanyAboutPayload {

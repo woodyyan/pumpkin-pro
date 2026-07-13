@@ -16,6 +16,7 @@ from data.data_loader import DataLoader, generate_sample_data
 from data.fundamentals import get_symbol_fundamentals
 from data.news import get_symbol_news
 from data.company_profile import fetch_a_share_company_profile, fetch_hk_company_profile, normalize_symbol
+from data_sources import DataSourceManager, GLOBAL_HEALTH, Market
 from data.scripts.akshare_loader import fetch_stock_data, resolve_stock_name_with_debug
 from engine.backtest_engine import BacktestEngine
 from result.metrics import PerformanceMetrics
@@ -43,6 +44,7 @@ strategy_registry = StrategyRegistry()
 strategy_service = StrategyService(registry=strategy_registry)
 strategy_resolver = StrategyResolver(service=strategy_service, registry=strategy_registry)
 capital_map_service = CapitalMapService()
+data_source_manager = DataSourceManager(health=GLOBAL_HEALTH)
 
 
 class SampleDataConfig(BaseModel):
@@ -137,6 +139,11 @@ def get_capital_map():
         raise HTTPException(status_code=500, detail=f"资金星图加载失败: {exc}") from exc
 
 
+@app.get("/api/data-sources/health")
+def get_data_source_health():
+    return GLOBAL_HEALTH.snapshot()
+
+
 @app.post("/api/screener/scan")
 def screener_scan(req: ScreenerScanRequest):
     """全市场筛选：获取实时快照 → 多维指标范围过滤 → 排序 → 分页返回
@@ -187,10 +194,12 @@ def sync_company_profiles(req: CompanyProfileSyncRequest):
     for symbol in symbols:
         try:
             normalized, exchange, _ = normalize_symbol(symbol)
-            if exchange == "HKEX":
-                items.append(fetch_hk_company_profile(normalized))
-            else:
-                items.append(fetch_a_share_company_profile(normalized))
+            market = Market.HKEX if exchange == "HKEX" else Market.ASHARE
+            response = data_source_manager.fetch_company_profile(symbol=normalized, market=market)
+            if not response.ok or not response.data:
+                detail = " | ".join(response.errors or []) or "公司资料暂不可用"
+                raise RuntimeError(detail)
+            items.append(response.data)
         except Exception as exc:
             logger.warning("公司资料采集失败 symbol=%s error=%s", symbol, exc)
             errors.append({"symbol": symbol, "error": str(exc)})

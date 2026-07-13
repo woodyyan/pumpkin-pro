@@ -5,6 +5,7 @@ instead of calling Tencent/EastMoney/AkShare directly.
 """
 
 from .manager import DataSourceManager
+from .health import GLOBAL_HEALTH
 from .models import (
     Capability,
     DataSourceRequest,
@@ -20,6 +21,7 @@ __all__ = [
     "DataSourceRequest",
     "DataSourceResponse",
     "DailyBar",
+    "GLOBAL_HEALTH",
     "Market",
     "SourceTrace",
 ]

@@ -9,6 +9,7 @@ import requests
 
 from ..models import Capability, DataSourceRequest, DailyBar, Market
 from ..normalizers.daily_bars import normalize_tencent_klines
+from .company_profile_legacy import LegacyCompanyProfileProvider
 from .fundamentals_legacy import LegacyFundamentalsProvider
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,8 @@ class TencentProvider:
     name = "tencent"
 
     def fetch(self, request: DataSourceRequest) -> List[DailyBar]:
+        if request.capability == Capability.COMPANY_PROFILE:
+            return LegacyCompanyProfileProvider().fetch(request.symbol, request.market)
         if request.capability in {Capability.FUNDAMENTALS, Capability.FINANCIALS, Capability.DIVIDENDS}:
             legacy = LegacyFundamentalsProvider()
             return legacy.fetch(DataSourceRequest(

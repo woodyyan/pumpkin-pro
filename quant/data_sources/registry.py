@@ -14,6 +14,10 @@ class ProviderCapability:
 
 
 PROVIDER_CAPABILITIES = (
+    ProviderCapability("eastmoney", Market.ASHARE, Capability.COMPANY_PROFILE),
+    ProviderCapability("eastmoney", Market.HKEX, Capability.COMPANY_PROFILE),
+    ProviderCapability("akshare", Market.ASHARE, Capability.COMPANY_PROFILE),
+    ProviderCapability("tencent", Market.HKEX, Capability.COMPANY_PROFILE),
     ProviderCapability("eastmoney", Market.ASHARE, Capability.FUNDAMENTALS),
     ProviderCapability("eastmoney", Market.HKEX, Capability.FUNDAMENTALS),
     ProviderCapability("tencent", Market.ASHARE, Capability.FUNDAMENTALS),

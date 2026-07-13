@@ -5,6 +5,7 @@ from typing import List
 
 from ..models import Capability, DataSourceRequest, DailyBar, Market
 from ..normalizers.daily_bars import normalize_akshare_frame
+from .company_profile_legacy import LegacyCompanyProfileProvider
 from .fundamentals_legacy import LegacyFundamentalsProvider
 
 
@@ -12,6 +13,8 @@ class AkShareProvider:
     name = "akshare"
 
     def fetch(self, request: DataSourceRequest) -> List[DailyBar]:
+        if request.capability == Capability.COMPANY_PROFILE:
+            return LegacyCompanyProfileProvider().fetch(request.symbol, request.market)
         if request.capability in {Capability.FUNDAMENTALS, Capability.FINANCIALS, Capability.DIVIDENDS}:
             legacy = LegacyFundamentalsProvider()
             return legacy.fetch(DataSourceRequest(

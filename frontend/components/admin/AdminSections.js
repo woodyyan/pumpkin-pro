@@ -1356,6 +1356,169 @@ export function FactorLabPipelinePanel({ onUnauthorized }) {
   )
 }
 
+function DataSourceStatusBadge({ status }) {
+  const normalized = String(status || '').toLowerCase()
+  let className = 'border-border bg-background text-foreground-dim'
+  if (normalized === 'success' || normalized === 'completed' || normalized === 'fresh') {
+    className = 'border-positive/30 bg-positive/10 text-positive'
+  } else if (normalized === 'failed' || normalized === 'error') {
+    className = 'border-negative/30 bg-negative/10 text-negative'
+  } else if (normalized === 'running' || normalized === 'pending' || normalized === 'stale' || normalized === 'partial') {
+    className = 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200'
+  }
+  return <span className={`rounded-full border px-2 py-0.5 text-[11px] ${className}`}>{status || '--'}</span>
+}
+
+function DataSourceHealthPanel({ onUnauthorized }) {
+  const [refreshingProfiles, setRefreshingProfiles] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const resource = useAdminResource({
+    key: 'admin:data-source-health',
+    request: () => adminFetch('/api/admin/data-source-health'),
+    staleMs: 10_000,
+    minIntervalMs: 3_000,
+    pollMs: (payload) => payload?.refresh?.running ? 5_000 : null,
+    onUnauthorized,
+    errorMessage: '加载数据源健康失败',
+  })
+  const data = resource.data || {}
+  const coverage = Array.isArray(data.coverage) ? data.coverage : []
+  const failures = Array.isArray(data.failures) ? data.failures : []
+  const refresh = data.refresh || {}
+  const gateway = data.data_source_health || {}
+  const providers = gateway.providers || {}
+  const capabilities = gateway.capabilities || {}
+
+  const triggerRefresh = async () => {
+    setRefreshingProfiles(true)
+    setActionError('')
+    try {
+      await adminFetch('/api/admin/company-profiles/refresh', { method: 'POST' })
+      await resource.refresh({ force: true, preferCache: false })
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '触发公司资料刷新失败')
+      if (message) setActionError(message)
+    } finally {
+      setRefreshingProfiles(false)
+    }
+  }
+
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground-muted">数据源健康</h2>
+          <p className="mt-1 text-xs text-foreground-dim">观察 quant Data Source Gateway 最近 provider/capability 状态，以及公司资料同步覆盖率与刷新状态。</p>
+        </div>
+        <button
+          type="button"
+          disabled={refreshingProfiles || refresh?.running}
+          onClick={triggerRefresh}
+          className="rounded-lg border border-border bg-card px-4 py-2 text-xs font-semibold text-foreground-muted transition hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {refresh?.running ? '刷新中...' : refreshingProfiles ? '触发中...' : '刷新公司资料'}
+        </button>
+      </div>
+      {(resource.error || actionError) ? <div className="mb-3 rounded-xl border border-negative/20 bg-negative/10 px-4 py-2 text-xs text-negative">{actionError || resource.error}</div> : null}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="text-sm font-semibold text-foreground-muted">公司资料同步</div>
+            <DataSourceStatusBadge status={refresh?.status} />
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-xs text-foreground-dim">
+            <StatCard label="总任务数" value={formatNumber(refresh?.total_count)} />
+            <StatCard label="成功" value={formatNumber(refresh?.success_count)} />
+            <StatCard label="失败" value={formatNumber(refresh?.failed_count)} />
+            <StatCard label="新增" value={formatNumber(refresh?.new_count)} />
+            <StatCard label="退市标记" value={formatNumber(refresh?.delisted_count)} />
+            <StatCard label="最近更新" value={formatAdminDateTime(data.updated_at)} />
+          </div>
+          <div className="mt-3 space-y-1 text-xs text-foreground-dim">
+            <div>开始时间：{formatAdminDateTime(refresh?.started_at)}</div>
+            <div>结束时间：{formatAdminDateTime(refresh?.finished_at)}</div>
+            <div>提示：{refresh?.error || refresh?.message || '--'}</div>
+          </div>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-border text-foreground-dim">
+                  <th className="pb-2 pr-3">市场</th>
+                  <th className="pb-2 pr-3 text-right">Universe</th>
+                  <th className="pb-2 pr-3 text-right">Profile</th>
+                  <th className="pb-2 pr-3 text-right">Complete</th>
+                  <th className="pb-2 pr-3 text-right">Pending</th>
+                  <th className="pb-2 text-right">覆盖率</th>
+                </tr>
+              </thead>
+              <tbody className="text-foreground-muted">
+                {coverage.length === 0 ? (
+                  <tr><td className="py-2 text-foreground-disabled" colSpan={6}>暂无公司资料覆盖数据。</td></tr>
+                ) : coverage.map((row) => (
+                  <tr key={row.exchange} className="border-b border-border last:border-0">
+                    <td className="py-2 pr-3">{row.exchange}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{formatNumber(row.universe_count)}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{formatNumber(row.profile_count)}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{formatNumber(row.complete_count)}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{formatNumber(row.pending_count + row.failed_count)}</td>
+                    <td className="py-2 text-right tabular-nums">{formatPercentValue(row.coverage_rate)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {failures.length ? (
+            <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
+              <div className="font-medium">最近失败/待补全项</div>
+              <ul className="mt-2 space-y-1">
+                {failures.slice(0, 6).map((item) => (
+                  <li key={`${item.symbol}-${item.updated_at}`}>{item.symbol} {item.name || ''} · {item.profile_status} · {(item.quality_flags || []).join(', ') || '--'}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="mb-3 text-sm font-semibold text-foreground-muted">Gateway 最近状态</div>
+          <div className="grid grid-cols-2 gap-3 text-xs text-foreground-dim">
+            <StatCard label="事件数" value={formatNumber(gateway.total_events)} />
+            <StatCard label="最近更新时间" value={formatAdminDateTime(data.updated_at)} />
+          </div>
+          <div className="mt-4">
+            <div className="mb-2 text-xs text-foreground-dim">按能力</div>
+            <div className="space-y-2">
+              {Object.keys(capabilities).length === 0 ? <p className="text-xs text-foreground-disabled">暂无 capability trace。</p> : Object.entries(capabilities).map(([key, value]) => (
+                <div key={key} className="rounded-lg border border-border bg-background px-3 py-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-foreground-muted">{key}</span>
+                    <DataSourceStatusBadge status={value.last_status} />
+                  </div>
+                  <div className="mt-1 text-foreground-dim">success {formatNumber(value.success)} / failed {formatNumber(value.failed)} / skipped {formatNumber(value.skipped)} · 最近 {value.last_provider || '--'} / {value.last_market || '--'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="mt-4">
+            <div className="mb-2 text-xs text-foreground-dim">按 Provider</div>
+            <div className="space-y-2">
+              {Object.keys(providers).length === 0 ? <p className="text-xs text-foreground-disabled">暂无 provider trace。</p> : Object.entries(providers).map(([key, value]) => (
+                <div key={key} className="rounded-lg border border-border bg-background px-3 py-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-foreground-muted">{key}</span>
+                    <DataSourceStatusBadge status={value.last_status} />
+                  </div>
+                  <div className="mt-1 text-foreground-dim">success {formatNumber(value.success)} / failed {formatNumber(value.failed)} / skipped {formatNumber(value.skipped)}</div>
+                  <div className="mt-1 text-foreground-disabled">最近原因：{value.last_reason || '--'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function normalizeFactorRunSelection(phase, phase0Mode, scope) {
   const payload = { phase, phase0_mode: phase0Mode, scope }
   if (!['all', 'phase0'].includes(phase)) {
@@ -3873,6 +4036,7 @@ export function BackupPanel({ onUnauthorized }) {
 export function AdminDataPage({ onUnauthorized }) {
   return (
     <div className="space-y-8">
+      <DataSourceHealthPanel onUnauthorized={onUnauthorized} />
       <FactorLabPipelinePanel onUnauthorized={onUnauthorized} />
       <FactorIndexAdminPanel onUnauthorized={onUnauthorized} />
       <QuadrantAdminPanel onUnauthorized={onUnauthorized} />

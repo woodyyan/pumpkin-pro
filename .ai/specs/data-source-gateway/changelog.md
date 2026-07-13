@@ -20,6 +20,11 @@
 
 ## 2026-07-13
 
+- Gateway 新增 `company_profile` capability，A 股 / 港股公司资料入口改为通过 `DataSourceManager` 编排 provider 顺序与 fallback。
+- `company_profile` 第一阶段继续复用既有 `data/company_profile.py` 抓取逻辑作为 legacy adapter，先收敛入口、trace 与降级，不一次性重写字段解析。
+- quant 新增 `/api/data-sources/health`，输出最近 provider/capability trace、聚合计数与最近事件。
+- backend 新增 `/api/admin/data-source-health` 与 `/api/admin/company-profiles/refresh`，admin 数据页可查看 Gateway 健康并手动触发公司资料刷新。
+- frontend `/admin/data` 新增“数据源健康”区块，展示公司资料同步状态、覆盖率、失败项，以及 Gateway 的 provider/capability 最近状态。
 - Phase 2 资金星图迁移到 quant：新增 `capital_map` capability，A 股资金星图由 EastMoney provider 统一出入口提供。
 - 新增 quant `capital_map` 模块，承载字段归一、PE 选择、成交额排序、PoC 分箱、板块资金排序和 `/api/capital-map` payload 构造。
 - backend `/api/capital-map` 从直接请求东方财富改为 quant proxy，并保留 30 秒缓存与 stale 降级。

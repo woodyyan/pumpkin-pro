@@ -34,7 +34,7 @@
 
 - [x] 新增 financials、dividends capability。
 - [x] 将 `quant/data/fundamentals.py` 基础面入口通过 Gateway provider 复用。
-- [ ] 将 `quant/data/company_profile.py` provider 调用收敛到 Gateway。
+- [x] 将 `quant/data/company_profile.py` provider 调用收敛到 Gateway。
 - [x] 将 factor Phase0 `daily-bars` / `financials` / `dividends` 收敛到 Gateway 编排。
 - [ ] fundamentals / financials / dividends 继续从 legacy adapter / Phase0 helper 细化为独立 adapter + normalizer。
 - [ ] 新增 company_profile、quote_snapshot capabilities。
@@ -47,6 +47,6 @@
 
 ## Phase 5: Admin 数据源健康区块
 
-- [ ] quant 新增 data source health/capabilities API。
-- [ ] backend 新增 admin proxy API。
-- [ ] frontend `/admin/data` 新增只读数据源健康区块。
+- [x] quant 新增 data source health/capabilities API。
+- [x] backend 新增 admin proxy API。
+- [x] frontend `/admin/data` 新增只读数据源健康区块。

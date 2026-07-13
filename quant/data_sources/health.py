@@ -19,14 +19,22 @@ class DataSourceHealth:
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
             events = list(self._events)
+        capabilities: Dict[str, Dict[str, Any]] = {}
         providers: Dict[str, Dict[str, Any]] = {}
         for event in events:
             entry = providers.setdefault(event.provider, {"success": 0, "failed": 0, "skipped": 0})
             entry[event.status] = entry.get(event.status, 0) + 1
             entry["last_status"] = event.status
             entry["last_reason"] = event.reason
+            cap = capabilities.setdefault(event.capability, {"success": 0, "failed": 0, "skipped": 0})
+            cap[event.status] = cap.get(event.status, 0) + 1
+            cap["last_provider"] = event.provider
+            cap["last_status"] = event.status
+            cap["last_market"] = event.market
         return {
             "providers": providers,
+            "capabilities": capabilities,
+            "total_events": len(events),
             "recent": [event.__dict__ for event in events[-20:]],
         }
 

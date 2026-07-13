@@ -154,6 +154,7 @@ type AdminCompanyProfileOverview struct {
 	Coverage  []CoverageByExchange        `json:"coverage"`
 	Failures  []CompanyProfileFailureItem `json:"failures"`
 	Refresh   CompanyProfileRefreshStatus `json:"refresh"`
+	DataSourceHealth any                  `json:"data_source_health,omitempty"`
 	UpdatedAt string                      `json:"updated_at"`
 }
 

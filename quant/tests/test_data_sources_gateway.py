@@ -40,6 +40,8 @@ def test_policy_is_code_constant_for_daily_and_index_bars():
     assert get_policy(Capability.DAILY_BARS, Market.ASHARE).providers == ["tencent", "eastmoney", "akshare"]
     assert get_policy(Capability.INDEX_BARS, Market.HKEX).providers == ["tencent", "eastmoney", "akshare"]
     assert get_policy(Capability.DAILY_BARS, Market.ASHARE).require_exact_trade_date is True
+    assert get_policy(Capability.COMPANY_PROFILE, Market.ASHARE).providers == ["eastmoney", "akshare", "tencent"]
+    assert get_policy(Capability.COMPANY_PROFILE, Market.HKEX).providers == ["eastmoney", "tencent", "akshare"]
     assert get_policy(Capability.FINANCIALS, Market.ASHARE).providers == ["akshare", "eastmoney", "tencent"]
     assert get_policy(Capability.DIVIDENDS, Market.ASHARE).providers == ["akshare", "eastmoney", "tencent"]
 
@@ -52,6 +54,7 @@ def test_registry_support_matrix():
     assert registry.supports("eastmoney", Market.HKEX, Capability.DAILY_BARS)
     assert registry.supports("akshare", Market.ASHARE, Capability.FINANCIALS)
     assert registry.supports("eastmoney", Market.ASHARE, Capability.DIVIDENDS)
+    assert registry.supports("eastmoney", Market.HKEX, Capability.COMPANY_PROFILE)
 
 
 def test_manager_fallbacks_after_provider_failure():
@@ -147,6 +150,24 @@ def test_manager_supports_dividends_fallback():
     assert resp.ok is True
     assert resp.used_sources == ["tencent"]
     assert resp.data[0]["report_period"] == "2025-12-31"
+
+
+def test_manager_supports_company_profile():
+    manager = DataSourceManager(providers={
+        "eastmoney": StubProvider(rows={"symbol": "600519.SH", "exchange": "SSE"}),
+        "akshare": StubProvider(rows={"symbol": "600519.SH", "exchange": "SSE"}),
+        "tencent": StubProvider(rows={"symbol": "600519.SH", "exchange": "SSE"}),
+    })
+
+    resp = manager.fetch(DataSourceRequest(
+        capability=Capability.COMPANY_PROFILE,
+        market=Market.ASHARE,
+        symbol="600519.SH",
+    ))
+
+    assert resp.ok is True
+    assert resp.used_sources == ["eastmoney"]
+    assert resp.data["symbol"] == "600519.SH"
 
 
 def test_validate_daily_bars_requires_exact_trade_date():

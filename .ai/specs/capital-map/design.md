@@ -6,18 +6,29 @@
 frontend/pages/capital-map.js
   -> components/CapitalMapDashboard.js
   -> lib/capital-map.js
-  -> /api/capital-map
-  -> backend/store/capitalmap.Service
-  -> Eastmoney qt/clist/get
+  -> backend /api/capital-map
+  -> backend/store/capitalmap.ProxyService（30 秒缓存 + stale 降级）
+  -> quant /api/capital-map
+  -> quant/capital_map.Service
+  -> DataSourceManager(capital_map, ASHARE)
+  -> EastMoney provider qt/clist/get
 ```
 
 ## 后端
 
-- 新增 `backend/store/capitalmap` 包。
-- `EastmoneyClient` 负责请求东方财富公开接口和字段解析。
-- `Service` 负责 30 秒内存缓存、stale 快照降级和 payload 构造。
+- `backend/store/capitalmap.ProxyService` 负责代理 quant `/api/capital-map`、30 秒内存缓存和 stale 降级。
+- backend 不再直接理解东方财富字段，不再承载 PE / PoC / 板块资金算法。
 - `GET /api/capital-map` 由 `main.go` 注册，公开访问。
-- 响应头设置 `Cache-Control: s-maxage=30, stale-while-revalidate=90`。
+- 响应头设置 `Cache-Control: s-maxage=30, stale-while-revalidate=60`。
+
+## Quant
+
+- 新增 `quant/capital_map/` 模块。
+- `models.py` 定义资金星图股票、板块与快照模型。
+- `normalizer.py` 负责东方财富字段归一、PE TTM 优先选择、市场前缀归一与金额单位转换。
+- `service.py` 负责 payload 构造、成交额排序、PoC 分箱、板块资金排序。
+- `DataSourceManager.fetch_capital_map()` 作为统一数据源入口，第一期固定 `ASHARE + EastMoney`。
+- quant `GET /api/capital-map` 返回前端兼容 payload。
 
 ## 前端
 

@@ -24,6 +24,7 @@ PROVIDER_CAPABILITIES = (
     ProviderCapability("akshare", Market.ASHARE, Capability.DAILY_BARS),
     ProviderCapability("akshare", Market.HKEX, Capability.DAILY_BARS),
     ProviderCapability("akshare", Market.ASHARE, Capability.INDEX_BARS),
+    ProviderCapability("eastmoney", Market.ASHARE, Capability.CAPITAL_MAP),
 )
 
 

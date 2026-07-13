@@ -193,3 +193,10 @@ frontend/
   - `validators.py`：负责防止假成功，价格类数据必须精确匹配目标交易日。
   - `manager.py`：统一执行 fallback、trace、partial failure 返回。
 - backend 长期边界保持不变：backend 只调用 quant API，不直接理解底层 provider 字段。资金星图后续应迁移为 backend proxy → quant `/api/capital-map`。
+
+### 资金星图 quant 化链路（2026-07-13）
+
+- `/capital-map` 前端页面仍请求 backend `/api/capital-map`，前端数据结构保持兼容。
+- backend `/api/capital-map` 现在只做 quant proxy、30 秒内存缓存和 stale 降级，不再直接解析东方财富字段或计算 PE / PoC / 板块资金。
+- quant 新增 `/api/capital-map` 和 `quant/capital_map/` 模块，负责资金星图 payload 构造：PE TTM 优先、成交额排序、PE 5 倍分箱 PoC、板块成交额与主力净流排序。
+- quant Data Source Gateway 新增 `capital_map` capability，第一期仅支持 `ASHARE` + EastMoney provider。

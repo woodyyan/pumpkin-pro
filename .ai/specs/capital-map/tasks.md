@@ -11,6 +11,15 @@
 - [x] 更新导航、首页功能入口和测试。
 - [x] 补充后端算法/缓存测试和前端 helper/页面测试。
 
+## Quant 迁移（2026-07-13）
+
+- [x] quant 新增 `/api/capital-map`。
+- [x] 资金星图 PE 选择、成交额排序、PoC 分箱和板块资金算法迁移到 quant。
+- [x] Data Source Gateway 新增 `capital_map` capability。
+- [x] EastMoney provider 增加 A 股资金星图股票和板块公开接口。
+- [x] backend `/api/capital-map` 改为 quant proxy。
+- [x] backend 保留 30 秒缓存与 stale 降级。
+
 ## 后续可选
 
 - [ ] 登录后高亮自选股。

@@ -295,7 +295,7 @@ type appServer struct {
 	signalService         *signal.Service
 	portfolioService      *portfolio.Service
 	portfolioWorker       *portfolio.Worker
-	capitalMapService     *capitalmap.Service
+	capitalMapService     *capitalmap.ProxyService
 	quadrantService       *quadrant.Service
 	simPortfolioV2Service *quadrant.SimPortfolioV2Service
 	adminService          *admin.Service
@@ -1664,10 +1664,12 @@ func (a *appServer) handleCapitalMap(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if payload.CacheStatus == "stale" && strings.TrimSpace(payload.LastError) != "" {
-		log.Printf("capital map served stale snapshot after refresh failure: %s", payload.LastError)
+	if status, _ := payload["cacheStatus"].(string); status == "stale" {
+		if lastError, _ := payload["lastError"].(string); strings.TrimSpace(lastError) != "" {
+			log.Printf("capital map served stale snapshot after refresh failure: %s", lastError)
+		}
 	}
-	cacheMaxAge := int(capitalmap.DefaultCacheTTL.Seconds())
+	cacheMaxAge := int(capitalmap.QuantProxyCacheTTL.Seconds())
 	w.Header().Set("Cache-Control", fmt.Sprintf("s-maxage=%d, stale-while-revalidate=%d", cacheMaxAge, cacheMaxAge*2))
 	writeJSON(w, http.StatusOK, payload)
 }
@@ -3969,8 +3971,7 @@ func main() {
 	liveRepo := live.NewRepository(storeInstance.DB)
 	liveService := live.NewService(liveRepo)
 	liveMarketClient := live.NewMarketClient()
-	capitalMapService := capitalmap.NewService(nil)
-	capitalMapService.StartBackgroundRefresh(context.Background(), capitalmap.DefaultCacheTTL)
+	capitalMapService := capitalmap.NewProxyService(cfg.QuantServiceURL, nil)
 
 	signalRepo := signal.NewRepository(storeInstance.DB)
 	signalService := signal.NewService(signalRepo, signal.ServiceConfig{

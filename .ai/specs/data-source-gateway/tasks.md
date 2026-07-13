@@ -24,11 +24,11 @@
 
 ## Phase 2: 资金星图迁移到 quant
 
-- [ ] quant 新增 `/api/capital-map`。
-- [ ] EastMoney provider 增加资金星图行情、估值、板块资金能力。
-- [ ] 新增 `normalizers/capital_map.py`。
-- [ ] 迁移资金星图 PE 选择、成交额排序、PoC 分箱和板块资金算法到 quant。
-- [ ] backend `/api/capital-map` 改为 quant proxy + 30 秒缓存 + stale 降级。
+- [x] quant 新增 `/api/capital-map`。
+- [x] EastMoney provider 增加资金星图行情、估值、板块资金能力。
+- [x] 新增 `quant/capital_map/normalizer.py`。
+- [x] 迁移资金星图 PE 选择、成交额排序、PoC 分箱和板块资金算法到 quant。
+- [x] backend `/api/capital-map` 改为 quant proxy + 30 秒缓存 + stale 降级。
 
 ## Phase 3: financials / dividends / company_profile
 

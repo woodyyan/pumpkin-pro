@@ -42,6 +42,11 @@ POLICIES: Dict[Tuple[str, str], SourcePolicy] = {
         providers=["tencent", "eastmoney", "akshare"],
         require_exact_trade_date=True,
     ),
+    (Capability.CAPITAL_MAP, Market.ASHARE): SourcePolicy(
+        capability=Capability.CAPITAL_MAP,
+        market=Market.ASHARE,
+        providers=["eastmoney"],
+    ),
 }
 
 

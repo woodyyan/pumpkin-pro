@@ -10,3 +10,10 @@
 - 首页「市场与机会发现」分类新增「资金星图」。
 - 补充后端 `capitalmap` 测试与前端 `capital-map` helper / 页面测试。
 - 精简页面展示：移除「数据源」标签和「手动刷新」按钮；数据口径说明统一为「当前按成交额排序抓取高流动性样本。主力净流入属于平台算法口径，不等同于交易所逐笔资金流。本页仅用于市场观察和产品验证，不构成投资建议。」；刷新失败不在前端提示，改为后端日志记录。
+
+## 2026-07-13
+
+- 资金星图数据链路迁移到 quant：新增 quant `/api/capital-map`，由 quant 内部通过 Data Source Gateway 调用 EastMoney provider 并构造资金星图 payload。
+- backend `/api/capital-map` 改为 quant proxy，保留 30 秒内存缓存与 stale 降级；backend 不再直接编排东方财富字段解析和资金星图算法。
+- 资金星图 PE 选择、成交额排序、PoC 分箱、板块资金排序算法迁移到 quant `capital_map` 模块。
+- Data Source Gateway 新增 `capital_map` capability，第一期仅支持 A 股 `ASHARE` + EastMoney。

@@ -651,3 +651,29 @@
 - 迁移期间会短期存在旧直连 provider 和新 Gateway 双轨，后续每迁移一个 capability 应逐步删除旧路径。
 - Policy 常量变更需要发版，不能热调整；这是第一期为降低运维复杂度接受的代价。
 - Gateway 返回 partial 数据时，上层业务必须检查 `ok` / `partial` / `trace` / `errors`，不能默认当作完整成功。
+
+## D-022: 资金星图迁移为 backend proxy → quant 计算链路
+
+**日期**: 2026-07-13
+
+**决策**:
+- 资金星图的公开 API 入口仍保留 backend `/api/capital-map`，避免前端路由和缓存口径变化。
+- backend `/api/capital-map` 只负责调用 quant `/api/capital-map`、30 秒内存缓存和 stale 降级，不再直接调用东方财富或承载资金星图算法。
+- quant 新增 `capital_map` 模块承载字段归一、PE 选择、成交额排序、PoC 分箱、板块资金排序和 payload 构造。
+- Data Source Gateway 新增 `capital_map` capability，第一期策略固定为 A 股 `ASHARE` 使用 EastMoney provider。
+
+**原因**:
+1. 符合 D-021：backend 保持纯粹，只调用 quant API，不理解底层 provider 字段。
+2. 资金星图与四象限、因子等同属行情/量化计算能力，应收敛到 quant，避免 Go backend 与 Python quant 重复维护 provider 字段解析。
+3. 保留 backend proxy 和缓存可以不影响前端调用路径，并继续提供 stale 降级保护。
+4. 第一阶段仅接入 A 股 + EastMoney，避免为尚未支持的港股/美股提前扩展复杂策略。
+
+**替代方案**:
+- 继续由 backend 直接请求东方财富：否决，会与 Data Source Gateway 统一出入口目标冲突，且 provider 字段解析继续分散。
+- 前端直接请求 quant：否决，会绕过 backend 的公开 API、缓存、统一错误处理和未来鉴权/观测入口。
+- 一次性引入 DB 快照或 Admin 可配置数据源：暂缓。当前只做最小迁移闭环，快照和 Admin 健康区块留到后续阶段。
+
+**风险与代价**:
+- backend 到 quant 增加一次内部 HTTP 调用；通过 30 秒缓存降低请求放大。
+- quant 进程需要承担资金星图外部请求耗时；若东方财富不可用，backend 只能返回 stale 或错误。
+- backend 旧 `capitalmap.Service` 与 EastMoney client 暂时作为遗留代码存在，后续确认稳定后可删除，避免一次迁移扩大回归面。

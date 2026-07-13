@@ -16,3 +16,10 @@
 - 四象限 A 股 / 港股 benchmark 60 日收益入口接入 `DataSourceManager.fetch_index_bars`，分别获取上证指数与恒生指数日线后计算。
 - 新增四象限 Gateway 注入测试，覆盖 A 股日线、港股日线、A 股 benchmark、港股 benchmark。
 - 四象限接入后仍不新增 env 或 Admin 可编辑配置，provider 顺序继续由 `data_sources/policy.py` 代码常量控制。
+
+
+## 2026-07-13
+
+- Phase 2 资金星图迁移到 quant：新增 `capital_map` capability，A 股资金星图由 EastMoney provider 统一出入口提供。
+- 新增 quant `capital_map` 模块，承载字段归一、PE 选择、成交额排序、PoC 分箱、板块资金排序和 `/api/capital-map` payload 构造。
+- backend `/api/capital-map` 从直接请求东方财富改为 quant proxy，并保留 30 秒缓存与 stale 降级。

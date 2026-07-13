@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 
 from .errors import DataSourceError, UnsupportedCapabilityError
 from .health import GLOBAL_HEALTH, DataSourceHealth
-from .models import DataSourceRequest, DataSourceResponse, DailyBar, SourceTrace
+from .models import Capability, DataSourceRequest, DataSourceResponse, DailyBar, Market, SourceTrace
 from .policy import SourcePolicy, get_policy
 from .providers import AkShareProvider, EastMoneyProvider, TencentProvider
 from .registry import SourceRegistry
@@ -51,14 +51,16 @@ class DataSourceManager:
                 rows = provider.fetch(request)  # type: ignore[attr-defined]
                 rows = self._validate(rows, request, policy)
                 duration = (time.perf_counter() - start) * 1000
+                records_count = len(rows) if hasattr(rows, "__len__") else 1
+                trade_date = rows[-1].trade_date if request.capability in {Capability.DAILY_BARS, Capability.INDEX_BARS} and rows else ""
                 trace = SourceTrace(
                     provider=provider_name,
                     capability=request.capability,
                     market=request.market,
                     status="success",
                     duration_ms=duration,
-                    records_count=len(rows),
-                    trade_date=rows[-1].trade_date if rows else "",
+                    records_count=records_count,
+                    trade_date=trade_date,
                 )
                 traces.append(trace)
                 response = DataSourceResponse(
@@ -69,7 +71,7 @@ class DataSourceManager:
                     data=rows,
                     used_sources=[provider_name],
                     trace=traces,
-                    source_trade_date=request.target_trade_date or (rows[-1].trade_date if rows else ""),
+                    source_trade_date=request.target_trade_date or (trade_date if trade_date else ""),
                 )
                 self.health.record(traces)
                 return response
@@ -100,8 +102,6 @@ class DataSourceManager:
         )
 
     def fetch_daily_bars(self, *, symbol: str, market: str, start_date: str = "", end_date: str = "", target_trade_date: str = "", lookback_days: int = 120, adjust: str = "qfq") -> DataSourceResponse:
-        from .models import Capability
-
         return self.fetch(DataSourceRequest(
             capability=Capability.DAILY_BARS,
             market=market,
@@ -115,8 +115,6 @@ class DataSourceManager:
         ))
 
     def fetch_index_bars(self, *, symbol: str, market: str, start_date: str = "", end_date: str = "", target_trade_date: str = "", lookback_days: int = 120, adjust: str = "qfq") -> DataSourceResponse:
-        from .models import Capability
-
         return self.fetch(DataSourceRequest(
             capability=Capability.INDEX_BARS,
             market=market,
@@ -129,9 +127,18 @@ class DataSourceManager:
             require_exact_trade_date=bool(target_trade_date),
         ))
 
+    def fetch_capital_map(self) -> DataSourceResponse:
+        return self.fetch(DataSourceRequest(
+            capability=Capability.CAPITAL_MAP,
+            market=Market.ASHARE,
+            symbol="capital_map",
+        ))
+
     @staticmethod
-    def _validate(rows: List[DailyBar], request: DataSourceRequest, policy: SourcePolicy) -> List[DailyBar]:
-        if request.capability not in {"daily_bars", "index_bars"}:
+    def _validate(rows, request: DataSourceRequest, policy: SourcePolicy):
+        if request.capability == Capability.CAPITAL_MAP:
+            return rows
+        if request.capability not in {Capability.DAILY_BARS, Capability.INDEX_BARS}:
             raise UnsupportedCapabilityError(f"unsupported capability: {request.capability}")
         return validate_daily_bars(
             rows,

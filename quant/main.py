@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from config import EXECUTION_PRICE
+from capital_map.service import CapitalMapService
 from data.data_loader import DataLoader, generate_sample_data
 from data.fundamentals import get_symbol_fundamentals
 from data.news import get_symbol_news
@@ -41,6 +42,7 @@ SUPPORTED_DATA_SOURCES = ["online", "csv", "sample"]
 strategy_registry = StrategyRegistry()
 strategy_service = StrategyService(registry=strategy_registry)
 strategy_resolver = StrategyResolver(service=strategy_service, registry=strategy_registry)
+capital_map_service = CapitalMapService()
 
 
 class SampleDataConfig(BaseModel):
@@ -122,6 +124,17 @@ def health_check():
         "strategies": [strategy.name for strategy in strategy_service.list_strategies(active_only=True)],
         "data_sources": SUPPORTED_DATA_SOURCES,
     }
+
+
+@app.get("/api/capital-map")
+def get_capital_map():
+    try:
+        return capital_map_service.get_payload()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("资金星图接口异常")
+        raise HTTPException(status_code=500, detail=f"资金星图加载失败: {exc}") from exc
 
 
 @app.post("/api/screener/scan")

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 class Capability:
     DAILY_BARS = "daily_bars"
     INDEX_BARS = "index_bars"
+    CAPITAL_MAP = "capital_map"
 
 
 class Market:
@@ -79,7 +80,7 @@ class DataSourceResponse:
     capability: str
     market: str
     symbol: str
-    data: List[DailyBar] = field(default_factory=list)
+    data: Any = field(default_factory=list)
     used_sources: List[str] = field(default_factory=list)
     trace: List[SourceTrace] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)

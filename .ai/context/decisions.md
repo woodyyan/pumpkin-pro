@@ -678,3 +678,72 @@
 - backend 到 quant 增加一次内部 HTTP 调用；通过 30 秒缓存降低请求放大。
 - quant 进程需要承担资金星图外部请求耗时；若东方财富不可用，backend 只能返回 stale 或错误。
 - backend 旧 `capitalmap.Service` 与 EastMoney client 暂时作为遗留代码存在，后续确认稳定后可删除，避免一次迁移扩大回归面。
+
+## D-023: A 股四象限股票池预过滤（ST/停牌/北交所）
+
+**日期**: 2026-07-14
+
+**背景**: A 股四象限计算原本对全市场快照只做 `price > 0` 的数据质量过滤，ST、停牌、北交所股票全部进入横截面排名。这些股票数据质量差、流动性异常，影响四象限打分的稳定性和可解释性。用户要求在发起任何数据源请求之前先过滤掉这三类股票。
+
+**决策**:
+1. 新增独立模块 `quant/screener/universe_filter.py`，提供三个纯函数 + 一个组合入口：`is_bse_code`/`is_st_name`/`is_suspended_row`/`filter_a_share_universe`。
+2. 过滤逻辑放在 `quadrant.py` 的 Step 1.5（快照之后、拉日线之前），不下沉到 `scanner.py`（通用快照层应保持中立）。
+3. 全部判断只读取已拉取的快照本地字段（`code`/`name`/`volume`），不发起任何网络请求，与 baostock 可用性完全解耦。
+4. 北交所判定复用 Factor Lab `classify_board()` 的 BJ 分支：`code.startswith(("8", "4", "920"))`。
+5. ST 判定用子串匹配：`"ST" in name.upper().replace(" ", "")`，天然覆盖 `*ST`/`SST`/`S*ST`；额外排除名称含"退"字的退市整理期股票。
+6. 停牌代理用 `volume <= 0`；保守原则：字段缺失（None/NaN）时不过滤，宁可漏过滤不可误伤。
+7. 过滤比例超过 15% 时记录 ERROR 告警但不阻断流程，防上游数据异常导致大批误伤。
+8. 被过滤的股票不参与四象限打分，但 `FilterStats` 写入计算报告和进度上报，供 Admin 监控。
+
+**原因**:
+1. 过滤所需信号全部可从已拉取的快照本地得出，不需要新增数据源请求。
+2. 独立模块便于未来被选股器等其他业务场景选择性复用，也便于单独写单元测试。
+3. 与 baostock 解耦是硬约束：过滤发生在 baostock 调用之前，baostock 不可用时过滤照常工作。
+4. 复用 Factor Lab 北交所判定规则避免系统内出现两套定义。
+
+**替代方案**:
+- 用 baostock `query_all_stock()` 的 `tradeStatus` 做停牌判断：否决，会让过滤依赖 baostock 可用性。
+- 直接在 `quadrant.py` 内写 pandas 过滤代码：否决，口径散落在编排逻辑里不利维护和收敛。
+- 设计更严谨的正则或引入交易所公开代码段清单判北交所：否决，过度设计。
+
+**风险与代价**:
+- `name`/`volume` 字段解析异常可能误伤正常股票。缓解：保守原则 + `MAX_FILTER_RATIO` 熔断 + 上线前离线校验。
+- 过滤模块可独立于 baostock 先行灰度上线，降低整体上线风险。
+
+## D-024: BaoStock 设为 A 股四象限第一优先级数据源 + 全局配额守卫
+
+**日期**: 2026-07-14
+
+**背景**: 四象限 A 股日线数据源原为 `tencent → eastmoney → akshare`。baostock 提供权威的 A 股 EOD 日线（含 `isST`/`peTTM`/`turn` 等字段），适合作为第一优先级。baostock 配额为 50000 次/日（单 IP 限制，不分账号），仓库内有多处裸调用 baostock 的代码路径共享同一份 IP 配额。
+
+**决策**:
+1. 新增 `quant/data_sources/providers/baostock.py` 作为 A 股 `DAILY_BARS` 的第一优先级 provider。
+2. `policy.py` 中 A 股 `DAILY_BARS` 的 provider 顺序改为 `["baostock", "tencent", "eastmoney", "akshare"]`。港股不动。
+3. baostock 登录态采用长连接单例：进程启动时 `bs.login()` 一次，全程复用 session。
+4. baostock 请求串行执行（非线程安全），通过 `threading.Lock` 保证。
+5. 新增 `GlobalBaostockQuotaGuard` 服务级全局单例（`quant/data_sources/quota/baostock_quota.py`）：
+   - SQLite 落盘跨进程共享同一份配额账本。
+   - 所有 baostock 调用方必须经过 `try_acquire(cost, caller)` 检查。
+   - `caller` 维度归因统计（不按 caller 分割配额，只做统计标注）。
+   - 用量达到 90%（45000 次）自动标记黑名单，当天剩余请求拒绝。
+   - 异常时放行（宁可多请求也不因配额守卫 bug 阻塞业务）。
+6. `backfill_factor_lab_phase0.py` 的行业回填分支接入 `GlobalBaostockQuotaGuard.try_acquire(caller="factor_lab_industry_backfill")`。
+7. `/api/data-sources/health` 追加 `baostock_quota` 字段，供 Admin 展示配额用量和 caller 归因。
+8. 利润增速（YOYNI）默认关闭，`ENABLE_BAOSTOCK_GROWTH` 开关保留但默认 `False`。
+9. `output/` 下的一次性 baostock 脚本本次不改代码接入配额守卫，作为已知过渡期风险接受。
+
+**原因**:
+1. 单 IP 限额意味着配额不是四象限一个任务的私有资源，必须是服务级全局账本，否则会出现"账本外支出"导致 IP 被拉黑却毫无察觉。
+2. 长连接单例避免每次请求重复登录/登出，降低 baostock 服务端压力和自身延迟。
+3. 串行执行是 baostock API 线程安全约束的必然选择。
+4. 过滤模块（D-023）会减少 `all_codes` 数量，直接降低 baostock 请求量，两者协同降低配额压力。
+
+**替代方案**:
+- 配额守卫只在四象限内部维护私有计数器：否决，无法覆盖 Factor Lab 等其他裸调用路径。
+- 把所有 `output/` 脚本也接入配额守卫：否决，改动面过大且这些脚本使用频率极低，作为已知风险接受更合适。
+- baostock 登录态每次请求 login/logout：否决，增加延迟和服务端压力。
+
+**风险与代价**:
+- baostock 串行请求可能拖慢全量计算耗时。缓解：过滤模块减少请求量 + `MAX_WORKERS=3` 对后续 provider 的并发仍有效。
+- `GlobalBaostockQuotaGuard` 多调用方并发写入需保证原子性。缓解：SQLite `BEGIN IMMEDIATE` 事务 + `busy_timeout`。
+- 建议过滤模块先于 baostock provider 独立灰度上线，两者解耦上线互不阻塞。

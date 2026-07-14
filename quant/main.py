@@ -141,7 +141,14 @@ def get_capital_map():
 
 @app.get("/api/data-sources/health")
 def get_data_source_health():
-    return GLOBAL_HEALTH.snapshot()
+    health = GLOBAL_HEALTH.snapshot()
+    # 追加 baostock 全局配额状态
+    try:
+        from data_sources.quota.baostock_quota import get_global_quota_guard
+        health["baostock_quota"] = get_global_quota_guard().snapshot()
+    except Exception:
+        health["baostock_quota"] = None
+    return health
 
 
 @app.post("/api/screener/scan")

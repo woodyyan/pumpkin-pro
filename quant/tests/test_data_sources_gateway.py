@@ -37,7 +37,7 @@ def bar(date="2026-07-10", provider="stub"):
 
 
 def test_policy_is_code_constant_for_daily_and_index_bars():
-    assert get_policy(Capability.DAILY_BARS, Market.ASHARE).providers == ["tencent", "eastmoney", "akshare"]
+    assert get_policy(Capability.DAILY_BARS, Market.ASHARE).providers == ["baostock", "tencent", "eastmoney", "akshare"]
     assert get_policy(Capability.INDEX_BARS, Market.HKEX).providers == ["tencent", "eastmoney", "akshare"]
     assert get_policy(Capability.DAILY_BARS, Market.ASHARE).require_exact_trade_date is True
     assert get_policy(Capability.COMPANY_PROFILE, Market.ASHARE).providers == ["eastmoney", "akshare", "tencent"]
@@ -59,6 +59,7 @@ def test_registry_support_matrix():
 
 def test_manager_fallbacks_after_provider_failure():
     manager = DataSourceManager(providers={
+        "baostock": StubProvider(exc=RuntimeError("baostock boom")),
         "tencent": StubProvider(exc=RuntimeError("boom")),
         "eastmoney": StubProvider(rows=[bar(provider="eastmoney")]),
         "akshare": StubProvider(rows=[bar(provider="akshare")]),
@@ -73,7 +74,7 @@ def test_manager_fallbacks_after_provider_failure():
 
     assert resp.ok is True
     assert resp.used_sources == ["eastmoney"]
-    assert [t.status for t in resp.trace] == ["failed", "success"]
+    assert [t.status for t in resp.trace] == ["failed", "failed", "success"]
     assert resp.data[0].provider == "eastmoney"
 
 

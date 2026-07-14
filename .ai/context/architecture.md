@@ -214,3 +214,15 @@ frontend/
 - backend `/api/capital-map` 现在只做 quant proxy、30 秒内存缓存和 stale 降级，不再直接解析东方财富字段或计算 PE / PoC / 板块资金。
 - quant 新增 `/api/capital-map` 和 `quant/capital_map/` 模块，负责资金星图 payload 构造：PE TTM 优先、成交额排序、PE 5 倍分箱 PoC、板块成交额与主力净流排序。
 - quant Data Source Gateway 新增 `capital_map` capability，第一期仅支持 `ASHARE` + EastMoney provider。
+
+### A 股四象限股票池预过滤 + BaoStock Provider（2026-07-14）
+
+- 四象限 A 股计算在 Step 1（全市场快照）和 Step 3（并发拉日线）之间新增 Step 1.5：调用 `quant/screener/universe_filter.py` 的 `filter_a_share_universe()` 过滤 ST/退市、停牌代理、北交所股票。
+- 过滤逻辑全部基于已拉取快照的本地字段（`code`/`name`/`volume`），不发起任何网络请求，与 baostock 可用性完全解耦。
+- 北交所判定复用 Factor Lab `classify_board()` 的 BJ 分支（`code.startswith(("8", "4", "920"))`）；ST 判定用子串匹配覆盖所有变体；停牌代理用 `volume <= 0`。
+- `FilterStats` 写入计算报告（`compute_report.universe_filter_stats`）和进度上报（`_send_progress` 的 `universe_filter_stats` 字段），供 Admin 监控过滤幅度。
+- Data Source Gateway 新增 BaoStockProvider（`quant/data_sources/providers/baostock.py`）作为 A 股 `DAILY_BARS` 第一优先级；provider 顺序改为 `["baostock", "tencent", "eastmoney", "akshare"]`。港股不动。
+- BaoStock 登录态采用长连接单例，请求串行执行（`threading.Lock`）。
+- 新增 `quant/data_sources/quota/baostock_quota.py` 的 `GlobalBaostockQuotaGuard` 服务级全局单例：SQLite 落盘跨进程共享配额账本，覆盖四象限 + Factor Lab 行业回填等所有 baostock 调用方，90% 用量自动黑名单。
+- `/api/data-sources/health` 追加 `baostock_quota` 字段，含 `by_caller` 归因统计。
+- Factor Lab 行业回填（`backfill_factor_lab_phase0.py::fetch_industry_rows_baostock`）已接入 `GlobalBaostockQuotaGuard.try_acquire(caller="factor_lab_industry_backfill")`。

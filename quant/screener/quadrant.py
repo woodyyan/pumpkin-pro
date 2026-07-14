@@ -29,6 +29,7 @@ import pandas as pd
 import requests
 
 from screener.scanner import get_a_share_snapshot
+from screener.universe_filter import filter_a_share_universe, FilterStats
 from data_sources import DataSourceManager
 from data_sources.models import Market
 
@@ -885,13 +886,20 @@ def compute_all_quadrant_scores(
         & (snapshot_df["price"].notna())
         & (snapshot_df["price"] > 0)
     ].copy()
+
+    # ── Step 1.5: 股票池预过滤（ST/停牌/北交所）──
+    # 纯本地判断，不发起网络请求，与 baostock 可用性完全解耦。
+    logger.info("[quadrant] Step 1.5: 预过滤 ST/停牌/北交所...")
+    snapshot_df, _universe_filter_stats = filter_a_share_universe(snapshot_df)
+
     all_codes = snapshot_df["code"].tolist()
     total_stocks = len(all_codes)
     logger.info("[quadrant] 有效股票: %d 只", total_stocks)
 
     # 上报：快照完成，更新真实总数
     _send_progress(_progress_url, "ASHARE", 0, total_stocks, "running",
-                   message=f"快照加载完成（{total_stocks}只），准备拉取日线...")
+                   message=f"快照加载完成（{total_stocks}只），准备拉取日线...",
+                   universe_filter_stats=_universe_filter_stats.to_dict())
 
     # ── Main computation: ensure failure path also writes log via callback ──
     result_items: list = []
@@ -1276,6 +1284,7 @@ def compute_all_quadrant_scores(
             "data_quality": data_quality,
             "score_distribution": score_stats,
             "quadrant_counts": quadrant_counts,
+            "universe_filter_stats": _universe_filter_stats.to_dict(),
             "status": "success",
             "error": "",
         }
@@ -1794,7 +1803,8 @@ def _derive_progress_url(callback_url: Optional[str]) -> Optional[str]:
 def _send_progress(progress_url: Optional[str], exchange: str,
                    current: int, total: int, status: str,
                    error_msg: Optional[str] = None,
-                   message: Optional[str] = None):
+                   message: Optional[str] = None,
+                   universe_filter_stats: Optional[Dict[str, Any]] = None):
     """向 Go 后端上报计算进度（fire-and-forget，失败不阻塞主流程）。
     
     Args:
@@ -1805,6 +1815,7 @@ def _send_progress(progress_url: Optional[str], exchange: str,
         status:       "running" / "success" / "failed"
         error_msg:    失败时的具体原因（仅 status="failed" 时有意义）
         message:      阶段描述信息，如「正在拉取全市场快照...」
+        universe_filter_stats: 股票池预过滤统计（仅 A 股有值）
     """
     if not progress_url:
         return
@@ -1819,6 +1830,8 @@ def _send_progress(progress_url: Optional[str], exchange: str,
             payload["error_msg"] = error_msg
         if message:
             payload["message"] = message
+        if universe_filter_stats:
+            payload["universe_filter_stats"] = universe_filter_stats
         resp = requests.post(
             progress_url, json=payload, timeout=5,
             headers={"Content-Type": "application/json"},

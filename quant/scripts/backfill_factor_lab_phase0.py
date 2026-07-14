@@ -893,6 +893,13 @@ def parse_baostock_industry_value(raw: Any) -> tuple[str, str]:
 
 def fetch_industry_rows_baostock(conn: sqlite3.Connection, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
     log_step("industries: 尝试外部源 BaoStock 全量行业")
+    # 全局配额守卫：行业回填消耗 1 次 baostock 请求，需先检查配额
+    try:
+        from data_sources.quota.baostock_quota import get_global_quota_guard
+        if not get_global_quota_guard().try_acquire(cost=1, caller="factor_lab_industry_backfill"):
+            raise RuntimeError("BaoStock 配额不足或已黑名单，跳过行业回填")
+    except ImportError:
+        pass  # 配额守卫未安装时降级为不检查（不阻塞已有功能）
     bs = import_baostock()
     login_result = bs.login()
     if str(getattr(login_result, "error_code", "")) != "0":

@@ -7,7 +7,7 @@ from .errors import DataSourceError, UnsupportedCapabilityError
 from .health import GLOBAL_HEALTH, DataSourceHealth
 from .models import Capability, DataSourceRequest, DataSourceResponse, DailyBar, Market, SourceTrace
 from .policy import SourcePolicy, get_policy
-from .providers import AkShareProvider, EastMoneyProvider, TencentProvider
+from .providers import AkShareProvider, BaoStockProvider, EastMoneyProvider, TencentProvider
 from .registry import SourceRegistry
 from .validators import validate_daily_bars
 
@@ -15,6 +15,7 @@ from .validators import validate_daily_bars
 class DataSourceManager:
     def __init__(self, providers: Optional[Dict[str, object]] = None, registry: Optional[SourceRegistry] = None, health: Optional[DataSourceHealth] = None):
         self.providers = providers or {
+            "baostock": BaoStockProvider(),
             "tencent": TencentProvider(),
             "eastmoney": EastMoneyProvider(),
             "akshare": AkShareProvider(),

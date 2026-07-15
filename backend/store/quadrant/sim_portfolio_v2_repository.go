@@ -81,6 +81,20 @@ func (r *Repository) GetSimPortfolioV2SignalBatch(ctx context.Context, market, d
 	return &row, err
 }
 
+func (r *Repository) DeleteSimPortfolioV2SignalBatch(ctx context.Context, market, date string) error {
+	market = normalizeSimPortfolioV2Market(market)
+	date = strings.TrimSpace(date)
+	if market == "" || date == "" {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("market = ? AND source_trade_date = ?", market, date).Delete(&SimPortfolioV2SignalItem{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("market = ? AND source_trade_date = ?", market, date).Delete(&SimPortfolioV2SignalBatch{}).Error
+	})
+}
+
 func (r *Repository) ListSimPortfolioV2SignalItems(ctx context.Context, batchID string) ([]SimPortfolioV2SignalItem, error) {
 	var rows []SimPortfolioV2SignalItem
 	err := r.db.WithContext(ctx).Where("batch_id = ?", strings.TrimSpace(batchID)).Order("rank ASC, code ASC").Find(&rows).Error

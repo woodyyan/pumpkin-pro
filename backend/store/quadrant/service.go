@@ -461,6 +461,7 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 		defer cancel()
 		log.Printf("[quadrant] async best-effort tasks START: exchange=%s log_id=%s", exchange, logID)
 		s.saveRankingSnapshotsBestEffortWithHints(asyncCtx, records, computedAt, priceHints)
+		s.invalidateSimPortfolioV2SignalBatchBestEffort(asyncCtx, exchange, sourceTradeDate)
 		s.saveRankingPortfolioBestEffort(asyncCtx, records, computedAt, priceHints, taskLog.ID)
 		log.Printf("[quadrant] async best-effort tasks DONE: exchange=%s log_id=%s", exchange, logID)
 	}()
@@ -812,6 +813,21 @@ func selectSnapshotRecords(records []QuadrantScoreRecord, limit int) []QuadrantS
 // This is best-effort: errors are logged but not propagated to the caller.
 func (s *Service) saveRankingSnapshotsBestEffort(ctx context.Context, records []QuadrantScoreRecord, computedAt time.Time) {
 	s.saveRankingSnapshotsBestEffortWithHints(ctx, records, computedAt, nil)
+}
+
+func (s *Service) invalidateSimPortfolioV2SignalBatchBestEffort(ctx context.Context, exchange, sourceTradeDate string) {
+	if sourceTradeDate == "" {
+		return
+	}
+	market := SimPortfolioV2MarketAShare
+	if strings.EqualFold(exchange, SimPortfolioV2MarketHKEX) {
+		market = SimPortfolioV2MarketHKEX
+	}
+	if err := s.repo.DeleteSimPortfolioV2SignalBatch(ctx, market, sourceTradeDate); err != nil {
+		log.Printf("[quadrant] WARNING: failed to invalidate sim portfolio v2 signal batch: market=%s source_trade_date=%s err=%v", market, sourceTradeDate, err)
+		return
+	}
+	log.Printf("[quadrant] sim portfolio v2 signal batch invalidated: market=%s source_trade_date=%s", market, sourceTradeDate)
 }
 
 func (s *Service) saveRankingSnapshotsBestEffortWithHints(ctx context.Context, records []QuadrantScoreRecord, computedAt time.Time, priceHints map[string]snapshotPriceHint) {

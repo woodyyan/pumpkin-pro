@@ -78,6 +78,40 @@ func TestSimPortfolioV2StrictModeBlocksMissingSignal(t *testing.T) {
 	}
 }
 
+func TestSimPortfolioV2SignalBatchRebuildsAfterInvalidation(t *testing.T) {
+	repo, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	const date = "2026-07-02"
+	now := time.Now().UTC()
+	stale := SimPortfolioV2SignalBatch{
+		ID: "sig-ashare-2026-07-02", Market: SimPortfolioV2MarketAShare, SourceTradeDate: date,
+		ComputedAt: now, Status: SimPortfolioV2StatusBlocked, Message: "缺少模拟组合信号快照。",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.ReplaceSimPortfolioV2SignalBatch(ctx, stale, nil); err != nil {
+		t.Fatalf("seed stale signal batch: %v", err)
+	}
+	seedV2RankingSnapshots(t, repo, SimPortfolioV2MarketAShare, date, 4)
+
+	if err := repo.DeleteSimPortfolioV2SignalBatch(ctx, SimPortfolioV2MarketAShare, date); err != nil {
+		t.Fatalf("DeleteSimPortfolioV2SignalBatch: %v", err)
+	}
+	if batch, err := repo.GetSimPortfolioV2SignalBatch(ctx, SimPortfolioV2MarketAShare, date); err != nil || batch != nil {
+		t.Fatalf("expected invalidated batch to be absent, got batch=%+v err=%v", batch, err)
+	}
+
+	detail, err := svc.GetAdminCalendarDay(ctx, SimPortfolioV2MarketAShare, date)
+	if err != nil {
+		t.Fatalf("GetAdminCalendarDay: %v", err)
+	}
+	if detail.Signal.Status != SimPortfolioV2StatusOK || detail.Signal.CandidateCount != 4 || detail.Signal.MissingPriceCount != 0 {
+		t.Fatalf("expected rebuilt ready signal batch, got %+v", detail.Signal)
+	}
+	if len(detail.RepairSuggestions) != 0 {
+		t.Fatalf("expected no signal repair suggestion, got %+v", detail.RepairSuggestions)
+	}
+}
+
 func TestSimPortfolioV2GeneratesVerifiedFacts(t *testing.T) {
 	repo, svc := setupSimPortfolioV2Test(t)
 	ctx := context.Background()

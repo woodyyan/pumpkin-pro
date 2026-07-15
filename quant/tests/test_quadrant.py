@@ -8,6 +8,7 @@ from screener.quadrant import (
     _classify_a_share_board,
     _compute_daily_metrics,
     _derive_progress_url,
+    _historical_cache_db_path,
     _latest_cached_close,
     _resolve_end_date,
     _safe_momentum,
@@ -126,6 +127,53 @@ def test_latest_cached_close_returns_empty_when_unavailable():
 
     assert close_price == 0
     assert trade_date == ""
+
+
+def test_latest_cached_close_uses_target_date_instead_of_newer_cached_price():
+    cache = StubDailyBarCache({
+        "600519": [
+            {"date": "2026-07-06", "close": 101.2},
+            {"date": "2026-07-07", "close": 103.4},
+        ]
+    })
+
+    close_price, trade_date = _latest_cached_close(
+        cache,
+        "600519",
+        target_trade_date="2026-07-06",
+        require_exact_trade_date=True,
+    )
+
+    assert close_price == pytest.approx(101.2)
+    assert trade_date == "2026-07-06"
+
+
+def test_latest_cached_close_requires_exact_target_date_for_historical_rebuild():
+    cache = StubDailyBarCache({
+        "600519": [
+            {"date": "2026-07-05", "close": 100.0},
+            {"date": "2026-07-07", "close": 103.4},
+        ]
+    })
+
+    close_price, trade_date = _latest_cached_close(
+        cache,
+        "600519",
+        target_trade_date="2026-07-06",
+        require_exact_trade_date=True,
+    )
+
+    assert close_price == 0
+    assert trade_date == ""
+
+
+def test_historical_cache_path_is_market_and_date_isolated():
+    a_share_path = _historical_cache_db_path("ASHARE", "2026-07-06")
+    hkex_path = _historical_cache_db_path("HKEX", "2026-07-06")
+
+    assert a_share_path.endswith("quadrant_cache_ashare_20260706.db")
+    assert hkex_path.endswith("quadrant_cache_hkex_20260706.db")
+    assert a_share_path != hkex_path
 
 
 # ── _derive_progress_url ──

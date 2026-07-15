@@ -80,6 +80,17 @@ _CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "c
 CACHE_DB_PATH = os.path.join(_CACHE_DIR, "quadrant_cache.db")
 LEGACY_JSON_PATH = os.path.join(_CACHE_DIR, "quadrant_daily_cache.json")
 
+
+def _historical_cache_db_path(market: str, source_trade_date: Optional[str]) -> Optional[str]:
+    """Return an isolated cache path for a historical market rebuild."""
+    if not source_trade_date:
+        return None
+    date = _resolve_end_date(source_trade_date)
+    if date != source_trade_date:
+        return None
+    return os.path.join(_CACHE_DIR, f"quadrant_cache_{market.lower()}_{date.replace('-', '')}.db")
+
+
 # Quadrant thresholds
 OPPORTUNITY_HIGH = 70
 OPPORTUNITY_LOW = 40
@@ -102,13 +113,15 @@ class DailyBarCache:
     _CONNECT_RETRIES = 3
     _CONNECT_RETRY_DELAY = 1
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None, migrate_legacy: bool = True):
         # 注意：db_path 在调用时解析，而非作为默认值绑定——否则 monkeypatch
         # CACHE_DB_PATH/HK_CACHE_DB_PATH 不会生效（默认值在定义时即被冻结）。
         self.db_path = db_path or CACHE_DB_PATH
+        self._migrate_legacy = migrate_legacy
         self._conn: Optional[sqlite3.Connection] = None
         self._ensure_db()
-        self._maybe_migrate_from_json()
+        if self._migrate_legacy:
+            self._maybe_migrate_from_json()
 
     def _ensure_db(self):
         """创建/打开 SQLite 数据库，带自动恢复能力。
@@ -700,18 +713,28 @@ def _sanitize_item(d: dict) -> dict:
     return d
 
 
-def _latest_cached_close(cache: DailyBarCache, code: str) -> Tuple[float, str]:
-    """Return the latest positive close and trade date from the daily-bar cache."""
+def _latest_cached_close(
+    cache: DailyBarCache,
+    code: str,
+    target_trade_date: Optional[str] = None,
+    require_exact_trade_date: bool = False,
+) -> Tuple[float, str]:
+    """Return a positive close from cache, optionally constrained to a target date."""
     if cache is None or not code:
         return 0.0, ""
+    target_date = _resolve_end_date(target_trade_date) if target_trade_date else ""
     bars = cache.get_stock_bars(code) or []
     for bar in reversed(bars):
+        trade_date = str(bar.get("date", "") or "")
+        if target_date and trade_date > target_date:
+            continue
         try:
             close_price = float(bar.get("close", 0) or 0)
         except (TypeError, ValueError):
             close_price = 0.0
-        trade_date = str(bar.get("date", "") or "")
         if close_price > 0 and trade_date:
+            if require_exact_trade_date and trade_date != target_date:
+                return 0.0, ""
             return close_price, trade_date
     return 0.0, ""
 
@@ -858,7 +881,12 @@ def compute_all_quadrant_scores(
     # ── 初始化缓存（带自动恢复）──
     logger.info("[quadrant] 初始化日线缓存...")
     try:
-        cache = DailyBarCache()
+        historical_cache_path = _historical_cache_db_path("ASHARE", source_trade_date)
+        cache = (
+            DailyBarCache(db_path=historical_cache_path, migrate_legacy=False)
+            if historical_cache_path
+            else DailyBarCache()
+        )
     except Exception as exc:
         _send_progress(_progress_url, "ASHARE", 0, 0, "failed",
                        f"缓存初始化失败（磁盘 I/O 错误）：{exc}")
@@ -1207,7 +1235,12 @@ def compute_all_quadrant_scores(
             name = str(row.get("name", "")) if pd.notna(row.get("name")) else code
             # Determine exchange from A-share code prefix: 6xxxxx→SSE, 0/3xxxxx→SZSE
             _exchange = "SSE" if code.startswith("6") else "SZSE"
-            close_price, price_trade_date = _latest_cached_close(cache, code)
+            close_price, price_trade_date = _latest_cached_close(
+                cache,
+                code,
+                target_trade_date=source_trade_date,
+                require_exact_trade_date=bool(source_trade_date),
+            )
             item = {
                 "code": code,
                 "name": name,
@@ -1352,8 +1385,8 @@ HK_CACHE_DB_PATH = os.path.join(_CACHE_DIR, "quadrant_cache_hk.db")
 class HkDailyBarCache(DailyBarCache):
     """港股日线缓存，独立 SQLite 文件避免与 A 股代码冲突（5 位 vs 6 位）。"""
 
-    def __init__(self):
-        super().__init__(db_path=HK_CACHE_DB_PATH)
+    def __init__(self, db_path: Optional[str] = None, migrate_legacy: bool = True):
+        super().__init__(db_path=db_path or HK_CACHE_DB_PATH, migrate_legacy=migrate_legacy)
 
 
 def compute_hk_quadrant_scores(
@@ -1390,7 +1423,12 @@ def compute_hk_quadrant_scores(
     # ── 初始化缓存（带自动恢复）──
     logger.info("[hk-quadrant] 初始化港股日线缓存...")
     try:
-        cache = HkDailyBarCache()
+        historical_cache_path = _historical_cache_db_path("HKEX", source_trade_date)
+        cache = (
+            HkDailyBarCache(db_path=historical_cache_path, migrate_legacy=False)
+            if historical_cache_path
+            else HkDailyBarCache()
+        )
     except Exception as exc:
         _send_progress(_hk_progress_url, "HKEX", 0, 0, "failed",
                        f"港股缓存初始化失败（磁盘 I/O 错误）：{exc}")
@@ -1651,7 +1689,12 @@ def compute_hk_quadrant_scores(
     for _, row in merged.iterrows():
         code = str(row.get("code", ""))
         name = str(row.get("name", "")) if pd.notna(row.get("name")) else code
-        close_price, price_trade_date = _latest_cached_close(cache, code)
+        close_price, price_trade_date = _latest_cached_close(
+            cache,
+            code,
+            target_trade_date=source_trade_date,
+            require_exact_trade_date=bool(source_trade_date),
+        )
         item = {
             "code": code,
             "name": name,

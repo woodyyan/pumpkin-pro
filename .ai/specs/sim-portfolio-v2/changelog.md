@@ -1,5 +1,12 @@
 # Changelog: 模拟组合 v2 Calendar-driven Pipeline
 
+## 2026-07-15（缺陷修复：历史四象限重算收盘价日期错配）
+
+- **问题**: Admin 市场日历选择历史信号日重拉四象限后，任务虽成功但日期仍显示“缺收盘价”。Quant 已将 `source_trade_date` 传入日线和基准请求，却在产出候选股价格时从共享日线缓存取“最新有效收盘价”；缓存中若存在目标日后的数据，`price_trade_date` 会晚于信号日，v2 Pipeline 的严格日期校验因此继续阻断。
+- **修复**: 历史重算改为按 `market + source_trade_date` 使用独立 SQLite 日线缓存，且最终候选股收盘价必须精确匹配目标交易日；目标日无有效收盘价时明确返回空价格，不回退旧价或使用未来价。A 股与港股统一适用。
+- **测试**: 新增回归测试覆盖“缓存含未来价格时仍取目标日价格”“目标日缺价不回退”“A/H 市场与日期缓存隔离”。
+- **运维**: 修复发布后，对仍标红的历史日期重新执行“重拉该日收盘价”；上游信号恢复后，按现有流程重新运行该日 Pipeline 生成 facts。
+
 ## 2026-07-06（缺陷修复：A 股组合科创板排除失效）
 
 - **问题**: v2 重构首个提交起，`defaultSimPortfolioV2Definitions()` 中 A 股 `模拟组合A`（`spv2_ashare_a`）、`模拟组合B`（`spv2_ashare_b`）遗漏了 `ExcludedBoards: [aShareBoardStar]`，导致科创板（688/689）个股未被排除，选股口径与旧版 `portfolio_service.go` 不一致。港股两个组合（`spv2_hkex_a`/`spv2_hkex_b`）本身不涉及科创板，无需处理，行为不受影响。

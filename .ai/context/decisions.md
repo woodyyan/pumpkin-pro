@@ -1,5 +1,29 @@
 # 设计决策记录
 
+## 决策 28: V2 generateFacts 重建换仓 diff 逻辑（BUY/SELL/HOLD）
+
+**日期**: 2026-07-16
+
+**背景**: V2 `generateFacts` 缺失与前一交易日持仓的 diff 逻辑，导致所有成交记录无条件记为 BUY。V1 的 `computeAndPersistSimPortfolioDay` 有完整 diff（previousMap vs selectedMap → SELL/BUY/HOLD），V2 重写时丢失。
+
+**决策**:
+在 `generateFacts` 中重建 diff 逻辑，对齐 V1 行为：
+- 构建 `previousMap`（前日 positions）与 `selectedMap`（当日 selection items），以 `snapshotPriceHintKey(code, exchange)` 为 key
+- 并集遍历，按存在性分类：仅 previous → SELL / 仅 selected → BUY / 两边都有 → HOLD
+- reason 复用 V1 常量：`drop_out_top4` / `enter_top4` / `stay_top4`
+- SELL 的 `tradePrice` 通过 `openPriceResolver` 回退获取（被卖出的股票不在当日 priceRequirements 中）
+- `OldWeight/OldShares` 从前日 position 填充，`NewWeight/NewShares` 从当日选股填充，`ShareDelta = NewShares - OldShares`
+
+**替代方案（未选）**:
+1. 直接复用 V1 的 `computeAndPersistSimPortfolioDay` — 拒绝，V2 pipeline 结构（stages/priceRequirements/watermark）与 V1 不同，强耦合会引入更多不一致
+2. 在 repo 层做 diff — 拒绝，diff 是业务逻辑应在 service 层
+
+**风险与代价**:
+- 历史存量全 BUY 数据需重算纠正（可通过 pipeline `Run` 按日 `ReplaceSimPortfolioV2FactDate` 覆盖）
+- SELL 交易依赖 `openPriceResolver`，若未注入则 `tradePrice=0`（不影响 action/reason 正确性，仅影响展示）
+
+**关联**: BP-006
+
 ## 决策 27: 重建市场时保留已修复价格需求 + dailyBarFetcher 兜底解析
 
 **日期**: 2026-07-05

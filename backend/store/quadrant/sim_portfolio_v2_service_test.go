@@ -668,3 +668,229 @@ func TestSimPortfolioV2BackfillSignalClosePriceRejectsEmptyCandidates(t *testing
 		t.Fatalf("expected message to suggest quadrant rebuild, got %q", resp.Message)
 	}
 }
+
+// TestSimPortfolioV2GenerateFactsRebalanceDiff verifies that generateFacts
+// produces SELL / HOLD / BUY trades by diffing the previous day's positions
+// against the current day's selection.  This is a regression test for the bug
+// where all trades were unconditionally written as BUY.
+func TestSimPortfolioV2GenerateFactsRebalanceDiff(t *testing.T) {
+	repo, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	def := SimPortfolioV2Definition{
+		ID:          "test-port-A",
+		Code:        "TPA",
+		Name:        "Test Portfolio A",
+		Market:      SimPortfolioV2MarketAShare,
+		MaxHoldings: 4,
+		InitialAssets: 1_000_000,
+		IsActive:    true,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := repo.db.Create(&def).Error; err != nil {
+		t.Fatalf("create definition: %v", err)
+	}
+
+	// --- Day 1: seed a completed daily + positions for stocks A/B/C/D ---
+	day1Date := "2026-07-06"
+	day1Daily := SimPortfolioV2Daily{
+		PortfolioID: def.ID, Market: def.Market, TradeDate: day1Date,
+		NAV: 1.0, TotalAssets: 1_000_000, PreviousAssets: 1_000_000,
+		DailyReturn: 0, TotalReturn: 0, PositionCount: 4,
+		Rebalance: true, Status: "verified", ComputedAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.db.Create(&day1Daily).Error; err != nil {
+		t.Fatalf("create day1 daily: %v", err)
+	}
+	day1Stocks := []string{"600001", "600002", "600003", "600004"}
+	for i, code := range day1Stocks {
+		pos := SimPortfolioV2Position{
+			PortfolioID: def.ID, Market: def.Market, TradeDate: day1Date,
+			Code: code, Exchange: "SSE", Name: "S" + code, Rank: i + 1,
+			Weight: 0.25, TargetValue: 250_000, Shares: 25000, BuyPrice: 10, ClosePrice: 10,
+			MarketValue: 250_000, Profit: 0, ProfitRate: 0, CreatedAt: now, UpdatedAt: now,
+		}
+		if err := repo.db.Create(&pos).Error; err != nil {
+			t.Fatalf("create day1 position %s: %v", code, err)
+		}
+	}
+
+	// --- Day 2: selection = C/D (hold) + E/F (buy); A/B dropped (sell) ---
+	signalDate2 := "2026-07-07"
+	tradeDate2 := "2026-07-08"
+
+	selItems := []SimPortfolioV2SelectionItem{
+		{SelectionBatchID: "sel-2", PortfolioID: def.ID, SignalDate: signalDate2, Code: "600003", Exchange: "SSE", Name: "S600003", Rank: 1, Weight: 0.25, CreatedAt: now},
+		{SelectionBatchID: "sel-2", PortfolioID: def.ID, SignalDate: signalDate2, Code: "600004", Exchange: "SSE", Name: "S600004", Rank: 2, Weight: 0.25, CreatedAt: now},
+		{SelectionBatchID: "sel-2", PortfolioID: def.ID, SignalDate: signalDate2, Code: "600005", Exchange: "SSE", Name: "S600005", Rank: 3, Weight: 0.25, CreatedAt: now},
+		{SelectionBatchID: "sel-2", PortfolioID: def.ID, SignalDate: signalDate2, Code: "600006", Exchange: "SSE", Name: "S600006", Rank: 4, Weight: 0.25, CreatedAt: now},
+	}
+	batch := SimPortfolioV2SelectionBatch{ID: "sel-2", PortfolioID: def.ID, Market: def.Market, SignalDate: signalDate2, EntryTradeDate: tradeDate2, Status: SimPortfolioV2StatusOK, SelectedCount: 4, CreatedAt: now, UpdatedAt: now}
+	if err := repo.ReplaceSimPortfolioV2Selection(ctx, batch, selItems); err != nil {
+		t.Fatalf("seed selection: %v", err)
+	}
+
+	// Price requirements for day-2 selected stocks (entry_open + valuation_close).
+	priceReqs := []SimPortfolioV2PriceRequirement{}
+	for _, item := range selItems {
+		for _, pt := range []string{SimPortfolioV2PriceTypeEntryOpen, SimPortfolioV2PriceTypeValuationClose} {
+			priceReqs = append(priceReqs, SimPortfolioV2PriceRequirement{
+				PortfolioID: def.ID, Market: def.Market, SignalDate: signalDate2,
+				TradeDate: tradeDate2, Code: item.Code, Exchange: item.Exchange,
+				PriceType: pt, Required: true, Status: SimPortfolioV2PriceStatusSatisfied,
+				Price: 10.0, PriceTradeDate: tradeDate2, Source: "test",
+				ResolvedAt: now, CreatedAt: now, UpdatedAt: now,
+			})
+		}
+	}
+	if err := repo.ReplaceSimPortfolioV2PriceRequirements(ctx, def.ID, signalDate2, priceReqs); err != nil {
+		t.Fatalf("seed price reqs: %v", err)
+	}
+
+	// Set openPriceResolver so SELL trades can get a trade price for dropped stocks.
+	svc.SetOpenPriceResolver(func(ctx context.Context, code, exchange, td string) float64 {
+		return 10.5
+	})
+
+	if err := svc.generateFacts(ctx, def, signalDate2, tradeDate2); err != nil {
+		t.Fatalf("generateFacts: %v", err)
+	}
+
+	// Verify trades.
+	tradeRows, err := repo.ListSimPortfolioV2Trades(ctx, def.ID, "", "", "")
+	if err != nil {
+		t.Fatalf("list trades: %v", err)
+	}
+	if len(tradeRows) != 6 {
+		t.Fatalf("expected 6 trades (2 sell + 2 hold + 2 buy), got %d", len(tradeRows))
+	}
+
+	byCode := map[string]SimPortfolioV2Trade{}
+	for _, tr := range tradeRows {
+		byCode[tr.Code] = tr
+	}
+
+	// SELL: 600001, 600002 — dropped from portfolio.
+	for _, code := range []string{"600001", "600002"} {
+		tr := byCode[code]
+		if tr.Action != simPortfolioActionSell {
+			t.Errorf("%s: action=%s, want SELL", code, tr.Action)
+		}
+		if tr.OldWeight != 0.25 || tr.OldShares != 25000 {
+			t.Errorf("%s: oldWeight=%v oldShares=%v, want 0.25 / 25000", code, tr.OldWeight, tr.OldShares)
+		}
+		if tr.NewWeight != 0 || tr.NewShares != 0 {
+			t.Errorf("%s: newWeight=%v newShares=%v, want 0 / 0", code, tr.NewWeight, tr.NewShares)
+		}
+		if tr.ShareDelta != -25000 {
+			t.Errorf("%s: shareDelta=%v, want -25000", code, tr.ShareDelta)
+		}
+		if tr.Reason != simPortfolioReasonDropTop4 {
+			t.Errorf("%s: reason=%s, want %s", code, tr.Reason, simPortfolioReasonDropTop4)
+		}
+	}
+
+	// HOLD: 600003, 600004 — stayed in portfolio.
+	for _, code := range []string{"600003", "600004"} {
+		tr := byCode[code]
+		if tr.Action != simPortfolioActionHold {
+			t.Errorf("%s: action=%s, want HOLD", code, tr.Action)
+		}
+		if tr.OldWeight != 0.25 || tr.OldShares != 25000 {
+			t.Errorf("%s: oldWeight=%v oldShares=%v, want 0.25 / 25000", code, tr.OldWeight, tr.OldShares)
+		}
+		if tr.NewWeight != 0.25 || tr.NewShares == 0 {
+			t.Errorf("%s: newWeight=%v newShares=%v, want 0.25 / >0", code, tr.NewWeight, tr.NewShares)
+		}
+		if tr.Reason != simPortfolioReasonStayTop4 {
+			t.Errorf("%s: reason=%s, want %s", code, tr.Reason, simPortfolioReasonStayTop4)
+		}
+	}
+
+	// BUY: 600005, 600006 — newly entered.
+	for _, code := range []string{"600005", "600006"} {
+		tr := byCode[code]
+		if tr.Action != simPortfolioActionBuy {
+			t.Errorf("%s: action=%s, want BUY", code, tr.Action)
+		}
+		if tr.OldWeight != 0 || tr.OldShares != 0 {
+			t.Errorf("%s: oldWeight=%v oldShares=%v, want 0 / 0", code, tr.OldWeight, tr.OldShares)
+		}
+		if tr.NewWeight != 0.25 || tr.NewShares == 0 {
+			t.Errorf("%s: newWeight=%v newShares=%v, want 0.25 / >0", code, tr.NewWeight, tr.NewShares)
+		}
+		if tr.Reason != simPortfolioReasonEnterTop4 {
+			t.Errorf("%s: reason=%s, want %s", code, tr.Reason, simPortfolioReasonEnterTop4)
+		}
+	}
+}
+
+// TestSimPortfolioV2GenerateFactsFirstDayAllBuy verifies that on the first
+// trading day (no previous daily), all trades are BUY — the expected baseline.
+func TestSimPortfolioV2GenerateFactsFirstDayAllBuy(t *testing.T) {
+	repo, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	def := SimPortfolioV2Definition{
+		ID: "test-port-B", Code: "TPB", Name: "Test B", Market: SimPortfolioV2MarketAShare,
+		MaxHoldings: 4, InitialAssets: 1_000_000, IsActive: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.db.Create(&def).Error; err != nil {
+		t.Fatalf("create definition: %v", err)
+	}
+
+	signalDate := "2026-07-06"
+	tradeDate := "2026-07-07"
+	selItems := []SimPortfolioV2SelectionItem{}
+	for i := 0; i < 4; i++ {
+		code := fmt.Sprintf("600%03d", i+1)
+		selItems = append(selItems, SimPortfolioV2SelectionItem{
+			SelectionBatchID: "sel-b", PortfolioID: def.ID, SignalDate: signalDate,
+			Code: code, Exchange: "SSE", Name: code, Rank: i + 1, Weight: 0.25, CreatedAt: now,
+		})
+	}
+	batch := SimPortfolioV2SelectionBatch{ID: "sel-b", PortfolioID: def.ID, Market: def.Market, SignalDate: signalDate, EntryTradeDate: tradeDate, Status: SimPortfolioV2StatusOK, SelectedCount: 4, CreatedAt: now, UpdatedAt: now}
+	if err := repo.ReplaceSimPortfolioV2Selection(ctx, batch, selItems); err != nil {
+		t.Fatalf("seed selection: %v", err)
+	}
+
+	priceReqs := []SimPortfolioV2PriceRequirement{}
+	for _, item := range selItems {
+		for _, pt := range []string{SimPortfolioV2PriceTypeEntryOpen, SimPortfolioV2PriceTypeValuationClose} {
+			priceReqs = append(priceReqs, SimPortfolioV2PriceRequirement{
+				PortfolioID: def.ID, Market: def.Market, SignalDate: signalDate,
+				TradeDate: tradeDate, Code: item.Code, Exchange: item.Exchange,
+				PriceType: pt, Required: true, Status: SimPortfolioV2PriceStatusSatisfied,
+				Price: 10.0, PriceTradeDate: tradeDate, Source: "test",
+				ResolvedAt: now, CreatedAt: now, UpdatedAt: now,
+			})
+		}
+	}
+	if err := repo.ReplaceSimPortfolioV2PriceRequirements(ctx, def.ID, signalDate, priceReqs); err != nil {
+		t.Fatalf("seed price reqs: %v", err)
+	}
+
+	// No previous daily exists → first day.
+	if err := svc.generateFacts(ctx, def, signalDate, tradeDate); err != nil {
+		t.Fatalf("generateFacts: %v", err)
+	}
+
+	tradeRows, err := repo.ListSimPortfolioV2Trades(ctx, def.ID, "", "", "")
+	if err != nil {
+		t.Fatalf("list trades: %v", err)
+	}
+	if len(tradeRows) != 4 {
+		t.Fatalf("expected 4 BUY trades on first day, got %d", len(tradeRows))
+	}
+	for _, tr := range tradeRows {
+		if tr.Action != simPortfolioActionBuy {
+			t.Errorf("first-day trade %s: action=%s, want BUY", tr.Code, tr.Action)
+		}
+		if tr.OldWeight != 0 || tr.OldShares != 0 {
+			t.Errorf("first-day trade %s: oldWeight=%v oldShares=%v, want 0/0", tr.Code, tr.OldWeight, tr.OldShares)
+		}
+	}
+}

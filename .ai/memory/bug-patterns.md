@@ -358,3 +358,33 @@
 - 进度成功的用户语义应至少覆盖上游持久化与下游批次失效；后续 Pipeline facts 生成仍应独立呈现。
 
 **适用场景**: 所有“上游快照 → 持久化派生批次 → 管理日历/看板”链路。
+
+
+## BP-006: V2 generateFacts 缺失换仓 diff 逻辑导致全 BUY
+
+**模式**: V2 重写时丢失 V1 核心业务逻辑 → 所有成交记录无条件记为同一种动作
+
+**根因**:
+`SimPortfolioV2Service.generateFacts`（`sim_portfolio_v2_service.go:537`）在生成每日成交事实时，未实现"与前一交易日持仓做差集"的换仓逻辑，而是把当日选出的每只股票都无条件记为 `BUY`。V1 服务 `computeAndPersistSimPortfolioDay` 有完整的 diff 逻辑（previousMap vs selectedMap → SELL/BUY/HOLD），但 V2 重写时丢失了这段代码。
+
+**表现**:
+- 前端"组合跟踪"页面"最近调仓记录"全是 BUY，没有 SELL
+- `sim_portfolio_v2_trades` 表所有行 `action = 'BUY'`，`old_weight / old_shares` 始终为 0
+- HOLD（持仓不变）也被错误记为 BUY
+
+**修复方案**:
+在 `generateFacts` 中重建 diff 逻辑：
+1. 构建 `selectedMap`（当日选股）和 `previousMap`（前日持仓，通过 `ListSimPortfolioV2PositionsByTradeDate` 加载）
+2. 对两个 map 的 key 求并集（排序以保证输出确定性）
+3. 按差集分类：
+   - 仅在 previousMap → SELL + reason=`drop_out_top4`
+   - 仅在 selectedMap → BUY + reason=`enter_top4`
+   - 两边都有 → HOLD + reason=`stay_top4`
+4. SELL 交易的 `tradePrice` 通过 `openPriceResolver` 获取（卖出股票不在当日 priceRequirements 中）
+
+**关键教训**:
+- V2 重写 V1 时必须逐函数比对核心业务逻辑，不能只对齐数据模型和接口签名
+- `SimPortfolioV2Trade` 表结构已有 `OldWeight/OldShares/Action/Reason` 字段，但生成端未填充 → 表结构就绪 ≠ 逻辑就绪
+- 历史存量数据需重算才能纠正已写入的全 BUY 记录（`ReplaceSimPortfolioV2FactDate` 可按日覆盖）
+
+**适用场景**: 所有 V1→V2 重写场景，特别是涉及"增量/diff"语义的核心逻辑。

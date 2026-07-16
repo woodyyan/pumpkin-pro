@@ -523,18 +523,100 @@ func (s *SimPortfolioV2Service) generateFacts(ctx context.Context, def SimPortfo
 	}
 	targetValue := previousAssets / float64(def.MaxHoldings)
 	now := time.Now().UTC()
+	// Build selectedMap from today's selection items.
+	selectedMap := make(map[string]SimPortfolioV2SelectionItem, len(items))
+	for _, item := range items {
+		selectedMap[snapshotPriceHintKey(item.Code, item.Exchange)] = item
+	}
+
+	// Load previous-day positions to compute the rebalance diff (BUY/SELL/HOLD).
+	previousMap := map[string]SimPortfolioV2Position{}
+	if previous != nil && previous.TradeDate != "" {
+		prevPositions, prevErr := s.repo.ListSimPortfolioV2PositionsByTradeDate(ctx, def.ID, previous.TradeDate)
+		if prevErr != nil {
+			return prevErr
+		}
+		for _, pp := range prevPositions {
+			previousMap[snapshotPriceHintKey(pp.Code, pp.Exchange)] = pp
+		}
+	}
+
+	// Collect sorted union of keys for deterministic output.
+	keys := make([]string, 0, len(previousMap)+len(selectedMap))
+	seen := map[string]struct{}{}
+	for k := range previousMap {
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		keys = append(keys, k)
+	}
+	for k := range selectedMap {
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	positions := []SimPortfolioV2Position{}
 	trades := []SimPortfolioV2Trade{}
 	total := 0.0
-	for _, item := range items {
-		open := priceByKey[item.Code+"\x00"+item.Exchange+"\x00"+SimPortfolioV2PriceTypeEntryOpen]
-		closep := priceByKey[item.Code+"\x00"+item.Exchange+"\x00"+SimPortfolioV2PriceTypeValuationClose]
-		shares := targetValue / open
-		marketValue := shares * closep
-		profit := marketValue - targetValue
-		total += marketValue
-		positions = append(positions, SimPortfolioV2Position{PortfolioID: def.ID, Market: def.Market, TradeDate: tradeDate, SignalDate: signalDate, Code: item.Code, Exchange: item.Exchange, Name: item.Name, Rank: item.Rank, Weight: item.Weight, TargetValue: targetValue, Shares: shares, BuyPrice: open, ClosePrice: closep, MarketValue: marketValue, Profit: profit, ProfitRate: profit / targetValue, CreatedAt: now, UpdatedAt: now})
-		trades = append(trades, SimPortfolioV2Trade{PortfolioID: def.ID, Market: def.Market, TradeDate: tradeDate, SignalDate: signalDate, Code: item.Code, Exchange: item.Exchange, Name: item.Name, Action: simPortfolioActionBuy, NewWeight: item.Weight, TradePrice: open, TargetValue: targetValue, NewShares: shares, ShareDelta: shares, Reason: simPortfolioReasonEnterTop4, CreatedAt: now, UpdatedAt: now})
+	for _, key := range keys {
+		prev, hasPrev := previousMap[key]
+		next, hasNext := selectedMap[key]
+
+		// Resolve identity from whichever side is present.
+		code := ""
+		name := ""
+		exchange := ""
+		oldWeight := 0.0
+		oldShares := 0.0
+		if hasPrev {
+			code = prev.Code
+			name = prev.Name
+			exchange = prev.Exchange
+			oldWeight = prev.Weight
+			oldShares = prev.Shares
+		}
+		newWeight := 0.0
+		newShares := 0.0
+		targetTradeValue := 0.0
+		action := simPortfolioActionSell
+		reason := simPortfolioReasonDropTop4
+		if hasNext {
+			code = next.Code
+			name = next.Name
+			exchange = next.Exchange
+			newWeight = next.Weight
+			targetTradeValue = targetValue
+			action = simPortfolioActionBuy
+			reason = simPortfolioReasonEnterTop4
+			if hasPrev {
+				action = simPortfolioActionHold
+				reason = simPortfolioReasonStayTop4
+			}
+		}
+
+		// Positions are only created for stocks still in the portfolio.
+		var tradePrice float64
+		if hasNext {
+			open := priceByKey[next.Code+"\x00"+next.Exchange+"\x00"+SimPortfolioV2PriceTypeEntryOpen]
+			closep := priceByKey[next.Code+"\x00"+next.Exchange+"\x00"+SimPortfolioV2PriceTypeValuationClose]
+			shares := targetValue / open
+			marketValue := shares * closep
+			profit := marketValue - targetValue
+			total += marketValue
+			newShares = shares
+			tradePrice = open
+			positions = append(positions, SimPortfolioV2Position{PortfolioID: def.ID, Market: def.Market, TradeDate: tradeDate, SignalDate: signalDate, Code: code, Exchange: exchange, Name: name, Rank: next.Rank, Weight: next.Weight, TargetValue: targetValue, Shares: shares, BuyPrice: open, ClosePrice: closep, MarketValue: marketValue, Profit: profit, ProfitRate: profit / targetValue, CreatedAt: now, UpdatedAt: now})
+		} else if s.openPriceResolver != nil {
+			// SELL: resolve open price for the dropped stock via fallback resolver.
+			tradePrice = s.openPriceResolver(ctx, code, exchange, tradeDate)
+		}
+
+		trades = append(trades, SimPortfolioV2Trade{PortfolioID: def.ID, Market: def.Market, TradeDate: tradeDate, SignalDate: signalDate, Code: code, Exchange: exchange, Name: name, Action: action, OldWeight: oldWeight, NewWeight: newWeight, TradePrice: tradePrice, TargetValue: targetTradeValue, OldShares: oldShares, NewShares: newShares, ShareDelta: newShares - oldShares, Reason: reason, CreatedAt: now, UpdatedAt: now})
 	}
 	dailyReturn := 0.0
 	if previousAssets > 0 {

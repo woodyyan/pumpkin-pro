@@ -1866,7 +1866,7 @@ function SimPipelineMarketCalendar({ market, onSelectDay, onPreviewStart }) {
   )
 }
 
-function SimPipelineDayDetail({ detail, onClose, onRecomputeSignal, onRepairPrices, onOpenOverride }) {
+function SimPipelineDayDetail({ detail, onClose, onRecomputeSignal, onBackfillSignalClose, onRepairPrices, onOpenOverride }) {
   if (!detail) return null
   const hasMissingPrices = (detail.portfolios || []).some((portfolio) => (
     [...(portfolio.entry_open?.missing_items || []), ...(portfolio.valuation_close?.missing_items || [])].length > 0
@@ -1907,11 +1907,11 @@ function SimPipelineDayDetail({ detail, onClose, onRecomputeSignal, onRepairPric
             <div className="mt-3">
               <button
                 type="button"
-                onClick={() => onRecomputeSignal?.(detail.market, detail.date)}
+                onClick={() => onBackfillSignalClose?.(detail.market, detail.date)}
                 className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] font-medium text-amber-700 hover:bg-amber-500/15"
                 title={closePriceSuggestion.hint || ''}
               >
-                重拉该日收盘价
+                补齐该日收盘价
               </button>
               {closePriceSuggestion.hint ? <div className="mt-1 text-[11px] text-foreground-dim">{closePriceSuggestion.hint}</div> : null}
             </div>
@@ -2196,6 +2196,27 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
     }
   }
 
+  const handleBackfillSignalClosePrice = async (market, date) => {
+    setRepairingPipeline(true)
+    setActionError('')
+    setPipelineNotice('')
+    try {
+      const resp = await adminFetch('/api/admin/sim-portfolio-pipeline/signal/backfill-close-price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ market, date }),
+      })
+      setPipelineNotice(resp?.message || '已补齐该日收盘价。')
+      await resource.refresh()
+      await refreshSelectedPipelineDay()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '补齐该日收盘价失败')
+      if (message) setActionError(message)
+    } finally {
+      setRepairingPipeline(false)
+    }
+  }
+
   const handleRepairPrices = async (action, market, signalDate, portfolioId = '') => {
     setRepairingPipeline(true)
     setActionError('')
@@ -2440,6 +2461,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
           detail={pipelineDayDetail}
           onClose={() => { setPipelineDayDetail(null); setSelectedPipelineDay(null) }}
           onRecomputeSignal={handleRecomputeQuadrantDate}
+          onBackfillSignalClose={handleBackfillSignalClosePrice}
           onRepairPrices={handleRepairPrices}
           onOpenOverride={handleOpenPriceOverride}
         />

@@ -31,9 +31,13 @@ describe('admin quadrant panel migration hints', () => {
     assert.match(adminSectionsSource, /重拉该日缺失历史日线/)
     assert.match(adminSectionsSource, /人工覆盖价格（审计）/)
     assert.match(adminSectionsSource, /\/api\/admin\/sim-portfolio-pipeline\/prices\/override/)
+    // Precise close-price backfill: the "补齐该日收盘价" button must call the
+    // dedicated signal backfill endpoint, NOT the full-market quadrant recompute.
+    assert.match(adminSectionsSource, /补齐该日收盘价/)
+    assert.match(adminSectionsSource, /\/api\/admin\/sim-portfolio-pipeline\/signal\/backfill-close-price/)
     assert.match(adminSectionsSource, /最近运行日志/)
     assert.doesNotMatch(adminSectionsSource, /补齐建仓开盘价/)
-    assert.doesNotMatch(adminSectionsSource, /补齐收盘价/)
+    assert.doesNotMatch(adminSectionsSource, /重拉该日收盘价/)
     assert.doesNotMatch(adminSectionsSource, /同步最新事实表/)
     assert.doesNotMatch(adminSectionsSource, /全局开始跟踪日期/)
   })

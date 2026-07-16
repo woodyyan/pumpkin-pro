@@ -545,3 +545,126 @@ func TestSimPortfolioV2ResolveUsesDailyBarFallback(t *testing.T) {
 		t.Fatalf("expected at least one requirement resolved via daily_bar_fallback, got %+v", reqs)
 	}
 }
+
+// TestSimPortfolioV2BackfillSignalClosePriceUpdatesOnlyMissing verifies the
+// precise close-price backfill: when candidates already exist (e.g. 50 of them)
+// but only a few are missing their close price, the targeted backfill fills in
+// ONLY the missing ones (leaving the already-satisfied snapshots untouched) and
+// flips the day's signal batch back to "ok" — without a full quadrant recompute.
+func TestSimPortfolioV2BackfillSignalClosePriceUpdatesOnlyMissing(t *testing.T) {
+	repo, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	date := "2026-07-06"
+	now := time.Now().UTC()
+	// Seed 50 candidates; the first 4 are missing their close price, the rest
+	// already have a valid close price aligned to the trading day.
+	rows := []RankingSnapshot{}
+	for i := 0; i < 50; i++ {
+		close := 10 + float64(i)
+		priceDate := date
+		if i < 4 {
+			close = 0
+			priceDate = ""
+		}
+		rows = append(rows, RankingSnapshot{Code: fmt.Sprintf("600%03d", i), Name: fmt.Sprintf("600%03d", i), Exchange: "SSE", Rank: i + 1, Opportunity: 90 - float64(i), Risk: 10 + float64(i), ClosePrice: close, PriceTradeDate: priceDate, SnapshotDate: date, CreatedAt: now})
+	}
+	if err := repo.UpsertSnapshots(ctx, rows); err != nil {
+		t.Fatalf("seed snapshots: %v", err)
+	}
+
+	// Sanity: the calendar day should report 4 missing prices and be blocked.
+	detail, err := svc.GetAdminCalendarDay(ctx, SimPortfolioV2MarketAShare, date)
+	if err != nil {
+		t.Fatalf("GetAdminCalendarDay: %v", err)
+	}
+	if detail.Signal.MissingPriceCount != 4 || detail.Signal.CandidateCount != 50 {
+		t.Fatalf("pre-backfill signal = %+v, want candidate=50 missing=4", detail.Signal)
+	}
+
+	closeResolverCalls := 0
+	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 {
+		closeResolverCalls++
+		return 12.5
+	})
+
+	resp, err := svc.BackfillSignalClosePrice(ctx, SimPortfolioV2SignalClosePriceBackfillRequest{Market: SimPortfolioV2MarketAShare, Date: date})
+	if err != nil {
+		t.Fatalf("BackfillSignalClosePrice: %v", err)
+	}
+	// Only the 4 missing candidates should be checked/updated, NOT all 50.
+	if resp.Checked != 4 || resp.Updated != 4 || resp.StillMissing != 0 {
+		t.Fatalf("unexpected backfill resp: %+v", resp)
+	}
+	if !resp.OK || resp.Status != SimPortfolioV2StatusOK {
+		t.Fatalf("expected ok status, got %+v", resp)
+	}
+	if closeResolverCalls != 4 {
+		t.Fatalf("price resolver should be called exactly 4 times (only missing), got %d", closeResolverCalls)
+	}
+
+	// After backfill, the day should no longer be blocked / missing any price.
+	detail, err = svc.GetAdminCalendarDay(ctx, SimPortfolioV2MarketAShare, date)
+	if err != nil {
+		t.Fatalf("GetAdminCalendarDay after backfill: %v", err)
+	}
+	if detail.Signal.MissingPriceCount != 0 {
+		t.Fatalf("expected missing_price_count=0 after backfill, got %d", detail.Signal.MissingPriceCount)
+	}
+	// The already-satisfied snapshots (index 4..49) must keep their original prices.
+	after, _ := repo.ListRankingSnapshotsByDate(ctx, SimPortfolioV2MarketAShare, date, 50)
+	for _, row := range after {
+		if row.ClosePrice <= 0 {
+			t.Fatalf("snapshot %s still missing close price after backfill", row.Code)
+		}
+	}
+}
+
+// TestSimPortfolioV2BackfillSignalClosePriceReportsStillMissing verifies the
+// degraded path: when a stock's close price cannot be resolved from any source,
+// the day stays blocked and the response reports the still-missing count so the
+// admin UI can fall back to full recompute / manual override.
+func TestSimPortfolioV2BackfillSignalClosePriceReportsStillMissing(t *testing.T) {
+	repo, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	date := "2026-07-06"
+	now := time.Now().UTC()
+	rows := []RankingSnapshot{}
+	for i := 0; i < 3; i++ {
+		rows = append(rows, RankingSnapshot{Code: fmt.Sprintf("600%03d", i), Name: fmt.Sprintf("600%03d", i), Exchange: "SSE", Rank: i + 1, Opportunity: 90 - float64(i), Risk: 10 + float64(i), ClosePrice: 0, PriceTradeDate: "", SnapshotDate: date, CreatedAt: now})
+	}
+	if err := repo.UpsertSnapshots(ctx, rows); err != nil {
+		t.Fatalf("seed snapshots: %v", err)
+	}
+	// No resolver / fetcher configured -> nothing can be backfilled.
+	resp, err := svc.BackfillSignalClosePrice(ctx, SimPortfolioV2SignalClosePriceBackfillRequest{Market: SimPortfolioV2MarketAShare, Date: date})
+	if err != nil {
+		t.Fatalf("BackfillSignalClosePrice: %v", err)
+	}
+	if resp.Checked != 3 || resp.Updated != 0 || resp.StillMissing != 3 {
+		t.Fatalf("unexpected resp: %+v", resp)
+	}
+	if resp.OK || resp.Status != SimPortfolioV2StatusBlocked {
+		t.Fatalf("expected blocked status when nothing resolvable, got %+v", resp)
+	}
+	if len(resp.MissingItems) != 3 {
+		t.Fatalf("expected 3 missing items, got %+v", resp.MissingItems)
+	}
+}
+
+// TestSimPortfolioV2BackfillSignalClosePriceRejectsEmptyCandidates verifies that
+// when there are no candidate snapshots at all, the backfill refuses and points
+// the admin to a full quadrant rebuild instead.
+func TestSimPortfolioV2BackfillSignalClosePriceRejectsEmptyCandidates(t *testing.T) {
+	_, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	resp, err := svc.BackfillSignalClosePrice(ctx, SimPortfolioV2SignalClosePriceBackfillRequest{Market: SimPortfolioV2MarketAShare, Date: "2026-07-06"})
+	if err != nil {
+		t.Fatalf("BackfillSignalClosePrice: %v", err)
+	}
+	if resp.OK || resp.Candidates != 0 || resp.RequiresRerun {
+		t.Fatalf("expected refusal for empty candidates, got %+v", resp)
+	}
+	if !strings.Contains(resp.Message, "重建该日四象限") {
+		t.Fatalf("expected message to suggest quadrant rebuild, got %q", resp.Message)
+	}
+}

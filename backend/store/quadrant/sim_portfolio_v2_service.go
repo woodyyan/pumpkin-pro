@@ -644,6 +644,133 @@ func (s *SimPortfolioV2Service) BackfillDailyBars(ctx context.Context, req SimPo
 	return resp, nil
 }
 
+// SimPortfolioV2SignalClosePriceBackfillRequest scopes a precise close-price
+// backfill to a single market + trading day. Unlike a full quadrant recompute,
+// this only re-fills the missing close_price of the ranking snapshots that are
+// already present for that day.
+type SimPortfolioV2SignalClosePriceBackfillRequest struct {
+	Market       string `json:"market"`
+	Date         string `json:"date"`
+	LookbackDays int    `json:"lookback_days,omitempty"`
+	Operator     string `json:"operator,omitempty"`
+}
+
+// SimPortfolioV2SignalClosePriceBackfillResponse reports how many candidate
+// snapshots were checked / updated / still missing after the targeted backfill.
+type SimPortfolioV2SignalClosePriceBackfillResponse struct {
+	OK            bool     `json:"ok"`
+	Market        string   `json:"market"`
+	Date          string   `json:"date"`
+	Status        string   `json:"status"`
+	Candidates    int      `json:"candidates"`
+	Checked       int      `json:"checked"`
+	Updated       int      `json:"updated"`
+	StillMissing  int      `json:"still_missing"`
+	Message       string   `json:"message,omitempty"`
+	MissingItems  []string `json:"missing_items,omitempty"`
+	RequiresRerun bool     `json:"requires_rerun"`
+}
+
+// BackfillSignalClosePrice fills in the missing/misaligned close price of the
+// ranking snapshots for a single market + trading day WITHOUT triggering a full
+// quadrant recompute.
+//
+// Context: buildSignalBatch flags a candidate as "missing price" when its
+// close_price <= 0 OR its price_trade_date != the snapshot date. Previously the
+// only admin action wired to this case ("补齐收盘价") reused the full-market
+// quadrant recompute endpoint, which is wasteful when only a handful of stocks
+// are missing their close price. This method instead:
+//  1. loads the candidate snapshots already present for the day,
+//  2. resolves each missing/misaligned close price via the existing resolvers
+//     (price resolver first, then daily-bar fetcher fallback), and
+//  3. writes back only the affected rows, then rebuilds the (lightweight)
+//     signal batch so the calendar day status turns green.
+func (s *SimPortfolioV2Service) BackfillSignalClosePrice(ctx context.Context, req SimPortfolioV2SignalClosePriceBackfillRequest) (*SimPortfolioV2SignalClosePriceBackfillResponse, error) {
+	market := normalizeSimPortfolioV2Market(req.Market)
+	date := strings.TrimSpace(req.Date)
+	if !isYMD(date) {
+		return nil, fmt.Errorf("date 必须为 YYYY-MM-DD")
+	}
+	today := time.Now().In(beijingLocation()).Format("2006-01-02")
+	if date > today {
+		return nil, fmt.Errorf("不能补齐未来日期收盘价")
+	}
+	if cal := s.calendar.CalendarRow(market, date); !cal.IsTradingDay {
+		return nil, fmt.Errorf("该市场当日休市，无需补齐收盘价")
+	}
+	lookback := req.LookbackDays
+	if lookback <= 0 {
+		lookback = 90
+	}
+	rows, err := s.repo.ListRankingSnapshotsByDate(ctx, market, date, 50)
+	if err != nil {
+		return nil, err
+	}
+	resp := &SimPortfolioV2SignalClosePriceBackfillResponse{OK: true, Market: market, Date: date, Status: SimPortfolioV2StatusOK, Candidates: len(rows), RequiresRerun: true}
+	if len(rows) == 0 {
+		resp.OK = false
+		resp.Status = SimPortfolioV2StatusBlocked
+		resp.RequiresRerun = false
+		resp.Message = "该日无候选快照，无法只补收盘价，请先重建该日四象限。"
+		return resp, nil
+	}
+	for _, row := range rows {
+		// A snapshot is considered missing when it has no positive close price
+		// or the price is not aligned to the requested trading day.
+		if row.ClosePrice > 0 && strings.TrimSpace(row.PriceTradeDate) == date {
+			continue
+		}
+		resp.Checked++
+		closePrice, priceDate := s.resolveSnapshotClosePrice(ctx, row.Code, row.Exchange, date, lookback)
+		if closePrice <= 0 {
+			resp.StillMissing++
+			resp.MissingItems = append(resp.MissingItems, fmt.Sprintf("%s/%s %s", row.Code, row.Exchange, date))
+			continue
+		}
+		if err := s.repo.UpdateSnapshotPrice(ctx, row.ID, closePrice, priceDate); err != nil {
+			return nil, err
+		}
+		resp.Updated++
+	}
+	// Rebuild the lightweight signal batch so the calendar day status reflects
+	// the freshly backfilled prices. This does NOT touch Quant / quadrant scores.
+	batch, err := s.buildSignalBatch(ctx, "", market, date)
+	if err != nil {
+		return nil, err
+	}
+	if batch != nil && batch.Status != SimPortfolioV2StatusOK {
+		resp.OK = false
+		resp.Status = SimPortfolioV2StatusBlocked
+	}
+	if resp.StillMissing > 0 {
+		resp.OK = false
+		resp.Status = SimPortfolioV2StatusBlocked
+		resp.Message = fmt.Sprintf("已补齐 %d 只收盘价，仍有 %d 只无法从历史日线补齐，可尝试重建该日四象限或人工覆盖。", resp.Updated, resp.StillMissing)
+	} else {
+		resp.Message = fmt.Sprintf("已补齐 %d 只收盘价（检查 %d 只），无需重建四象限。请重新运行该日 pipeline 生成 facts。", resp.Updated, resp.Checked)
+	}
+	return resp, nil
+}
+
+// resolveSnapshotClosePrice resolves a single stock's close price for a given
+// trade date, reusing the price resolver first and falling back to the
+// daily-bar fetcher. Returns (0, "") when no usable price is found.
+func (s *SimPortfolioV2Service) resolveSnapshotClosePrice(ctx context.Context, code, exchange, date string, lookback int) (float64, string) {
+	if s.priceResolver != nil {
+		if price := s.priceResolver(ctx, code, exchange, date); price > 0 {
+			return price, date
+		}
+	}
+	if s.dailyBarFetcher != nil {
+		if bars, err := s.dailyBarFetcher(ctx, code, exchange, lookback); err == nil {
+			if price := simPortfolioV2PriceFromBars(bars, date, SimPortfolioV2PriceTypeValuationClose); price > 0 {
+				return price, date
+			}
+		}
+	}
+	return 0, ""
+}
+
 func (s *SimPortfolioV2Service) OverridePrice(ctx context.Context, req SimPortfolioV2PriceOverrideRequest) (*SimPortfolioV2PriceRepairResponse, error) {
 	market, signalDate, priceType, err := validateSimPortfolioV2PriceRepairScope(req.Market, req.SignalDate, req.PriceType)
 	if err != nil {
@@ -1275,7 +1402,7 @@ func (s *SimPortfolioV2Service) GetAdminCalendarDay(ctx context.Context, market,
 			if batch.CandidateCount == 0 {
 				resp.RepairSuggestions = append(resp.RepairSuggestions, SimPortfolioV2RepairSuggestion{Type: "recompute_quadrant", Label: "重建该日四象限", Hint: "请在四象限板块按 market + source_trade_date 重建上游快照。"})
 			} else if batch.MissingPriceCount > 0 {
-				resp.RepairSuggestions = append(resp.RepairSuggestions, SimPortfolioV2RepairSuggestion{Type: "backfill_signal_close_price", Label: "补齐收盘价", Hint: fmt.Sprintf("该日候选股已存在（%d 只），但其中 %d 只收盘价缺失或未对齐当日交易日，请重建该日四象限以回填精确收盘价。", batch.CandidateCount, batch.MissingPriceCount)})
+				resp.RepairSuggestions = append(resp.RepairSuggestions, SimPortfolioV2RepairSuggestion{Type: "backfill_signal_close_price", Label: "补齐收盘价", Hint: fmt.Sprintf("该日候选股已存在（%d 只），其中 %d 只收盘价缺失或未对齐当日交易日。将只补齐这些股票的收盘价，无需重建四象限。", batch.CandidateCount, batch.MissingPriceCount)})
 			}
 		}
 	} else if cal.IsTradingDay && date <= today {

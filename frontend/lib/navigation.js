@@ -41,6 +41,7 @@ export const NAV_GROUPS = [
     key: 'more',
     label: '更多',
     items: [
+      { key: 'membership', href: '/membership', label: '会员中心', matchNested: true },
       { key: 'changelog', href: '/changelog', label: '更新日志', badgeKey: 'changelog', matchNested: true },
     ],
   },

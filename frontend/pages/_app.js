@@ -10,6 +10,10 @@ import NavSearchBox from '../components/NavSearchBox'
 import ThemeToggle from '../components/ThemeToggle'
 import { AuthProvider, useAuth } from '../lib/auth-context'
 import changelogData from '../data/changelog.json'
+import {
+  buildMembershipMenuLabel,
+  resolveMembershipEntryState,
+} from '../lib/membership'
 import { buildPageViewHeaders } from '../lib/pageview'
 import { ThemeProvider } from '../lib/theme-context'
 
@@ -267,7 +271,10 @@ function AccountEntry() {
     return () => window.removeEventListener('mousedown', onClickOutside)
   }, [menuOpen])
 
-  if (!ready) {
+  // 预发布期间无真实会员状态，统一按非会员展示（见 lib/membership.js）
+  const membershipState = resolveMembershipEntryState({ ready, isLoggedIn, isMember: false })
+
+  if (membershipState === 'loading') {
     return (
       <div className="flex items-center gap-2 shrink-0">
         <span className="text-sm text-foreground-dim">···</span>
@@ -275,7 +282,7 @@ function AccountEntry() {
     )
   }
 
-  if (!isLoggedIn) {
+  if (membershipState === 'guest') {
     return (
       <div className="flex items-center gap-2 shrink-0">
         <button
@@ -292,50 +299,76 @@ function AccountEntry() {
         >
           注册
         </button>
+        <Link
+          href="/membership"
+          className="hidden sm:inline-flex rounded-lg px-2 py-1.5 text-sm text-foreground-dim transition hover:text-primary"
+        >
+          开通会员
+        </Link>
       </div>
     )
   }
 
   const accountLabel = user?.nickname?.trim() || user?.email || '账号'
+  const membershipMenuLabel = buildMembershipMenuLabel(membershipState)
 
   return (
-    <div ref={menuRef} className="relative shrink-0">
-      <button
-        type="button"
-        onClick={() => setMenuOpen((prev) => !prev)}
-        className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground-muted transition hover:border-border-strong hover:bg-[var(--color-bg-hover)] hover:text-foreground"
-      >
-        <span className="max-w-[180px] truncate">{accountLabel}</span>
-        <span className="text-xs text-foreground-dim">▼</span>
-      </button>
-
-      {menuOpen ? (
-        <div className="absolute right-0 mt-2 w-64 rounded-xl border border-border bg-card p-2 shadow-2xl">
-          <div className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-2">
-            <div className="text-xs text-foreground-dim">当前账号</div>
-            <div className="mt-1 truncate text-sm text-foreground">{user?.email || '--'}</div>
-          </div>
-
-          <Link
-            href="/settings"
-            onClick={() => setMenuOpen(false)}
-            className="mt-2 block w-full rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-2 text-left text-sm text-foreground-muted transition hover:bg-[var(--color-bg-hover)] hover:text-foreground"
-          >
-            ⚙️ 设置
-          </Link>
-
-          <button
-            type="button"
-            onClick={async () => {
-              setMenuOpen(false)
-              await logout()
-            }}
-            className="mt-2 w-full rounded-lg border border-negative/35 bg-negative/10 px-3 py-2 text-left text-sm text-negative transition hover:bg-negative/20"
-          >
-            退出登录
-          </button>
-        </div>
+    <div className="flex items-center gap-2 shrink-0">
+      {membershipState === 'non-member' ? (
+        <Link
+          href="/membership"
+          className="hidden sm:inline-flex items-center rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-primary/20"
+        >
+          开通会员 · ¥39/月
+        </Link>
       ) : null}
+
+      <div ref={menuRef} className="relative shrink-0">
+        <button
+          type="button"
+          onClick={() => setMenuOpen((prev) => !prev)}
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground-muted transition hover:border-border-strong hover:bg-[var(--color-bg-hover)] hover:text-foreground"
+        >
+          <span className="max-w-[180px] truncate">{accountLabel}</span>
+          <span className="text-xs text-foreground-dim">▼</span>
+        </button>
+
+        {menuOpen ? (
+          <div className="absolute right-0 mt-2 w-64 rounded-xl border border-border bg-card p-2 shadow-2xl">
+            <div className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-2">
+              <div className="text-xs text-foreground-dim">当前账号</div>
+              <div className="mt-1 truncate text-sm text-foreground">{user?.email || '--'}</div>
+            </div>
+
+            <Link
+              href="/membership"
+              onClick={() => setMenuOpen(false)}
+              className="mt-2 block w-full rounded-lg border border-primary/35 bg-primary/10 px-3 py-2 text-left text-sm text-primary transition hover:bg-primary/20"
+            >
+              👑 {membershipMenuLabel}
+            </Link>
+
+            <Link
+              href="/settings"
+              onClick={() => setMenuOpen(false)}
+              className="mt-2 block w-full rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-2 text-left text-sm text-foreground-muted transition hover:bg-[var(--color-bg-hover)] hover:text-foreground"
+            >
+              ⚙️ 设置
+            </Link>
+
+            <button
+              type="button"
+              onClick={async () => {
+                setMenuOpen(false)
+                await logout()
+              }}
+              className="mt-2 w-full rounded-lg border border-negative/35 bg-negative/10 px-3 py-2 text-left text-sm text-negative transition hover:bg-negative/20"
+            >
+              退出登录
+            </button>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }

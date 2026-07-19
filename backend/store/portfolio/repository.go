@@ -299,6 +299,17 @@ func (r *Repository) CreateSnapshotJobRunItems(ctx context.Context, records []Po
 	return r.db.WithContext(ctx).Create(&records).Error
 }
 
+func (r *Repository) HasCompletedSnapshotJobRun(ctx context.Context, scope, targetDate string) (bool, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Model(&PortfolioSnapshotJobRunRecord{}).
+		Where("job_type = ? AND scope = ? AND target_date = ? AND status IN ?", PortfolioSnapshotJobTypeDailyMarket, scope, targetDate, []string{PortfolioSnapshotJobStatusSuccess, PortfolioSnapshotJobStatusPartialFailed, PortfolioSnapshotJobStatusSkipped}).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (r *Repository) ListUsersByScopeWithPositions(ctx context.Context, scope string) ([]string, error) {
 	query := r.db.WithContext(ctx).
 		Model(&PortfolioRecord{}).

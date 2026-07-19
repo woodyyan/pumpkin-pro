@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 )
 
 const (
@@ -19,14 +21,14 @@ const (
 )
 
 type WorkerConfig struct {
-	Enabled        bool
-	AShareHour     int
-	AShareMinute   int
-	HKHour         int
-	HKMinute       int
-	RunTimeout     time.Duration
-	NowFunc        func() time.Time
-	TriggerSource  string
+	Enabled       bool
+	AShareHour    int
+	AShareMinute  int
+	HKHour        int
+	HKMinute      int
+	RunTimeout    time.Duration
+	NowFunc       func() time.Time
+	TriggerSource string
 }
 
 type WorkerRun struct {
@@ -95,9 +97,37 @@ func (w *Worker) Start(ctx context.Context) {
 		log.Printf("%s disabled", portfolioWorkerLogPrefix)
 		return
 	}
+	go w.runStartupCatchUp(ctx, PortfolioScopeAShare, w.cfg.AShareHour, w.cfg.AShareMinute)
+	go w.runStartupCatchUp(ctx, PortfolioScopeHK, w.cfg.HKHour, w.cfg.HKMinute)
 	go w.scheduleLoop(ctx, PortfolioScopeAShare, w.cfg.AShareHour, w.cfg.AShareMinute)
 	go w.scheduleLoop(ctx, PortfolioScopeHK, w.cfg.HKHour, w.cfg.HKMinute)
 	log.Printf("%s started, A-share at %02d:%02d CST, HK at %02d:%02d CST", portfolioWorkerLogPrefix, w.cfg.AShareHour, w.cfg.AShareMinute, w.cfg.HKHour, w.cfg.HKMinute)
+}
+
+func (w *Worker) runStartupCatchUp(ctx context.Context, scope string, hour, minute int) {
+	now := w.cfg.NowFunc().In(shanghaiLocation())
+	targetDate := now.Format("2006-01-02")
+	scheduledTime := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
+	if now.Before(scheduledTime) {
+		return
+	}
+	calendar := quadrant.NewSimPortfolioV2CalendarService()
+	if !calendar.IsTradingDay(scope, targetDate) {
+		return
+	}
+	hasRun, err := w.service.repo.HasCompletedSnapshotJobRun(ctx, scope, targetDate)
+	if err != nil {
+		log.Printf("%s %s startup catch-up check failed for %s: %v", portfolioWorkerLogPrefix, scope, targetDate, err)
+		return
+	}
+	if hasRun {
+		return
+	}
+	if _, err := w.RunOnce(ctx, scope, targetDate, scheduledTime, PortfolioSnapshotJobTriggerScheduler); err != nil {
+		log.Printf("%s %s startup catch-up failed for %s: %v", portfolioWorkerLogPrefix, scope, targetDate, err)
+		return
+	}
+	log.Printf("%s %s startup catch-up completed for %s", portfolioWorkerLogPrefix, scope, targetDate)
 }
 
 func (w *Worker) scheduleLoop(ctx context.Context, scope string, hour, minute int) {

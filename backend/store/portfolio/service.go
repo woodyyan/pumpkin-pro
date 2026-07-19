@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
+	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 )
 
 const portfolioHistoryPreviewLimit = 5
@@ -490,6 +491,10 @@ func (s *Service) rebuildHistoricalSnapshotForUserScopeDate(ctx context.Context,
 	}
 	if _, err := time.ParseInLocation("2006-01-02", snapshotDate, shanghaiLocation()); err != nil {
 		return nil, nil, false, fmt.Errorf("invalid snapshot date: %s", snapshotDate)
+	}
+	today := s.nowFunc().In(shanghaiLocation()).Format("2006-01-02")
+	if snapshotDate > today {
+		return nil, nil, false, fmt.Errorf("cannot rebuild snapshot for future date: %s (today=%s)", snapshotDate, today)
 	}
 	events, err := s.repo.ListActiveEventsByUserAsc(ctx, userID)
 	if err != nil {
@@ -1030,7 +1035,8 @@ func (s *Service) GetPnlCalendar(ctx context.Context, userID string, query Portf
 	if err != nil {
 		return nil, err
 	}
-	days, monthPnl, monthBase, currencyCode := buildPnlCalendarDays(query, snapshots, realizedByDate, tradingDates, dayCount)
+	today := s.nowFunc().In(shanghaiLocation()).Format("2006-01-02")
+	days, monthPnl, monthBase, currencyCode := buildPnlCalendarDays(query, snapshots, realizedByDate, tradingDates, dayCount, today)
 	var monthRate *float64
 	if monthBase > 0 {
 		value := monthPnl / monthBase
@@ -1323,63 +1329,40 @@ func monthDateRange(year int, month int) (string, string, int) {
 }
 
 func (s *Service) resolvePnlCalendarTradingDates(ctx context.Context, userID, scope, startDate, endDate string) (map[string]struct{}, error) {
-	records, err := s.repo.ListByUser(ctx, userID)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	events, err := s.repo.ListActiveEventsByUser(ctx, userID)
+	start, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(startDate), shanghaiLocation())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid pnl calendar start date %q: %w", startDate, err)
+	}
+	end, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(endDate), shanghaiLocation())
+	if err != nil {
+		return nil, fmt.Errorf("invalid pnl calendar end date %q: %w", endDate, err)
+	}
+	if end.Before(start) {
+		return nil, fmt.Errorf("invalid pnl calendar date range: %s > %s", startDate, endDate)
 	}
 
-	symbols := uniquePortfolioSymbols(records, events)
-	codes := make([]string, 0, len(symbols))
-	seen := map[string]struct{}{}
-	for _, symbol := range symbols {
-		normalizedSymbol, exchange := normalizeAttributionSymbol(symbol)
-		if normalizedSymbol == "" || !scopeMatchesExchange(scope, exchange) {
-			continue
-		}
-		code := historyCodeFromSymbol(normalizedSymbol)
-		if code == "" {
-			continue
-		}
-		if _, ok := seen[code]; ok {
-			continue
-		}
-		seen[code] = struct{}{}
-		codes = append(codes, code)
-	}
-	if len(codes) == 0 {
-		return map[string]struct{}{}, nil
-	}
-
-	historyReader := s.historyReader
-	if historyReader == nil {
-		historyRepo, err := NewRiskDBRepository()
-		if err != nil {
+	calendar := quadrant.NewSimPortfolioV2CalendarService()
+	today := s.nowFunc().In(shanghaiLocation()).Format("2006-01-02")
+	tradingDates := map[string]struct{}{}
+	for date := start; !date.After(end); date = date.AddDate(0, 0, 1) {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		historyReader = historyRepo
-	}
-	barsByCode, err := historyReader.GetDailyBars(ctx, codes, startDate, endDate)
-	if err != nil {
-		return nil, err
-	}
-
-	tradingDates := map[string]struct{}{}
-	for _, bars := range barsByCode {
-		for _, bar := range bars {
-			if bar.Date < startDate || bar.Date > endDate || bar.Close <= 0 {
-				continue
-			}
-			tradingDates[bar.Date] = struct{}{}
+		value := date.Format("2006-01-02")
+		if value > today {
+			continue
+		}
+		if calendar.IsTradingDay(scope, value) {
+			tradingDates[value] = struct{}{}
 		}
 	}
 	return tradingDates, nil
 }
 
-func buildPnlCalendarDays(query PortfolioPnlCalendarQuery, snapshots []PortfolioDailySnapshotRecord, realizedByDate map[string]float64, tradingDates map[string]struct{}, dayCount int) ([]PortfolioPnlCalendarDay, float64, float64, string) {
+func buildPnlCalendarDays(query PortfolioPnlCalendarQuery, snapshots []PortfolioDailySnapshotRecord, realizedByDate map[string]float64, tradingDates map[string]struct{}, dayCount int, today string) ([]PortfolioPnlCalendarDay, float64, float64, string) {
 	snapshotByDate := make(map[string]PortfolioDailySnapshotRecord, len(snapshots))
 	currencyCode := defaultCurrencyCodeForScope(query.Scope)
 	for _, snapshot := range snapshots {
@@ -1389,7 +1372,6 @@ func buildPnlCalendarDays(query PortfolioPnlCalendarQuery, snapshots []Portfolio
 		}
 	}
 
-	today := time.Now().In(shanghaiLocation()).Format("2006-01-02")
 	days := make([]PortfolioPnlCalendarDay, 0, dayCount)
 	monthPnl := 0.0
 	monthBase := 0.0
@@ -1491,8 +1473,12 @@ func (s *Service) ensurePnlCalendarSnapshots(ctx context.Context, userID, scope,
 	for _, snapshot := range snapshots {
 		existing[snapshot.SnapshotDate] = struct{}{}
 	}
+	today := s.nowFunc().In(shanghaiLocation()).Format("2006-01-02")
 	missing := make([]string, 0)
 	for date := range tradingDates {
+		if date > today {
+			continue
+		}
 		if _, ok := existing[date]; ok {
 			continue
 		}

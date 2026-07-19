@@ -414,6 +414,119 @@ func TestServiceGetPnlCalendarBuildsMonthDays(t *testing.T) {
 	}
 }
 
+func TestServiceGetPnlCalendarUsesMarketCalendarWhenHoldingBarsAreStale(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	seedPnlCalendarTradingContext(t, svc, "calendar-stale-bars", "600519.SH", map[string]float64{"2026-07-14": 10})
+	now := time.Now().UTC()
+	if err := svc.repo.UpsertDailySnapshot(ctx, &PortfolioDailySnapshotRecord{
+		ID: "calendar-stale-bars-day", UserID: "calendar-stale-bars", Scope: PortfolioScopeAShare, SnapshotDate: "2026-07-15",
+		CurrencyCode: "CNY", MarketValueAmount: 11000, TotalCostAmount: 10000, TodayPnlAmount: 1000, PositionCount: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertDailySnapshot failed: %v", err)
+	}
+
+	payload, err := svc.GetPnlCalendar(ctx, "calendar-stale-bars", PortfolioPnlCalendarQuery{Scope: PortfolioScopeAShare, Year: 2026, Month: 7})
+	if err != nil {
+		t.Fatalf("GetPnlCalendar failed: %v", err)
+	}
+	day := payload.Days[14]
+	if day.Date != "2026-07-15" || !day.HasData || day.PnlAmount != 1000 {
+		t.Fatalf("expected snapshot data on market trading day despite stale bars, got %+v", day)
+	}
+}
+
+func TestServiceGetPnlCalendarDoesNotProduceFuturePnl(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	svc.nowFunc = func() time.Time { return time.Date(2026, 7, 19, 18, 0, 0, 0, shanghaiLocation()) }
+	seedPnlCalendarTradingContext(t, svc, "calendar-future-user", "600519.SH", map[string]float64{"2026-07-14": 10})
+
+	payload, err := svc.GetPnlCalendar(ctx, "calendar-future-user", PortfolioPnlCalendarQuery{Scope: PortfolioScopeAShare, Year: 2026, Month: 7})
+	if err != nil {
+		t.Fatalf("GetPnlCalendar failed: %v", err)
+	}
+	for day := 20; day <= 31; day++ {
+		d := payload.Days[day-1]
+		if d.HasData {
+			t.Fatalf("expected future day %s to have no data, got %+v", d.Date, d)
+		}
+		if d.PnlAmount != 0 || d.PnlRate != nil || d.MarketValueAmount != 0 {
+			t.Fatalf("expected future day %s to have zero pnl/market value, got %+v", d.Date, d)
+		}
+	}
+
+	var futureSnapshotCount int64
+	if err := svc.repo.db.Model(&PortfolioDailySnapshotRecord{}).
+		Where("user_id = ? AND scope = ? AND snapshot_date > ?", "calendar-future-user", PortfolioScopeAShare, "2026-07-19").
+		Count(&futureSnapshotCount).Error; err != nil {
+		t.Fatalf("count future snapshots failed: %v", err)
+	}
+	if futureSnapshotCount != 0 {
+		t.Fatalf("expected no future snapshots in db, got %d", futureSnapshotCount)
+	}
+}
+
+func TestServiceGetPnlCalendarDoesNotProduceFuturePnlHK(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	svc.nowFunc = func() time.Time { return time.Date(2026, 7, 19, 18, 0, 0, 0, shanghaiLocation()) }
+	seedPnlCalendarTradingContext(t, svc, "calendar-future-hk-user", "00700.HK", map[string]float64{"2026-07-14": 410})
+
+	payload, err := svc.GetPnlCalendar(ctx, "calendar-future-hk-user", PortfolioPnlCalendarQuery{Scope: PortfolioScopeHK, Year: 2026, Month: 7})
+	if err != nil {
+		t.Fatalf("GetPnlCalendar failed: %v", err)
+	}
+	for day := 20; day <= 31; day++ {
+		d := payload.Days[day-1]
+		if d.HasData {
+			t.Fatalf("expected HK future day %s to have no data, got %+v", d.Date, d)
+		}
+	}
+}
+
+func TestRebuildDailySnapshotRejectsFutureDate(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	svc.nowFunc = func() time.Time { return time.Date(2026, 7, 19, 18, 0, 0, 0, shanghaiLocation()) }
+	seedPnlCalendarTradingContext(t, svc, "rebuild-future-user", "600519.SH", map[string]float64{"2026-07-14": 10})
+
+	ok, err := svc.RebuildDailySnapshotForUser(ctx, "rebuild-future-user", PortfolioScopeAShare, "2026-07-25", PortfolioSnapshotSourceQueryBackfill, "")
+	if err == nil {
+		t.Fatalf("expected error for future snapshot rebuild, got ok=%v", ok)
+	}
+	if ok {
+		t.Fatalf("expected ok=false for future snapshot rebuild")
+	}
+	hasSnapshot, err := svc.repo.HasDailySnapshot(ctx, "rebuild-future-user", PortfolioScopeAShare, "2026-07-25")
+	if err != nil {
+		t.Fatalf("HasDailySnapshot failed: %v", err)
+	}
+	if hasSnapshot {
+		t.Fatal("expected no future snapshot written to db")
+	}
+}
+
+func TestServiceGetPnlCalendarStillShowsTodayTradingDay(t *testing.T) {
+	svc, ctx := setupPortfolioService(t)
+	svc.nowFunc = func() time.Time { return time.Date(2026, 7, 17, 18, 0, 0, 0, shanghaiLocation()) }
+	seedPnlCalendarTradingContext(t, svc, "calendar-today-user", "600519.SH", map[string]float64{"2026-07-17": 11})
+	now := time.Now().UTC()
+	if err := svc.repo.UpsertDailySnapshot(ctx, &PortfolioDailySnapshotRecord{
+		ID: "calendar-today-day", UserID: "calendar-today-user", Scope: PortfolioScopeAShare, SnapshotDate: "2026-07-17",
+		CurrencyCode: "CNY", MarketValueAmount: 11000, TotalCostAmount: 10000, TodayPnlAmount: 1000, PositionCount: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertDailySnapshot failed: %v", err)
+	}
+
+	payload, err := svc.GetPnlCalendar(ctx, "calendar-today-user", PortfolioPnlCalendarQuery{Scope: PortfolioScopeAShare, Year: 2026, Month: 7})
+	if err != nil {
+		t.Fatalf("GetPnlCalendar failed: %v", err)
+	}
+	day := payload.Days[16]
+	if day.Date != "2026-07-17" || !day.HasData || day.PnlAmount != 1000 {
+		t.Fatalf("expected today trading day snapshot to be visible, got %+v", day)
+	}
+}
+
 func TestServiceGetPnlCalendarHidesAShareHolidaySnapshots(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
 	seedPnlCalendarTradingContext(t, svc, "calendar-ashare-holiday", "600519.SH", map[string]float64{"2026-05-06": 11})
@@ -467,10 +580,10 @@ func TestServiceGetPnlCalendarHidesHKHolidaySnapshots(t *testing.T) {
 
 func TestServiceGetPnlCalendarCombinesHoldingAndRealizedPnl(t *testing.T) {
 	svc, ctx := setupPortfolioService(t)
-	seedPnlCalendarTradingContext(t, svc, "calendar-combine-user", "600519.SH", map[string]float64{"2026-05-10": 10.1})
+	seedPnlCalendarTradingContext(t, svc, "calendar-combine-user", "600519.SH", map[string]float64{"2026-05-11": 10.1})
 	now := time.Now().UTC()
 	if err := svc.repo.UpsertDailySnapshot(ctx, &PortfolioDailySnapshotRecord{
-		ID: "calendar-combine", UserID: "calendar-combine-user", Scope: PortfolioScopeAShare, SnapshotDate: "2026-05-10",
+		ID: "calendar-combine", UserID: "calendar-combine-user", Scope: PortfolioScopeAShare, SnapshotDate: "2026-05-11",
 		CurrencyCode: "CNY", MarketValueAmount: 10100, TotalCostAmount: 10000, TodayPnlAmount: 100, PositionCount: 1,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -478,7 +591,7 @@ func TestServiceGetPnlCalendarCombinesHoldingAndRealizedPnl(t *testing.T) {
 	}
 	if err := svc.repo.CreateEvent(ctx, &PortfolioEventRecord{
 		ID: "calendar-realized", UserID: "calendar-combine-user", Symbol: "600519.SH", EventType: EventTypeSell,
-		TradeDate: "2026-05-10", EffectiveAt: now, RealizedPnlAmount: 50, CreatedAt: now, UpdatedAt: now,
+		TradeDate: "2026-05-11", EffectiveAt: now, RealizedPnlAmount: 50, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("CreateEvent failed: %v", err)
 	}
@@ -487,9 +600,9 @@ func TestServiceGetPnlCalendarCombinesHoldingAndRealizedPnl(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPnlCalendar failed: %v", err)
 	}
-	day := payload.Days[9]
-	if day.Date != "2026-05-10" {
-		t.Fatalf("expected May 10 at index 9, got %s", day.Date)
+	day := payload.Days[10]
+	if day.Date != "2026-05-11" {
+		t.Fatalf("expected May 11 at index 10, got %s", day.Date)
 	}
 	if day.PnlAmount != 150 || day.HoldingPnlAmount != 100 || day.RealizedPnlAmount != 50 {
 		t.Fatalf("expected combined pnl 150 from 100 + 50, got %+v", day)

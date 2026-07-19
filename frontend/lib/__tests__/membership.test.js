@@ -31,6 +31,33 @@ describe('membership plans config', () => {
     assert.ok(reportRow.member.includes('5 份'), 'member cell must state 5 reports per month')
   })
 
+  it('covers the full member benefit scope in the compare table', () => {
+    const features = MEMBERSHIP_COMPARE_ROWS.map((row) => row.feature)
+    assert.deepEqual(features, [
+      'AI 研报',
+      'AI 功能',
+      'AI 选股',
+      '模拟组合',
+      '绩效归因分析',
+      '组合风险分析',
+      '因子实验室',
+      '卧龙推荐',
+      '交易信号配置',
+    ])
+
+    const rowByFeature = Object.fromEntries(MEMBERSHIP_COMPARE_ROWS.map((row) => [row.feature, row]))
+    assert.ok(rowByFeature['AI 功能'].free.includes('每日 3 次'))
+    assert.ok(rowByFeature['AI 功能'].member.includes('无限次'))
+    assert.ok(rowByFeature['AI 选股'].member.includes('无限次'))
+    assert.ok(rowByFeature['模拟组合'].member.includes('因子组合'))
+    assert.ok(rowByFeature['绩效归因分析'].member.includes('高级版'))
+    assert.ok(rowByFeature['组合风险分析'].free.includes('无此功能'))
+    assert.ok(rowByFeature['因子实验室'].member.includes('因子选股'))
+    assert.ok(rowByFeature['卧龙推荐'].free.includes('无此功能'))
+    assert.ok(rowByFeature['交易信号配置'].member.includes('邮件推送'))
+    assert.ok(rowByFeature['交易信号配置'].free.includes('3 个信号'))
+  })
+
   it('mentions Beijing-time reset for free quota and keeps FAQ concise', () => {
     const text = MEMBERSHIP_COMPARE_ROWS.map((row) => row.free).join('\n')
     assert.ok(text.includes('北京时间'))

@@ -43,12 +43,14 @@ export const MEMBERSHIP_PLANS = [
 // 免费 vs 会员 对比表（会员权益全部在此呈现）
 export const MEMBERSHIP_COMPARE_ROWS = [
   { feature: 'AI 研报', free: '按份购买', member: '每月 5 份 AI 研报额度，用完后可按份购买' },
-  { feature: 'AI 深度投研', free: '每日少量免费额度（每日 0 点北京时间重置）', member: '更完整的个股诊断、深度追问与研究记录' },
-  { feature: '市场行情与机会榜', free: '基础行情与有限榜单', member: '完整榜单与历史趋势' },
-  { feature: '自选股与选股器', free: '少量自选股、基础条件', member: '更高上限、高级因子、筛选器保存' },
-  { feature: '策略回测', free: '示例策略与摘要结果', member: '自定义参数、全量指标、结果导出' },
-  { feature: '组合与风险管理', free: '组合模板', member: '持仓归因、风险诊断、预警提醒' },
-  { feature: '信号推送', free: '低频站内提醒', member: '更高频提醒与 Webhook 推送' },
+  { feature: 'AI 功能', free: '每日 3 次额度（每日 0 点北京时间重置）', member: '无限次使用，包括 AI 分析、AI 策略、AI 回测、AI 选股等' },
+  { feature: 'AI 选股', free: '仅能查看每日固定选股', member: '无限次选股' },
+  { feature: '模拟组合', free: '仅能查看有限组合', member: '可查看未来所有模拟组合，包括因子组合' },
+  { feature: '绩效归因分析', free: '基础绩效归因分析', member: '高级版绩效归因分析' },
+  { feature: '组合风险分析', free: '无此功能', member: '支持组合风险分析' },
+  { feature: '因子实验室', free: '仅能查看因子', member: '全部功能，包括因子选股' },
+  { feature: '卧龙推荐', free: '无此功能', member: '卧龙推荐的因子选股与模拟组合' },
+  { feature: '交易信号配置', free: '仅可配置 3 个信号，仅 Webhook', member: '批量与多指标信号，支持邮件推送与 Webhook' },
 ]
 
 export const MEMBERSHIP_FREE_QUOTA_NOTE = '免费额度每日 0 点（北京时间）重置。'

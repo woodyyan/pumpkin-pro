@@ -72,13 +72,13 @@ export default function MembershipPage() {
             卧龙会员
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-foreground-muted lg:text-base">
-            一个档位，全部权益。会员每月拥有 5 份 AI 研报额度，并解锁深度投研、高级选股、完整回测与组合风险管理能力。
+            一个档位，全部权益。会员每月拥有 5 份 AI 研报额度，AI 功能无限次使用，并解锁全部模拟组合、因子实验室与高级分析能力。
           </p>
           <p className="mt-2 text-xs text-foreground-dim">
             本期为预发布展示，暂未开启支付；{MEMBERSHIP_LAUNCH_NOTE}
           </p>
 
-          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:max-w-2xl">
+          <div className="mt-8 grid gap-5 sm:grid-cols-2">
             {MEMBERSHIP_PLANS.map((plan) => (
               <PricingCard key={plan.key} plan={plan} onSubscribe={openDialog} />
             ))}

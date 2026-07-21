@@ -267,7 +267,8 @@ export default function NewsKlineDashboard() {
     const minClose = closeValues.length ? Math.min(...closeValues) : 0
     const maxClose = closeValues.length ? Math.max(...closeValues) : 0
     const guidePadding = Math.max((maxClose - minClose) * 0.08, Math.abs(minClose) * 0.015, 0.01)
-    const guideBase = Math.max(0, minClose - guidePadding)
+    const guideBase = minClose - guidePadding
+    const yAxisMin = guideBase - guidePadding * 0.6
     const closeByDate = new Map(filteredKline.map((item) => [item.date, Number(item.close)]))
     const cats = report?.CATS || {}
     const grouped = new Map()
@@ -277,7 +278,8 @@ export default function NewsKlineDashboard() {
       const date = event.trade_date || event.date
       grouped.get(category).push({
         name: event.title,
-        value: [date, closeByDate.get(date)],
+        value: [date, guideBase],
+        guidePrice: closeByDate.get(date),
         event,
       })
     })
@@ -312,8 +314,8 @@ export default function NewsKlineDashboard() {
       const color = cats?.[category]?.color || palette.neutral
       const label = CATEGORY_LABELS[category] || category
       const guideRows = rows
-        .filter((item) => Number.isFinite(Number(item.value[1])))
-        .map((item) => ({ value: [item.value[0], item.value[1], guideBase] }))
+        .filter((item) => Number.isFinite(Number(item.guidePrice)))
+        .map((item) => ({ value: [item.value[0], item.guidePrice, guideBase] }))
       series.push({
         name: `${label}指引线`,
         type: 'custom',
@@ -348,20 +350,21 @@ export default function NewsKlineDashboard() {
         tooltip: {
           trigger: 'item',
           formatter(params) {
-            const event = params.data.event || {}
-            return [
-              `<div style="font-weight:600;max-width:280px;margin-bottom:4px">${event.title || '--'}</div>`,
-              `事件日期: ${event.date || '--'}`,
-              `交易日: ${event.trade_date || event.date || '--'}`,
-              `分类: ${label}`,
-              `当日: ${formatPercent(event.impact?.day_change)}`,
-              `后1日: ${formatPercent(event.impact?.ret_1d)}`,
-              `后3日: ${formatPercent(event.impact?.ret_3d)}`,
-            ].join('<br/>')
+            return formatEventTooltip(params.data.event || {}, label)
           },
         },
       })
     })
+
+    const formatEventTooltip = (event, label) => [
+      `<div style="font-weight:600;max-width:280px;margin-bottom:4px">${event.title || '--'}</div>`,
+      `事件日期: ${event.date || '--'}`,
+      `交易日: ${event.trade_date || event.date || '--'}`,
+      `分类: ${label || CATEGORY_LABELS[event.category] || event.category || '--'}`,
+      `当日: ${formatPercent(event.impact?.day_change)}`,
+      `后1日: ${formatPercent(event.impact?.ret_1d)}`,
+      `后3日: ${formatPercent(event.impact?.ret_3d)}`,
+    ].join('<br/>')
 
     return {
       backgroundColor: 'transparent',
@@ -369,6 +372,14 @@ export default function NewsKlineDashboard() {
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'cross' },
+        formatter(params) {
+          const rows = Array.isArray(params) ? params : [params]
+          const eventPoint = rows.find((item) => item?.data?.event)
+          if (eventPoint?.data?.event) return formatEventTooltip(eventPoint.data.event, eventPoint.seriesName)
+          const linePoint = rows.find((item) => item?.seriesName === '前复权收盘价')
+          if (!linePoint) return ''
+          return [`${linePoint.axisValue || linePoint.name || '--'}`, `前复权收盘价: ${formatNumber(linePoint.data?.[1] ?? linePoint.value?.[1])}`].join('<br/>')
+        },
         ...chartTooltipStyle(palette),
       },
       legend: {
@@ -388,7 +399,7 @@ export default function NewsKlineDashboard() {
       },
       yAxis: {
         scale: true,
-        min: guideBase,
+        min: yAxisMin,
         axisLine: { lineStyle: { color: palette.split } },
         axisLabel: { color: palette.axis },
         splitLine: { lineStyle: { color: palette.split, type: 'dashed' } },
@@ -464,7 +475,7 @@ export default function NewsKlineDashboard() {
             <div className="text-xs font-medium uppercase tracking-[0.18em] text-foreground-dim">Search first</div>
             <h2 className="mt-2 text-2xl font-semibold text-foreground">先搜索一只股票开始透视</h2>
             <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-foreground-muted">
-              当前页面不会默认加载个股，避免无意义外部请求。请选择股票后，系统会拉取 500 个交易日 K 线和更深覆盖的公告/新闻事件。
+              请选择股票后，系统会拉取 500 个交易日 K 线和更深覆盖的公告/新闻事件。
             </p>
           </section>
         )}

@@ -277,24 +277,37 @@ export default function NewsKlineDashboard() {
       })
     })
 
-    const candleData = filteredKline.map((item) => [Number(item.open), Number(item.close), Number(item.low), Number(item.high)])
+    const lineData = filteredKline.map((item) => [item.date, Number(item.close)])
     const series = [
       {
-        name: '前复权K线',
-        type: 'candlestick',
-        data: candleData,
-        itemStyle: {
-          color: palette.red,
-          color0: palette.green,
-          borderColor: palette.red,
-          borderColor0: palette.green,
+        name: '前复权收盘价',
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        sampling: 'lttb',
+        data: lineData,
+        lineStyle: { color: palette.blue, width: 1.6 },
+        itemStyle: { color: palette.blue },
+        areaStyle: {
+          color: {
+            type: 'linear',
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: palette.blueAlpha },
+              { offset: 1, color: 'rgba(0,0,0,0)' },
+            ],
+          },
         },
       },
     ]
     Array.from(grouped.entries()).forEach(([category, rows]) => {
       const color = cats?.[category]?.color || palette.neutral
+      const label = CATEGORY_LABELS[category] || category
       series.push({
-        name: CATEGORY_LABELS[category] || category,
+        name: label,
         type: 'scatter',
         symbol: 'circle',
         symbolSize(value, params) {
@@ -305,14 +318,16 @@ export default function NewsKlineDashboard() {
         itemStyle: { color, opacity: 0.86 },
         emphasis: { itemStyle: { borderColor: palette.tooltipText, borderWidth: 1.5, opacity: 1 } },
         tooltip: {
+          trigger: 'item',
           formatter(params) {
             const event = params.data.event || {}
             return [
-              `<strong>${event.title || '--'}</strong>`,
+              `<div style="font-weight:600;max-width:280px;margin-bottom:4px">${event.title || '--'}</div>`,
               `事件日期: ${event.date || '--'}`,
               `交易日: ${event.trade_date || event.date || '--'}`,
-              `分类: ${event.category || '--'}`,
+              `分类: ${label}`,
               `当日: ${formatPercent(event.impact?.day_change)}`,
+              `后1日: ${formatPercent(event.impact?.ret_1d)}`,
               `后3日: ${formatPercent(event.impact?.ret_3d)}`,
             ].join('<br/>')
           },
@@ -375,7 +390,7 @@ export default function NewsKlineDashboard() {
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-primary/80">News K-line Lens</div>
               <h1 className="mt-2 text-3xl font-semibold tracking-tight text-foreground md:text-4xl">新闻透视</h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-foreground-muted">
-                将公告、新闻和财报催化剂映射到前复权 K 线，观察事件发生后的短期股价反应。A 股与中国香港股票均使用前复权口径；研报分类首期隐藏空数据。
+                将公告、新闻和财报催化剂映射到前复权 K 线，观察事件发生后的短期股价反应。
               </p>
             </div>
             {selectedSymbol && (
@@ -404,7 +419,7 @@ export default function NewsKlineDashboard() {
                 onClick={() => loadReport(selectedSymbol, true)}
                 className="inline-flex items-center justify-center rounded-2xl border border-border bg-[var(--color-bg-hover)] px-4 py-3 text-sm text-foreground-muted transition hover:border-primary/40 hover:text-primary"
               >
-                强制刷新
+                刷新
               </button>
             )}
           </div>
@@ -438,7 +453,7 @@ export default function NewsKlineDashboard() {
                 <div>
                   <h2 className="text-xl font-semibold text-foreground">股价走势与催化剂时间轴</h2>
                   <p className="mt-1 text-sm leading-6 text-foreground-muted">
-                    蜡烛图为前复权日 K；圆点为事件标记，颜色代表事件类型。公告若落在非交易日，会映射到下一交易日参与影响计算。
+                    曲线为前复权日收盘价；圆点为事件标记，颜色代表事件类型。将鼠标移到圆点上可查看事件内容。公告若落在非交易日，会映射到下一交易日参与影响计算。
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -536,11 +551,6 @@ export default function NewsKlineDashboard() {
                   </table>
                 </div>
               </div>
-            </section>
-
-            <section className="mt-6 rounded-3xl border border-border bg-card px-5 py-4 text-xs leading-6 text-foreground-muted md:px-6">
-              <strong className="text-foreground">口径说明：</strong>
-              K 线为腾讯公开行情前复权日 K；事件来源首期包括公告、新闻和财报类披露，不包含研报；事件分类基于标题关键词规则，仅用于辅助观察，不构成投资建议。数据刷新失败时会优先返回最近一次缓存快照。
             </section>
           </>
         )}

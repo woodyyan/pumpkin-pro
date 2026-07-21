@@ -66,6 +66,7 @@ export function chartPalette(resolvedTheme) {
     red: dark ? '#ef4444' : '#dc2626',
     green: dark ? '#22c55e' : '#16a34a',
     blue: dark ? '#60a5fa' : '#2563eb',
+    blueAlpha: dark ? 'rgba(96,165,250,0.20)' : 'rgba(37,99,235,0.16)',
     purple: dark ? '#a78bfa' : '#8b5cf6',
     amber: dark ? '#fbbf24' : '#f59e0b',
     teal: dark ? '#2dd4bf' : '#14b8a6',

@@ -46,7 +46,7 @@ POLICIES: Dict[Tuple[str, str], SourcePolicy] = {
     (Capability.DIVIDENDS, Market.ASHARE): SourcePolicy(
         capability=Capability.DIVIDENDS,
         market=Market.ASHARE,
-        providers=["akshare", "eastmoney", "tencent"],
+        providers=["baostock", "akshare", "eastmoney", "tencent"],
     ),
     (Capability.DAILY_BARS, Market.ASHARE): SourcePolicy(
         capability=Capability.DAILY_BARS,

@@ -260,7 +260,7 @@ func Load() Config {
 			Phase1ScriptPath:     getEnv("FACTOR_LAB_PHASE1_SCRIPT", "quant/scripts/compute_factor_lab_phase1.py"),
 			Phase2ScriptPath:     getEnv("FACTOR_LAB_PHASE2_SCRIPT", "quant/scripts/compute_factor_lab_phase2.py"),
 			IndustriesSource:     getEnv("FACTOR_LAB_INDUSTRIES_SOURCE", "auto"),
-			DailyBarsSource:      getEnv("FACTOR_LAB_DAILY_BARS_SOURCE", "tencent"),
+			DailyBarsSource:      getEnv("FACTOR_LAB_DAILY_BARS_SOURCE", "auto"),
 			FinancialsSource:     getEnv("FACTOR_LAB_FINANCIALS_SOURCE", "auto"),
 			DividendsSource:      getEnv("FACTOR_LAB_DIVIDENDS_SOURCE", "auto"),
 			ProgressInterval:     getEnvAsInt("FACTOR_LAB_PROGRESS_INTERVAL", 500),

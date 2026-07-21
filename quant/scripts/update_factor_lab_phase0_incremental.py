@@ -63,7 +63,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--industries-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="行业增量数据源")
     parser.add_argument("--daily-bars-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="tencent", help="日线增量数据源，默认腾讯以减少逐股慢失败")
     parser.add_argument("--financials-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="财务增量数据源")
-    parser.add_argument("--dividends-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="分红增量数据源")
+    parser.add_argument("--dividends-source", choices=["auto", "baostock", "akshare", "eastmoney", "tencent"], default="auto", help="分红增量数据源；auto=BaoStock→AKShare→东方财富→腾讯")
     parser.add_argument("--sleep", type=float, default=0.05, help="单股票请求间隔秒数，避免外部源限流")
     parser.add_argument("--snapshot-date", default="", help="市场快照交易日 YYYY-MM-DD；默认今天")
     parser.add_argument("--python-bin", default=sys.executable, help="用于调用 backfill 脚本的 Python 解释器")

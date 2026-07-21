@@ -50,6 +50,12 @@ DEFAULT_ADJUST = "qfq"
 EXTERNAL_SOURCE_ORDER = ["akshare", "eastmoney", "tencent"]
 SECURITIES_SOURCE_ORDER = ["akshare", "eastmoney", "tencent", "local"]
 INDUSTRY_SOURCE_ORDER = ["baostock", "akshare", "eastmoney", "tencent"]
+# daily-bars 以 BaoStock 为第一优先级（与 gateway policy.py 的 DAILY_BARS 顺序对齐）。
+# BaoStock 长连接单例 + 串行请求，吞吐稳定且限流宽松；配额熔断后自动 fallback 至 tencent/eastmoney/akshare。
+DAILY_BARS_SOURCE_ORDER = ["baostock", "tencent", "eastmoney", "akshare"]
+# dividends 以 BaoStock 为第一优先级。BaoStock query_dividend_data 返回每股股利税前与除权除息日，
+# total_cash_dividend / dividend_yield 留空由 phase1 的 compute_dividend_yield 反算（每股股利 / 收盘价）。
+DIVIDENDS_SOURCE_ORDER = ["baostock", "akshare", "eastmoney", "tencent"]
 MIN_FULL_UNIVERSE_SECURITY_COUNT = 1000
 EASTMONEY_CLIST_URL = "https://82.push2.eastmoney.com/api/qt/clist/get"
 EASTMONEY_KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
@@ -1321,7 +1327,14 @@ def build_gateway_request(
     lookback_days: int = 120,
     adjust: str = "qfq",
 ) -> DataSourceRequest:
-    extras: dict[str, Any] = {"providers_override": source_order(selected_source, EXTERNAL_SOURCE_ORDER)}
+    # daily-bars 使用 BaoStock 优先的顺序；其他能力沿用 EXTERNAL_SOURCE_ORDER。
+    if capability == Capability.DAILY_BARS:
+        order = DAILY_BARS_SOURCE_ORDER
+    else:
+        order = EXTERNAL_SOURCE_ORDER
+    extras: dict[str, Any] = {"providers_override": source_order(selected_source, order)}
+    # 透传 caller 用于 BaoStock 配额归因（BaoStockProvider 优先读 extras.caller，缺省回退 quadrant）。
+    extras["caller"] = "factor_lab_daily_bars" if capability == Capability.DAILY_BARS else "factor_lab"
     return DataSourceRequest(
         capability=capability,
         market=market,
@@ -2383,9 +2396,104 @@ def parse_dividend_frame(code: str, df: Any, source: str) -> list[tuple[Any, ...
     return rows
 
 
+def fetch_dividend_rows_baostock(code: str, report_limit: int = 8) -> list[tuple[Any, ...]]:
+    """
+    通过 BaoStock query_dividend_data 获取个股除权除息记录。
+
+    BaoStock 返回字段映射：
+    - dividCashPsBeforeTax → cash_dividend_per_share（每股股利税前，直接映射）
+    - dividOperateDate → ex_dividend_date（除权除息日，直接映射）
+    - dividCashStock → raw_plan（分红送转描述，如"10派2.5转5"）
+    - year + yearType="report" → report_period = "{year}-12-31"（报告年度对应年报期）
+
+    不返回的字段（留空，由 phase1 compute_dividend_yield 反算）：
+    - total_cash_dividend：BaoStock 不提供分红总额（需每股股利 × 总股本，总股本需另查）
+    - dividend_yield：BaoStock 不提供股息率（phase1 用 cash_dividend_per_share / close_price 反算）
+
+    配额：每只股票每年消耗 1 次 baostock 请求，report_limit 年内最多 report_limit 次。
+    """
+    # 代码映射（与 BaoStockProvider._to_baostock_code 同逻辑，但本地实现避免循环依赖）
+    raw_code = str(code or "").strip().zfill(6)
+    if len(raw_code) != 6:
+        raise ValueError(f"BaoStock 不支持代码 {code}（长度非 6）")
+    if raw_code.startswith("6"):
+        bs_code = f"sh.{raw_code}"
+    elif raw_code.startswith(("0", "3")):
+        bs_code = f"sz.{raw_code}"
+    else:
+        raise ValueError(f"BaoStock 不支持代码 {code}（可能是北交所）")
+
+    # 配额守卫：按年遍历，每年 1 次请求，预估 report_limit 次
+    try:
+        from data_sources.quota.baostock_quota import get_global_quota_guard
+        guard = get_global_quota_guard()
+        for _ in range(report_limit):
+            if not guard.try_acquire(cost=1, caller="factor_lab_dividends"):
+                raise RuntimeError("BaoStock 配额不足或已黑名单，跳过分红回填")
+    except ImportError:
+        pass  # 配额守卫未安装时降级为不检查
+
+    bs = import_baostock()
+    login_result = bs.login()
+    if str(getattr(login_result, "error_code", "")) != "0":
+        raise RuntimeError(f"BaoStock 登录失败: {getattr(login_result, 'error_msg', '')}")
+
+    rows: list[tuple[Any, ...]] = []
+    now = utc_now()
+    current_year = datetime.now().year
+    # 从当前年度往前回溯 report_limit 年（覆盖最近 report_limit 个报告期）
+    years_to_query = [str(y) for y in range(current_year, current_year - report_limit, -1)]
+
+    try:
+        for year in years_to_query:
+            try:
+                rs = bs.query_dividend_data(code=bs_code, year=year, yearType="report")
+            except Exception as exc:
+                log_step(f"dividends: BaoStock {bs_code} year={year} 查询异常: {exc}")
+                continue
+            if str(getattr(rs, "error_code", "")) != "0":
+                log_step(f"dividends: BaoStock {bs_code} year={year} 查询失败: {getattr(rs, 'error_msg', '')}")
+                continue
+            year_rows: list[list[str]] = []
+            while rs.next():
+                year_rows.append(rs.get_row_data())
+            for row in year_rows:
+                # BaoStock dividend 字段顺序（官方文档）：
+                # [code, dividOperateDate, dividCashPsBeforeTax, dividCashPsAfterTax, dividStockPs, dividCashStock]
+                ex_date = normalize_date(row[1]) if len(row) > 1 and row[1] else ""
+                cash_per_share = safe_float(row[2]) if len(row) > 2 else None
+                raw_plan = str(row[5] or "").strip() if len(row) > 5 else ""
+                # 仅保留有效记录（有每股股利或有送转描述）
+                if cash_per_share is None and not raw_plan:
+                    continue
+                if not ex_date:
+                    ex_date = "unknown"
+                report_period = f"{year}-12-31"
+                rows.append((
+                    code,
+                    report_period,
+                    ex_date,
+                    cash_per_share,
+                    None,  # total_cash_dividend：BaoStock 不提供，留空由 phase1 反算
+                    None,  # dividend_yield：BaoStock 不提供，留空由 phase1 用 cash_per_share / close_price 反算
+                    "",    # dividend_yield_source
+                    raw_plan,
+                    "baostock:query_dividend_data",
+                    now,
+                ))
+        if not rows:
+            raise RuntimeError(f"BaoStock 分红数据为空: {code}")
+        return rows
+    finally:
+        try:
+            bs.logout()
+        except Exception:
+            pass
+
+
 def fetch_dividend_rows_akshare(code: str) -> list[tuple[Any, ...]]:
     ak = import_akshare()
-    df = ak.stock_fhps_detail_em(symbol=code)
+    df = ak.stock_fhpe_detail_em(symbol=code)
     rows = parse_dividend_frame(code, df, "akshare:stock_fhps_detail_em")
     if not rows:
         raise RuntimeError("AKShare 分红数据为空")
@@ -2440,7 +2548,9 @@ def fetch_dividend_rows_tencent(code: str) -> list[tuple[Any, ...]]:
 
 
 def fetch_dividend_rows_with_fallback(code: str, args: argparse.Namespace) -> tuple[list[tuple[Any, ...]], str]:
+    report_limit = getattr(args, "report_limit", 8)
     manager = DataSourceManager(providers={
+        "baostock": _Phase0DividendsGatewayProvider("baostock", lambda c: fetch_dividend_rows_baostock(c, report_limit)),
         "akshare": _Phase0DividendsGatewayProvider("akshare", fetch_dividend_rows_akshare),
         "eastmoney": _Phase0DividendsGatewayProvider("eastmoney", fetch_dividend_rows_eastmoney),
         "tencent": _Phase0DividendsGatewayProvider("tencent", fetch_dividend_rows_tencent),
@@ -2450,7 +2560,7 @@ def fetch_dividend_rows_with_fallback(code: str, args: argparse.Namespace) -> tu
         market=Market.ASHARE,
         symbol=code,
         extras={
-            "providers_override": source_order(args.dividends_source, EXTERNAL_SOURCE_ORDER),
+            "providers_override": source_order(args.dividends_source, DIVIDENDS_SOURCE_ORDER),
             "code": code,
         },
     ))
@@ -2564,10 +2674,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--report-limit", type=int, default=8, help="最多扫描多少个报告期")
     parser.add_argument("--securities-source", choices=["auto", "akshare", "eastmoney", "tencent", "local"], default="auto", help="股票池数据源；auto=AKShare→东方财富→腾讯行情→本地兜底")
     parser.add_argument("--industries-source", choices=["auto", "baostock", "akshare", "eastmoney", "tencent"], default="auto", help="行业数据源；auto=BaoStock→AKShare→东方财富→腾讯")
-    parser.add_argument("--daily-bars-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="个股日线数据源；auto=AKShare→东方财富→腾讯")
+    parser.add_argument("--daily-bars-source", choices=["auto", "baostock", "akshare", "eastmoney", "tencent"], default="auto", help="个股日线数据源；auto=BaoStock→腾讯→东方财富→AKShare")
     parser.add_argument("--index-bars-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="指数日线数据源；auto=AKShare→东方财富→腾讯")
     parser.add_argument("--financials-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="财务数据源；auto=AKShare→东方财富→腾讯基础面兜底")
-    parser.add_argument("--dividends-source", choices=["auto", "akshare", "eastmoney", "tencent"], default="auto", help="分红数据源；auto=AKShare→东方财富→腾讯基础面兜底")
+    parser.add_argument("--dividends-source", choices=["auto", "baostock", "akshare", "eastmoney", "tencent"], default="auto", help="分红数据源；auto=BaoStock→AKShare→东方财富→腾讯基础面兜底")
     parser.add_argument("--require-fcfm-inputs", "--require-operating-cash-flow", dest="require_fcfm_inputs", action="store_true", help="财务回填要求至少一个 revenue/operating_cash_flow/capex 组合可用于计算 FCFM，否则继续尝试下一数据源")
     parser.add_argument("--progress-interval", type=int, default=50, help="每处理多少项输出一次进度")
     parser.add_argument("--verbose", action="store_true", help="输出外部源失败的完整 traceback")

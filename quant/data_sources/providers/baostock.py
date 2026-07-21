@@ -136,9 +136,10 @@ class BaoStockProvider:
         if not self._ensure_login():
             raise RuntimeError("BaoStock 登录失败")
 
-        # 配额检查
+        # 配额检查（caller 从 extras 透传，便于按消费方归因；缺省回退 quadrant 保持向后兼容）
+        caller = (request.extras or {}).get("caller") or "quadrant"
         quota_guard = get_global_quota_guard()
-        if not quota_guard.try_acquire(cost=1, caller="quadrant"):
+        if not quota_guard.try_acquire(cost=1, caller=caller):
             raise RuntimeError("BaoStock 配额不足或已黑名单")
 
         # 计算日期范围

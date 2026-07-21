@@ -272,10 +272,13 @@ export default function NewsKlineDashboard() {
     const closeByDate = new Map(filteredKline.map((item) => [item.date, Number(item.close)]))
     const cats = report?.CATS || {}
     const grouped = new Map()
+    const eventsByDate = new Map()
     eventsInRange.forEach((event) => {
       const category = event.category || '其他'
       if (!grouped.has(category)) grouped.set(category, [])
       const date = event.trade_date || event.date
+      if (!eventsByDate.has(date)) eventsByDate.set(date, [])
+      eventsByDate.get(date).push(event)
       grouped.get(category).push({
         name: event.title,
         value: [date, guideBase],
@@ -283,6 +286,17 @@ export default function NewsKlineDashboard() {
         event,
       })
     })
+
+    const formatEventTooltip = (event, label) => [
+      `<div style="font-weight:600;max-width:280px;margin-bottom:4px">${event.title || '--'}</div>`,
+      `事件日期: ${event.date || '--'}`,
+      `交易日: ${event.trade_date || event.date || '--'}`,
+      `分类: ${label || CATEGORY_LABELS[event.category] || event.category || '--'}`,
+      `当日: ${formatPercent(event.impact?.day_change)}`,
+      `后1日: ${formatPercent(event.impact?.ret_1d)}`,
+      `后3日: ${formatPercent(event.impact?.ret_3d)}`,
+    ].join('<br/>')
+    const formatEventsTooltip = (events) => events.slice(0, 3).map((event) => formatEventTooltip(event)).join('<div style="height:8px"></div>')
 
     const lineData = filteredKline.map((item) => [item.date, Number(item.close)])
     const series = [
@@ -320,6 +334,7 @@ export default function NewsKlineDashboard() {
         name: `${label}指引线`,
         type: 'custom',
         silent: true,
+        z: 2,
         tooltip: { show: false },
         data: guideRows,
         renderItem(params, api) {
@@ -340,12 +355,14 @@ export default function NewsKlineDashboard() {
         name: label,
         type: 'scatter',
         symbol: 'circle',
+        z: 12,
+        cursor: 'pointer',
         symbolSize(value, params) {
           const count = rows.filter((item) => item.value[0] === params.data.value[0]).length
-          return Math.min(14, 7 + count)
+          return Math.min(18, 10 + count)
         },
         data: rows,
-        itemStyle: { color, opacity: 0.9, borderColor: palette.card, borderWidth: 1.5 },
+        itemStyle: { color, opacity: 0.95, borderColor: palette.card, borderWidth: 1.5 },
         emphasis: { itemStyle: { borderColor: palette.tooltipText, borderWidth: 1.5, opacity: 1 } },
         tooltip: {
           trigger: 'item',
@@ -356,27 +373,22 @@ export default function NewsKlineDashboard() {
       })
     })
 
-    const formatEventTooltip = (event, label) => [
-      `<div style="font-weight:600;max-width:280px;margin-bottom:4px">${event.title || '--'}</div>`,
-      `事件日期: ${event.date || '--'}`,
-      `交易日: ${event.trade_date || event.date || '--'}`,
-      `分类: ${label || CATEGORY_LABELS[event.category] || event.category || '--'}`,
-      `当日: ${formatPercent(event.impact?.day_change)}`,
-      `后1日: ${formatPercent(event.impact?.ret_1d)}`,
-      `后3日: ${formatPercent(event.impact?.ret_3d)}`,
-    ].join('<br/>')
-
     return {
       backgroundColor: 'transparent',
       animationDuration: 600,
       tooltip: {
-        trigger: 'item',
+        trigger: 'axis',
+        triggerOn: 'mousemove|click',
+        confine: true,
+        axisPointer: { type: 'line' },
         formatter(params) {
-          if (params?.data?.event) return formatEventTooltip(params.data.event, params.seriesName)
-          if (params?.seriesName === '前复权收盘价') {
-            return [`${params.name || params.value?.[0] || '--'}`, `前复权收盘价: ${formatNumber(params.data?.[1] ?? params.value?.[1])}`].join('<br/>')
-          }
-          return ''
+          const rows = Array.isArray(params) ? params : [params]
+          const axisValue = rows.find((item) => item?.axisValue)?.axisValue || rows[0]?.name || rows[0]?.value?.[0]
+          const events = eventsByDate.get(axisValue) || []
+          if (events.length) return formatEventsTooltip(events)
+          const linePoint = rows.find((item) => item?.seriesName === '前复权收盘价')
+          if (!linePoint) return ''
+          return [`${axisValue || linePoint.name || '--'}`, `前复权收盘价: ${formatNumber(linePoint.data?.[1] ?? linePoint.value?.[1])}`].join('<br/>')
         },
         ...chartTooltipStyle(palette),
       },

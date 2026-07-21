@@ -453,7 +453,7 @@ export default function NewsKlineDashboard() {
                 <div>
                   <h2 className="text-xl font-semibold text-foreground">股价走势与催化剂时间轴</h2>
                   <p className="mt-1 text-sm leading-6 text-foreground-muted">
-                    曲线为前复权日收盘价；圆点为事件标记，颜色代表事件类型。将鼠标移到圆点上可查看事件内容。公告若落在非交易日，会映射到下一交易日参与影响计算。
+                    曲线为前复权日收盘价；圆点为事件标记，颜色代表事件类型。将鼠标移到圆点上可查看事件内容。
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -485,7 +485,7 @@ export default function NewsKlineDashboard() {
             <section className="mt-6 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
               <div className="rounded-3xl border border-border bg-card px-5 py-5 md:px-6">
                 <h2 className="text-xl font-semibold text-foreground">事件影响解释力排行</h2>
-                <p className="mt-1 text-sm leading-6 text-foreground-muted">按「平均 3 日绝对收益 × 方向稳定性」排序。空分类自动隐藏。</p>
+                <p className="mt-1 text-sm leading-6 text-foreground-muted">按「平均 3 日绝对收益 × 方向稳定性」排序。</p>
                 <div className="mt-4 overflow-hidden rounded-2xl border border-border/80">
                   <table className="w-full text-sm">
                     <thead className="bg-[var(--color-bg-hover)] text-xs text-foreground-dim">

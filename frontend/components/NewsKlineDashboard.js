@@ -370,15 +370,13 @@ export default function NewsKlineDashboard() {
       backgroundColor: 'transparent',
       animationDuration: 600,
       tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'cross' },
+        trigger: 'item',
         formatter(params) {
-          const rows = Array.isArray(params) ? params : [params]
-          const eventPoint = rows.find((item) => item?.data?.event)
-          if (eventPoint?.data?.event) return formatEventTooltip(eventPoint.data.event, eventPoint.seriesName)
-          const linePoint = rows.find((item) => item?.seriesName === '前复权收盘价')
-          if (!linePoint) return ''
-          return [`${linePoint.axisValue || linePoint.name || '--'}`, `前复权收盘价: ${formatNumber(linePoint.data?.[1] ?? linePoint.value?.[1])}`].join('<br/>')
+          if (params?.data?.event) return formatEventTooltip(params.data.event, params.seriesName)
+          if (params?.seriesName === '前复权收盘价') {
+            return [`${params.name || params.value?.[0] || '--'}`, `前复权收盘价: ${formatNumber(params.data?.[1] ?? params.value?.[1])}`].join('<br/>')
+          }
+          return ''
         },
         ...chartTooltipStyle(palette),
       },

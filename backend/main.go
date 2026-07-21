@@ -32,6 +32,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/fundcache"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"github.com/woodyyan/pumpkin-pro/backend/store/mail"
+	"github.com/woodyyan/pumpkin-pro/backend/store/newskline"
 	"github.com/woodyyan/pumpkin-pro/backend/store/payment"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
@@ -297,6 +298,7 @@ type appServer struct {
 	portfolioService      *portfolio.Service
 	portfolioWorker       *portfolio.Worker
 	capitalMapService     *capitalmap.ProxyService
+	newsKlineService      *newskline.ProxyService
 	companyProfileService *companyprofile.Service
 	quadrantService       *quadrant.Service
 	simPortfolioV2Service *quadrant.SimPortfolioV2Service
@@ -1672,6 +1674,46 @@ func (a *appServer) handleCapitalMap(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	cacheMaxAge := int(capitalmap.QuantProxyCacheTTL.Seconds())
+	w.Header().Set("Cache-Control", fmt.Sprintf("s-maxage=%d, stale-while-revalidate=%d", cacheMaxAge, cacheMaxAge*2))
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (a *appServer) handleNewsKline(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	if a.newsKlineService == nil {
+		writeError(w, http.StatusServiceUnavailable, "新闻透视服务暂不可用")
+		return
+	}
+	symbol := strings.TrimSpace(r.URL.Query().Get("symbol"))
+	if symbol == "" {
+		writeError(w, http.StatusBadRequest, "请先选择股票")
+		return
+	}
+	days := newskline.NormalizeDays(r.URL.Query().Get("days"))
+	pages := newskline.NormalizePages(r.URL.Query().Get("pages"))
+	force := r.URL.Query().Get("force") == "1" || strings.EqualFold(r.URL.Query().Get("force"), "true")
+	payload, err := a.newsKlineService.GetPayload(r.Context(), symbol, days, pages, force)
+	if err != nil {
+		st := a.newsKlineService.Status()
+		log.Printf("news kline GetPayload failed: %v | cacheAvailable=%v cacheStatus=%q lastError=%q",
+			err, st.CacheAvailable, st.CacheStatus, st.LastError)
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"error":   "NEWS_KLINE_SOURCE_UNAVAILABLE",
+			"message": "新闻透视数据暂不可用",
+		})
+		return
+	}
+	if meta, _ := payload["META"].(map[string]any); meta != nil {
+		if status, _ := meta["cache_status"].(string); status == "stale" {
+			if lastError, _ := meta["last_error"].(string); strings.TrimSpace(lastError) != "" {
+				log.Printf("news kline served stale snapshot after refresh failure: %s", lastError)
+			}
+		}
+	}
+	cacheMaxAge := int(newskline.QuantProxyCacheTTL.Seconds())
 	w.Header().Set("Cache-Control", fmt.Sprintf("s-maxage=%d, stale-while-revalidate=%d", cacheMaxAge, cacheMaxAge*2))
 	writeJSON(w, http.StatusOK, payload)
 }
@@ -3974,6 +4016,7 @@ func main() {
 	liveService := live.NewService(liveRepo)
 	liveMarketClient := live.NewMarketClient()
 	capitalMapService := capitalmap.NewProxyService(cfg.QuantServiceURL, nil)
+	newsKlineService := newskline.NewProxyService(cfg.QuantServiceURL, nil)
 	companyProfileRepo := companyprofile.NewRepository(storeInstance.DB)
 	companyProfileService := companyprofile.NewService(companyProfileRepo)
 	companyProfileService.SetQuantServiceURL(cfg.QuantServiceURL)
@@ -4157,6 +4200,7 @@ func main() {
 		portfolioService:      portfolioService,
 		portfolioWorker:       portfolioWorker,
 		capitalMapService:     capitalMapService,
+		newsKlineService:      newsKlineService,
 		companyProfileService: companyProfileService,
 		quadrantService:       quadrantService,
 		simPortfolioV2Service: simPortfolioV2Service,
@@ -4236,6 +4280,7 @@ func main() {
 	mux.HandleFunc("/api/live/market/overview", server.handleLiveMarketOverview)
 	mux.HandleFunc("/api/live/factor-index/overview", server.handleLiveFactorIndexOverview)
 	mux.HandleFunc("/api/capital-map", server.handleCapitalMap)
+	mux.HandleFunc("/api/live/news-kline", server.handleNewsKline)
 	mux.HandleFunc("/api/live/symbols/", server.withOptionalAuth(server.handleLiveSymbolsSubroutes))
 	mux.HandleFunc("/api/ai/reports", server.withOptionalAuth(server.handleAIReports))
 	mux.HandleFunc("/api/ai/reports/", server.withRequiredAuth(server.handleAIReportSubroutes))

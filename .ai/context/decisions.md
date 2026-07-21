@@ -771,3 +771,36 @@
 - baostock 串行请求可能拖慢全量计算耗时。缓解：过滤模块减少请求量 + `MAX_WORKERS=3` 对后续 provider 的并发仍有效。
 - `GlobalBaostockQuotaGuard` 多调用方并发写入需保证原子性。缓解：SQLite `BEGIN IMMEDIATE` 事务 + `busy_timeout`。
 - 建议过滤模块先于 baostock provider 独立灰度上线，两者解耦上线互不阻塞。
+
+## D-025: 新闻透视以 backend proxy → quant 计算链路接入看板
+
+**日期**: 2026-07-21
+
+**背景**: 用户已有本地「新闻K线透视」demo，希望迁入卧龙网站「看板」分组，作为用户搜索股票后查看新闻/公告催化剂与前复权 K 线关系的独立页面。
+
+**决策**:
+1. 路由固定为 `/news-kline`，导航显示「新闻透视」，归属「看板」分组并排在「资金星图」之后。
+2. 首期通过 `/api/search` 的股票搜索表选择 A 股/中国香港股票，不新增前端直连外部搜索源。
+3. 公开 API 固定为 backend `GET /api/live/news-kline?symbol=&days=&pages=&force=`，backend 只做代理、30 分钟内存缓存和 stale 降级。
+4. quant 新增 `data/news_kline.py` 与 `/api/news-kline/{symbol}`，负责腾讯前复权日 K、腾讯 `news/info/search` 公告(type=0)+新闻(type=2)、事件分类、前后收益和解释力统计。
+5. A 股和中国香港股票 K 线均使用前复权口径；用户展示日期以 K 线最新交易日作为 `source_trade_date`。
+6. 研报首期不纳入。`研报评级` 作为分类能力保留，但空分类必须在前端隐藏；二期再评估研报源。
+7. 超时与降级参数：backend quant proxy HTTP timeout 18s；quant 外部 HTTP 单次 5s、最多 2 次尝试；缓存 TTL 30 分钟。
+8. 前端使用 ECharts 动态加载和 `useTheme().resolvedTheme` 配色，遵守语义化 Tailwind token 与红涨绿跌口径。
+
+**原因**:
+1. 与资金星图一致，backend 保持纯粹，业务计算和外部源字段解析收敛到 quant。
+2. 腾讯 `news/info/search` 单只股票默认可拉更深历史（按页），比现有 akshare 新闻浅历史更适合解释力统计。
+3. 研报数据源尚未在平台内形成稳定授权/数据口径，首期暂缓能降低上线风险。
+4. 30 分钟缓存 + stale 降级适合低频研究型页面，避免用户搜索造成外部源放大。
+
+**替代方案**:
+- 复用现有 `/api/live/symbols/{symbol}/news` 的 akshare 新闻链路：未选，历史覆盖偏浅，解释力统计样本不足。
+- 直接在 Go backend 里实现分类和收益计算：未选，会把行情计算逻辑从 quant 分散到 backend。
+- 前端直接请求腾讯接口：否决，会绕过 backend 缓存、错误处理和未来鉴权/观测入口。
+- 首期纳入研报：暂缓，研报源和授权口径需单独评估。
+
+**风险与代价**:
+- 腾讯公开接口不是正式商用授权数据源，页面需保留口径和风险提示；正式商用前应确认授权或切换授权源。
+- 事件分类基于标题关键词规则，可能误分类；后续可升级为规则+LLM/模型复核，但首期不引入 LLM 成本。
+- 非交易日事件映射到下一交易日用于收益计算，需在 UI 中显式提示，避免用户误读为事件当天交易。

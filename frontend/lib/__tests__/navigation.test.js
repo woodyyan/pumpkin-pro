@@ -13,6 +13,7 @@ describe('navigation config', () => {
     assert.ok(hrefs.includes('/ai/backtest'))
     assert.ok(hrefs.includes('/quadrant'))
     assert.ok(hrefs.includes('/capital-map'))
+    assert.ok(hrefs.includes('/news-kline'))
     assert.ok(hrefs.includes('/watchlist'))
     assert.ok(hrefs.includes('/portfolio-tracking'))
     assert.ok(hrefs.includes('/live-trading'))
@@ -22,6 +23,12 @@ describe('navigation config', () => {
     const aiItems = NAV_GROUPS.find((group) => group.key === 'wolong-ai').items
 
     assert.deepEqual(aiItems.map((item) => item.href).slice(0, 3), ['/ai/analysis', '/ai/reports', '/ai/picker'])
+  })
+
+  it('places news perspective under dashboard after capital map', () => {
+    const dashboardItems = NAV_GROUPS.find((group) => group.key === 'dashboard').items
+
+    assert.deepEqual(dashboardItems.map((item) => item.href), ['/live-trading', '/quadrant', '/capital-map', '/news-kline'])
   })
 
   it('does not duplicate hrefs across navigation items', () => {

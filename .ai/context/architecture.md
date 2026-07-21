@@ -47,6 +47,7 @@ frontend/
 | `/ai/backtest` | `ai/backtest.js` | AI回测占位页（一期「敬请期待」） |
 | `/quadrant` | `quadrant.js` | 四象限与卧龙AI精选页面（导航归属「看板 / 市场全景」），展示风险机会分布和精选榜单 |
 | `/capital-map` | `capital-map.js` | 资金星图页面（导航归属「看板 / 资金星图」），基于 A 股东方财富公开行情样本展示 PE、成交额、板块资金流和 PoC 估值锚；前端 60 秒刷新，后端 30 秒内存缓存 |
+| `/news-kline` | `news-kline.js` | 新闻透视页面（导航归属「看板 / 新闻透视」），通过股票搜索选择 A 股/中国香港股票，将公告、新闻和财报类催化剂映射到前复权 K 线并计算事件解释力 |
 | `/watchlist` | `watchlist.js` | 自选股页面 |
 | `/stock-picker` | `stock-picker.js` | 选股器 |
 | `/backtest` | `backtest.js` | 回测引擎 |
@@ -66,7 +67,7 @@ frontend/
 - PC 端导航由 `components/DesktopNavMenu.js` + `components/NavDropdown.js` 渲染：hover 展开下拉，点击一级导航只负责展开/收起，不做跳转。
 - 移动端导航由 `components/MobileNavMenu.js` 渲染：保留汉堡入口，菜单内部按「卧龙AI / 看板 / 跟踪 / 选股 / 更多」分组折叠，一次只展开一个分组。
 - 「卧龙AI」分组当前顺序为「AI分析 / AI研报 / AI选股 / AI回测」。
-- 「看板」分组当前顺序为「市场行情 / 市场全景 / 资金星图」。其中资金星图路由固定为 `/capital-map`，首期仅支持 A 股。
+- 「看板」分组当前顺序为「市场行情 / 市场全景 / 资金星图 / 新闻透视」。其中资金星图路由固定为 `/capital-map`，首期仅支持 A 股；新闻透视路由固定为 `/news-kline`，支持 A 股与中国香港股票。
 - 占位页统一复用 `components/ComingSoonPage.js`，文案固定为标题 + 「敬请期待」，避免散落多个空白实现。
 
 ### 首页内容架构（2026-06-27）

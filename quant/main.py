@@ -15,6 +15,7 @@ from capital_map.service import CapitalMapService
 from data.data_loader import DataLoader, generate_sample_data
 from data.fundamentals import get_symbol_fundamentals
 from data.news import get_symbol_news
+from data.news_kline import get_news_kline_report
 from data.company_profile import fetch_a_share_company_profile, fetch_hk_company_profile, normalize_symbol
 from data_sources import DataSourceManager, GLOBAL_HEALTH, Market
 from data.scripts.akshare_loader import fetch_stock_data, resolve_stock_name_with_debug
@@ -237,6 +238,19 @@ def get_symbol_news_endpoint(symbol: str):
     except Exception as exc:
         logger.exception("新闻接口异常 symbol=%s", symbol)
         raise HTTPException(status_code=500, detail=f"新闻加载失败: {exc}") from exc
+
+
+@app.get("/api/news-kline/{symbol}")
+def get_news_kline_endpoint(symbol: str, days: int = 500, pages: int = 3, force: bool = False):
+    try:
+        return get_news_kline_report(symbol, days=days, pages=pages, force=force)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("新闻透视接口异常 symbol=%s", symbol)
+        raise HTTPException(status_code=500, detail=f"新闻透视加载失败: {exc}") from exc
 
 
 @app.get("/api/backtest/options")

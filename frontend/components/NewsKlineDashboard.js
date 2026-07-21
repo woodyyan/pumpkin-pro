@@ -263,6 +263,11 @@ export default function NewsKlineDashboard() {
   const chartOption = useMemo(() => {
     if (!filteredKline.length) return null
     const labels = filteredKline.map((item) => item.date)
+    const closeValues = filteredKline.map((item) => Number(item.close)).filter(Number.isFinite)
+    const minClose = closeValues.length ? Math.min(...closeValues) : 0
+    const maxClose = closeValues.length ? Math.max(...closeValues) : 0
+    const guidePadding = Math.max((maxClose - minClose) * 0.08, Math.abs(minClose) * 0.015, 0.01)
+    const guideBase = Math.max(0, minClose - guidePadding)
     const closeByDate = new Map(filteredKline.map((item) => [item.date, Number(item.close)]))
     const cats = report?.CATS || {}
     const grouped = new Map()
@@ -306,6 +311,29 @@ export default function NewsKlineDashboard() {
     Array.from(grouped.entries()).forEach(([category, rows]) => {
       const color = cats?.[category]?.color || palette.neutral
       const label = CATEGORY_LABELS[category] || category
+      const guideRows = rows
+        .filter((item) => Number.isFinite(Number(item.value[1])))
+        .map((item) => ({ value: [item.value[0], item.value[1], guideBase] }))
+      series.push({
+        name: `${label}指引线`,
+        type: 'custom',
+        silent: true,
+        tooltip: { show: false },
+        data: guideRows,
+        renderItem(params, api) {
+          const date = api.value(0)
+          const price = Number(api.value(1))
+          const base = Number(api.value(2))
+          if (!date || !Number.isFinite(price) || !Number.isFinite(base)) return null
+          const start = api.coord([date, base])
+          const end = api.coord([date, price])
+          return {
+            type: 'line',
+            shape: { x1: start[0], y1: start[1], x2: end[0], y2: end[1] },
+            style: { stroke: color, lineWidth: 1, lineDash: [4, 4], opacity: 0.48 },
+          }
+        },
+      })
       series.push({
         name: label,
         type: 'scatter',
@@ -315,7 +343,7 @@ export default function NewsKlineDashboard() {
           return Math.min(14, 7 + count)
         },
         data: rows,
-        itemStyle: { color, opacity: 0.86 },
+        itemStyle: { color, opacity: 0.9, borderColor: palette.card, borderWidth: 1.5 },
         emphasis: { itemStyle: { borderColor: palette.tooltipText, borderWidth: 1.5, opacity: 1 } },
         tooltip: {
           trigger: 'item',
@@ -343,7 +371,12 @@ export default function NewsKlineDashboard() {
         axisPointer: { type: 'cross' },
         ...chartTooltipStyle(palette),
       },
-      legend: { top: 0, right: 0, textStyle: { color: palette.axis } },
+      legend: {
+        top: 0,
+        right: 0,
+        data: ['前复权收盘价', ...Array.from(grouped.keys()).map((category) => CATEGORY_LABELS[category] || category)],
+        textStyle: { color: palette.axis },
+      },
       grid: { left: 58, right: 32, top: 48, bottom: 54 },
       xAxis: {
         type: 'category',
@@ -355,6 +388,7 @@ export default function NewsKlineDashboard() {
       },
       yAxis: {
         scale: true,
+        min: guideBase,
         axisLine: { lineStyle: { color: palette.split } },
         axisLabel: { color: palette.axis },
         splitLine: { lineStyle: { color: palette.split, type: 'dashed' } },
@@ -482,29 +516,35 @@ export default function NewsKlineDashboard() {
               </div>
             </section>
 
-            <section className="mt-6 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+            <section className="mt-6 space-y-6">
               <div className="rounded-3xl border border-border bg-card px-5 py-5 md:px-6">
                 <h2 className="text-xl font-semibold text-foreground">事件影响解释力排行</h2>
                 <p className="mt-1 text-sm leading-6 text-foreground-muted">按「平均 3 日绝对收益 × 方向稳定性」排序。</p>
-                <div className="mt-4 overflow-hidden rounded-2xl border border-border/80">
-                  <table className="w-full text-sm">
+                <div className="mt-4 overflow-x-auto rounded-2xl border border-border/80">
+                  <table className="w-full min-w-[920px] text-sm">
                     <thead className="bg-[var(--color-bg-hover)] text-xs text-foreground-dim">
                       <tr>
                         <th className="px-3 py-3 text-left font-medium">类型</th>
                         <th className="px-3 py-3 text-right font-medium">数量</th>
                         <th className="px-3 py-3 text-right font-medium">得分</th>
+                        <th className="px-3 py-3 text-right font-medium">当日平均</th>
                         <th className="px-3 py-3 text-right font-medium">后3日</th>
                         <th className="px-3 py-3 text-right font-medium">胜率</th>
+                        <th className="px-3 py-3 text-right font-medium">最大上涨</th>
+                        <th className="px-3 py-3 text-right font-medium">最大下跌</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/70">
                       {(report?.STATS || []).map((item) => (
                         <tr key={item.category}>
-                          <td className="px-3 py-3"><CategoryTag category={item.category} cats={report?.CATS} /></td>
+                          <td className="whitespace-nowrap px-3 py-3"><CategoryTag category={item.category} cats={report?.CATS} /></td>
                           <td className="px-3 py-3 text-right tabular-nums text-foreground-muted">{item.count}</td>
                           <td className="px-3 py-3 text-right tabular-nums text-foreground">{item.explain_score == null ? '--' : formatNumber(item.explain_score * 100, 1)}</td>
+                          <td className={`px-3 py-3 text-right tabular-nums ${changeClassName(item.avg_day)}`}>{formatPercent(item.avg_day)}</td>
                           <td className={`px-3 py-3 text-right tabular-nums ${changeClassName(item.avg_3d)}`}>{formatPercent(item.avg_3d)}</td>
                           <td className="px-3 py-3 text-right tabular-nums text-foreground-muted">{formatPercent(item.win_3d, 0)}</td>
+                          <td className={`px-3 py-3 text-right tabular-nums ${changeClassName(item.max_up)}`}>{formatPercent(item.max_up)}</td>
+                          <td className={`px-3 py-3 text-right tabular-nums ${changeClassName(item.max_down)}`}>{formatPercent(item.max_down)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -537,8 +577,8 @@ export default function NewsKlineDashboard() {
                             <div>{event.date}</div>
                             {event.trade_date !== event.date && <div className="text-[11px] text-foreground-disabled">映射 {event.trade_date}</div>}
                           </td>
-                          <td className="px-3 py-3"><CategoryTag category={event.category} cats={report?.CATS} /></td>
-                          <td className="max-w-[360px] px-3 py-3 text-foreground">
+                          <td className="whitespace-nowrap px-3 py-3"><CategoryTag category={event.category} cats={report?.CATS} /></td>
+                          <td className="max-w-[640px] px-3 py-3 text-foreground">
                             <div className="truncate" title={event.title}>{event.title}</div>
                             <div className="mt-1 text-xs text-foreground-dim">{event.info_type_str || '资讯'} · {event.src || '来源未标注'}</div>
                           </td>

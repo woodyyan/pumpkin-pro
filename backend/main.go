@@ -4343,6 +4343,7 @@ func main() {
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/prices/resolve", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2PriceResolve))
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/prices/backfill-daily-bars", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2PriceBackfillDailyBars))
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/signal/backfill-close-price", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2SignalBackfillClosePrice))
+	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/signal/override-close-price", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2SignalOverrideClosePrice))
 	mux.HandleFunc("/api/admin/sim-portfolio-pipeline/prices/override", server.withSuperAdminAuth(server.handleAdminSimPortfolioV2PriceOverride))
 
 	// ── Quadrant Monitoring (progress + manual trigger) ──

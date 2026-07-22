@@ -35,6 +35,12 @@ describe('admin quadrant panel migration hints', () => {
     // dedicated signal backfill endpoint, NOT the full-market quadrant recompute.
     assert.match(adminSectionsSource, /补齐该日收盘价/)
     assert.match(adminSectionsSource, /\/api\/admin\/sim-portfolio-pipeline\/signal\/backfill-close-price/)
+    // Manual snapshot override escape hatch: when backfill still leaves a stock
+    // missing (e.g. suspended HK stock), the day detail must surface the missing
+    // stock list and wire a manual override to the dedicated endpoint.
+    assert.match(adminSectionsSource, /缺收盘价股票/)
+    assert.match(adminSectionsSource, /onOverrideSignalClose/)
+    assert.match(adminSectionsSource, /\/api\/admin\/sim-portfolio-pipeline\/signal\/override-close-price/)
     assert.match(adminSectionsSource, /最近运行日志/)
     assert.doesNotMatch(adminSectionsSource, /补齐建仓开盘价/)
     assert.doesNotMatch(adminSectionsSource, /重拉该日收盘价/)

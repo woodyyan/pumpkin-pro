@@ -271,7 +271,7 @@ func (s *SimPortfolioV2Service) buildSignalBatch(ctx context.Context, runID, mar
 	items := []SimPortfolioV2SignalItem{}
 	missingPrice := 0
 	for _, row := range rows {
-		if row.ClosePrice <= 0 || strings.TrimSpace(row.PriceTradeDate) != date {
+		if !isAcceptableSnapshotPriceDate(market, date, row.ClosePrice, row.PriceTradeDate) {
 			missingPrice++
 		}
 		items = append(items, SimPortfolioV2SignalItem{BatchID: batchID, Market: market, SourceTradeDate: date, Code: row.Code, Exchange: row.Exchange, Name: row.Name, Rank: row.Rank, Opportunity: row.Opportunity, Risk: row.Risk, ClosePrice: row.ClosePrice, PriceTradeDate: row.PriceTradeDate, Board: inferSimPortfolioBoard(row.Code, row.Exchange), CreatedAt: now})
@@ -798,15 +798,16 @@ func (s *SimPortfolioV2Service) BackfillSignalClosePrice(ctx context.Context, re
 	}
 	for _, row := range rows {
 		// A snapshot is considered missing when it has no positive close price
-		// or the price is not aligned to the requested trading day.
-		if row.ClosePrice > 0 && strings.TrimSpace(row.PriceTradeDate) == date {
+		// or the price is not aligned to an acceptable trading day (the
+		// requested day or the most-recent prior trading day within tolerance).
+		if isAcceptableSnapshotPriceDate(market, date, row.ClosePrice, row.PriceTradeDate) {
 			continue
 		}
 		resp.Checked++
-		closePrice, priceDate := s.resolveSnapshotClosePrice(ctx, row.Code, row.Exchange, date, lookback)
+		closePrice, priceDate := s.resolveSnapshotClosePrice(ctx, market, row.Code, row.Exchange, date, lookback)
 		if closePrice <= 0 {
 			resp.StillMissing++
-			resp.MissingItems = append(resp.MissingItems, fmt.Sprintf("%s/%s %s", row.Code, row.Exchange, date))
+			resp.MissingItems = append(resp.MissingItems, fmt.Sprintf("%s/%s %s %s", row.Code, row.Exchange, row.Name, date))
 			continue
 		}
 		if err := s.repo.UpdateSnapshotPrice(ctx, row.ID, closePrice, priceDate); err != nil {
@@ -835,9 +836,31 @@ func (s *SimPortfolioV2Service) BackfillSignalClosePrice(ctx context.Context, re
 }
 
 // resolveSnapshotClosePrice resolves a single stock's close price for a given
-// trade date, reusing the price resolver first and falling back to the
-// daily-bar fetcher. Returns (0, "") when no usable price is found.
-func (s *SimPortfolioV2Service) resolveSnapshotClosePrice(ctx context.Context, code, exchange, date string, lookback int) (float64, string) {
+// trade date, aligning its behaviour with the normal pipeline resolver
+// (resolveSinglePriceRequirement) so that "补齐收盘价" and the pipeline never
+// diverge. Resolution order:
+//  1. priceLookupResolver — already falls back to the most-recent prior
+//     trading day and reports the actual trade date it resolved.
+//  2. priceResolver — legacy close-only resolver (exact/near date).
+//  3. dailyBarFetcher — scans the candidate trade-date sequence (requested day
+//     then up to 3 prior calendar days) and returns the close of the nearest
+//     available bar, along with that bar's real date.
+//
+// Returns (0, "") when no usable price is found. The returned priceDate is the
+// ACTUAL date the price belongs to (may be earlier than `date`), so callers can
+// persist an accurate PriceTradeDate.
+func (s *SimPortfolioV2Service) resolveSnapshotClosePrice(ctx context.Context, market, code, exchange, date string, lookback int) (float64, string) {
+	if s.priceLookupResolver != nil {
+		if lookup := s.priceLookupResolver(ctx, code, exchange, date); lookup.ClosePrice > 0 {
+			priceDate := strings.TrimSpace(lookup.TradeDate)
+			if priceDate == "" {
+				priceDate = date
+			}
+			if isAcceptableSnapshotPriceDate(market, date, lookup.ClosePrice, priceDate) {
+				return lookup.ClosePrice, priceDate
+			}
+		}
+	}
 	if s.priceResolver != nil {
 		if price := s.priceResolver(ctx, code, exchange, date); price > 0 {
 			return price, date
@@ -845,12 +868,33 @@ func (s *SimPortfolioV2Service) resolveSnapshotClosePrice(ctx context.Context, c
 	}
 	if s.dailyBarFetcher != nil {
 		if bars, err := s.dailyBarFetcher(ctx, code, exchange, lookback); err == nil {
-			if price := simPortfolioV2PriceFromBars(bars, date, SimPortfolioV2PriceTypeValuationClose); price > 0 {
-				return price, date
+			for _, candidate := range simPortfolioV2SnapshotPriceDates(date) {
+				if price := simPortfolioV2PriceFromBars(bars, candidate, SimPortfolioV2PriceTypeValuationClose); price > 0 {
+					return price, candidate
+				}
 			}
 		}
 	}
 	return 0, ""
+}
+
+// listSignalMissingPriceItems returns human-readable identifiers of the
+// candidate snapshots whose close price is missing or misaligned for a day,
+// e.g. "00700/HKEX 腾讯控股 2026-07-10". It powers the admin UI hint so the
+// operator knows exactly which stock to manually override.
+func (s *SimPortfolioV2Service) listSignalMissingPriceItems(ctx context.Context, market, date string) []string {
+	rows, err := s.repo.ListRankingSnapshotsByDate(ctx, market, date, 50)
+	if err != nil {
+		return nil
+	}
+	items := []string{}
+	for _, row := range rows {
+		if isAcceptableSnapshotPriceDate(market, date, row.ClosePrice, row.PriceTradeDate) {
+			continue
+		}
+		items = append(items, fmt.Sprintf("%s/%s %s %s", row.Code, row.Exchange, strings.TrimSpace(row.Name), date))
+	}
+	return items
 }
 
 func (s *SimPortfolioV2Service) OverridePrice(ctx context.Context, req SimPortfolioV2PriceOverrideRequest) (*SimPortfolioV2PriceRepairResponse, error) {
@@ -919,6 +963,101 @@ func (s *SimPortfolioV2Service) OverridePrice(ctx context.Context, req SimPortfo
 	return resp, nil
 }
 
+// SimPortfolioV2SnapshotClosePriceOverrideRequest carries a manual close-price
+// override for a single ranking snapshot on a given signal (source trade) day.
+// It is used when the targeted "补齐收盘价" cannot resolve a stock (e.g. it is
+// suspended and has no daily bar), letting an admin fill the value with an
+// audited manual entry.
+type SimPortfolioV2SnapshotClosePriceOverrideRequest struct {
+	Market   string  `json:"market"`
+	Date     string  `json:"date"`
+	Code     string  `json:"code"`
+	Exchange string  `json:"exchange"`
+	Price    float64 `json:"price"`
+	Reason   string  `json:"reason"`
+	Evidence string  `json:"evidence"`
+	Operator string  `json:"operator,omitempty"`
+	Confirm  bool    `json:"confirm"`
+}
+
+// OverrideSnapshotClosePrice writes an audited manual close price onto the
+// ranking snapshot for a single stock + signal day, then rebuilds the
+// lightweight signal batch so the calendar day can turn green. Unlike
+// OverridePrice (which targets the pipeline price_requirements table), this
+// operates on the ranking_snapshot rows that feed buildSignalBatch — the exact
+// data that produced the "缺收盘价:N" indicator.
+func (s *SimPortfolioV2Service) OverrideSnapshotClosePrice(ctx context.Context, req SimPortfolioV2SnapshotClosePriceOverrideRequest) (*SimPortfolioV2SignalClosePriceBackfillResponse, error) {
+	market := normalizeSimPortfolioV2Market(req.Market)
+	date := strings.TrimSpace(req.Date)
+	code := strings.TrimSpace(req.Code)
+	exchange := strings.ToUpper(strings.TrimSpace(req.Exchange))
+	if !isYMD(date) {
+		return nil, fmt.Errorf("date 必须为 YYYY-MM-DD")
+	}
+	if code == "" || exchange == "" {
+		return nil, fmt.Errorf("code/exchange 必填")
+	}
+	if req.Price <= 0 {
+		return nil, fmt.Errorf("人工覆盖价格必须大于 0")
+	}
+	if strings.TrimSpace(req.Reason) == "" || strings.TrimSpace(req.Evidence) == "" {
+		return nil, fmt.Errorf("人工覆盖必须填写 reason 和 evidence")
+	}
+	if !req.Confirm {
+		return nil, fmt.Errorf("人工覆盖价格必须显式 confirm=true")
+	}
+	if date > time.Now().In(beijingLocation()).Format("2006-01-02") {
+		return nil, fmt.Errorf("不能覆盖未来日期价格")
+	}
+	// Record an audit trail first (running), matching OverridePrice semantics.
+	audit := newSimPortfolioV2PriceRepairAudit(SimPortfolioV2PriceRepairManualOverride, market, date, "", SimPortfolioV2PriceTypeValuationClose, req.Operator)
+	audit.Code, audit.Exchange, audit.TradeDate, audit.Price = code, exchange, date, req.Price
+	audit.Source = "snapshot_manual_override"
+	audit.Reason, audit.Evidence = strings.TrimSpace(req.Reason), strings.TrimSpace(req.Evidence)
+	if err := s.repo.CreateSimPortfolioV2PriceRepairAudit(ctx, audit); err != nil {
+		return nil, err
+	}
+	affected, err := s.repo.UpdateSnapshotPriceByKey(ctx, exchange, code, date, req.Price, date)
+	if err != nil {
+		return nil, err
+	}
+	resp := &SimPortfolioV2SignalClosePriceBackfillResponse{OK: true, Market: market, Date: date, Status: SimPortfolioV2StatusOK, RequiresRerun: true}
+	if affected == 0 {
+		resp.OK = false
+		resp.Status = SimPortfolioV2StatusBlocked
+		resp.RequiresRerun = false
+		resp.Message = fmt.Sprintf("未找到 %s/%s 在 %s 的候选快照，无法人工覆盖，请确认该股是否属于该日候选。", code, exchange, date)
+		finishSnapshotOverrideAudit(audit, resp)
+		_ = s.repo.UpdateSimPortfolioV2PriceRepairAudit(ctx, audit)
+		return resp, nil
+	}
+	resp.Updated = int(affected)
+	// Rebuild the signal batch so the calendar day status reflects the override.
+	batch, err := s.buildSignalBatch(ctx, "", market, date)
+	if err != nil {
+		return nil, err
+	}
+	if batch != nil && batch.Status != SimPortfolioV2StatusOK {
+		resp.OK = false
+		resp.Status = SimPortfolioV2StatusBlocked
+		resp.MissingItems = s.listSignalMissingPriceItems(ctx, market, date)
+		resp.StillMissing = len(resp.MissingItems)
+		resp.Message = fmt.Sprintf("已人工覆盖 %s/%s 收盘价，但该日仍有 %d 只待处理。", code, exchange, resp.StillMissing)
+	} else {
+		resp.Message = fmt.Sprintf("已人工覆盖 %s/%s 在 %s 的收盘价并记录审计。请重新运行该日 pipeline 生成 facts。", code, exchange, date)
+	}
+	finishSnapshotOverrideAudit(audit, resp)
+	_ = s.repo.UpdateSimPortfolioV2PriceRepairAudit(ctx, audit)
+	return resp, nil
+}
+
+func finishSnapshotOverrideAudit(audit *SimPortfolioV2PriceRepairAudit, resp *SimPortfolioV2SignalClosePriceBackfillResponse) {
+	audit.Status = resp.Status
+	audit.UpdatedAt = time.Now().UTC()
+	summary, _ := json.Marshal(resp)
+	audit.SummaryJSON = string(summary)
+}
+
 func validateSimPortfolioV2PriceRepairScope(market, signalDate, priceType string) (string, string, string, error) {
 	market = normalizeSimPortfolioV2Market(market)
 	signalDate = strings.TrimSpace(signalDate)
@@ -949,6 +1088,56 @@ func simPortfolioV2PriceFromBars(bars []SimPortfolioV2DailyBar, tradeDate, price
 		return bar.Close
 	}
 	return 0
+}
+
+// simPortfolioV2CloseTradeDateToleranceDays is the maximum number of calendar
+// days a snapshot close price may lag behind the requested trading day and
+// still be treated as "aligned". This mirrors the fallback window used by the
+// pipeline's price lookup (quadrantSnapshotTradeDates in main.go), keeping the
+// signal batch, the pipeline and the targeted backfill consistent so that a
+// price resolved to the most-recent prior trading day does not cause an endless
+// "缺收盘价" loop.
+const simPortfolioV2CloseTradeDateToleranceDays = 3
+
+// simPortfolioV2SnapshotPriceDates returns the requested trading day followed by
+// up to simPortfolioV2CloseTradeDateToleranceDays prior calendar days, matching
+// the candidate sequence the pipeline uses when falling back to an earlier
+// close. The list is ordered nearest-first so callers pick the closest bar.
+func simPortfolioV2SnapshotPriceDates(tradeDate string) []string {
+	tradeDate = strings.TrimSpace(tradeDate)
+	if tradeDate == "" {
+		return nil
+	}
+	dates := []string{tradeDate}
+	parsed, ok := parseYMD(tradeDate)
+	if !ok {
+		return dates
+	}
+	for gap := 1; gap <= simPortfolioV2CloseTradeDateToleranceDays; gap++ {
+		dates = append(dates, formatYMD(parsed.AddDate(0, 0, -gap)))
+	}
+	return dates
+}
+
+// isAcceptableSnapshotPriceDate reports whether a snapshot's close price is
+// usable for the given snapshot date. A price is acceptable when it is positive
+// AND its trade date is the snapshot date or falls within the tolerance window
+// of prior calendar days. This is the single source of truth shared by
+// buildSignalBatch and BackfillSignalClosePrice.
+func isAcceptableSnapshotPriceDate(_ string, snapshotDate string, closePrice float64, priceTradeDate string) bool {
+	if closePrice <= 0 {
+		return false
+	}
+	priceTradeDate = strings.TrimSpace(priceTradeDate)
+	if priceTradeDate == "" {
+		return false
+	}
+	for _, candidate := range simPortfolioV2SnapshotPriceDates(snapshotDate) {
+		if priceTradeDate == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func newSimPortfolioV2PriceRepairAudit(action, market, signalDate, portfolioID, priceType, operator string) *SimPortfolioV2PriceRepairAudit {
@@ -1202,11 +1391,12 @@ type SimPortfolioV2DayDetailResponse struct {
 }
 
 type SimPortfolioV2SignalDetail struct {
-	Status            string `json:"status"`
-	CandidateCount    int    `json:"candidate_count"`
-	SignalCount       int    `json:"signal_count"`
-	MissingPriceCount int    `json:"missing_price_count"`
-	Message           string `json:"message,omitempty"`
+	Status            string   `json:"status"`
+	CandidateCount    int      `json:"candidate_count"`
+	SignalCount       int      `json:"signal_count"`
+	MissingPriceCount int      `json:"missing_price_count"`
+	Message           string   `json:"message,omitempty"`
+	MissingItems      []string `json:"missing_items,omitempty"`
 }
 
 type SimPortfolioV2PortfolioDetail struct {
@@ -1470,6 +1660,12 @@ func (s *SimPortfolioV2Service) GetAdminCalendarDay(ctx context.Context, market,
 	}
 	if batch != nil {
 		resp.Signal = SimPortfolioV2SignalDetail{Status: batch.Status, CandidateCount: batch.CandidateCount, SignalCount: batch.SignalCount, MissingPriceCount: batch.MissingPriceCount, Message: batch.Message}
+		// Surface exactly WHICH candidate snapshots are missing/misaligned so the
+		// admin UI can tell the operator which stock needs a manual override,
+		// instead of only reporting a bare "缺收盘价:N" count.
+		if batch.MissingPriceCount > 0 {
+			resp.Signal.MissingItems = s.listSignalMissingPriceItems(ctx, market, date)
+		}
 		// Even though buildSignalBatch always returns a non-nil batch, the batch
 		// may be in "blocked" status for two distinct reasons that need two
 		// distinct repair actions surfaced to the admin UI:
@@ -1485,6 +1681,14 @@ func (s *SimPortfolioV2Service) GetAdminCalendarDay(ctx context.Context, market,
 				resp.RepairSuggestions = append(resp.RepairSuggestions, SimPortfolioV2RepairSuggestion{Type: "recompute_quadrant", Label: "重建该日四象限", Hint: "请在四象限板块按 market + source_trade_date 重建上游快照。"})
 			} else if batch.MissingPriceCount > 0 {
 				resp.RepairSuggestions = append(resp.RepairSuggestions, SimPortfolioV2RepairSuggestion{Type: "backfill_signal_close_price", Label: "补齐收盘价", Hint: fmt.Sprintf("该日候选股已存在（%d 只），其中 %d 只收盘价缺失或未对齐当日交易日。将只补齐这些股票的收盘价，无需重建四象限。", batch.CandidateCount, batch.MissingPriceCount)})
+				// The targeted backfill may fail for a stock that is suspended /
+				// has no daily bar on this day. Always offer the two escape
+				// hatches so the admin never hits a dead end when "补齐" returns
+				// still-missing: rebuild the day's quadrant, or manually override.
+				resp.RepairSuggestions = append(resp.RepairSuggestions,
+					SimPortfolioV2RepairSuggestion{Type: "recompute_quadrant", Label: "重建该日四象限", Hint: "若补齐仍失败（个股停牌/无历史日线），可按 market + source_trade_date 重建上游快照。"},
+					SimPortfolioV2RepairSuggestion{Type: "manual_override_snapshot", Label: "人工覆盖收盘价", Hint: "对补齐失败的个股，凭券商回单等凭证人工填入该日收盘价。"},
+				)
 			}
 		}
 	} else if cal.IsTradingDay && date <= today {

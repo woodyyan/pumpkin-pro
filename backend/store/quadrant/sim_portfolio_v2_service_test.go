@@ -232,16 +232,30 @@ func TestSimPortfolioV2CalendarDaySuggestsBackfillWhenCandidatesExistButPriceMis
 		t.Fatalf("signal status = %s, want blocked", detail.Signal.Status)
 	}
 	found := false
+	foundOverride := false
 	for _, s := range detail.RepairSuggestions {
 		if s.Type == "backfill_signal_close_price" {
 			found = true
 		}
-		if s.Type == "recompute_quadrant" {
-			t.Fatalf("did not expect recompute_quadrant when candidates already exist: %+v", detail.RepairSuggestions)
+		if s.Type == "manual_override_snapshot" {
+			foundOverride = true
 		}
 	}
 	if !found {
 		t.Fatalf("expected backfill_signal_close_price repair suggestion, got %+v", detail.RepairSuggestions)
+	}
+	// The primary suggestion must be backfill (index 0). Recompute + manual
+	// override are offered afterwards as escape hatches for when backfill fails,
+	// so they must NOT precede the backfill suggestion.
+	if detail.RepairSuggestions[0].Type != "backfill_signal_close_price" {
+		t.Fatalf("expected backfill to be the primary suggestion, got %+v", detail.RepairSuggestions)
+	}
+	if !foundOverride {
+		t.Fatalf("expected manual_override_snapshot escape hatch, got %+v", detail.RepairSuggestions)
+	}
+	// The missing stocks must be surfaced so the admin knows which to override.
+	if len(detail.Signal.MissingItems) != 7 {
+		t.Fatalf("expected 7 missing items surfaced, got %+v", detail.Signal.MissingItems)
 	}
 }
 
@@ -892,5 +906,192 @@ func TestSimPortfolioV2GenerateFactsFirstDayAllBuy(t *testing.T) {
 		if tr.OldWeight != 0 || tr.OldShares != 0 {
 			t.Errorf("first-day trade %s: oldWeight=%v oldShares=%v, want 0/0", tr.Code, tr.OldWeight, tr.OldShares)
 		}
+	}
+}
+
+// TestSimPortfolioV2BackfillSignalClosePriceFallsBackToPriorTradingDay covers
+// the production bug where a single HK stock stayed "缺收盘价:1" forever: the
+// stock has no daily bar exactly on the requested day but DOES have one on the
+// previous trading day. The backfill must fall back to that prior bar (mirroring
+// the pipeline resolver), persist the actual price date, and flip the day green.
+func TestSimPortfolioV2BackfillSignalClosePriceFallsBackToPriorTradingDay(t *testing.T) {
+	repo, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	date := "2026-07-10" // Friday, HK trading day
+	prior := "2026-07-09"
+	now := time.Now().UTC()
+	// 50 HK candidates; only the last one is missing its close price.
+	rows := []RankingSnapshot{}
+	for i := 0; i < 50; i++ {
+		close := 10 + float64(i)
+		priceDate := date
+		if i == 49 {
+			close = 0
+			priceDate = ""
+		}
+		rows = append(rows, RankingSnapshot{Code: fmt.Sprintf("%05d", i+1), Name: fmt.Sprintf("HK%05d", i+1), Exchange: "HKEX", Rank: i + 1, Opportunity: 90 - float64(i), Risk: 10 + float64(i), ClosePrice: close, PriceTradeDate: priceDate, SnapshotDate: date, CreatedAt: now})
+	}
+	if err := repo.UpsertSnapshots(ctx, rows); err != nil {
+		t.Fatalf("seed snapshots: %v", err)
+	}
+
+	detail, err := svc.GetAdminCalendarDay(ctx, SimPortfolioV2MarketHKEX, date)
+	if err != nil {
+		t.Fatalf("GetAdminCalendarDay: %v", err)
+	}
+	if detail.Signal.MissingPriceCount != 1 || detail.Signal.CandidateCount != 50 {
+		t.Fatalf("pre-backfill signal = %+v, want candidate=50 missing=1", detail.Signal)
+	}
+	// Missing stock must be surfaced by code so the UI can offer override.
+	if len(detail.Signal.MissingItems) != 1 || !strings.Contains(detail.Signal.MissingItems[0], "00050") {
+		t.Fatalf("expected missing item to name stock 00050, got %+v", detail.Signal.MissingItems)
+	}
+
+	// The lookup resolver has nothing for 07-10, but the daily bar fetcher only
+	// has a bar on the prior trading day (07-09) — simulating a stock that did
+	// not trade on the requested day. The backfill must fall back to 07-09.
+	svc.SetPriceLookupResolver(func(ctx context.Context, code string, exchange string, tradeDate string) PriceLookupResult {
+		return PriceLookupResult{}
+	})
+	svc.SetPriceResolver(func(ctx context.Context, code string, exchange string, tradeDate string) float64 { return 0 })
+	svc.SetDailyBarFetcher(func(ctx context.Context, code string, exchange string, lookbackDays int) ([]SimPortfolioV2DailyBar, error) {
+		return []SimPortfolioV2DailyBar{{Date: prior, Open: 8.8, Close: 9.9}}, nil
+	})
+
+	resp, err := svc.BackfillSignalClosePrice(ctx, SimPortfolioV2SignalClosePriceBackfillRequest{Market: SimPortfolioV2MarketHKEX, Date: date})
+	if err != nil {
+		t.Fatalf("BackfillSignalClosePrice: %v", err)
+	}
+	if resp.Checked != 1 || resp.Updated != 1 || resp.StillMissing != 0 {
+		t.Fatalf("unexpected backfill resp: %+v", resp)
+	}
+	if !resp.OK || resp.Status != SimPortfolioV2StatusOK {
+		t.Fatalf("expected ok status after prior-day fallback, got %+v", resp)
+	}
+
+	// The persisted snapshot must carry the actual (prior) trade date and price.
+	after, _ := repo.ListRankingSnapshotsByDate(ctx, SimPortfolioV2MarketHKEX, date, 50)
+	var backfilled *RankingSnapshot
+	for i := range after {
+		if after[i].Code == "00050" {
+			backfilled = &after[i]
+		}
+	}
+	if backfilled == nil {
+		t.Fatalf("stock 00050 not found after backfill")
+	}
+	if backfilled.ClosePrice != 9.9 || backfilled.PriceTradeDate != prior {
+		t.Fatalf("expected close=9.9 priceDate=%s, got close=%v priceDate=%s", prior, backfilled.ClosePrice, backfilled.PriceTradeDate)
+	}
+
+	// The day must no longer be blocked, because the prior-day close is now
+	// treated as acceptable within the tolerance window.
+	detail, err = svc.GetAdminCalendarDay(ctx, SimPortfolioV2MarketHKEX, date)
+	if err != nil {
+		t.Fatalf("GetAdminCalendarDay after backfill: %v", err)
+	}
+	if detail.Signal.MissingPriceCount != 0 || detail.Signal.Status != SimPortfolioV2StatusOK {
+		t.Fatalf("expected missing=0 ok after backfill, got %+v", detail.Signal)
+	}
+}
+
+// TestSimPortfolioV2OverrideSnapshotClosePrice covers the manual-override escape
+// hatch: when the targeted backfill cannot resolve a stock (e.g. suspended, no
+// daily bar at all), an admin can write an audited close price directly onto the
+// ranking snapshot, and the day turns green.
+func TestSimPortfolioV2OverrideSnapshotClosePrice(t *testing.T) {
+	repo, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	date := "2026-07-10"
+	now := time.Now().UTC()
+	rows := []RankingSnapshot{}
+	for i := 0; i < 50; i++ {
+		close := 10 + float64(i)
+		priceDate := date
+		if i == 49 {
+			close = 0
+			priceDate = ""
+		}
+		rows = append(rows, RankingSnapshot{Code: fmt.Sprintf("%05d", i+1), Name: fmt.Sprintf("HK%05d", i+1), Exchange: "HKEX", Rank: i + 1, Opportunity: 90 - float64(i), Risk: 10 + float64(i), ClosePrice: close, PriceTradeDate: priceDate, SnapshotDate: date, CreatedAt: now})
+	}
+	if err := repo.UpsertSnapshots(ctx, rows); err != nil {
+		t.Fatalf("seed snapshots: %v", err)
+	}
+
+	// Missing reason / evidence / confirm must be rejected.
+	if _, err := svc.OverrideSnapshotClosePrice(ctx, SimPortfolioV2SnapshotClosePriceOverrideRequest{Market: SimPortfolioV2MarketHKEX, Date: date, Code: "00050", Exchange: "HKEX", Price: 12.3, Confirm: true}); err == nil {
+		t.Fatalf("expected error when reason/evidence missing")
+	}
+
+	resp, err := svc.OverrideSnapshotClosePrice(ctx, SimPortfolioV2SnapshotClosePriceOverrideRequest{
+		Market: SimPortfolioV2MarketHKEX, Date: date, Code: "00050", Exchange: "HKEX", Price: 12.3,
+		Reason: "该股当日停牌，凭券商回单核对", Evidence: "broker-ticket-77", Confirm: true,
+	})
+	if err != nil {
+		t.Fatalf("OverrideSnapshotClosePrice: %v", err)
+	}
+	if !resp.OK || resp.Status != SimPortfolioV2StatusOK || resp.Updated != 1 {
+		t.Fatalf("unexpected override resp: %+v", resp)
+	}
+
+	after, _ := repo.ListRankingSnapshotsByDate(ctx, SimPortfolioV2MarketHKEX, date, 50)
+	for _, row := range after {
+		if row.Code == "00050" && (row.ClosePrice != 12.3 || row.PriceTradeDate != date) {
+			t.Fatalf("override not applied: %+v", row)
+		}
+	}
+
+	detail, err := svc.GetAdminCalendarDay(ctx, SimPortfolioV2MarketHKEX, date)
+	if err != nil {
+		t.Fatalf("GetAdminCalendarDay after override: %v", err)
+	}
+	if detail.Signal.MissingPriceCount != 0 {
+		t.Fatalf("expected missing=0 after override, got %d", detail.Signal.MissingPriceCount)
+	}
+}
+
+// TestSimPortfolioV2OverrideSnapshotClosePriceRejectsUnknownStock verifies that
+// overriding a stock that is not a candidate for the day is refused cleanly.
+func TestSimPortfolioV2OverrideSnapshotClosePriceRejectsUnknownStock(t *testing.T) {
+	repo, svc := setupSimPortfolioV2Test(t)
+	ctx := context.Background()
+	date := "2026-07-10"
+	seedV2RankingSnapshots(t, repo, SimPortfolioV2MarketHKEX, date, 3)
+	resp, err := svc.OverrideSnapshotClosePrice(ctx, SimPortfolioV2SnapshotClosePriceOverrideRequest{
+		Market: SimPortfolioV2MarketHKEX, Date: date, Code: "99999", Exchange: "HKEX", Price: 5,
+		Reason: "test", Evidence: "test", Confirm: true,
+	})
+	if err != nil {
+		t.Fatalf("OverrideSnapshotClosePrice: %v", err)
+	}
+	if resp.OK || resp.Status != SimPortfolioV2StatusBlocked {
+		t.Fatalf("expected refusal for unknown stock, got %+v", resp)
+	}
+}
+
+// TestIsAcceptableSnapshotPriceDate is a focused unit test for the shared
+// tolerance predicate that keeps buildSignalBatch and the backfill consistent.
+func TestIsAcceptableSnapshotPriceDate(t *testing.T) {
+	cases := []struct {
+		name       string
+		close      float64
+		priceDate  string
+		snapshot   string
+		acceptable bool
+	}{
+		{"exact day", 10, "2026-07-10", "2026-07-10", true},
+		{"one day prior", 10, "2026-07-09", "2026-07-10", true},
+		{"three days prior", 10, "2026-07-07", "2026-07-10", true},
+		{"four days prior out of tolerance", 10, "2026-07-06", "2026-07-10", false},
+		{"zero price", 0, "2026-07-10", "2026-07-10", false},
+		{"empty price date", 10, "", "2026-07-10", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := isAcceptableSnapshotPriceDate(SimPortfolioV2MarketHKEX, c.snapshot, c.close, c.priceDate)
+			if got != c.acceptable {
+				t.Fatalf("isAcceptableSnapshotPriceDate(%s) = %v, want %v", c.name, got, c.acceptable)
+			}
+		})
 	}
 }

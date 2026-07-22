@@ -1866,11 +1866,12 @@ function SimPipelineMarketCalendar({ market, onSelectDay, onPreviewStart }) {
   )
 }
 
-function SimPipelineDayDetail({ detail, onClose, onRecomputeSignal, onBackfillSignalClose, onRepairPrices, onOpenOverride }) {
+function SimPipelineDayDetail({ detail, onClose, onRecomputeSignal, onBackfillSignalClose, onOverrideSignalClose, onRepairPrices, onOpenOverride }) {
   if (!detail) return null
   const hasMissingPrices = (detail.portfolios || []).some((portfolio) => (
     [...(portfolio.entry_open?.missing_items || []), ...(portfolio.valuation_close?.missing_items || [])].length > 0
   ))
+  const signalMissingItems = detail.signal?.missing_items || []
   return (
     <div className="mt-4 rounded-xl border border-border bg-background p-4">
       <div className="mb-3 flex items-start justify-between gap-3">
@@ -1891,6 +1892,29 @@ function SimPipelineDayDetail({ detail, onClose, onRecomputeSignal, onBackfillSi
           <div>缺收盘价：{detail.signal?.missing_price_count ?? 0}</div>
         </div>
         {detail.signal?.message ? <div className="mt-1 text-foreground-dim">{detail.signal.message}</div> : null}
+        {signalMissingItems.length > 0 ? (
+          <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700">
+            <div className="font-medium">缺收盘价股票（{signalMissingItems.length}）</div>
+            <ul className="mt-1 space-y-1">
+              {signalMissingItems.map((item, index) => {
+                const [codeExchange = '', ...nameParts] = String(item).split(' ')
+                const [code = '', exchange = ''] = codeExchange.split('/')
+                return (
+                  <li key={`${item}-${index}`} className="flex items-center justify-between gap-2">
+                    <span className="truncate">{item}</span>
+                    <button
+                      type="button"
+                      onClick={() => onOverrideSignalClose?.(detail.market, detail.date, code, exchange, item)}
+                      className="shrink-0 rounded border border-amber-500/40 px-2 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-500/20"
+                    >
+                      人工覆盖
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : null}
         {detail.repair_suggestions?.some((item) => item.type === 'recompute_quadrant') ? (
           <button
             type="button"
@@ -2217,6 +2241,46 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
     }
   }
 
+  const handleOverrideSignalClosePrice = async (market, date, code, exchange, label) => {
+    const priceInput = window.prompt(`人工覆盖 ${label || `${code}/${exchange}`} 在 ${date} 的收盘价（元/HKD）：`)
+    if (priceInput === null) return
+    const price = Number(priceInput)
+    if (!Number.isFinite(price) || price <= 0) {
+      setActionError('人工覆盖价格必须为大于 0 的数字。')
+      return
+    }
+    const reason = window.prompt('请填写覆盖原因（必填，例如：该股当日停牌，凭券商回单核对）：')
+    if (reason === null) return
+    if (!reason.trim()) {
+      setActionError('人工覆盖必须填写原因。')
+      return
+    }
+    const evidence = window.prompt('请填写凭证（必填，例如：券商回单编号 / 交易所公告链接）：')
+    if (evidence === null) return
+    if (!evidence.trim()) {
+      setActionError('人工覆盖必须填写凭证。')
+      return
+    }
+    setRepairingPipeline(true)
+    setActionError('')
+    setPipelineNotice('')
+    try {
+      const resp = await adminFetch('/api/admin/sim-portfolio-pipeline/signal/override-close-price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ market, date, code, exchange, price, reason: reason.trim(), evidence: evidence.trim(), confirm: true }),
+      })
+      setPipelineNotice(resp?.message || '已人工覆盖该股收盘价。')
+      await resource.refresh()
+      await refreshSelectedPipelineDay()
+    } catch (err) {
+      const message = handleAdminActionError(err, onUnauthorized, '人工覆盖收盘价失败')
+      if (message) setActionError(message)
+    } finally {
+      setRepairingPipeline(false)
+    }
+  }
+
   const handleRepairPrices = async (action, market, signalDate, portfolioId = '') => {
     setRepairingPipeline(true)
     setActionError('')
@@ -2462,6 +2526,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
           onClose={() => { setPipelineDayDetail(null); setSelectedPipelineDay(null) }}
           onRecomputeSignal={handleRecomputeQuadrantDate}
           onBackfillSignalClose={handleBackfillSignalClosePrice}
+          onOverrideSignalClose={handleOverrideSignalClosePrice}
           onRepairPrices={handleRepairPrices}
           onOpenOverride={handleOpenPriceOverride}
         />

@@ -251,3 +251,25 @@ func (a *appServer) handleAdminSimPortfolioV2PriceOverride(w http.ResponseWriter
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
+
+func (a *appServer) handleAdminSimPortfolioV2SignalOverrideClosePrice(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	if a.simPortfolioV2Service == nil {
+		writeError(w, http.StatusInternalServerError, "Sim Portfolio v2 服务未配置")
+		return
+	}
+	var req quadrant.SimPortfolioV2SnapshotClosePriceOverrideRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	resp, err := a.simPortfolioV2Service.OverrideSnapshotClosePrice(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}

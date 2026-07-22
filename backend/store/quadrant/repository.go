@@ -598,6 +598,34 @@ func (r *Repository) UpdateSnapshotPrice(ctx context.Context, id int64, closePri
 		Updates(updates).Error
 }
 
+// UpdateSnapshotPriceByKey overrides the close price of the ranking snapshot(s)
+// matching a given (exchange, code, snapshot_date). It is used by the admin
+// manual-override flow when the targeted backfill cannot resolve a stock's
+// close price (e.g. a suspended HK stock with no daily bar). It returns the
+// number of rows affected so the caller can tell whether the stock actually
+// existed as a candidate for that day.
+func (r *Repository) UpdateSnapshotPriceByKey(ctx context.Context, exchange, code, snapshotDate string, closePrice float64, priceTradeDate string) (int64, error) {
+	code = strings.TrimSpace(code)
+	snapshotDate = strings.TrimSpace(snapshotDate)
+	if code == "" || snapshotDate == "" || closePrice <= 0 {
+		return 0, nil
+	}
+	updates := map[string]any{"close_price": closePrice}
+	if strings.TrimSpace(priceTradeDate) != "" {
+		updates["price_trade_date"] = strings.TrimSpace(priceTradeDate)
+	}
+	query := r.db.WithContext(ctx).Model(&RankingSnapshot{}).
+		Where("code = ? AND snapshot_date = ?", code, snapshotDate)
+	switch strings.ToUpper(strings.TrimSpace(exchange)) {
+	case "HKEX":
+		query = query.Where("exchange = ?", "HKEX")
+	case "SSE", "SZSE":
+		query = query.Where("exchange = ?", strings.ToUpper(strings.TrimSpace(exchange)))
+	}
+	result := query.Updates(updates)
+	return result.RowsAffected, result.Error
+}
+
 // GetEarliestAvailableClosePrice returns the earliest positive close_price on or after a date.
 // This lets ranking returns recover when the first appearance snapshot was saved before a usable
 // closing snapshot was present for that market/day.

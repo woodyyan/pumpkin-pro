@@ -4132,6 +4132,7 @@ func main() {
 	factorLabService := factorlab.NewService(factorLabRepo)
 	factorIndexRepo := factorindex.NewRepository(storeInstance.DB)
 	factorIndexService := factorindex.NewService(factorIndexRepo)
+	factorIndexService.MinBarCoverageRatio = cfg.FactorIndex.MinBarCoverageRatio
 	if err := factorIndexService.EnsureInitialized(context.Background()); err != nil {
 		log.Printf("factor index init skipped: %v", err)
 	}

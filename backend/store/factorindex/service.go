@@ -3,17 +3,26 @@ package factorindex
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"time"
 )
 
+// defaultMinBarCoverageRatio 是 NAV 计算前的日线覆盖率门槛：某交易日有日线的
+// 去重股票数低于历史基线（全表最大单日覆盖数）的该比例时，视为当日数据尚未补齐，
+// 跳过计算、等待后续补齐后再算，避免把残缺快照固化为永久 partial 行。
+const defaultMinBarCoverageRatio = 0.9
+
 type Service struct {
 	repo *Repository
+	// MinBarCoverageRatio 日线覆盖率门槛，<=0 表示不启用。生产默认 0.9，
+	// 可通过 FACTOR_INDEX_MIN_BAR_COVERAGE_RATIO 调整。
+	MinBarCoverageRatio float64
 }
 
 func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+	return &Service{repo: repo, MinBarCoverageRatio: defaultMinBarCoverageRatio}
 }
 
 func (s *Service) EnsureInitialized(ctx context.Context) error {
@@ -126,7 +135,21 @@ func (s *Service) SyncDaily(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	barCounts, err := s.repo.ListTradeDateBarCounts(ctx)
+	if err != nil {
+		return err
+	}
+	baseline := 0
+	for _, count := range barCounts {
+		if count > baseline {
+			baseline = count
+		}
+	}
 	for _, tradeDate := range tradeDates {
+		if !s.hasSufficientBarCoverage(barCounts[tradeDate], baseline) {
+			log.Printf("[factorindex] skip %s: bar coverage %d/%d below ratio %.2f, will retry after bars catch up", tradeDate, barCounts[tradeDate], baseline, s.MinBarCoverageRatio)
+			continue
+		}
 		for _, definition := range definitions {
 			if err := s.computeDailyForTradeDate(ctx, definition, tradeDate); err != nil {
 				return err
@@ -136,13 +159,31 @@ func (s *Service) SyncDaily(ctx context.Context) error {
 	return nil
 }
 
+// hasSufficientBarCoverage 判断当日日线覆盖数是否达到计算门槛。
+// ratio<=0 或基线未知（空表）时不设限；否则要求当日覆盖数 >= 基线 * ratio。
+func (s *Service) hasSufficientBarCoverage(count, baseline int) bool {
+	ratio := s.MinBarCoverageRatio
+	if ratio <= 0 || baseline <= 0 {
+		return true
+	}
+	return float64(count) >= float64(baseline)*ratio
+}
+
 func (s *Service) computeDailyForTradeDate(ctx context.Context, definition Definition, tradeDate string) error {
 	existing, err := s.repo.GetDailyByTradeDate(ctx, definition.ID, tradeDate)
 	if err != nil {
 		return err
 	}
-	if existing != nil {
+	if existing != nil && existing.Status == StatusCompleted {
 		return nil
+	}
+	if existing != nil {
+		// partial/pending 行是早期数据未补齐时的残缺快照。NAV 按日链式推进，
+		// 当日修正后其后的所有行都必须随之重算，因此级联删除当日及之后的
+		// 全部 daily 行，交给外层按日期升序的循环顺序重算。
+		if err := s.repo.DeleteDailyRows(ctx, []string{definition.ID}, tradeDate, ""); err != nil {
+			return err
+		}
 	}
 	rebalance, err := s.repo.LatestRebalanceBeforeTradeDate(ctx, definition.ID, tradeDate)
 	if err != nil {
@@ -181,7 +222,12 @@ func (s *Service) computeDailyForTradeDate(ctx context.Context, definition Defin
 	if err != nil {
 		return err
 	}
+	suspendedSet, err := s.repo.ListSuspendedCodes(ctx, codes, tradeDate)
+	if err != nil {
+		return err
+	}
 	validPriceCount := 0
+	suspendedCount := 0
 	missingCount := 0
 	returnSum := 0.0
 	for _, item := range constituents {
@@ -189,6 +235,10 @@ func (s *Service) computeDailyForTradeDate(ctx context.Context, definition Defin
 		dailyReturn, valid := resolveConstituentReturn(tradeDate, rows)
 		if valid {
 			validPriceCount++
+		} else if suspendedSet[item.StockCode] {
+			// 停牌/退市股当日无日线是正常市场现象，按 0 收益处理在经济上正确，
+			// 单独计数、不计入数据缺失。
+			suspendedCount++
 		} else {
 			missingCount++
 		}
@@ -213,31 +263,36 @@ func (s *Service) computeDailyForTradeDate(ctx context.Context, definition Defin
 	threeMonth := returnForWindow(series, 60)
 	halfYear := returnForWindow(series, 120)
 	status := StatusCompleted
-	warningText := ""
+	warningParts := make([]string, 0, 2)
 	if missingCount > 0 {
 		status = StatusPartial
-		warningText = fmt.Sprintf("%d/%d 只成分股缺少完整日线，按 0 收益处理", missingCount, len(constituents))
+		warningParts = append(warningParts, fmt.Sprintf("%d/%d 只成分股缺少完整日线，按 0 收益处理", missingCount, len(constituents)))
 	}
+	if suspendedCount > 0 {
+		warningParts = append(warningParts, fmt.Sprintf("%d/%d 只成分股停牌或已退市，按 0 收益处理", suspendedCount, len(constituents)))
+	}
+	warningText := strings.Join(warningParts, "；")
 	now := time.Now().UTC()
 	row := Daily{
-		IndexID:          definition.ID,
-		TradeDate:        tradeDate,
-		SourceTradeDate:  tradeDate,
-		RebalanceID:      rebalance.ID,
-		NAV:              nav,
-		DailyReturn:      roundFloat(returnSum, 6),
-		TotalReturn:      roundFloat(totalReturn, 6),
-		WeeklyReturn:     weekly,
-		MonthlyReturn:    monthly,
-		ThreeMonthReturn: threeMonth,
-		HalfYearReturn:   halfYear,
-		ConstituentCount: len(constituents),
-		ValidPriceCount:  validPriceCount,
-		Status:           status,
-		WarningText:      warningText,
-		ComputedAt:       now,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		IndexID:             definition.ID,
+		TradeDate:           tradeDate,
+		SourceTradeDate:     tradeDate,
+		RebalanceID:         rebalance.ID,
+		NAV:                 nav,
+		DailyReturn:         roundFloat(returnSum, 6),
+		TotalReturn:         roundFloat(totalReturn, 6),
+		WeeklyReturn:        weekly,
+		MonthlyReturn:       monthly,
+		ThreeMonthReturn:    threeMonth,
+		HalfYearReturn:      halfYear,
+		ConstituentCount:    len(constituents),
+		ValidPriceCount:     validPriceCount,
+		SuspendedPriceCount: suspendedCount,
+		Status:              status,
+		WarningText:         warningText,
+		ComputedAt:          now,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	return s.repo.SaveDaily(ctx, row)
 }
@@ -315,6 +370,7 @@ func (s *Service) buildOverviewItem(ctx context.Context, definition Definition) 
 	item.Status = latest.Status
 	item.WarningText = latest.WarningText
 	item.ConstituentCount = latest.ConstituentCount
+	item.SuspendedPriceCount = latest.SuspendedPriceCount
 	recentRows, err := s.repo.ListRecentDailyRows(ctx, definition.ID, latest.TradeDate, 20)
 	if err != nil {
 		return OverviewItem{}, err

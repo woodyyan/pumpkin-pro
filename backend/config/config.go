@@ -87,6 +87,9 @@ type FactorIndexConfig struct {
 	DailyHour           int
 	DailyMinute         int
 	TimeoutMinutes      int
+	// MinBarCoverageRatio 是日级 NAV 计算前的日线覆盖率门槛（相对全表最大
+	// 单日覆盖数），低于该比例的交易日跳过计算、等待数据补齐。<=0 表示不启用。
+	MinBarCoverageRatio float64
 }
 
 type PortfolioSnapshotConfig struct {
@@ -275,6 +278,7 @@ func Load() Config {
 			DailyHour:           getEnvAsInt("FACTOR_INDEX_DAILY_HOUR", 20),
 			DailyMinute:         getEnvAsInt("FACTOR_INDEX_DAILY_MINUTE", 30),
 			TimeoutMinutes:      getEnvAsInt("FACTOR_INDEX_TIMEOUT_MINUTES", 120),
+			MinBarCoverageRatio: getEnvAsFloat("FACTOR_INDEX_MIN_BAR_COVERAGE_RATIO", 0.9),
 		},
 		PortfolioSnapshot: PortfolioSnapshotConfig{
 			DailyComputeEnabled: getEnvAsBool("PORTFOLIO_SNAPSHOT_DAILY_COMPUTE_ENABLED", true),
@@ -308,6 +312,18 @@ func getEnvAsInt(key string, defaultValue int) int {
 		return defaultValue
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultValue
+	}
+	return parsed
+}
+
+func getEnvAsFloat(key string, defaultValue float64) float64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		return defaultValue
 	}

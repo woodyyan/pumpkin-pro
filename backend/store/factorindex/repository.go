@@ -85,6 +85,67 @@ func (r *Repository) LatestTradeDate(ctx context.Context) (string, error) {
 	return strings.TrimSpace(value), err
 }
 
+// ListTradeDateBarCounts 返回每个交易日有日线记录的去重股票数，用于
+// NAV 计算前的覆盖率门槛判断：单日覆盖数显著低于基线时说明当日数据尚未补齐。
+func (r *Repository) ListTradeDateBarCounts(ctx context.Context) (map[string]int, error) {
+	type row struct {
+		TradeDate string
+		Cnt       int
+	}
+	var rows []row
+	err := r.db.WithContext(ctx).Model(&factorlab.FactorDailyBar{}).
+		Select("trade_date, COUNT(DISTINCT code) AS cnt").
+		Group("trade_date").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]int, len(rows))
+	for _, item := range rows {
+		result[strings.TrimSpace(item.TradeDate)] = item.Cnt
+	}
+	return result, nil
+}
+
+// ListSuspendedCodes 返回在 tradeDate 应视为「停牌或已退市」的股票集合。
+// 判定口径：每只股票取 tradeDate 当日或之前最近一条 factor_market_metrics 记录，
+// 若该记录 is_suspended=1，且股票在 tradeDate 无日线（由调用方保证此前置），
+// 则视为停牌/退市——当日无数据是正常市场现象，按 0 收益处理在经济上正确，
+// 不计入数据缺失。取「最近一条」而非「当日」，是为了覆盖退市股：数据源在其
+// 退市后会停止推送快照，但最近一条快照的停牌标记仍然成立。
+func (r *Repository) ListSuspendedCodes(ctx context.Context, codes []string, tradeDate string) (map[string]bool, error) {
+	cleanCodes := make([]string, 0, len(codes))
+	seen := map[string]struct{}{}
+	for _, code := range codes {
+		value := strings.TrimSpace(code)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		cleanCodes = append(cleanCodes, value)
+	}
+	result := make(map[string]bool, len(cleanCodes))
+	if len(cleanCodes) == 0 {
+		return result, nil
+	}
+	var suspended []string
+	err := r.db.WithContext(ctx).Model(&factorlab.FactorMarketMetric{}).
+		Select("factor_market_metrics.code").
+		Joins("JOIN (SELECT code, MAX(trade_date) AS max_date FROM factor_market_metrics WHERE trade_date <= ? AND code IN ? GROUP BY code) latest ON latest.code = factor_market_metrics.code AND latest.max_date = factor_market_metrics.trade_date", strings.TrimSpace(tradeDate), cleanCodes).
+		Where("factor_market_metrics.is_suspended = 1").
+		Pluck("factor_market_metrics.code", &suspended).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, code := range suspended {
+		result[strings.TrimSpace(code)] = true
+	}
+	return result, nil
+}
+
 func (r *Repository) RebalanceExists(ctx context.Context, indexID, signalDate string) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&Rebalance{}).

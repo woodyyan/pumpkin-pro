@@ -1,5 +1,31 @@
 # 设计决策记录
 
+## 决策 33: 单因子指数 NAV 自愈机制（覆盖率门槛 + partial 级联重算 + 停牌/缺数分级）
+
+**日期**: 2026-07-25
+
+**背景**: live-trading 因子指数卡长期显示「部分数据」与「X/50 只成分股缺少完整日线」。调查（2026-07-24）确认三层根因：① NAV 行「先到先得、写过不重算」——`ListTradeDates` 只看全表 distinct 日期，`computeDailyForTradeDate` 对已有行永久跳过，日线晚到时落库的残缺行永不自愈，且 NAV 链式推进会把错误向后传播；② `is_delisted_name` 只匹配「退市」前缀漏「X退」后缀，92 只退市整理股 `is_active=1` 进入小市值指数，退市后日线断更；③ docker-compose 把 `FACTOR_LAB_DAILY_BARS_SOURCE` 钉死 `tencent`，腾讯 fqkline 大面积 501 时无降级，全市场日线残缺并连带 phase1 选股快照失败。
+
+**决策**:
+1. **覆盖率门槛**（P1）：`SyncDaily` 先取每交易日日线覆盖数（`ListTradeDateBarCounts`），以全表最大单日覆盖数为基线，当日覆盖 < 基线 × `MinBarCoverageRatio`（默认 0.9，env `FACTOR_INDEX_MIN_BAR_COVERAGE_RATIO`）时跳过该日，等数据补齐后再算。`<=0` 表示不启用。
+2. **partial 级联重算**（P1）：`computeDailyForTradeDate` 只在「已有行且 status=completed」时跳过；已有 partial/pending 行时先级联删除该指数当日及之后全部 daily 行，由外层按日期升序的循环顺序重算，NAV 链自动从最近一个 completed 行续接。admin recompute(reset) 的手工修复路径保持不变。
+3. **停牌/退市与数据缺失分级**（P2）：成分股当日无日线时，查 `factor_market_metrics` 当日或之前最近一条记录，`is_suspended=1` 则计入 `SuspendedPriceCount`（按 0 收益在经济上正确，不触发 partial，警告文案为信息性「X/50 只成分股停牌或已退市，按 0 收益处理」）；否则计入缺失并触发 partial。取「最近一条」而非「当日」是为了覆盖退市股（数据源在其退市后停止推送快照）。`factor_index_daily` 与 overview 响应新增 `suspended_price_count` 字段；前端无需改动（任何 status 都渲染 warningText）。
+4. **退市名口径统一**（P0）：`is_delisted_name` 改为 `"退" in name`，与四象限 `universe_filter.is_st_name` 完全一致；securities 每日全量 `INSERT OR REPLACE` 会自动重判存量股票，另用一次性 SQL 立即修复存量 92 只。
+5. **日线源恢复降级链**（P0）：docker-compose（prod/local 两份）`FACTOR_LAB_DAILY_BARS_SOURCE` 默认值 `tencent` → `auto`（= baostock→tencent→eastmoney→akshare）。quant 增量脚本自身的 argparse 默认 `tencent` 保留（仅影响手工运行，是有意的快速通道）。
+6. **Admin 可观测性**：`/api/admin/factor-index/status` 响应新增 `latest_trade_date_bar_count` / `bar_coverage_baseline` / `min_bar_coverage_ratio`，用于判断最新交易日是否被覆盖率门槛跳过。
+
+**替代方案（未选）**:
+- 「不用日线的因子指数忽略日线」：否决。警告产生于 NAV 计算（指数日收益=成分股当日涨跌幅等权平均），7 个指数无一例外需要每只成分股每日收盘价，与因子评分是否用日线无关；评分层面价值/股息率/小市值/质量确实不用日线，但成长含 20% performance_1y，动量/低波动重度依赖日线。
+- 重算时只覆写单行不级联：否决。NAV 按日链式推进，单行修正后其后所有行的 prevNAV 都已污染，必须级联。
+- 停牌判定只看当日 metrics 行：否决。退市股在退市后无当日快照，会被误判为数据缺失继续触发 partial。
+
+**风险与代价**:
+- 级联重算在启动 catch-up 时可能一次重算多个交易日（当前历史 ~300 交易日 × 7 指数，实测秒级完成），成本可接受。
+- 覆盖率门槛在数据源长期残缺时会让最新交易日 NAV 持续跳过（页面数据日期停留），这是刻意的「宁可晚更新不可错更新」；admin status 的覆盖率字段用于暴露该状态。
+- 退市股在月内仍留在成分股中（月内不调仓是既定口径），按停牌/退市 0 收益处理并提示，下月调仓自动剔除。
+
+**关联**: BP-025 / BP-026 / BP-027 / BP-028
+
 ## 决策 28: V2 generateFacts 重建换仓 diff 逻辑（BUY/SELL/HOLD）
 
 **日期**: 2026-07-16

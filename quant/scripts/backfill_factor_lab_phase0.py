@@ -545,11 +545,20 @@ def is_st_name(name: Any) -> bool:
 def is_delisted_name(name: Any) -> bool:
     """Return True if the security name indicates it has been delisted.
 
-    A-share delisted stocks are renamed with a "退市" prefix by exchanges
-    (e.g. "退市熊猫", "退市中新").  Such stocks should be marked is_active=0
-    so they are excluded from factor scoring and index construction.
+    A-share delisting/delisted stocks are renamed by exchanges in two forms:
+    - "退市" prefix (e.g. "退市熊猫", "退市中新"), the older convention;
+    - "退" suffix (e.g. "天龙退", "恒久退"), the current convention for stocks
+      in the delisting arrangement period (退市整理期).
+
+    A plain substring match on "退" covers both forms and stays consistent
+    with the quadrant universe filter (quant/screener/universe_filter.py).
+    Such stocks should be marked is_active=0 so they are excluded from factor
+    scoring and index construction.
     """
-    return str(name or "").strip().startswith("退市")
+    text = str(name or "").strip()
+    if not text:
+        return False
+    return "退" in text
 
 
 def safe_float(value: Any) -> Optional[float]:

@@ -66,25 +66,28 @@ type Constituent struct {
 func (Constituent) TableName() string { return "factor_index_constituents" }
 
 type Daily struct {
-	ID               int64     `gorm:"primaryKey;autoIncrement"`
-	IndexID          string    `gorm:"size:64;not null;uniqueIndex:uidx_factor_index_daily,priority:1;index"`
-	TradeDate        string    `gorm:"size:10;not null;uniqueIndex:uidx_factor_index_daily,priority:2;index"`
-	SourceTradeDate  string    `gorm:"size:10;not null;default:''"`
-	RebalanceID      string    `gorm:"size:64;not null;default:'';index"`
-	NAV              float64   `gorm:"not null;default:1000"`
-	DailyReturn      float64   `gorm:"not null;default:0"`
-	TotalReturn      float64   `gorm:"not null;default:0"`
-	WeeklyReturn     *float64  `gorm:"default:null"`
-	MonthlyReturn    *float64  `gorm:"default:null"`
-	ThreeMonthReturn *float64  `gorm:"default:null"`
-	HalfYearReturn   *float64  `gorm:"default:null"`
-	ConstituentCount int       `gorm:"not null;default:0"`
-	ValidPriceCount  int       `gorm:"not null;default:0"`
-	Status           string    `gorm:"size:16;not null;default:'pending';index"`
-	WarningText      string    `gorm:"type:text;not null;default:''"`
-	ComputedAt       time.Time `gorm:"not null"`
-	CreatedAt        time.Time `gorm:"not null"`
-	UpdatedAt        time.Time `gorm:"not null"`
+	ID               int64    `gorm:"primaryKey;autoIncrement"`
+	IndexID          string   `gorm:"size:64;not null;uniqueIndex:uidx_factor_index_daily,priority:1;index"`
+	TradeDate        string   `gorm:"size:10;not null;uniqueIndex:uidx_factor_index_daily,priority:2;index"`
+	SourceTradeDate  string   `gorm:"size:10;not null;default:''"`
+	RebalanceID      string   `gorm:"size:64;not null;default:'';index"`
+	NAV              float64  `gorm:"not null;default:1000"`
+	DailyReturn      float64  `gorm:"not null;default:0"`
+	TotalReturn      float64  `gorm:"not null;default:0"`
+	WeeklyReturn     *float64 `gorm:"default:null"`
+	MonthlyReturn    *float64 `gorm:"default:null"`
+	ThreeMonthReturn *float64 `gorm:"default:null"`
+	HalfYearReturn   *float64 `gorm:"default:null"`
+	ConstituentCount int      `gorm:"not null;default:0"`
+	ValidPriceCount  int      `gorm:"not null;default:0"`
+	// SuspendedPriceCount 统计当日无日线、但经 factor_market_metrics 判定为停牌/退市的
+	// 成分股数量。这类股票按 0 收益处理在经济上正确，不计入数据缺失、不触发 partial。
+	SuspendedPriceCount int       `gorm:"not null;default:0"`
+	Status              string    `gorm:"size:16;not null;default:'pending';index"`
+	WarningText         string    `gorm:"type:text;not null;default:''"`
+	ComputedAt          time.Time `gorm:"not null"`
+	CreatedAt           time.Time `gorm:"not null"`
+	UpdatedAt           time.Time `gorm:"not null"`
 }
 
 func (Daily) TableName() string { return "factor_index_daily" }
@@ -95,25 +98,26 @@ type TrendPoint struct {
 }
 
 type OverviewItem struct {
-	IndexID            string       `json:"index_id"`
-	FactorKey          string       `json:"factor_key"`
-	Name               string       `json:"name"`
-	Exchange           string       `json:"exchange"`
-	NAV                *float64     `json:"nav,omitempty"`
-	DailyReturn        *float64     `json:"daily_return,omitempty"`
-	TotalReturn        *float64     `json:"total_return,omitempty"`
-	WeeklyReturn       *float64     `json:"weekly_return,omitempty"`
-	MonthlyReturn      *float64     `json:"monthly_return,omitempty"`
-	ThreeMonthReturn   *float64     `json:"three_month_return,omitempty"`
-	HalfYearReturn     *float64     `json:"half_year_return,omitempty"`
-	LatestTradeDate    string       `json:"latest_trade_date,omitempty"`
-	SourceTradeDate    string       `json:"source_trade_date,omitempty"`
-	RebalanceDate      string       `json:"rebalance_date,omitempty"`
-	EffectiveStartDate string       `json:"effective_start_date,omitempty"`
-	ConstituentCount   int          `json:"constituent_count"`
-	Status             string       `json:"status"`
-	WarningText        string       `json:"warning_text,omitempty"`
-	TrendPoints        []TrendPoint `json:"trend_points,omitempty"`
+	IndexID             string       `json:"index_id"`
+	FactorKey           string       `json:"factor_key"`
+	Name                string       `json:"name"`
+	Exchange            string       `json:"exchange"`
+	NAV                 *float64     `json:"nav,omitempty"`
+	DailyReturn         *float64     `json:"daily_return,omitempty"`
+	TotalReturn         *float64     `json:"total_return,omitempty"`
+	WeeklyReturn        *float64     `json:"weekly_return,omitempty"`
+	MonthlyReturn       *float64     `json:"monthly_return,omitempty"`
+	ThreeMonthReturn    *float64     `json:"three_month_return,omitempty"`
+	HalfYearReturn      *float64     `json:"half_year_return,omitempty"`
+	LatestTradeDate     string       `json:"latest_trade_date,omitempty"`
+	SourceTradeDate     string       `json:"source_trade_date,omitempty"`
+	RebalanceDate       string       `json:"rebalance_date,omitempty"`
+	EffectiveStartDate  string       `json:"effective_start_date,omitempty"`
+	ConstituentCount    int          `json:"constituent_count"`
+	SuspendedPriceCount int          `json:"suspended_price_count"`
+	Status              string       `json:"status"`
+	WarningText         string       `json:"warning_text,omitempty"`
+	TrendPoints         []TrendPoint `json:"trend_points,omitempty"`
 }
 
 type OverviewResponse struct {

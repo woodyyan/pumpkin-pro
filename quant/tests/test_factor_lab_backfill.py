@@ -31,6 +31,11 @@ def test_is_delisted_name():
     assert module.is_delisted_name("退市熊猫") is True
     assert module.is_delisted_name("退市中新") is True
     assert module.is_delisted_name("退市紫晶") is True
+    # 退市整理期「X退」后缀股票同样应被识别（现行交易所命名惯例）
+    assert module.is_delisted_name("天龙退") is True
+    assert module.is_delisted_name("恒久退") is True
+    assert module.is_delisted_name("赛隆退") is True
+    assert module.is_delisted_name("左江退") is True
     # 普通股票、ST 股票不应被识别为已退市
     assert module.is_delisted_name("平安银行") is False
     assert module.is_delisted_name("*ST 样本") is False
@@ -39,17 +44,19 @@ def test_is_delisted_name():
 
 
 def test_build_security_payload_sets_is_active_false_for_delisted():
-    """退市股（名称以"退市"开头）在 build_security_payload_from_quote_records 中
+    """退市股（「退市」前缀或「X退」后缀）在 build_security_payload_from_quote_records 中
     is_active 应被设为 0，确保其不再参与选股和因子指数构建。"""
     args = module.parse_args(["--mode", "securities"])
     records = [
         {"code": "600599", "name": "退市熊猫", "price": 0.44, "volume": 0, "amount": 0},
+        {"code": "300029", "name": "天龙退", "price": 0.35, "volume": 0, "amount": 0},
         {"code": "600519", "name": "贵州茅台", "price": 1500.0, "volume": 100, "amount": 150000},
     ]
     payload = module.build_security_payload_from_quote_records(records, args, "test")
     rows_by_code = {row[0]: row for row in payload.rows}
-    # 退市熊猫: is_active (index 7) should be 0
-    assert rows_by_code["600599"][7] == 0, "退市股 is_active 应为 0"
+    # 退市熊猫 / 天龙退: is_active (index 7) should be 0
+    assert rows_by_code["600599"][7] == 0, "退市前缀股 is_active 应为 0"
+    assert rows_by_code["300029"][7] == 0, "「X退」后缀股 is_active 应为 0"
     # 正常股票: is_active should be 1
     assert rows_by_code["600519"][7] == 1, "正常股 is_active 应为 1"
 
@@ -528,7 +535,8 @@ def test_daily_bars_fallback_uses_second_source(monkeypatch):
     class StubManager:
         def fetch(self, request):
             assert request.capability == module.Capability.DAILY_BARS
-            assert request.extras["providers_override"] == ["akshare", "eastmoney", "tencent"]
+            # DAILY_BARS 走 BaoStock 优先的完整降级链
+            assert request.extras["providers_override"] == ["baostock", "tencent", "eastmoney", "akshare"]
             return Response()
 
     monkeypatch.setattr(module, "get_data_source_manager", lambda: StubManager())

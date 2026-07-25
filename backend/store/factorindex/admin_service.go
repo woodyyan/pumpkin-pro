@@ -22,10 +22,16 @@ type ManualRunRequest struct {
 }
 
 type AdminStatusResponse struct {
-	LatestSnapshotDate string            `json:"latest_snapshot_date,omitempty"`
-	LatestTradeDate    string            `json:"latest_trade_date,omitempty"`
-	Worker             WorkerStatus      `json:"worker"`
-	Items              []AdminStatusItem `json:"items"`
+	LatestSnapshotDate string `json:"latest_snapshot_date,omitempty"`
+	LatestTradeDate    string `json:"latest_trade_date,omitempty"`
+	// 日线覆盖率可观测性：LatestTradeDateBarCount 是最新交易日有日线的去重股票数，
+	// BarCoverageBaseline 是全表最大单日覆盖数；二者比值显著低于 MinBarCoverageRatio
+	// 时，最新交易日的 NAV 会被覆盖率门槛跳过，等待日线补齐后自动重算。
+	LatestTradeDateBarCount int               `json:"latest_trade_date_bar_count"`
+	BarCoverageBaseline     int               `json:"bar_coverage_baseline"`
+	MinBarCoverageRatio     float64           `json:"min_bar_coverage_ratio"`
+	Worker                  WorkerStatus      `json:"worker"`
+	Items                   []AdminStatusItem `json:"items"`
 }
 
 type AdminStatusItem struct {
@@ -72,6 +78,16 @@ func (s *Service) AdminStatus(ctx context.Context, worker WorkerStatus) (*AdminS
 	if err != nil {
 		return nil, err
 	}
+	barCounts, err := s.repo.ListTradeDateBarCounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	barBaseline := 0
+	for _, count := range barCounts {
+		if count > barBaseline {
+			barBaseline = count
+		}
+	}
 	items := make([]AdminStatusItem, 0, len(defaultDefinitions))
 	for _, cfg := range defaultDefinitions {
 		definition, ok := definitionMap[cfg.FactorKey]
@@ -93,10 +109,13 @@ func (s *Service) AdminStatus(ctx context.Context, worker WorkerStatus) (*AdminS
 		items = append(items, item)
 	}
 	return &AdminStatusResponse{
-		LatestSnapshotDate: latestSnapshotDate,
-		LatestTradeDate:    latestTradeDate,
-		Worker:             worker,
-		Items:              items,
+		LatestSnapshotDate:      latestSnapshotDate,
+		LatestTradeDate:         latestTradeDate,
+		LatestTradeDateBarCount: barCounts[latestTradeDate],
+		BarCoverageBaseline:     barBaseline,
+		MinBarCoverageRatio:     s.MinBarCoverageRatio,
+		Worker:                  worker,
+		Items:                   items,
 	}, nil
 }
 

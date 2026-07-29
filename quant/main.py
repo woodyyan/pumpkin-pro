@@ -18,7 +18,8 @@ from data.news import get_symbol_news
 from data.news_kline import get_news_kline_report
 from data.company_profile import fetch_a_share_company_profile, fetch_hk_company_profile, normalize_symbol
 from data_sources import DataSourceManager, GLOBAL_HEALTH, Market
-from data.scripts.akshare_loader import fetch_stock_data, resolve_stock_name_with_debug
+from data.scripts.akshare_loader import resolve_stock_name_with_debug
+from data.scripts.online_market_data import fetch_online_bars
 from engine.backtest_engine import BacktestEngine
 from result.metrics import PerformanceMetrics
 from strategy_library.models import StrategyDefinition, StrategyParamDefinition
@@ -471,6 +472,25 @@ def model_to_dict(model) -> Dict:
     return model.dict()
 
 
+def _resolve_stock_name_safe(ticker: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """解析股票名称；任何失败都不得阻断回测，降级为只显示代码。
+
+    名称解析（港股依赖东财 spot 接口）在境外环境同样可能失败，但股票名并非
+    回测必需项。此处兜住所有异常，返回 (None, debug)，让上层继续用代码展示。
+    """
+    try:
+        return resolve_stock_name_with_debug(ticker)
+    except Exception as exc:  # noqa: BLE001 - 名称解析失败不应阻断回测
+        logger.warning("股票名称解析异常，降级为仅显示代码 ticker=%s error=%s", ticker, exc)
+        return None, {
+            "status": "failed",
+            "market": None,
+            "source": None,
+            "message": f"名称解析异常: {exc}",
+            "errors": [str(exc)],
+        }
+
+
 def load_market_data(
     req: BacktestRequest, start_dt: datetime, end_dt: datetime
 ) -> Tuple[pd.DataFrame, str, Optional[str], Optional[Dict[str, Any]]]:
@@ -482,8 +502,8 @@ def load_market_data(
     if req.data_source == "online":
         if not req.ticker:
             raise ValueError("在线下载模式必须填写股票代码")
-        data, source_name = fetch_stock_data(req.ticker, start_dt, end_dt)
-        stock_name, stock_name_debug = resolve_stock_name_with_debug(req.ticker)
+        data, source_name = fetch_online_bars(req.ticker, start_dt, end_dt, data_source_manager)
+        stock_name, stock_name_debug = _resolve_stock_name_safe(req.ticker)
         logger.info(
             "股票名称识别结果 ticker=%s status=%s source=%s message=%s",
             req.ticker,

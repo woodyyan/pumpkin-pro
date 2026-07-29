@@ -32,3 +32,15 @@
 - 因子 Phase0 的 `daily-bars`、`financials`、`dividends` 改为通过 Gateway 统一编排 provider 顺序与 fallback，同时保持原有表结构和 CLI 参数兼容。
 - `fundamentals` / `financials` / `dividends` 第一阶段复用既有基础面/Phase0 抓取逻辑作为 adapter，避免一次性重写财报与分红字段映射。
 - 补充 Gateway 与 Phase0 接入测试；`cd quant && pytest -q` 通过。
+
+## 2026-07-29
+
+- 背景：生产（香港服务器）backtest 港股在线回测报「所有数据源均连接失败」，根因是旧 `data.scripts.akshare_loader.fetch_stock_data` 仅依赖东财+新浪，东财对境外出口 IP 在 TCP 层 RST（RemoteDisconnected），且新浪层静默失效未兜住。
+- Backtest「在线下载」模式（`main.py::load_market_data` online 分支）迁移到 Gateway：新增薄适配层 `quant/data/scripts/online_market_data.py::fetch_online_bars`，把 datetime 起止 / 5位6位裸代码 / 中文源名 转换为 `DataSourceManager.fetch()` 调用（`DataSourceRequest(capability=DAILY_BARS, extras={"caller":"backtest"})`）。港股天然获得 `tencent→eastmoney→akshare` 降级链（tencent 带 UA+429退避，境外最稳），A股获得 `baostock→tencent→eastmoney→akshare`。
+- 输出对齐：`[bar.to_dict() for bar in resp.data]` → DataFrame（列 date/open/high/low/close/volume 已被 `DataLoader.COLUMN_ALIASES` 直接识别），失败判 `resp.ok`（policy allow_partial=True 不抛异常），命中源 `resp.used_sources[0]` 映射为中文 source_name。
+- 复用 `main.py` 已有 `data_source_manager` 单例（注入 adapter），保证 health 账本 / baostock 长连接 / 配额守卫统一；不改 manager/policy/registry。
+- 附带方案二：`data_sources/providers/eastmoney.py` 新增 `HEADERS`（浏览器 UA + `Referer: https://quote.eastmoney.com/`），给 kline/clist/sector 三处 `requests.get` 加 `headers=HEADERS`，惠及四象限/资金星图所有东财调用，降低境外风控概率。
+- 名称解析降级（决策已确认）：`resolve_stock_name_with_debug` 用 `_resolve_stock_name_safe` 包裹，任何异常返回 (None, debug)，只显示代码不阻断回测（港股名依赖东财 spot，境外同样可能失败）。
+- 放弃旧 akshare_loader 的 4h 磁盘缓存（回测低频，不迁移，避免缓存口径分裂）。旧 `fetch_stock_data`/`fetch_data_worker` 暂保留为 legacy，观察稳定后再删。
+- 测试：新增 `quant/tests/test_online_market_data.py`（14 用例：market 识别、源名映射、港股成功、tencent→eastmoney fallback、全失败抛可读异常、A股链、空代码校验）全通过；港股 00700 真实端到端命中 Tencent HK 42 行，`prepare_dataframe` 兼容通过。仓库预存在的 pydantic/matplotlib 缺失导致的失败与本次改动无关（已用 git stash 基线比对确认）。
+- 已知后续：港股「股票名」二期可作为独立 capability 纳入 Gateway，彻底摆脱 akshare 名称解析的境外脆弱性。

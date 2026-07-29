@@ -16,6 +16,14 @@ EASTMONEY_KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 EASTMONEY_CLIST_URL = "https://82.push2.eastmoney.com/api/qt/clist/get"
 EASTMONEY_SECTOR_URL = "https://push2.eastmoney.com/api/qt/clist/get"
 EASTMONEY_TOKEN = "bd1d9ddb04089700cf9c27f6f7426281"
+# 携带浏览器 UA/Referer，降低东财对境外/裸请求 IP 的风控概率（RemoteDisconnected）。
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://quote.eastmoney.com/",
+}
 CAPITAL_MAP_PAGE_SIZE = 100
 CAPITAL_MAP_PAGE_COUNT = 16
 CAPITAL_MAP_STOCK_FIELDS = "f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,f62,f115"
@@ -62,7 +70,7 @@ class EastMoneyProvider:
             "fields1": "f1,f2,f3,f4,f5,f6",
             "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
         }
-        response = requests.get(EASTMONEY_KLINE_URL, params=params, timeout=15)
+        response = requests.get(EASTMONEY_KLINE_URL, params=params, headers=HEADERS, timeout=15)
         response.raise_for_status()
         klines = ((response.json().get("data") or {}).get("klines") or [])
         return normalize_eastmoney_klines(klines, symbol=request.symbol, market=request.market, provider=self.name)
@@ -76,7 +84,7 @@ class EastMoneyProvider:
         failed_pages = 0
         for page in range(1, CAPITAL_MAP_PAGE_COUNT + 1):
             try:
-                response = requests.get(EASTMONEY_CLIST_URL, params=_capital_map_stock_params(page), timeout=15)
+                response = requests.get(EASTMONEY_CLIST_URL, params=_capital_map_stock_params(page), headers=HEADERS, timeout=15)
                 response.raise_for_status()
                 data = response.json().get("data") or {}
                 if total_available == 0:
@@ -87,7 +95,7 @@ class EastMoneyProvider:
         if not rows:
             raise ValueError(f"东方财富资金星图股票页全部失败: {failed_pages}/{CAPITAL_MAP_PAGE_COUNT}")
 
-        sector_response = requests.get(EASTMONEY_SECTOR_URL, params=_capital_map_sector_params(), timeout=15)
+        sector_response = requests.get(EASTMONEY_SECTOR_URL, params=_capital_map_sector_params(), headers=HEADERS, timeout=15)
         sector_response.raise_for_status()
         sector_rows = ((sector_response.json().get("data") or {}).get("diff") or [])
 

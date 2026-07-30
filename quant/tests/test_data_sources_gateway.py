@@ -43,7 +43,7 @@ def test_policy_is_code_constant_for_daily_and_index_bars():
     assert get_policy(Capability.COMPANY_PROFILE, Market.ASHARE).providers == ["eastmoney", "akshare", "tencent"]
     assert get_policy(Capability.COMPANY_PROFILE, Market.HKEX).providers == ["eastmoney", "tencent", "akshare"]
     assert get_policy(Capability.FINANCIALS, Market.ASHARE).providers == ["akshare", "eastmoney", "tencent"]
-    assert get_policy(Capability.DIVIDENDS, Market.ASHARE).providers == ["akshare", "eastmoney", "tencent"]
+    assert get_policy(Capability.DIVIDENDS, Market.ASHARE).providers == ["baostock", "akshare", "eastmoney", "tencent"]
 
 
 def test_registry_support_matrix():

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -33,9 +33,19 @@ func setupSourceDB(t *testing.T) (*gorm.DB, string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "pumpkin.db")
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	// Use a busy_timeout so the shared reader connection waits out the exclusive
+	// lock taken by `VACUUM INTO` (run on a separate connection during backup)
+	// instead of surfacing a transient "disk I/O error" on concurrent GetLatest
+	// reads. This mirrors production, where the pumpkin.db DSN sets busy_timeout
+	// and the app + vacuum share the same glebarez/modernc SQLite driver.
+	db, err := gorm.Open(sqlite.Open(dbPath+"?_pragma=busy_timeout(15000)"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open source db: %v", err)
+	}
+	// Pin to a single connection so concurrent reads during VACUUM do not spin up
+	// a fresh raw connection that races on the source file's temp/journal files.
+	if sqlDB, sqlErr := db.DB(); sqlErr == nil {
+		sqlDB.SetMaxOpenConns(1)
 	}
 	if err := db.Exec("PRAGMA journal_mode=WAL;").Error; err != nil {
 		t.Fatalf("enable wal: %v", err)

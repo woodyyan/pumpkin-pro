@@ -180,6 +180,7 @@ var strategyLabelMap = map[string]struct {
 	"volume_breakout":     {"放量突破", "量价"},
 	"dual_confirm":        {"双重确认（趋势+动量）", "组合"},
 	"bollinger_macd":      {"布林带+MACD 组合", "组合"},
+	"combo_grid":          {"网格组合（网格+择时+突破）", "组合"},
 }
 
 // ── System Prompt ──

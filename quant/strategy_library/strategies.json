@@ -574,6 +574,73 @@
       "ui_schema": { "param_order": ["bb_period", "bb_std", "fast_period", "slow_period", "signal_period", "logic_mode"] },
       "execution_options": {},
       "metadata": { "aliases": ["布林带MACD组合策略"] }
+    },
+    {
+      "id": "combo-grid-timing-breakout",
+      "key": "combo_grid_timing_breakout",
+      "name": "网格组合（网格+择时+突破）",
+      "description": "策略逻辑：三层资金组合。①网格主体（约60%）在动态箱体内逐档低买高卖；②RSI+布林带择时（约30%）在超卖触下轨时增强买入、超买触上轨时卖出；③放量突破熔断（约10%）在放量突破上沿时追多、放量跌破下沿时熔断清仓。执行优先级：向下熔断 > 硬止损 > 向上突破 > 网格 > 择时。示例：箱体窗口40天、网格8档、止损2.5%、RSI(30/70)、布林20/2.0、放量1.5倍、追多移动止损4.3%。",
+      "category": "组合",
+      "implementation_key": "combo_grid",
+      "status": "active",
+      "version": 1,
+      "created_at": "2026-07-31T00:00:00Z",
+      "updated_at": "2026-07-31T00:00:00Z",
+      "param_schema": [
+        { "key": "box_lookback", "label": "箱体窗口（天）", "type": "integer", "required": true, "default": 40, "min": 5.0, "max": 250.0, "step": 1.0, "description": "【箱体】滚动窗口，用于确定动态箱体上下沿，单位：天。", "options": [] },
+        { "key": "box_method", "label": "箱体方式", "type": "string", "required": true, "default": "minmax", "description": "【箱体】minmax=滚动最高/最低价；boll=布林上下轨；percentile=分位数。", "options": [{ "value": "minmax", "label": "最高最低价" }, { "value": "boll", "label": "布林带" }, { "value": "percentile", "label": "分位数" }] },
+        { "key": "grid_num", "label": "网格档数（格）", "type": "integer", "required": true, "default": 8, "min": 2.0, "max": 50.0, "step": 1.0, "description": "【网格60%】箱体等分格数，单位：格。", "options": [] },
+        { "key": "grid_capital_ratio", "label": "网格资金占比", "type": "number", "required": true, "default": 0.60, "min": 0.0, "max": 1.0, "step": 0.05, "description": "【网格60%】网格主体占用总资金比例（三层之和须=1）。", "options": [] },
+        { "key": "grid_stop_pct", "label": "硬止损（跌破下沿）", "type": "number", "required": true, "default": 0.025, "min": 0.0, "max": 0.2, "step": 0.005, "description": "【网格60%】收盘价跌破下沿×(1-该值)时清空网格，单位：比例。", "options": [] },
+        { "key": "rsi_window", "label": "RSI 周期（天）", "type": "integer", "required": true, "default": 14, "min": 2.0, "max": 60.0, "step": 1.0, "description": "【择时30%】RSI 回看周期，单位：天。", "options": [] },
+        { "key": "rsi_oversold", "label": "RSI 超卖阈值", "type": "number", "required": true, "default": 30, "min": 1.0, "max": 50.0, "step": 1.0, "description": "【择时30%】RSI 低于该值且触布林下轨时买入，单位：RSI 点。", "options": [] },
+        { "key": "rsi_overbought", "label": "RSI 超买阈值", "type": "number", "required": true, "default": 70, "min": 50.0, "max": 99.0, "step": 1.0, "description": "【择时30%】RSI 高于该值且触布林上轨时卖出，单位：RSI 点。", "options": [] },
+        { "key": "boll_window", "label": "布林周期（天）", "type": "integer", "required": true, "default": 20, "min": 5.0, "max": 100.0, "step": 1.0, "description": "【择时30%】布林带中轨均线周期，单位：天。", "options": [] },
+        { "key": "boll_std", "label": "布林标准差（倍）", "type": "number", "required": true, "default": 2.0, "min": 0.5, "max": 4.0, "step": 0.1, "description": "【择时30%】布林带上下轨宽度，单位：倍。", "options": [] },
+        { "key": "timing_capital_ratio", "label": "择时资金占比", "type": "number", "required": true, "default": 0.30, "min": 0.0, "max": 1.0, "step": 0.05, "description": "【择时30%】RSI+布林择时占用总资金比例（三层之和须=1）。", "options": [] },
+        { "key": "vol_multiple", "label": "放量倍数（倍）", "type": "number", "required": true, "default": 1.5, "min": 1.0, "max": 5.0, "step": 0.1, "description": "【突破10%】成交量>均量×该值才确认突破/熔断，单位：倍。", "options": [] },
+        { "key": "break_buffer", "label": "上沿突破缓冲", "type": "number", "required": true, "default": 0.0, "min": 0.0, "max": 0.1, "step": 0.005, "description": "【突破10%】收盘价>上沿×(1+该值)视为向上突破，单位：比例。", "options": [] },
+        { "key": "trail_stop_pct", "label": "追多移动止损", "type": "number", "required": true, "default": 0.043, "min": 0.0, "max": 0.2, "step": 0.005, "description": "【突破10%】追多后回落超过该比例离场，单位：比例。", "options": [] },
+        { "key": "break_capital_ratio", "label": "突破资金占比", "type": "number", "required": true, "default": 0.10, "min": 0.0, "max": 1.0, "step": 0.05, "description": "【突破10%】放量突破机动仓占用总资金比例（三层之和须=1）。", "options": [] }
+      ],
+      "default_params": {
+        "box_lookback": 40,
+        "box_method": "minmax",
+        "grid_num": 8,
+        "grid_capital_ratio": 0.60,
+        "grid_stop_pct": 0.025,
+        "rsi_window": 14,
+        "rsi_oversold": 30,
+        "rsi_overbought": 70,
+        "boll_window": 20,
+        "boll_std": 2.0,
+        "timing_capital_ratio": 0.30,
+        "vol_multiple": 1.5,
+        "break_buffer": 0.0,
+        "trail_stop_pct": 0.043,
+        "break_capital_ratio": 0.10
+      },
+      "required_indicators": [
+        { "type": "bollinger", "params": ["boll_window", "boll_std"] },
+        { "type": "rsi", "params": ["rsi_window"] },
+        { "type": "volume_ma", "params": ["box_lookback"] }
+      ],
+      "chart_overlays": [
+        { "type": "line", "template": "combo_box_up" },
+        { "type": "line", "template": "combo_box_low" },
+        { "type": "line", "template": "combo_boll_up" },
+        { "type": "line", "template": "combo_boll_low" }
+      ],
+      "ui_schema": {
+        "param_order": [
+          "box_lookback", "box_method",
+          "grid_num", "grid_capital_ratio", "grid_stop_pct",
+          "rsi_window", "rsi_oversold", "rsi_overbought", "boll_window", "boll_std", "timing_capital_ratio",
+          "vol_multiple", "break_buffer", "trail_stop_pct", "break_capital_ratio"
+        ]
+      },
+      "execution_options": {},
+      "metadata": { "aliases": ["网格组合策略", "网格+择时+突破"] }
     }
   ]
 }

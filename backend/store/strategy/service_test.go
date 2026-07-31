@@ -132,6 +132,42 @@ func TestStrategyService_Create_InvalidImplKey(t *testing.T) {
 	}
 }
 
+func TestStrategyService_ComboGrid_IsAllowed(t *testing.T) {
+	repo, cleanup := setupStrategySvcTest(t)
+	defer cleanup()
+	s := NewService(repo)
+
+	// combo_grid must be in the allowlist ...
+	found := false
+	for _, k := range s.ImplementationKeys() {
+		if k == "combo_grid" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("combo_grid missing from ImplementationKeys(): %v", s.ImplementationKeys())
+	}
+
+	// ... and creatable as a valid combo strategy.
+	payload := StrategyPayload{
+		ID: t.Name() + "-01", Key: "combo_grid_k", Name: "网格组合",
+		Description: "D", Category: "组合", ImplementationKey: "combo_grid",
+		Status: "active", Version: 1,
+		ParamSchema: []ParamSchemaItem{
+			{Key: "grid_num", Label: "网格档数", Type: "integer", Required: true, Default: float64(8)},
+		},
+		DefaultParams: map[string]any{"grid_num": 8},
+	}
+	strategy, err := s.Create(context.Background(), "user-combo", payload)
+	if err != nil {
+		t.Fatalf("Create combo_grid strategy failed: %v", err)
+	}
+	if strategy.ImplementationKey != "combo_grid" {
+		t.Errorf("expected implementation_key combo_grid, got %q", strategy.ImplementationKey)
+	}
+}
+
 func TestStrategyService_Delete_EmptyUserID(t *testing.T) {
 	repo, cleanup := setupStrategySvcTest(t)
 	defer cleanup()

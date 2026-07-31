@@ -335,10 +335,11 @@ class TestStrategyRegistry:
     def test_list_all_keys(self):
         keys = self.registry.list_implementation_keys()
         assert isinstance(keys, list)
-        assert len(keys) == 8
+        assert len(keys) == 9
         expected = {
             "bollinger_macd",
             "bollinger_reversion",
+            "combo_grid",
             "dual_confirm",
             "grid",
             "macd_cross",

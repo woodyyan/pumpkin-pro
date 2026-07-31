@@ -5,6 +5,7 @@ import pandas as pd
 
 from indicators.technical_indicators import TechnicalIndicators
 from strategy.bollinger_macd_strategy import BollingerMACDStrategy
+from strategy.combo_grid_strategy import ComboGridStrategy
 from strategy.dual_confirm_strategy import DualConfirmStrategy
 from strategy.grid_strategy import GridStrategy
 from strategy.macd_strategy import MACDStrategy
@@ -81,6 +82,13 @@ class StrategyRegistry:
                 attach_indicators=_attach_bollinger_macd_indicators,
                 build_strategy=_build_bollinger_macd_strategy,
                 get_overlay_columns=_bollinger_macd_overlay_columns,
+            ),
+            "combo_grid": StrategyExecutionAdapter(
+                implementation_key="combo_grid",
+                validate_params=_validate_combo_grid_params,
+                attach_indicators=_attach_combo_grid_indicators,
+                build_strategy=_build_combo_grid_strategy,
+                get_overlay_columns=_combo_grid_overlay_columns,
             ),
         }
 
@@ -364,3 +372,104 @@ def _build_bollinger_macd_strategy(data: pd.DataFrame, params: Dict[str, Any]) -
 
 def _bollinger_macd_overlay_columns(params: Dict[str, Any]) -> List[str]:
     return ["BB_upper", "BB_mid", "BB_lower", "MACD_DIF", "MACD_DEA"]
+
+
+# ── 组合策略：网格 + RSI/布林择时 + 突破熔断 ──
+
+ALLOWED_BOX_METHODS = {"minmax", "boll", "percentile"}
+
+
+def _validate_combo_grid_params(params: Dict[str, Any]) -> None:
+    grid_ratio = float(params["grid_capital_ratio"])
+    timing_ratio = float(params["timing_capital_ratio"])
+    break_ratio = float(params["break_capital_ratio"])
+    if abs(grid_ratio + timing_ratio + break_ratio - 1.0) > 1e-6:
+        raise ValueError("三部分资金比例之和必须等于 1（网格 + 择时 + 突破）")
+    if int(params["grid_num"]) < 2:
+        raise ValueError("网格档数最小为 2")
+    if float(params["rsi_oversold"]) >= float(params["rsi_overbought"]):
+        raise ValueError("RSI 超卖阈值必须小于超买阈值")
+    box_method = str(params.get("box_method", "minmax")).strip().lower()
+    if box_method not in ALLOWED_BOX_METHODS:
+        raise ValueError(f"箱体方式必须为 minmax / boll / percentile，当前值: {box_method}")
+    if int(params["box_lookback"]) < 5:
+        raise ValueError("箱体窗口最小为 5")
+    if float(params["boll_std"]) <= 0:
+        raise ValueError("布林带标准差倍数必须大于 0")
+
+
+def _attach_combo_grid_indicators(data: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
+    """移植自 combo_strategy.compute_indicators：动态箱体 + 布林 + RSI + 均量 + 关键阈值。
+
+    所有派生列加 combo_ 前缀，避免与其它策略/指标列冲突。
+    """
+    enriched = data.copy()
+
+    box_method = str(params.get("box_method", "minmax")).strip().lower()
+    box_lookback = int(params["box_lookback"])
+    box_pctile = float(params.get("box_pctile", 0.10))
+    boll_window = int(params.get("boll_window", 20))
+    boll_std = float(params["boll_std"])
+    grid_num = int(params["grid_num"])
+    rsi_window = int(params.get("rsi_window", 14))
+    vol_window = int(params.get("vol_window", 20))
+    grid_stop_pct = float(params["grid_stop_pct"])
+    break_buffer = float(params.get("break_buffer", 0.0))
+    break_down_buffer = float(params.get("break_down_buffer", 0.0))
+
+    # 动态箱体上下沿
+    if box_method == "minmax":
+        enriched["combo_box_up"] = enriched["high"].rolling(box_lookback).max()
+        enriched["combo_box_low"] = enriched["low"].rolling(box_lookback).min()
+    elif box_method == "percentile":
+        enriched["combo_box_up"] = enriched["close"].rolling(box_lookback).quantile(1 - box_pctile)
+        enriched["combo_box_low"] = enriched["close"].rolling(box_lookback).quantile(box_pctile)
+    else:  # boll
+        ma = enriched["close"].rolling(boll_window).mean()
+        sd = enriched["close"].rolling(boll_window).std()
+        enriched["combo_box_up"] = ma + boll_std * sd
+        enriched["combo_box_low"] = ma - boll_std * sd
+
+    enriched["combo_grid_step"] = (enriched["combo_box_up"] - enriched["combo_box_low"]) / grid_num
+
+    # 布林带（择时用，独立于箱体）
+    ma = enriched["close"].rolling(boll_window).mean()
+    sd = enriched["close"].rolling(boll_window).std()
+    enriched["combo_boll_up"] = ma + boll_std * sd
+    enriched["combo_boll_low"] = ma - boll_std * sd
+
+    # RSI（与用户原脚本一致的算法）
+    delta = enriched["close"].diff()
+    gain = delta.clip(lower=0).rolling(rsi_window).mean()
+    loss = (-delta.clip(upper=0)).rolling(rsi_window).mean()
+    rs = gain / loss.replace(0, float("nan"))
+    enriched["combo_rsi"] = 100 - 100 / (1 + rs)
+
+    # 均量
+    enriched["combo_vol_ma"] = enriched["volume"].rolling(vol_window).mean()
+
+    # 关键阈值（相对价格，每根 K 线动态）
+    enriched["combo_stop_line"] = enriched["combo_box_low"] * (1 - grid_stop_pct)
+    enriched["combo_break_up_line"] = enriched["combo_box_up"] * (1 + break_buffer)
+    enriched["combo_break_down_line"] = enriched["combo_box_low"] * (1 - break_down_buffer)
+    return enriched
+
+
+def _build_combo_grid_strategy(data: pd.DataFrame, params: Dict[str, Any]) -> ComboGridStrategy:
+    return ComboGridStrategy(
+        data,
+        grid_num=int(params["grid_num"]),
+        grid_capital_ratio=float(params["grid_capital_ratio"]),
+        grid_stop_pct=float(params["grid_stop_pct"]),
+        rsi_oversold=float(params["rsi_oversold"]),
+        rsi_overbought=float(params["rsi_overbought"]),
+        timing_capital_ratio=float(params["timing_capital_ratio"]),
+        break_buffer=float(params.get("break_buffer", 0.0)),
+        vol_multiple=float(params["vol_multiple"]),
+        trail_stop_pct=float(params["trail_stop_pct"]),
+        break_capital_ratio=float(params["break_capital_ratio"]),
+    )
+
+
+def _combo_grid_overlay_columns(params: Dict[str, Any]) -> List[str]:
+    return ["combo_box_up", "combo_box_low", "combo_boll_up", "combo_boll_low"]

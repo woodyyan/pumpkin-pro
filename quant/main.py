@@ -1025,6 +1025,43 @@ def _build_bollinger_macd_reason(params: Dict, enriched: pd.DataFrame, signal: s
     }
 
 
+# 组合策略：把本根实际触发的腿（combo_leg）翻译成可读文案
+_COMBO_LEG_LABELS = {
+    "break_down": "放量跌破下沿，触发向下熔断清仓",
+    "hard_stop": "收盘跌破硬止损线，清空网格离场",
+    "break_up": "放量突破上沿，触发追多",
+    "break_trail_stop": "追多回落触及移动止损，离场",
+    "grid_buy": "网格逐档买入",
+    "grid_sell": "网格逐档卖出",
+    "timing_buy": "RSI 超卖 + 触布林下轨，择时买入",
+    "timing_sell": "RSI 超买 + 触布林上轨，择时卖出",
+}
+
+
+def _build_combo_grid_reason(params: Dict, enriched: pd.DataFrame, signal: str) -> Dict[str, Any]:
+    row = enriched.iloc[-1]
+    close = round(float(row.get("close", 0)), 2)
+    leg = str(row.get("combo_leg", "")).strip()
+    rsi_val = round(float(row.get("combo_rsi", 0)), 2) if "combo_rsi" in enriched.columns else 0
+    # leg 形如 "grid_buy x2+timing_buy"，逐段翻译
+    parts = []
+    for token in leg.split("+"):
+        token = token.strip()
+        if not token:
+            continue
+        base = token.split(" x")[0]
+        label = _COMBO_LEG_LABELS.get(base, base)
+        if " x" in token:
+            label += f"（命中 {token.split(' x')[1]} 档）"
+        parts.append(label)
+    detail = "；".join(parts) if parts else ("组合买入信号" if signal == "buy" else "组合卖出信号")
+    kind = "combo_grid_buy" if signal == "buy" else "combo_grid_sell"
+    return {
+        "kind": kind,
+        "message": f"网格组合{signal.upper()}：{detail}。当前收盘价={close}，RSI={rsi_val}。",
+    }
+
+
 SIGNAL_REASON_BUILDERS = {
     "trend_cross": _build_trend_reason,
     "bollinger_reversion": _build_bollinger_reason,
@@ -1034,6 +1071,7 @@ SIGNAL_REASON_BUILDERS = {
     "volume_breakout": _build_volume_breakout_reason,
     "dual_confirm": _build_dual_confirm_reason,
     "bollinger_macd": _build_bollinger_macd_reason,
+    "combo_grid": _build_combo_grid_reason,
 }
 
 

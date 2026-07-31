@@ -14,8 +14,8 @@ import assert from 'node:assert/strict';
 // ── STRATEGY_PRESETS ──
 
 describe('STRATEGY_PRESETS', () => {
-  it('should have exactly 8 presets', () => {
-    assert.equal(STRATEGY_PRESETS.length, 8);
+  it('should have exactly 9 presets', () => {
+    assert.equal(STRATEGY_PRESETS.length, 9);
   });
 
   it('each preset should have required fields', () => {
@@ -54,11 +54,11 @@ describe('getStrategyPresetByType()', () => {
     assert.equal(getStrategyPresetByType('nonexistent'), null);
   });
 
-  it('can find all 8 presets by typeKey', () => {
+  it('can find all 9 presets by typeKey', () => {
     const found = STRATEGY_PRESETS
       .map((p) => getStrategyPresetByType(p.typeKey))
       .filter(Boolean);
-    assert.equal(found.length, 8);
+    assert.equal(found.length, 9);
   });
 });
 
@@ -76,11 +76,11 @@ describe('getStrategyPresetByImplementation()', () => {
     assert.equal(getStrategyPresetByImplementation('nope'), null);
   });
 
-  it('can find all 8 presets by implementationKey', () => {
+  it('can find all 9 presets by implementationKey', () => {
     const found = STRATEGY_PRESETS
       .map((p) => getStrategyPresetByImplementation(p.implementationKey))
       .filter(Boolean);
-    assert.equal(found.length, 8);
+    assert.equal(found.length, 9);
   });
 });
 
@@ -244,5 +244,51 @@ describe('buildPayloadFromDraft()', () => {
     });
     assert.equal(payload.id, 'spaced-id');
     assert.equal(payload.key, 'spaced-key');
+  });
+});
+
+// ── combo_grid preset (网格组合) ──
+
+describe('combo_grid preset', () => {
+  it('is registered as a 组合 category preset', () => {
+    const preset = getStrategyPresetByImplementation('combo_grid');
+    assert.ok(preset);
+    assert.equal(preset.typeKey, 'combo_grid');
+    assert.equal(preset.category, '组合');
+    assert.equal(preset.shortLabel, '网格组合');
+  });
+
+  it('carries all three-leg capital ratio params', () => {
+    const preset = getStrategyPresetByType('combo_grid');
+    const keys = preset.paramSchema.map((p) => p.key);
+    for (const k of ['grid_capital_ratio', 'timing_capital_ratio', 'break_capital_ratio']) {
+      assert.ok(keys.includes(k), `missing ${k}`);
+    }
+    // default ratios sum to 1
+    const def = buildPresetDefinition(preset).default_params;
+    const sum = def.grid_capital_ratio + def.timing_capital_ratio + def.break_capital_ratio;
+    assert.ok(Math.abs(sum - 1) < 1e-9, `ratios must sum to 1, got ${sum}`);
+  });
+
+  it('box_method exposes minmax/boll/percentile options', () => {
+    const preset = getStrategyPresetByType('combo_grid');
+    const boxMethod = preset.paramSchema.find((p) => p.key === 'box_method');
+    assert.ok(boxMethod);
+    const values = boxMethod.options.map((o) => o.value);
+    assert.deepEqual(values, ['minmax', 'boll', 'percentile']);
+  });
+
+  it('creates a draft with default params from schema', () => {
+    const draft = createDraftFromType('combo_grid', []);
+    assert.equal(draft.typeKey, 'combo_grid');
+    assert.equal(draft.params.grid_num, 8);
+    assert.equal(draft.params.box_method, 'minmax');
+    assert.ok(draft.id.startsWith('combo-grid-strategy-'));
+  });
+
+  it('builds a payload with implementation_key combo_grid', () => {
+    const payload = buildPayloadFromDraft({ typeKey: 'combo_grid' });
+    assert.equal(payload.implementation_key, 'combo_grid');
+    assert.ok(payload.param_schema.length >= 15);
   });
 });

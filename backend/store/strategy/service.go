@@ -34,6 +34,7 @@ var allowedImplementationKeys = map[string]struct{}{
 	"volume_breakout":     {},
 	"dual_confirm":        {},
 	"bollinger_macd":      {},
+	"combo_grid":          {},
 }
 
 type Service struct {

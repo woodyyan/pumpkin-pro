@@ -885,6 +885,14 @@ func validateDefaultFeeRate(field string, value float64) error {
 	return nil
 }
 
+// validateRiskPct 校验百分比类风控参数（0 表示"未设置/关闭"）。
+func validateRiskPct(field string, value float64) error {
+	if value < 0 || value > 100 {
+		return fmt.Errorf("%s must be between 0 and 100", field)
+	}
+	return nil
+}
+
 func (s *Service) UpsertInvestmentProfile(ctx context.Context, userID string, input UpsertInvestmentProfileInput) (*InvestmentProfile, error) {
 	if input.TotalCapital < 0 {
 		return nil, fmt.Errorf("total_capital must be >= 0")
@@ -904,6 +912,24 @@ func (s *Service) UpsertInvestmentProfile(ctx context.Context, userID string, in
 	if err := validateDefaultFeeRate("default_fee_rate_hk_sell", input.DefaultFeeRateHKSell); err != nil {
 		return nil, err
 	}
+	if err := validateRiskPct("max_single_position_pct", input.MaxSinglePositionPct); err != nil {
+		return nil, err
+	}
+	if err := validateRiskPct("max_total_exposure_pct", input.MaxTotalExposurePct); err != nil {
+		return nil, err
+	}
+	if err := validateRiskPct("default_stop_loss_pct", input.DefaultStopLossPct); err != nil {
+		return nil, err
+	}
+
+	// 个性化开关未传时保持原值（默认 true），避免前端漏传导致误关。
+	personalizationEnabled := true
+	if existing, err := s.repo.GetInvestmentProfile(ctx, userID); err == nil && existing != nil {
+		personalizationEnabled = existing.PersonalizationEnabled
+	}
+	if input.PersonalizationEnabled != nil {
+		personalizationEnabled = *input.PersonalizationEnabled
+	}
 
 	now := time.Now().UTC()
 	record := &InvestmentProfileRecord{
@@ -918,8 +944,14 @@ func (s *Service) UpsertInvestmentProfile(ctx context.Context, userID string, in
 		DefaultFeeRateAShareSell: input.DefaultFeeRateAShareSell,
 		DefaultFeeRateHKBuy:      input.DefaultFeeRateHKBuy,
 		DefaultFeeRateHKSell:     input.DefaultFeeRateHKSell,
-		Note:                     strings.TrimSpace(input.Note),
-		UpdatedAt:                now,
+
+		MaxSinglePositionPct:   input.MaxSinglePositionPct,
+		MaxTotalExposurePct:    input.MaxTotalExposurePct,
+		DefaultStopLossPct:     input.DefaultStopLossPct,
+		PersonalizationEnabled: personalizationEnabled,
+
+		Note:      strings.TrimSpace(input.Note),
+		UpdatedAt: now,
 	}
 
 	if err := s.repo.UpsertInvestmentProfile(ctx, record); err != nil {

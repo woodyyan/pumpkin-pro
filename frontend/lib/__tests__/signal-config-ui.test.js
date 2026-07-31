@@ -109,6 +109,12 @@ describe('buildSignalConfigPayload()', () => {
       cooldown_seconds: 3600,
       eval_interval_seconds: 900,
       thresholds: { score: 0.8 },
+      // 持仓感知 / 风控字段始终显式下发（0 = 关闭该规则）
+      position_aware_enabled: true,
+      max_position_pct: 0,
+      max_add_times: 0,
+      stop_loss_pct: 0,
+      trailing_stop_pct: 0,
     })
   })
 
@@ -160,6 +166,7 @@ describe('buildSignalConfigMeta()', () => {
       { label: '策略', value: '趋势策略' },
       { label: '频率', value: '每 30 分钟' },
       { label: '推送', value: '已就绪' },
+      { label: '持仓感知', value: '已开启' },
     ])
   })
 
@@ -176,6 +183,7 @@ describe('buildSignalConfigMeta()', () => {
       { label: '策略', value: '未选择策略' },
       { label: '频率', value: '每小时' },
       { label: '推送', value: '未就绪' },
+      { label: '持仓感知', value: '已开启' },
       { label: '配置', value: '有未保存修改', tone: 'warning' },
     ])
   })

@@ -1460,6 +1460,13 @@ func (a *appServer) handleSignalConfigSubroutes(w http.ResponseWriter, r *http.R
 			CooldownSeconds:     asInt(payload["cooldown_seconds"]),
 			EvalIntervalSeconds: asInt(payload["eval_interval_seconds"]),
 			Thresholds:          asMap(payload["thresholds"]),
+
+			// 持仓感知 / 风控：指针语义区分"未传保持原值"与"显式 0 关闭规则"
+			PositionAwareEnabled: asBoolPtr(payload["position_aware_enabled"]),
+			MaxPositionPct:       asFloat64Ptr(payload["max_position_pct"]),
+			MaxAddTimes:          asIntPtr(payload["max_add_times"]),
+			StopLossPct:          asFloat64Ptr(payload["stop_loss_pct"]),
+			TrailingStopPct:      asFloat64Ptr(payload["trailing_stop_pct"]),
 		}
 
 		if strings.TrimSpace(input.StrategyID) != "" {
@@ -2528,6 +2535,55 @@ func asBoolPtr(input any) *bool {
 	if !ok {
 		return nil
 	}
+	return &value
+}
+
+// asFloat64Ptr 解析可选的浮点参数。
+// 返回 nil 表示"未传，保持原值"；返回指向 0 的指针表示"显式关闭该规则"。
+func asFloat64Ptr(input any) *float64 {
+	if input == nil {
+		return nil
+	}
+	switch value := input.(type) {
+	case float64:
+		return &value
+	case float32:
+		converted := float64(value)
+		return &converted
+	case int:
+		converted := float64(value)
+		return &converted
+	case int64:
+		converted := float64(value)
+		return &converted
+	case json.Number:
+		converted, err := value.Float64()
+		if err != nil {
+			return nil
+		}
+		return &converted
+	case string:
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return nil
+		}
+		converted, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil {
+			return nil
+		}
+		return &converted
+	default:
+		return nil
+	}
+}
+
+// asIntPtr 解析可选的整型参数，语义同 asFloat64Ptr。
+func asIntPtr(input any) *int {
+	converted := asFloat64Ptr(input)
+	if converted == nil {
+		return nil
+	}
+	value := int(*converted)
 	return &value
 }
 
@@ -4123,8 +4179,66 @@ func main() {
 	})
 	factorLabWorker.Start(context.Background())
 
+	// 持仓感知门控：用闭包把 portfolio.Service 适配为 signal.PositionReader，
+	// 避免 signal 与 portfolio 互相 import 造成循环依赖。
+	signalPositionReader := signal.NewPortfolioPositionReader(signal.PositionSource{
+		GetPosition: func(ctx context.Context, userID, symbol string) (signal.RawPositionData, error) {
+			data, err := portfolioService.GetPositionForSignal(ctx, userID, symbol)
+			if err != nil || data == nil {
+				return signal.RawPositionData{Symbol: symbol, Found: false}, err
+			}
+			return signal.RawPositionData{
+				Symbol:          data.Symbol,
+				Found:           data.Found,
+				Shares:          data.Shares,
+				AvgCostPrice:    data.AvgCostPrice,
+				TotalCostAmount: data.TotalCostAmount,
+				BuyDate:         data.BuyDate,
+				AddTimes:        data.AddTimes,
+				LastTradeAt:     data.LastTradeAt,
+				UpdatedAt:       data.UpdatedAt,
+			}, nil
+		},
+		ListPositions: func(ctx context.Context, userID string) ([]signal.RawPositionData, error) {
+			items, err := portfolioService.ListPositionsForSignal(ctx, userID)
+			if err != nil {
+				return nil, err
+			}
+			result := make([]signal.RawPositionData, 0, len(items))
+			for _, item := range items {
+				result = append(result, signal.RawPositionData{
+					Symbol:          item.Symbol,
+					Found:           item.Found,
+					Shares:          item.Shares,
+					AvgCostPrice:    item.AvgCostPrice,
+					TotalCostAmount: item.TotalCostAmount,
+					BuyDate:         item.BuyDate,
+					AddTimes:        item.AddTimes,
+					LastTradeAt:     item.LastTradeAt,
+					UpdatedAt:       item.UpdatedAt,
+				})
+			}
+			return result, nil
+		},
+		GetRiskProfile: func(ctx context.Context, userID string) (signal.RawAccountRiskProfile, error) {
+			profile, err := portfolioService.GetAccountRiskProfileForSignal(ctx, userID)
+			if err != nil || profile == nil {
+				return signal.RawAccountRiskProfile{Found: false, PersonalizationOn: true}, err
+			}
+			return signal.RawAccountRiskProfile{
+				Found:                profile.Found,
+				TotalCapital:         profile.TotalCapital,
+				MaxSinglePositionPct: profile.MaxSinglePositionPct,
+				MaxTotalExposurePct:  profile.MaxTotalExposurePct,
+				DefaultStopLossPct:   profile.DefaultStopLossPct,
+				PersonalizationOn:    profile.PersonalizationOn,
+			}, nil
+		},
+	})
+
 	signalEvaluator := signal.NewEvaluator(signalService, liveService, strategyService, signal.EvaluatorConfig{
 		QuantServiceURL: cfg.QuantServiceURL,
+		PositionReader:  signalPositionReader,
 	})
 	signalEvaluator.Start(context.Background())
 

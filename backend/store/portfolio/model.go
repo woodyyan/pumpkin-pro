@@ -546,19 +546,29 @@ func (r PortfolioEventRecord) toItem() PortfolioEventItem {
 // ── Investment Profile ──
 
 type InvestmentProfileRecord struct {
-	UserID                   string    `gorm:"primaryKey;size:36"`
-	TotalCapital             float64   `gorm:"not null;default:0"`
-	RiskPreference           string    `gorm:"size:32;not null;default:''"`
-	InvestmentGoal           string    `gorm:"size:64;not null;default:''"`
-	InvestmentHorizon        string    `gorm:"size:32;not null;default:''"`
-	MaxDrawdownPct           float64   `gorm:"not null;default:0"`
-	ExperienceLevel          string    `gorm:"size:32;not null;default:''"`
-	DefaultFeeRateAShareBuy  float64   `gorm:"column:default_fee_rate_ashare_buy;not null;default:0"`
-	DefaultFeeRateAShareSell float64   `gorm:"column:default_fee_rate_ashare_sell;not null;default:0"`
-	DefaultFeeRateHKBuy      float64   `gorm:"column:default_fee_rate_hk_buy;not null;default:0"`
-	DefaultFeeRateHKSell     float64   `gorm:"column:default_fee_rate_hk_sell;not null;default:0"`
-	Note                     string    `gorm:"type:text;not null;default:''"`
-	UpdatedAt                time.Time `gorm:"not null"`
+	UserID                   string  `gorm:"primaryKey;size:36"`
+	TotalCapital             float64 `gorm:"not null;default:0"`
+	RiskPreference           string  `gorm:"size:32;not null;default:''"`
+	InvestmentGoal           string  `gorm:"size:64;not null;default:''"`
+	InvestmentHorizon        string  `gorm:"size:32;not null;default:''"`
+	MaxDrawdownPct           float64 `gorm:"not null;default:0"`
+	ExperienceLevel          string  `gorm:"size:32;not null;default:''"`
+	DefaultFeeRateAShareBuy  float64 `gorm:"column:default_fee_rate_ashare_buy;not null;default:0"`
+	DefaultFeeRateAShareSell float64 `gorm:"column:default_fee_rate_ashare_sell;not null;default:0"`
+	DefaultFeeRateHKBuy      float64 `gorm:"column:default_fee_rate_hk_buy;not null;default:0"`
+	DefaultFeeRateHKSell     float64 `gorm:"column:default_fee_rate_hk_sell;not null;default:0"`
+
+	// ── 账户级风控（供交易信号持仓感知门控使用）──
+	// 0 表示"未设置"，由信号侧回退到系统默认值。
+	MaxSinglePositionPct float64 `gorm:"not null;default:0"` // 全局单票市值上限(%)
+	MaxTotalExposurePct  float64 `gorm:"not null;default:0"` // 总敞口上限(%)
+	// DefaultStopLossPct 默认 0 = 关闭。止损会强制发出卖出信号，必须用户显式开启。
+	DefaultStopLossPct float64 `gorm:"not null;default:0"`
+	// PersonalizationEnabled 合规开关：关闭后信号退回纯客观策略输出，不结合持仓做个性化。
+	PersonalizationEnabled bool `gorm:"not null;default:true"`
+
+	Note      string    `gorm:"type:text;not null;default:''"`
+	UpdatedAt time.Time `gorm:"not null"`
 }
 
 func (InvestmentProfileRecord) TableName() string {
@@ -576,8 +586,15 @@ type InvestmentProfile struct {
 	DefaultFeeRateAShareSell float64 `json:"default_fee_rate_ashare_sell"`
 	DefaultFeeRateHKBuy      float64 `json:"default_fee_rate_hk_buy"`
 	DefaultFeeRateHKSell     float64 `json:"default_fee_rate_hk_sell"`
-	Note                     string  `json:"note"`
-	UpdatedAt                string  `json:"updated_at"`
+
+	// 账户级风控（交易信号持仓感知门控）
+	MaxSinglePositionPct   float64 `json:"max_single_position_pct"`
+	MaxTotalExposurePct    float64 `json:"max_total_exposure_pct"`
+	DefaultStopLossPct     float64 `json:"default_stop_loss_pct"`
+	PersonalizationEnabled bool    `json:"personalization_enabled"`
+
+	Note      string `json:"note"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 type UpsertInvestmentProfileInput struct {
@@ -591,7 +608,14 @@ type UpsertInvestmentProfileInput struct {
 	DefaultFeeRateAShareSell float64 `json:"default_fee_rate_ashare_sell"`
 	DefaultFeeRateHKBuy      float64 `json:"default_fee_rate_hk_buy"`
 	DefaultFeeRateHKSell     float64 `json:"default_fee_rate_hk_sell"`
-	Note                     string  `json:"note"`
+
+	MaxSinglePositionPct float64 `json:"max_single_position_pct"`
+	MaxTotalExposurePct  float64 `json:"max_total_exposure_pct"`
+	DefaultStopLossPct   float64 `json:"default_stop_loss_pct"`
+	// 指针类型以区分"未传"与"显式传 false"，避免误关个性化。
+	PersonalizationEnabled *bool `json:"personalization_enabled"`
+
+	Note string `json:"note"`
 }
 
 func (r InvestmentProfileRecord) toProfile() InvestmentProfile {
@@ -606,7 +630,13 @@ func (r InvestmentProfileRecord) toProfile() InvestmentProfile {
 		DefaultFeeRateAShareSell: r.DefaultFeeRateAShareSell,
 		DefaultFeeRateHKBuy:      r.DefaultFeeRateHKBuy,
 		DefaultFeeRateHKSell:     r.DefaultFeeRateHKSell,
-		Note:                     r.Note,
-		UpdatedAt:                r.UpdatedAt.UTC().Format(time.RFC3339),
+
+		MaxSinglePositionPct:   r.MaxSinglePositionPct,
+		MaxTotalExposurePct:    r.MaxTotalExposurePct,
+		DefaultStopLossPct:     r.DefaultStopLossPct,
+		PersonalizationEnabled: r.PersonalizationEnabled,
+
+		Note:      r.Note,
+		UpdatedAt: r.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }

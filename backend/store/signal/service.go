@@ -308,11 +308,58 @@ func (s *Service) UpsertSymbolConfig(ctx context.Context, userID, symbol string,
 		record.LastEvaluatedAt = existing.LastEvaluatedAt
 	}
 
+	// ── 持仓感知 / 风控字段：nil 表示未传保持原值；新建时用默认值 ──
+	if err := applyRiskConfigInput(&record, existing, input); err != nil {
+		return nil, err
+	}
+
 	saved, err := s.repo.SaveSymbolConfig(ctx, record)
 	if err != nil {
 		return nil, err
 	}
 	return toSymbolSignalConfig(*saved)
+}
+
+// applyRiskConfigInput 把风控入参合并到记录，并做范围校验。
+func applyRiskConfigInput(record *SymbolSignalConfigRecord, existing *SymbolSignalConfigRecord, input SymbolSignalConfigInput) error {
+	// 持仓感知默认开启（只影响"是否推送无意义信号"，无交易决策风险）。
+	record.PositionAwareEnabled = true
+	if existing != nil {
+		record.PositionAwareEnabled = existing.PositionAwareEnabled
+		record.MaxPositionPct = existing.MaxPositionPct
+		record.MaxAddTimes = existing.MaxAddTimes
+		record.StopLossPct = existing.StopLossPct
+		record.TrailingStopPct = existing.TrailingStopPct
+	}
+
+	if input.PositionAwareEnabled != nil {
+		record.PositionAwareEnabled = *input.PositionAwareEnabled
+	}
+	if input.MaxPositionPct != nil {
+		if *input.MaxPositionPct < 0 || *input.MaxPositionPct > 100 {
+			return fmt.Errorf("%w: max_position_pct 必须在 0~100 之间", ErrInvalidInput)
+		}
+		record.MaxPositionPct = *input.MaxPositionPct
+	}
+	if input.MaxAddTimes != nil {
+		if *input.MaxAddTimes < 0 || *input.MaxAddTimes > 100 {
+			return fmt.Errorf("%w: max_add_times 必须在 0~100 之间", ErrInvalidInput)
+		}
+		record.MaxAddTimes = *input.MaxAddTimes
+	}
+	if input.StopLossPct != nil {
+		if *input.StopLossPct < 0 || *input.StopLossPct > 100 {
+			return fmt.Errorf("%w: stop_loss_pct 必须在 0~100 之间", ErrInvalidInput)
+		}
+		record.StopLossPct = *input.StopLossPct
+	}
+	if input.TrailingStopPct != nil {
+		if *input.TrailingStopPct < 0 || *input.TrailingStopPct > 100 {
+			return fmt.Errorf("%w: trailing_stop_pct 必须在 0~100 之间", ErrInvalidInput)
+		}
+		record.TrailingStopPct = *input.TrailingStopPct
+	}
+	return nil
 }
 
 func (s *Service) DeleteSymbolConfig(ctx context.Context, userID, symbol string) error {
@@ -357,24 +404,37 @@ func (s *Service) ListSymbolConfigRefs(ctx context.Context, userID, strategyID s
 	return refs, nil
 }
 
+// EmitSignal 生成一条信号事件，并按需创建 webhook 投递。
+//
+// 「全量生成 + 推送门控」设计：
+//   - 生成（写 signal_events）与投递（写 webhook_deliveries）已解耦。
+//   - input.Gate == nil：保持改造前语义（要求已启用的 webhook，否则返回错误），
+//     以兼容 SendTestSignal 等既有调用方。
+//   - input.Gate != nil：信号一律落库以保留策略胜率可复盘性；
+//     仅当 !Gate.SkipDelivery 且 webhook 可用时才创建投递。
+//     无 webhook 或被门控拦截都不再报错，而是落库 + IsDelivered=false。
 func (s *Service) EmitSignal(ctx context.Context, input EmitSignalInput) (*SignalEvent, error) {
 	userID := strings.TrimSpace(input.UserID)
 	if userID == "" {
 		return nil, ErrForbidden
 	}
 
-	endpoint, err := s.repo.GetWebhookEndpoint(ctx, userID)
-	if err != nil {
-		if err == ErrNotFound {
-			return nil, ErrWebhookMissing
-		}
-		return nil, err
+	gated := input.Gate != nil
+
+	endpoint, endpointErr := s.repo.GetWebhookEndpoint(ctx, userID)
+	if endpointErr != nil && endpointErr != ErrNotFound {
+		return nil, endpointErr
 	}
-	if endpoint == nil {
-		return nil, ErrWebhookMissing
+	// 判定 webhook 是否可用；不可用的具体原因只在"非门控模式"下作为错误抛出。
+	var webhookErr error
+	switch {
+	case endpointErr == ErrNotFound || endpoint == nil:
+		webhookErr = ErrWebhookMissing
+	case !endpoint.IsEnabled:
+		webhookErr = ErrWebhookOff
 	}
-	if !endpoint.IsEnabled {
-		return nil, ErrWebhookOff
+	if !gated && webhookErr != nil {
+		return nil, webhookErr
 	}
 
 	normalizedSymbol, _, err := live.NormalizeSymbol(input.Symbol)
@@ -396,6 +456,7 @@ func (s *Service) EmitSignal(ctx context.Context, input EmitSignalInput) (*Signa
 	}
 
 	eventID := "sig_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	// fingerprint 生成规则保持不变，确保既有幂等/去重语义不被破坏。
 	fingerprint := buildFingerprint(userID, normalizedSymbol, strings.TrimSpace(input.StrategyID), normalizedSide, eventTime, input.IsTest, eventID)
 
 	now := time.Now().UTC()
@@ -413,6 +474,26 @@ func (s *Service) EmitSignal(ctx context.Context, input EmitSignalInput) (*Signa
 		EventTime:   eventTime,
 		CreatedAt:   now,
 	}
+
+	// 决定是否投递：门控模式下由 SkipDelivery + webhook 可用性共同决定。
+	shouldDeliver := true
+	if gated {
+		shouldDeliver = !input.Gate.SkipDelivery && webhookErr == nil
+		applyGateToEventRecord(&eventRecord, input.Gate, normalizedSide, shouldDeliver)
+	} else {
+		eventRecord.RawSide = normalizedSide
+		eventRecord.FinalSide = normalizedSide
+		eventRecord.GateDecision = GateDecisionPass
+		eventRecord.IsDelivered = true
+	}
+
+	if !shouldDeliver {
+		if err := s.repo.CreateEvent(ctx, eventRecord); err != nil {
+			return nil, err
+		}
+		return toSignalEvent(eventRecord)
+	}
+
 	deliveryRecord := WebhookDeliveryRecord{
 		ID:          uuid.NewString(),
 		EventID:     eventID,
@@ -429,6 +510,37 @@ func (s *Service) EmitSignal(ctx context.Context, input EmitSignalInput) (*Signa
 		return nil, err
 	}
 	return toSignalEvent(eventRecord)
+}
+
+// applyGateToEventRecord 把门控结果写入事件记录。
+func applyGateToEventRecord(record *SignalEventRecord, gate *EmitGateInfo, normalizedSide string, delivered bool) {
+	record.RawSide = strings.ToUpper(strings.TrimSpace(gate.RawSide))
+	if record.RawSide == "" {
+		record.RawSide = normalizedSide
+	}
+	record.FinalSide = normalizedSide
+	record.GateDecision = gate.Decision
+	record.SuppressedReason = gate.SuppressedReason
+	record.SemanticLabel = gate.SemanticLabel
+	record.ReferencePrice = gate.ReferencePrice
+	record.SuggestedShares = gate.SuggestedShares
+	record.PositionDataStatus = gate.PositionDataStatus
+	record.IsDelivered = delivered
+
+	if snapshotJSON, err := encodeJSONMap(gate.PositionSnapshot); err == nil {
+		record.PositionSnapshotJSON = snapshotJSON
+	} else {
+		record.PositionSnapshotJSON = "{}"
+	}
+	if len(gate.MatchedRules) > 0 {
+		if raw, err := json.Marshal(gate.MatchedRules); err == nil {
+			record.MatchedRulesJSON = string(raw)
+		} else {
+			record.MatchedRulesJSON = "[]"
+		}
+	} else {
+		record.MatchedRulesJSON = "[]"
+	}
 }
 
 func (s *Service) SendTestSignal(ctx context.Context, userID string, input TestSignalInput) (*DispatchResult, error) {

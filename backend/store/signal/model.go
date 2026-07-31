@@ -3,6 +3,7 @@ package signal
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -23,17 +24,28 @@ func (WebhookEndpointRecord) TableName() string {
 }
 
 type SymbolSignalConfigRecord struct {
-	ID                  string     `gorm:"primaryKey;size:36"`
-	UserID              string     `gorm:"size:36;not null;index;uniqueIndex:idx_signal_config_user_symbol,priority:1"`
-	Symbol              string     `gorm:"size:16;not null;index;uniqueIndex:idx_signal_config_user_symbol,priority:2"`
-	StrategyID          string     `gorm:"size:128;not null;default:'';index"`
-	IsEnabled           bool       `gorm:"not null;default:false;index"`
-	CooldownSeconds     int        `gorm:"not null;default:300"`
-	EvalIntervalSeconds int        `gorm:"not null;default:3600"`
-	ThresholdsJSON      string     `gorm:"type:text;not null;default:'{}'"`
-	LastEvaluatedAt     *time.Time `gorm:"index"`
-	CreatedAt           time.Time  `gorm:"not null"`
-	UpdatedAt           time.Time  `gorm:"not null"`
+	ID                  string `gorm:"primaryKey;size:36"`
+	UserID              string `gorm:"size:36;not null;index;uniqueIndex:idx_signal_config_user_symbol,priority:1"`
+	Symbol              string `gorm:"size:16;not null;index;uniqueIndex:idx_signal_config_user_symbol,priority:2"`
+	StrategyID          string `gorm:"size:128;not null;default:'';index"`
+	IsEnabled           bool   `gorm:"not null;default:false;index"`
+	CooldownSeconds     int    `gorm:"not null;default:300"`
+	EvalIntervalSeconds int    `gorm:"not null;default:3600"`
+	ThresholdsJSON      string `gorm:"type:text;not null;default:'{}'"`
+
+	// ── 持仓感知 / 风控（单票级；优先级 单票 > 账户 > 默认，0 表示"未设置"回退上层或关闭）──
+	// PositionAwareEnabled 默认 true：持仓感知门控只是"不推送无意义信号"，无交易决策风险。
+	PositionAwareEnabled bool    `gorm:"not null;default:true"`
+	MaxPositionPct       float64 `gorm:"not null;default:0"` // 单票市值占总资金上限(%)，0=回退账户级
+	MaxAddTimes          int     `gorm:"not null;default:0"` // 最大加仓次数，0=不限
+	// StopLossPct / TrailingStopPct 默认 0 = 关闭。
+	// 止损属于 override（会强制发出卖出信号），默认开启等于替用户做重大交易决策，必须显式设置。
+	StopLossPct     float64 `gorm:"not null;default:0"` // 止损线(相对成本 %)，0=关闭
+	TrailingStopPct float64 `gorm:"not null;default:0"` // 移动止盈回撤(%)，0=关闭
+
+	LastEvaluatedAt *time.Time `gorm:"index"`
+	CreatedAt       time.Time  `gorm:"not null"`
+	UpdatedAt       time.Time  `gorm:"not null"`
 }
 
 func (SymbolSignalConfigRecord) TableName() string {
@@ -46,13 +58,27 @@ type SignalEventRecord struct {
 	UserID      string    `gorm:"size:36;not null;index"`
 	Symbol      string    `gorm:"size:16;not null;index"`
 	StrategyID  string    `gorm:"size:128;not null;default:'';index"`
-	Side        string    `gorm:"size:16;not null;index"`
+	Side        string    `gorm:"size:16;not null;index"` // == FinalSide，保留以兼容既有 webhook / 查询逻辑
 	SignalScore float64   `gorm:"not null;default:0"`
 	ReasonJSON  string    `gorm:"type:text;not null;default:'{}'"`
 	Fingerprint string    `gorm:"size:128;not null;uniqueIndex"`
 	IsTest      bool      `gorm:"not null;default:false;index"`
 	EventTime   time.Time `gorm:"not null;index"`
 	CreatedAt   time.Time `gorm:"not null;index"`
+
+	// ── 持仓感知门控（全量生成 + 推送门控）──
+	// 设计要点：所有信号一律落库（保留策略胜率可复盘性），仅 IsDelivered 决定是否投递 webhook。
+	RawSide              string  `gorm:"size:16;not null;default:''"`     // 策略原始输出（未经门控）
+	FinalSide            string  `gorm:"size:16;not null;default:''"`     // 门控后最终动作（override 可改写）
+	GateDecision         string  `gorm:"size:24;not null;default:''"`     // pass / suppressed / overridden
+	SuppressedReason     string  `gorm:"size:64;not null;default:''"`     // 拦截规则码
+	SemanticLabel        string  `gorm:"size:32;not null;default:''"`     // 首次建仓/加仓/减仓/清仓/止损离场
+	MatchedRulesJSON     string  `gorm:"type:text;not null;default:'[]'"` // 命中的全部规则码
+	IsDelivered          bool    `gorm:"not null;default:false;index"`    // 是否实际创建了投递
+	PositionSnapshotJSON string  `gorm:"type:text;not null;default:'{}'"` // 决策时点持仓快照
+	ReferencePrice       float64 `gorm:"not null;default:0"`              // 决策参考价
+	SuggestedShares      float64 `gorm:"not null;default:0"`              // 参考数量（二期完善）
+	PositionDataStatus   string  `gorm:"size:16;not null;default:''"`     // known / unknown / stale
 }
 
 func (SignalEventRecord) TableName() string {
@@ -97,6 +123,13 @@ type SymbolSignalConfig struct {
 	EvalIntervalSeconds int            `json:"eval_interval_seconds"`
 	Thresholds          map[string]any `json:"thresholds"`
 	UpdatedAt           string         `json:"updated_at"`
+
+	// 持仓感知 / 风控（单票级）
+	PositionAwareEnabled bool    `json:"position_aware_enabled"`
+	MaxPositionPct       float64 `json:"max_position_pct"`
+	MaxAddTimes          int     `json:"max_add_times"`
+	StopLossPct          float64 `json:"stop_loss_pct"`
+	TrailingStopPct      float64 `json:"trailing_stop_pct"`
 }
 
 type SignalEvent struct {
@@ -108,7 +141,31 @@ type SignalEvent struct {
 	IsTest      bool           `json:"is_test"`
 	EventTime   string         `json:"event_time"`
 	Reason      map[string]any `json:"reason"`
+
+	// 持仓感知门控信息（供前端信号历史展示"为什么没推送"）
+	RawSide            string            `json:"raw_side,omitempty"`
+	FinalSide          string            `json:"final_side,omitempty"`
+	GateDecision       string            `json:"gate_decision,omitempty"`
+	SuppressedReason   string            `json:"suppressed_reason,omitempty"`
+	SuppressedMessage  string            `json:"suppressed_message,omitempty"`
+	SemanticLabel      string            `json:"semantic_label,omitempty"`
+	MatchedRules       []string          `json:"matched_rules,omitempty"`
+	IsDelivered        bool              `json:"is_delivered"`
+	PositionSnapshot   map[string]any    `json:"position_snapshot,omitempty"`
+	ReferencePrice     float64           `json:"reference_price,omitempty"`
+	SuggestedShares    float64           `json:"suggested_shares,omitempty"`
+	PositionDataStatus string            `json:"position_data_status,omitempty"`
+	Compliance         *ComplianceNotice `json:"compliance,omitempty"`
 }
+
+// ComplianceNotice 内联合规声明。设计要求：免责声明必须随每条信号内联下发，
+// 而不是只放在页面角落，避免个性化建议被误解为投资顾问服务。
+type ComplianceNotice struct {
+	Disclaimer string `json:"disclaimer"`
+}
+
+// SignalComplianceDisclaimer 全站统一的信号免责声明文案（研究参考口径）。
+const SignalComplianceDisclaimer = "本提示由你配置的策略与持仓参数自动生成，仅供投研参考，不构成投资建议。请结合自身情况独立决策。"
 
 type WebhookDelivery struct {
 	EventID      string `json:"event_id"`
@@ -138,6 +195,14 @@ type SymbolSignalConfigInput struct {
 	CooldownSeconds     int            `json:"cooldown_seconds"`
 	EvalIntervalSeconds int            `json:"eval_interval_seconds"`
 	Thresholds          map[string]any `json:"thresholds"`
+
+	// ── 持仓感知 / 风控（单票级）──
+	// 全部使用指针：nil 表示"未传，保持原值"；显式 0 表示"关闭该规则"。
+	PositionAwareEnabled *bool    `json:"position_aware_enabled"`
+	MaxPositionPct       *float64 `json:"max_position_pct"`
+	MaxAddTimes          *int     `json:"max_add_times"`
+	StopLossPct          *float64 `json:"stop_loss_pct"`
+	TrailingStopPct      *float64 `json:"trailing_stop_pct"`
 }
 
 type TestSignalInput struct {
@@ -154,6 +219,26 @@ type EmitSignalInput struct {
 	Reason      map[string]any
 	EventTime   time.Time
 	IsTest      bool
+
+	// ── 持仓感知门控（可选；为空时行为与改造前完全一致，保证向后兼容）──
+	// Gate 为 nil 表示"未经门控"，EmitSignal 会按老逻辑要求 webhook 并正常投递。
+	Gate *EmitGateInfo
+}
+
+// EmitGateInfo 承载门控结果，决定 signal_event 的门控字段与是否投递。
+type EmitGateInfo struct {
+	RawSide            string
+	FinalSide          string
+	Decision           string // pass / suppressed / overridden
+	SuppressedReason   string
+	SemanticLabel      string
+	MatchedRules       []string
+	PositionSnapshot   map[string]any
+	ReferencePrice     float64
+	SuggestedShares    float64
+	PositionDataStatus string
+	// SkipDelivery=true 时只落库不投递（被门控拦截的信号）。
+	SkipDelivery bool
 }
 
 type DispatchResult struct {
@@ -188,6 +273,12 @@ func toSymbolSignalConfig(record SymbolSignalConfigRecord) (*SymbolSignalConfig,
 		EvalIntervalSeconds: record.EvalIntervalSeconds,
 		Thresholds:          thresholds,
 		UpdatedAt:           record.UpdatedAt.UTC().Format(time.RFC3339),
+
+		PositionAwareEnabled: record.PositionAwareEnabled,
+		MaxPositionPct:       record.MaxPositionPct,
+		MaxAddTimes:          record.MaxAddTimes,
+		StopLossPct:          record.StopLossPct,
+		TrailingStopPct:      record.TrailingStopPct,
 	}, nil
 }
 
@@ -195,6 +286,15 @@ func toSignalEvent(record SignalEventRecord) (*SignalEvent, error) {
 	reason := map[string]any{}
 	if err := decodeJSONMap(record.ReasonJSON, &reason); err != nil {
 		return nil, fmt.Errorf("decode reason failed: %w", err)
+	}
+	positionSnapshot := map[string]any{}
+	// 快照解析失败不应让整条信号查询失败——降级为空快照。
+	if err := decodeJSONMap(record.PositionSnapshotJSON, &positionSnapshot); err != nil {
+		positionSnapshot = map[string]any{}
+	}
+	matchedRules := []string{}
+	if strings.TrimSpace(record.MatchedRulesJSON) != "" {
+		_ = json.Unmarshal([]byte(record.MatchedRulesJSON), &matchedRules)
 	}
 	return &SignalEvent{
 		EventID:     record.EventID,
@@ -205,6 +305,20 @@ func toSignalEvent(record SignalEventRecord) (*SignalEvent, error) {
 		IsTest:      record.IsTest,
 		EventTime:   record.EventTime.UTC().Format(time.RFC3339),
 		Reason:      reason,
+
+		RawSide:            record.RawSide,
+		FinalSide:          record.FinalSide,
+		GateDecision:       record.GateDecision,
+		SuppressedReason:   record.SuppressedReason,
+		SuppressedMessage:  GateRuleMessage(record.SuppressedReason),
+		SemanticLabel:      record.SemanticLabel,
+		MatchedRules:       matchedRules,
+		IsDelivered:        record.IsDelivered,
+		PositionSnapshot:   positionSnapshot,
+		ReferencePrice:     record.ReferencePrice,
+		SuggestedShares:    record.SuggestedShares,
+		PositionDataStatus: record.PositionDataStatus,
+		Compliance:         &ComplianceNotice{Disclaimer: SignalComplianceDisclaimer},
 	}, nil
 }
 

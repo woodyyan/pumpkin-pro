@@ -112,15 +112,29 @@ func (r *Repository) SaveSymbolConfig(ctx context.Context, record SymbolSignalCo
 		existing.StrategyID = record.StrategyID
 		existing.IsEnabled = record.IsEnabled
 		existing.CooldownSeconds = record.CooldownSeconds
+		existing.EvalIntervalSeconds = record.EvalIntervalSeconds
 		existing.ThresholdsJSON = record.ThresholdsJSON
+		existing.PositionAwareEnabled = record.PositionAwareEnabled
+		existing.MaxPositionPct = record.MaxPositionPct
+		existing.MaxAddTimes = record.MaxAddTimes
+		existing.StopLossPct = record.StopLossPct
+		existing.TrailingStopPct = record.TrailingStopPct
 		existing.UpdatedAt = record.UpdatedAt
 
+		// 必须使用 map 形式显式列出所有列：
+		// 结构体形式的 Updates 会跳过零值，导致「显式关闭某条风控规则（设为 0/false）」无法落库。
 		if err := tx.Model(&SymbolSignalConfigRecord{}).Where("id = ?", existing.ID).Updates(map[string]any{
-			"strategy_id":      existing.StrategyID,
-			"is_enabled":       existing.IsEnabled,
-			"cooldown_seconds": existing.CooldownSeconds,
-			"thresholds_json":  existing.ThresholdsJSON,
-			"updated_at":       existing.UpdatedAt,
+			"strategy_id":            existing.StrategyID,
+			"is_enabled":             existing.IsEnabled,
+			"cooldown_seconds":       existing.CooldownSeconds,
+			"eval_interval_seconds":  existing.EvalIntervalSeconds,
+			"thresholds_json":        existing.ThresholdsJSON,
+			"position_aware_enabled": existing.PositionAwareEnabled,
+			"max_position_pct":       existing.MaxPositionPct,
+			"max_add_times":          existing.MaxAddTimes,
+			"stop_loss_pct":          existing.StopLossPct,
+			"trailing_stop_pct":      existing.TrailingStopPct,
+			"updated_at":             existing.UpdatedAt,
 		}).Error; err != nil {
 			return translateWriteError(err)
 		}
@@ -195,6 +209,16 @@ func (r *Repository) CreateEventWithDelivery(ctx context.Context, event SignalEv
 		}
 		return nil
 	})
+}
+
+// CreateEvent 只写入信号事件，不创建投递。
+// 用于「全量生成 + 推送门控」：被门控拦截或用户未配置 webhook 时，
+// 信号仍需完整落库以保留策略胜率的可复盘性。
+func (r *Repository) CreateEvent(ctx context.Context, event SignalEventRecord) error {
+	if err := r.db.WithContext(ctx).Create(&event).Error; err != nil {
+		return translateWriteError(err)
+	}
+	return nil
 }
 
 func (r *Repository) GetSignalEventByEventID(ctx context.Context, eventID string) (*SignalEventRecord, error) {

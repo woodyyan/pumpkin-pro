@@ -64,6 +64,12 @@ describe('signal config interaction workflow', () => {
       cooldown_seconds: 3600,
       eval_interval_seconds: 900,
       thresholds: { score: 0.75 },
+      // 持仓感知 / 风控字段始终显式下发（0 = 关闭该规则）
+      position_aware_enabled: true,
+      max_position_pct: 0,
+      max_add_times: 0,
+      stop_loss_pct: 0,
+      trailing_stop_pct: 0,
     })
   })
 
@@ -84,6 +90,7 @@ describe('signal config interaction workflow', () => {
       { label: '策略', value: 'MACD' },
       { label: '频率', value: '每 15 分钟' },
       { label: '推送', value: '已就绪' },
+      { label: '持仓感知', value: '已开启' },
     ])
   })
 
@@ -98,6 +105,8 @@ describe('signal config interaction workflow', () => {
     })
 
     assert.equal(meta[3].value, '未就绪')
-    assert.deepEqual(meta[4], { label: '配置', value: '有未保存修改', tone: 'warning' })
+    // 持仓感知条目插在推送之后，未保存提示顺延到最后一项。
+    assert.deepEqual(meta[4], { label: '持仓感知', value: '已开启' })
+    assert.deepEqual(meta[5], { label: '配置', value: '有未保存修改', tone: 'warning' })
   })
 })

@@ -24,10 +24,14 @@ const (
 // Evaluator periodically scans enabled signal configs, runs strategy
 // evaluation via the quant service, and emits real signals when BUY/SELL
 // is detected (respecting cooldown).
+//
+// 信号采用「全量生成 + 推送门控」：策略命中的信号一律落库，
+// 由 RiskGate 决定是否推送，以保留策略胜率的可复盘性。
 type Evaluator struct {
 	signalService   *Service
 	liveService     *live.Service
 	strategyService *strategy.Service
+	contextBuilder  *PositionContextBuilder
 	quantURL        string
 	interval        time.Duration
 }
@@ -36,6 +40,8 @@ type Evaluator struct {
 type EvaluatorConfig struct {
 	QuantServiceURL string
 	Interval        time.Duration
+	// PositionReader 为 nil 时门控降级为透传（fail-open），行为与改造前一致。
+	PositionReader PositionReader
 }
 
 // NewEvaluator creates a new evaluator.
@@ -48,6 +54,7 @@ func NewEvaluator(signalService *Service, liveService *live.Service, strategySer
 		signalService:   signalService,
 		liveService:     liveService,
 		strategyService: strategyService,
+		contextBuilder:  NewPositionContextBuilder(cfg.PositionReader),
 		quantURL:        strings.TrimRight(cfg.QuantServiceURL, "/"),
 		interval:        interval,
 	}
@@ -160,9 +167,28 @@ func (e *Evaluator) evaluateOne(ctx context.Context, cfg SymbolSignalConfigRecor
 	}
 
 	side := strings.ToUpper(strings.TrimSpace(result.Side))
-	if side != "BUY" && side != "SELL" {
+	if side != SideBuy && side != SideSell {
 		return // HOLD — no action needed
 	}
+
+	// ── 持仓感知门控（全量生成 + 推送门控）──
+	// 装配持仓上下文（IO 集中在装配层），再由纯函数 EvaluateGate 判定三态决策。
+	// 参考价复用已取到的最新收盘价，避免额外行情请求。
+	referencePrice := result.LatestClose
+	if referencePrice <= 0 && len(bars) > 0 {
+		referencePrice = bars[len(bars)-1].Close
+	}
+	positionCtx := e.contextBuilder.Build(ctx, BuildInput{
+		UserID:      userID,
+		Symbol:      symbol,
+		LatestPrice: referencePrice,
+		// 能取到有效价格即视为可交易；停牌等场景下 referencePrice 为 0。
+		IsTradable: referencePrice > 0,
+		Config:     cfg,
+		Now:        now,
+	})
+	gateDecision := EvaluateGate(side, positionCtx)
+	finalSide := gateDecision.FinalSide
 
 	// Emit real signal.
 	reason := result.Reason
@@ -173,24 +199,68 @@ func (e *Evaluator) evaluateOne(ctx context.Context, cfg SymbolSignalConfigRecor
 	reason["strategy_name"] = strat.Name
 	reason["strategy_params"] = strat.DefaultParams
 	reason["latest_close"] = result.LatestClose
+	// 门控上下文写入 reason，供 webhook 文案与站内展示使用。
+	reason["position_summary"] = BuildGateSummary(positionCtx)
+	if gateDecision.SemanticLabel != "" {
+		reason["semantic_label"] = gateDecision.SemanticLabel
+	}
+	if msg := gateDecision.Message(); msg != "" {
+		reason["gate_message"] = msg
+	}
+	if notes := collectGateNotes(gateDecision.Notes); len(notes) > 0 {
+		reason["gate_notes"] = notes
+	}
+	// 合规：免责声明随每条信号内联下发，而不是只放在页面角落。
+	reason["disclaimer"] = SignalComplianceDisclaimer
 
 	_, emitErr := e.signalService.EmitSignal(ctx, EmitSignalInput{
 		UserID:      userID,
 		Symbol:      symbol,
 		StrategyID:  strategyID,
-		Side:        side,
+		Side:        finalSide,
 		SignalScore: result.Score,
 		Reason:      reason,
 		EventTime:   now,
 		IsTest:      false,
+		Gate: &EmitGateInfo{
+			RawSide:            side,
+			FinalSide:          finalSide,
+			Decision:           gateDecision.Decision,
+			SuppressedReason:   gateDecision.SuppressedReason,
+			SemanticLabel:      gateDecision.SemanticLabel,
+			MatchedRules:       gateDecision.MatchedRules,
+			PositionSnapshot:   ToSnapshotMap(positionCtx.Snapshot),
+			ReferencePrice:     referencePrice,
+			PositionDataStatus: positionCtx.Snapshot.DataStatus,
+			SkipDelivery:       gateDecision.SkipDelivery(),
+		},
 	})
 	if emitErr != nil {
-		log.Printf("[signal-evaluator] emit signal error user=%s symbol=%s side=%s: %v", userID, symbol, side, emitErr)
+		log.Printf("[signal-evaluator] emit signal error user=%s symbol=%s side=%s: %v", userID, symbol, finalSide, emitErr)
 		return
 	}
 
-	log.Printf("[signal-evaluator] ✅ emitted %s signal user=%s symbol=%s strategy=%s reason=%s",
-		side, userID, symbol, strat.Name, truncate(reason["message"], 80))
+	if gateDecision.SkipDelivery() {
+		log.Printf("[signal-evaluator] ⛔ suppressed %s signal user=%s symbol=%s rule=%s (已归档，未推送)",
+			side, userID, symbol, gateDecision.SuppressedReason)
+		return
+	}
+	log.Printf("[signal-evaluator] ✅ emitted %s signal user=%s symbol=%s strategy=%s decision=%s reason=%s",
+		finalSide, userID, symbol, strat.Name, gateDecision.Decision, truncate(reason["message"], 80))
+}
+
+// collectGateNotes 把非决策性提示规则码翻译成用户可读文案。
+func collectGateNotes(codes []string) []string {
+	if len(codes) == 0 {
+		return nil
+	}
+	notes := make([]string, 0, len(codes))
+	for _, code := range codes {
+		if text := GateRuleMessage(code); text != "" {
+			notes = append(notes, text)
+		}
+	}
+	return notes
 }
 
 type quantEvaluateInput struct {
@@ -203,12 +273,12 @@ type quantEvaluateInput struct {
 }
 
 type quantEvaluateRequest struct {
-	StrategyID        string           `json:"strategy_id"`
-	ImplementationKey string           `json:"implementation_key"`
-	StrategyName      string           `json:"strategy_name"`
-	Params            map[string]any   `json:"params"`
-	Symbol            string           `json:"symbol"`
-	Bars              []quantBarInput  `json:"bars"`
+	StrategyID        string          `json:"strategy_id"`
+	ImplementationKey string          `json:"implementation_key"`
+	StrategyName      string          `json:"strategy_name"`
+	Params            map[string]any  `json:"params"`
+	Symbol            string          `json:"symbol"`
+	Bars              []quantBarInput `json:"bars"`
 }
 
 type quantBarInput struct {
@@ -221,11 +291,11 @@ type quantBarInput struct {
 }
 
 type quantEvaluateResponse struct {
-	Side        string          `json:"side"`
-	Score       float64         `json:"score"`
-	Reason      map[string]any  `json:"reason"`
+	Side        string            `json:"side"`
+	Score       float64           `json:"score"`
+	Reason      map[string]any    `json:"reason"`
 	Strategy    quantStrategyInfo `json:"strategy"`
-	LatestClose float64         `json:"latest_close"`
+	LatestClose float64           `json:"latest_close"`
 }
 
 type quantStrategyInfo struct {

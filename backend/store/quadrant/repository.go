@@ -24,6 +24,17 @@ func (r *Repository) DB() *gorm.DB {
 	return r.db
 }
 
+// withDB returns a shallow copy of the repository bound to db (typically a
+// transaction handle). Transaction callbacks must route every nested query
+// through such a bound copy: a query issued via the root handle inside a
+// Transaction callback escapes the transaction — under a multi-connection
+// pool it reads stale committed state, under a private ":memory:" pool it
+// hits an empty database ("no such table"), and with a single-connection
+// pool it deadlocks waiting for the pinned connection.
+func (r *Repository) withDB(db *gorm.DB) *Repository {
+	return &Repository{db: db}
+}
+
 // BulkUpsert replaces all quadrant scores in a single transaction.
 func (r *Repository) BulkUpsert(ctx context.Context, records []QuadrantScoreRecord) error {
 	if len(records) == 0 {

@@ -278,7 +278,7 @@ type rankingPortfolioPriceLookup struct {
 	TradeDate  string
 }
 
-func (s *Service) resolveRankingPortfolioMarketPrice(ctx context.Context, code string, exchange string, targetTradeDate string) rankingPortfolioPriceLookup {
+func (s *Service) resolveRankingPortfolioMarketPrice(ctx context.Context, repo *Repository, code string, exchange string, targetTradeDate string) rankingPortfolioPriceLookup {
 	targetTradeDate = strings.TrimSpace(targetTradeDate)
 	if targetTradeDate == "" {
 		return rankingPortfolioPriceLookup{}
@@ -288,8 +288,8 @@ func (s *Service) resolveRankingPortfolioMarketPrice(ctx context.Context, code s
 			return rankingPortfolioPriceLookup{ClosePrice: closePrice, TradeDate: targetTradeDate}
 		}
 	}
-	if s.repo != nil {
-		if closePrice, tradeDate, err := s.repo.GetLatestRankingSnapshotClosePriceOnOrBefore(ctx, code, exchange, targetTradeDate); err == nil && closePrice > 0 && strings.TrimSpace(tradeDate) != "" {
+	if repo != nil {
+		if closePrice, tradeDate, err := repo.GetLatestRankingSnapshotClosePriceOnOrBefore(ctx, code, exchange, targetTradeDate); err == nil && closePrice > 0 && strings.TrimSpace(tradeDate) != "" {
 			return rankingPortfolioPriceLookup{ClosePrice: closePrice, TradeDate: strings.TrimSpace(tradeDate)}
 		}
 	}
@@ -818,7 +818,7 @@ func (s *Service) buildRankingPortfolioMarketPricesFromSnapshotRows(ctx context.
 			}
 		}
 		if closePrice <= 0 {
-			lookup := s.resolveRankingPortfolioMarketPrice(ctx, item.Code, item.Exchange, sourceTradeDate)
+			lookup := s.resolveRankingPortfolioMarketPrice(ctx, s.repo, item.Code, item.Exchange, sourceTradeDate)
 			if lookup.ClosePrice > 0 {
 				closePrice = lookup.ClosePrice
 				priceTradeDate = lookup.TradeDate
@@ -988,7 +988,11 @@ func (s *Service) saveSingleRankingPortfolio(ctx context.Context, definition Ran
 			return newRankingPortfolioPersistError(definition.ID, "cleanup_snapshot_version", err.Error(), nil)
 		}
 
-		currentConstituents, err := s.selectRankingPortfolioConstituents(ctx, definition, records)
+		// Nested reads below must join this transaction: route them through a
+		// tx-bound repository instead of the pool's root handle (see
+		// Repository.withDB for the failure modes this prevents).
+		txRepo := s.repo.withDB(tx)
+		currentConstituents, err := s.selectRankingPortfolioConstituents(ctx, txRepo, definition, records)
 		if err != nil {
 			return newRankingPortfolioPersistError(definition.ID, "select_constituents", err.Error(), nil)
 		}
@@ -1076,7 +1080,7 @@ func (s *Service) saveSingleRankingPortfolio(ctx context.Context, definition Ran
 			}
 		}
 
-		marketPrices, priceErr := s.buildRankingPortfolioMarketPrices(ctx, definition, snapshotVersion, sourceTradeDate, currentConstituents, previousConstituents, now, priceHints)
+		marketPrices, priceErr := s.buildRankingPortfolioMarketPrices(ctx, txRepo, definition, snapshotVersion, sourceTradeDate, currentConstituents, previousConstituents, now, priceHints)
 		if priceErr != nil {
 			return priceErr
 		}
@@ -1324,7 +1328,10 @@ func buildRankingItemsFromRecords(ctx context.Context, repo *Repository, definit
 	return items
 }
 
-func (s *Service) selectRankingPortfolioConstituents(ctx context.Context, definition RankingPortfolioDefinition, records []QuadrantScoreRecord) ([]RankingPortfolioConstituentItem, error) {
+// selectRankingPortfolioConstituents takes the repository explicitly so
+// callers inside a Transaction callback can pass a tx-bound copy
+// (Repository.withDB) and keep nested reads inside the transaction.
+func (s *Service) selectRankingPortfolioConstituents(ctx context.Context, repo *Repository, definition RankingPortfolioDefinition, records []QuadrantScoreRecord) ([]RankingPortfolioConstituentItem, error) {
 	limit := definition.SelectionWindow
 	if limit < definition.MaxHoldings {
 		limit = definition.MaxHoldings
@@ -1333,9 +1340,9 @@ func (s *Service) selectRankingPortfolioConstituents(ctx context.Context, defini
 		limit = 20
 	}
 	if len(records) > 0 {
-		return buildRankingPortfolioConstituentItems(definition, buildRankingItemsFromRecords(ctx, s.repo, definition, records, limit)), nil
+		return buildRankingPortfolioConstituentItems(definition, buildRankingItemsFromRecords(ctx, repo, definition, records, limit)), nil
 	}
-	ranking, err := s.buildRankingResponse(ctx, definition.Exchange, limit)
+	ranking, err := buildRankingResponse(ctx, repo, definition.Exchange, limit)
 	if err != nil {
 		return nil, fmt.Errorf("load ranking portfolio candidates: %w", err)
 	}
@@ -1446,7 +1453,7 @@ func selectRankingPortfolioConstituents(records []QuadrantScoreRecord, limit int
 	return items
 }
 
-func (s *Service) buildRankingPortfolioMarketPrices(ctx context.Context, definition RankingPortfolioDefinition, snapshotVersion string, sourceTradeDate string, current []RankingPortfolioConstituentItem, previous []RankingPortfolioConstituentItem, now time.Time, priceHints map[string]snapshotPriceHint) ([]RankingPortfolioMarketPrice, error) {
+func (s *Service) buildRankingPortfolioMarketPrices(ctx context.Context, repo *Repository, definition RankingPortfolioDefinition, snapshotVersion string, sourceTradeDate string, current []RankingPortfolioConstituentItem, previous []RankingPortfolioConstituentItem, now time.Time, priceHints map[string]snapshotPriceHint) ([]RankingPortfolioMarketPrice, error) {
 	seen := map[string]RankingPortfolioConstituentItem{}
 	for _, item := range current {
 		seen[snapshotPriceHintKey(item.Code, item.Exchange)] = item
@@ -1467,7 +1474,7 @@ func (s *Service) buildRankingPortfolioMarketPrices(ctx context.Context, definit
 			}
 		}
 		if closePrice <= 0 || priceTradeDate == "" {
-			lookup := s.resolveRankingPortfolioMarketPrice(ctx, item.Code, item.Exchange, sourceTradeDate)
+			lookup := s.resolveRankingPortfolioMarketPrice(ctx, repo, item.Code, item.Exchange, sourceTradeDate)
 			if lookup.ClosePrice > 0 && lookup.TradeDate != "" {
 				closePrice = lookup.ClosePrice
 				priceTradeDate = lookup.TradeDate
@@ -2021,7 +2028,7 @@ func (s *Service) buildCurrentRankingPortfolioSelection(ctx context.Context, def
 	if limit < 20 {
 		limit = 20
 	}
-	ranking, err := s.buildRankingResponse(ctx, definition.Exchange, limit)
+	ranking, err := buildRankingResponse(ctx, s.repo, definition.Exchange, limit)
 	if err != nil {
 		return nil, time.Time{}, "", err
 	}

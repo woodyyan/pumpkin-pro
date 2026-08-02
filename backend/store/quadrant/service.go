@@ -1265,7 +1265,11 @@ func resolveRankingExchanges(exchange string) []string {
 
 // GetRanking returns the market-specific ranking list.
 // HKEX keeps the legacy opportunity-zone logic; ASHARE prefers ranking_score when available.
-func (s *Service) buildRankingResponse(ctx context.Context, exchange string, limit int) (*RankingResponse, error) {
+//
+// buildRankingResponse takes the repository explicitly (not via Service) so
+// callers inside a Transaction callback can pass a tx-bound copy
+// (Repository.withDB) and keep nested reads inside the transaction.
+func buildRankingResponse(ctx context.Context, repo *Repository, exchange string, limit int) (*RankingResponse, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
@@ -1283,7 +1287,7 @@ func (s *Service) buildRankingResponse(ctx context.Context, exchange string, lim
 
 	// Check if the data has been recomputed with liquidity field.
 	// If all avg_amount5d are zero/NULL, skip the filter (backward compat).
-	hasLiquidityData, err := s.repo.HasNonZeroLiquidity(ctx, exchanges)
+	hasLiquidityData, err := repo.HasNonZeroLiquidity(ctx, exchanges)
 	if err != nil {
 		return nil, fmt.Errorf("check liquidity data: %w", err)
 	}
@@ -1295,13 +1299,13 @@ func (s *Service) buildRankingResponse(ctx context.Context, exchange string, lim
 	var records []QuadrantScoreRecord
 	var totalInZone int64
 	if displayExchange == "HKEX" {
-		records, totalInZone, err = s.repo.FindOpportunityZone(ctx, exchanges, limit, minAmount)
+		records, totalInZone, err = repo.FindOpportunityZone(ctx, exchanges, limit, minAmount)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		var hasRankingScore bool
-		records, totalInZone, hasRankingScore, err = s.repo.FindAShareRankingCandidates(ctx, limit, minAmount)
+		records, totalInZone, hasRankingScore, err = repo.FindAShareRankingCandidates(ctx, limit, minAmount)
 		if err != nil {
 			return nil, err
 		}
@@ -1341,13 +1345,13 @@ func (s *Service) buildRankingResponse(ctx context.Context, exchange string, lim
 		}
 
 		// Enrich with consecutive days and return since current streak start.
-		days, _ := s.repo.GetConsecutiveDays(ctx, r.Code, exchanges)
+		days, _ := repo.GetConsecutiveDays(ctx, r.Code, exchanges)
 		item.ConsecutiveDays = days
 
-		streakStartDate, _ := s.repo.GetConsecutiveStartDate(ctx, r.Code, exchanges)
+		streakStartDate, _ := repo.GetConsecutiveStartDate(ctx, r.Code, exchanges)
 		if streakStartDate != "" {
-			startPrice, _, _ := s.repo.GetEarliestAvailableClosePrice(ctx, r.Code, exchanges, streakStartDate)
-			currentPrice, _, _ := s.repo.GetLatestAvailableClosePrice(ctx, r.Code, exchanges)
+			startPrice, _, _ := repo.GetEarliestAvailableClosePrice(ctx, r.Code, exchanges, streakStartDate)
+			currentPrice, _, _ := repo.GetLatestAvailableClosePrice(ctx, r.Code, exchanges)
 			if startPrice > 0 && currentPrice > 0 {
 				pct := (currentPrice - startPrice) / startPrice * 100
 				item.ReturnPct = &pct
@@ -1375,7 +1379,7 @@ func (s *Service) buildRankingResponse(ctx context.Context, exchange string, lim
 }
 
 func (s *Service) GetRanking(ctx context.Context, exchange string, limit int) (*RankingResponse, error) {
-	return s.buildRankingResponse(ctx, exchange, limit)
+	return buildRankingResponse(ctx, s.repo, exchange, limit)
 }
 
 // VerifyAllRankingPortfolioResults replays the NAV series for every definition

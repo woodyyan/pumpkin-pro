@@ -442,3 +442,33 @@
 - 链式物化（NAV、累计值、滚动窗口）的修复单位是「从首个脏行起的后缀」，不是单行。
 
 **适用场景**: 所有日级物化/预计算链路（指数 NAV、组合净值、榜单快照、滚动指标），尤其是「源数据分批到达」的离线计算。
+
+## BP-029: SQLite `:memory:` 连接池各自独立空库，并发访问命中「no such table」
+
+**模式**: Go `database/sql` 默认无界连接池 + DSN `:memory:` 时，**每条池连接都是一个独立的私有空数据库**。只要被测代码存在任何并发访问（如 BulkSave 的 async best-effort goroutine），新连接就会命中一个没有任何表的空库。错误在 best-effort 路径被静默吞掉，只在主断言路径随机爆 `SQL logic error: no such table (1)`；CI 跑 `-race` 放大竞态窗口所以必挂，本地无 `-race` 碰巧常过，呈典型「CI 红、本地绿」。
+
+**案例**: 2026-07-31 backend CI `TestBulkSave_ExchangePreservation` 失败：`BulkSave` 写成功（4 条日志 OK），紧接着主协程 `FindByExchange` 被池子分到新空连接报 no such table。本地 `-race` 复现时可见 async goroutine 的 best-effort 日志全是 `no such table: quadrant_ranking_snapshots / ..._definitions`（被吞掉的铁证）。
+
+**修复**: `tests/testutil.InMemoryDB` 改用唯一命名共享缓存 DSN——`file:memdb_<原子序号>?mode=memory&cache=shared&_fk=1`（沿用 aipicker `openMemDB` 约定）：同一测试内所有池连接共享同一内存库，测试之间互不污染。注意**不能**用 `SetMaxOpenConns(1)` 修：tx 回调内若有经根句柄的嵌套查询（见 BP-030），单连接下 tx 占住唯一连接、嵌套查询永久等待，全量测试死锁超时（实测 124s 挂掉）。
+
+**教训**:
+- `:memory:` ≠ 一个数据库，而是「每条连接一个数据库」；涉及连接池的测试基建必须显式选择共享策略。
+- `file::memory:?cache=shared` 不带唯一名时是**进程级共享**，同包测试互相污染（aipicker 已踩过）；必须带唯一名。
+- CI 与本地测试命令要一致（尤其 `-race`），否则时序类 bug 永远在 CI 才暴露。
+
+**适用场景**: 所有 Go + SQLite 内存库测试基建；任何在测试中会并发访问 DB 的服务（异步 goroutine、事务内嵌套查询）。
+
+## BP-030: Transaction 回调内经根句柄发嵌套查询，脱离事务三重危害
+
+**模式**: `db.Transaction(func(tx *gorm.DB) { ... })` 回调体内，又通过 `s.repo.xxx()` / `r.db.xxx()`（根句柄）发查询。这些查询**脱离事务**：①多连接池下读到的是事务外旧数据（写读不一致）；②配合 BP-029 的私有 `:memory:` 池直接命中空库报 no such table；③连接被吞错路径静默降级（如 `days, _ := repo.GetConsecutiveDays(...)` 返回 0，连续上榜天数悄悄变 0）；④池被限为单连接时 tx 占住唯一连接，嵌套查询永久等待 → 死锁。
+
+**案例**: `saveSingleRankingPortfolio` tx 回调内调用 `selectRankingPortfolioConstituents`（内部 `GetConsecutiveDays` / `GetFirstAppearedDate` / 收盘价系列查询全走 `s.repo` 根句柄）与 `buildRankingPortfolioMarketPrices`（`GetLatestRankingSnapshotClosePriceOnOrBefore` 走根句柄）。修复 BP-029 时若改用单连接方案，该模式立即把全量测试死锁在 `buildRankingItemsFromRecords`。
+
+**修复**: 新增 `Repository.withDB(tx)` 派生 tx 绑定副本（与 payment `&Repository{db: tx}` 既有惯例一致），tx 回调内所有嵌套查询改走 `txRepo`；`buildRankingResponse` / `selectRankingPortfolioConstituents` / `buildRankingPortfolioMarketPrices` / `resolveRankingPortfolioMarketPrice` 改为显式接收 `*Repository` 参数，由调用方决定传根句柄还是 tx 句柄。回归测试 `TestSaveRankingPortfolio_TxNestedReadsJoinTransaction`：`SetMaxOpenConns(1)` + 预置 3 日快照连击，断言事务内嵌套读能读到连击数（变异测试验证：回退修复后 20s 超时失败）。
+
+**教训**:
+- 事务回调内出现的任何「不经过 tx 的 DB 访问」都是 bug，即使当前碰巧能跑；审查 `Transaction(func(tx` 时把回调体内的 `s.repo.`/`r.db.`/`s.<ServiceMethod>` 调用列为必查项。
+- 错误吞噬（`_ =`）会把这类问题从「报错」变成「数据悄悄降级」，危害放大一个数量级。
+- 例外边界：注入的 resolver 闭包（priceResolver/tradeDateResolver 等）设计上读「最新已提交」参考数据，无法也不应进事务，保持根句柄即可，但要在代码注释中显式说明。
+
+**适用场景**: 所有 GORM `Transaction` 回调，尤其是回调内调用同包 Service/Repository 方法的写路径（批量落库、替换式物化、级联删除+重建）。

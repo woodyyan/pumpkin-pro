@@ -880,3 +880,68 @@ func TestRebuildLaggingRankingPortfolioResultsFromDate_D0Guard(t *testing.T) {
 		t.Fatalf("expected 0 pre-cutover results, got %d", count)
 	}
 }
+
+// TestSaveRankingPortfolio_TxNestedReadsJoinTransaction is a regression test
+// for the "root-handle query inside a Transaction callback" bug class:
+// saveSingleRankingPortfolio's tx callback performs nested reads (select
+// constituents → consecutive snapshot days; market-price resolution). Those
+// reads must join the transaction via a tx-bound repository
+// (Repository.withDB). Before the fix they escaped to the pool's root
+// handle, which deadlocks when the pool is pinned to a single connection,
+// and silently read an empty database with private ":memory:" connections.
+func TestSaveRankingPortfolio_TxNestedReadsJoinTransaction(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	sqlDB, err := repo.DB().DB()
+	if err != nil {
+		t.Fatalf("get sql.DB: %v", err)
+	}
+	// Pin the pool to one connection: pre-fix code deadlocks on the nested
+	// read and fails on ctx timeout; fixed code completes because nested
+	// reads join the transaction.
+	sqlDB.SetMaxOpenConns(1)
+	svc := NewService(repo)
+	svc.SetPriceResolver(func(context.Context, string, string, string) float64 { return 10 })
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	// Seed a 3-day snapshot streak for 600001 (committed before the tx).
+	snaps := make([]RankingSnapshot, 0, 3)
+	for i, date := range []string{"2026-05-05", "2026-05-06", "2026-05-07"} {
+		snaps = append(snaps, RankingSnapshot{
+			Code: "600001", Name: "股票600001", Exchange: "SSE",
+			Rank: i + 1, Opportunity: 95, Risk: 10,
+			ClosePrice: 10 + float64(i), PriceTradeDate: date, SnapshotDate: date,
+			CreatedAt: time.Now().UTC(),
+		})
+	}
+	if err := repo.UpsertSnapshots(ctx, snaps); err != nil {
+		t.Fatalf("seed snapshots failed: %v", err)
+	}
+
+	records := []QuadrantScoreRecord{
+		makeAShareRankingRecord("688001", "STAR", "机会", 99, 88, 10, 12000),
+		makeAShareRankingRecord("600001", "MAIN", "机会", 98, 87, 10, 12000),
+		makeAShareRankingRecord("000001", "MAIN", "机会", 97, 86, 10, 12000),
+		makeAShareRankingRecord("300001", "CHINEXT", "机会", 96, 85, 10, 12000),
+		makeAShareRankingRecord("600002", "MAIN", "机会", 95, 84, 10, 12000),
+	}
+	computedAt := time.Date(2026, 5, 7, 15, 0, 0, 0, rankingSnapshotLocation)
+	if err := svc.saveRankingPortfolio(ctx, records, computedAt, nil, ""); err != nil {
+		t.Fatalf("saveRankingPortfolio failed (nested tx read must join the transaction): %v", err)
+	}
+
+	// The nested GetConsecutiveDays read inside the transaction must have
+	// observed the seeded 3-day streak — pre-fix it silently saw an empty
+	// database and stored 0.
+	var row RankingPortfolioSnapshotConstituent
+	if err := repo.DB().WithContext(ctx).
+		Where("definition_id = ? AND code = ?", defaultRankingPortfolioDefinitionID, "600001").
+		Order("snapshot_date DESC, id DESC").
+		First(&row).Error; err != nil {
+		t.Fatalf("load constituent failed: %v", err)
+	}
+	if row.ConsecutiveDays != 3 {
+		t.Fatalf("consecutive days = %d, want 3 (nested read escaped the transaction)", row.ConsecutiveDays)
+	}
+}

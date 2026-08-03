@@ -418,6 +418,75 @@ func TestEventRepositoryLifecycle(t *testing.T) {
 	}
 }
 
+// 回归：PersonalizationEnabled 带 default:true，首次创建时用户显式 false 必须持久化。
+// 同时验证既有画像更新时四个账户风控字段会被完整更新，且 0/false 能真正关闭。
+func TestInvestmentProfileRiskSettingsPersistence(t *testing.T) {
+	repo, ctx := setupPortfolioDB(t)
+	now := time.Now().UTC()
+
+	created := &InvestmentProfileRecord{
+		UserID:                 "profile-risk-user",
+		TotalCapital:           1000000,
+		MaxSinglePositionPct:   25,
+		MaxTotalExposurePct:    80,
+		DefaultStopLossPct:     8,
+		PersonalizationEnabled: false,
+		UpdatedAt:              now,
+	}
+	if err := repo.UpsertInvestmentProfile(ctx, created); err != nil {
+		t.Fatalf("UpsertInvestmentProfile create failed: %v", err)
+	}
+	found, err := repo.GetInvestmentProfile(ctx, created.UserID)
+	if err != nil {
+		t.Fatalf("GetInvestmentProfile failed: %v", err)
+	}
+	if found.PersonalizationEnabled {
+		t.Fatal("首次创建显式 false 不应被 default:true 覆盖")
+	}
+	if found.MaxSinglePositionPct != 25 || found.MaxTotalExposurePct != 80 || found.DefaultStopLossPct != 8 {
+		t.Fatalf("账户风控字段创建后不匹配: %+v", found)
+	}
+
+	// 更新到 0 / false 是有效的"关闭"操作，必须覆盖历史值。
+	updated := &InvestmentProfileRecord{
+		UserID:                 created.UserID,
+		TotalCapital:           1000000,
+		MaxSinglePositionPct:   0,
+		MaxTotalExposurePct:    0,
+		DefaultStopLossPct:     0,
+		PersonalizationEnabled: true,
+		UpdatedAt:              now.Add(time.Minute),
+	}
+	if err := repo.UpsertInvestmentProfile(ctx, updated); err != nil {
+		t.Fatalf("UpsertInvestmentProfile update failed: %v", err)
+	}
+	found, err = repo.GetInvestmentProfile(ctx, created.UserID)
+	if err != nil {
+		t.Fatalf("GetInvestmentProfile after update failed: %v", err)
+	}
+	if !found.PersonalizationEnabled {
+		t.Fatal("更新为 true 应持久化")
+	}
+	if found.MaxSinglePositionPct != 0 || found.MaxTotalExposurePct != 0 || found.DefaultStopLossPct != 0 {
+		t.Fatalf("显式 0 应关闭账户风控规则，got single=%v exposure=%v stop=%v",
+			found.MaxSinglePositionPct, found.MaxTotalExposurePct, found.DefaultStopLossPct)
+	}
+
+	// 再次将 bool 切回 false，验证 update map 同样支持 false。
+	updated.PersonalizationEnabled = false
+	updated.UpdatedAt = now.Add(2 * time.Minute)
+	if err := repo.UpsertInvestmentProfile(ctx, updated); err != nil {
+		t.Fatalf("UpsertInvestmentProfile false update failed: %v", err)
+	}
+	found, err = repo.GetInvestmentProfile(ctx, created.UserID)
+	if err != nil {
+		t.Fatalf("GetInvestmentProfile final read failed: %v", err)
+	}
+	if found.PersonalizationEnabled {
+		t.Fatal("更新为 false 应持久化")
+	}
+}
+
 func TestInvestmentProfileCRUD(t *testing.T) {
 	repo, ctx := setupPortfolioDB(t)
 	record := &InvestmentProfileRecord{

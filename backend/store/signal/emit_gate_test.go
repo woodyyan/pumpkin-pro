@@ -224,18 +224,17 @@ func TestEmitSignal_Overridden_DeliversWithRewrittenSide(t *testing.T) {
 }
 
 // webhook 存在但被禁用：门控模式下落库不投递，不报错。
-//
-// 注意：这里先以启用状态创建、再 UPDATE 为禁用。
-// 原因是 WebhookEndpointRecord.IsEnabled 带 `default:true` 标签，
-// GORM 的 Create 会跳过 false 零值而落库成 true（既有行为，与本次改造无关）。
+// 这里直接首次创建为 false，验证 default:true 零值覆盖缺陷已被 repository 修复。
 func TestEmitSignal_Gated_DisabledWebhook_PersistsOnly(t *testing.T) {
 	svc, repo := setupEmitTest(t)
 	ctx := context.Background()
-	seedEnabledWebhook(t, repo, "u-off")
-	if err := repo.db.Model(&WebhookEndpointRecord{}).
-		Where("user_id = ?", "u-off").
-		Update("is_enabled", false).Error; err != nil {
-		t.Fatalf("disable webhook failed: %v", err)
+	disabled := WebhookEndpointRecord{
+		ID: "wh-u-off", UserID: "u-off", URL: "https://example.com/hook",
+		Channel: "wecom", IsEnabled: false, TimeoutMS: 3000,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if _, err := repo.SaveWebhookEndpoint(ctx, disabled); err != nil {
+		t.Fatalf("seed disabled webhook failed: %v", err)
 	}
 
 	event, err := svc.EmitSignal(ctx, EmitSignalInput{

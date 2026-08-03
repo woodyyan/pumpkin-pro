@@ -411,29 +411,52 @@ func (r *Repository) GetInvestmentProfile(ctx context.Context, userID string) (*
 }
 
 func (r *Repository) UpsertInvestmentProfile(ctx context.Context, record *InvestmentProfileRecord) error {
-	var existing InvestmentProfileRecord
-	err := r.db.WithContext(ctx).Where("user_id = ?", record.UserID).First(&existing).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return r.db.WithContext(ctx).Create(record).Error
-		}
-		return err
+	// 配置类字段必须使用 map 显式更新：用户将数值调回 0、或将 bool 调为 false
+	// 都是有效业务操作，不能被 GORM 的零值省略规则吞掉。
+	updateFields := map[string]any{
+		"total_capital":                record.TotalCapital,
+		"risk_preference":              record.RiskPreference,
+		"investment_goal":              record.InvestmentGoal,
+		"investment_horizon":           record.InvestmentHorizon,
+		"max_drawdown_pct":             record.MaxDrawdownPct,
+		"experience_level":             record.ExperienceLevel,
+		"default_fee_rate_ashare_buy":  record.DefaultFeeRateAShareBuy,
+		"default_fee_rate_ashare_sell": record.DefaultFeeRateAShareSell,
+		"default_fee_rate_hk_buy":      record.DefaultFeeRateHKBuy,
+		"default_fee_rate_hk_sell":     record.DefaultFeeRateHKSell,
+		"max_single_position_pct":      record.MaxSinglePositionPct,
+		"max_total_exposure_pct":       record.MaxTotalExposurePct,
+		"default_stop_loss_pct":        record.DefaultStopLossPct,
+		"personalization_enabled":      record.PersonalizationEnabled,
+		"note":                         record.Note,
+		"updated_at":                   record.UpdatedAt,
 	}
-	return r.db.WithContext(ctx).
-		Model(&InvestmentProfileRecord{}).
-		Where("user_id = ?", record.UserID).
-		Updates(map[string]any{
-			"total_capital":                record.TotalCapital,
-			"risk_preference":              record.RiskPreference,
-			"investment_goal":              record.InvestmentGoal,
-			"investment_horizon":           record.InvestmentHorizon,
-			"max_drawdown_pct":             record.MaxDrawdownPct,
-			"experience_level":             record.ExperienceLevel,
-			"default_fee_rate_ashare_buy":  record.DefaultFeeRateAShareBuy,
-			"default_fee_rate_ashare_sell": record.DefaultFeeRateAShareSell,
-			"default_fee_rate_hk_buy":      record.DefaultFeeRateHKBuy,
-			"default_fee_rate_hk_sell":     record.DefaultFeeRateHKSell,
-			"note":                         record.Note,
-			"updated_at":                   record.UpdatedAt,
-		}).Error
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing InvestmentProfileRecord
+		err := tx.Where("user_id = ?", record.UserID).First(&existing).Error
+		if err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+
+			// PersonalizationEnabled 带 default:true。普通 Create 会忽略 false 零值，
+			// 所以先保存用户意图，再在同一事务内显式回写该列。
+			desiredPersonalization := record.PersonalizationEnabled
+			if err := tx.Create(record).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&InvestmentProfileRecord{}).
+				Where("user_id = ?", record.UserID).
+				Updates(map[string]any{"personalization_enabled": desiredPersonalization}).Error; err != nil {
+				return err
+			}
+			record.PersonalizationEnabled = desiredPersonalization
+			return nil
+		}
+
+		return tx.Model(&InvestmentProfileRecord{}).
+			Where("user_id = ?", record.UserID).
+			Updates(updateFields).Error
+	})
 }

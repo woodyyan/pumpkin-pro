@@ -36,9 +36,19 @@ func (r *Repository) SaveWebhookEndpoint(ctx context.Context, record WebhookEndp
 		err := tx.Where("user_id = ?", record.UserID).First(&existing).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
+				// IsEnabled 带 default:true 标签。GORM Create 会跳过 false 零值，
+				// 因而数据库默认值可能把用户显式 false 覆盖为 true。
+				// 在同一事务内立即用 map 显式回写，确保外部不会看到中间值。
+				desiredEnabled := record.IsEnabled
 				if err := tx.Create(&record).Error; err != nil {
 					return translateWriteError(err)
 				}
+				if err := tx.Model(&WebhookEndpointRecord{}).Where("id = ?", record.ID).Updates(map[string]any{
+					"is_enabled": desiredEnabled,
+				}).Error; err != nil {
+					return translateWriteError(err)
+				}
+				record.IsEnabled = desiredEnabled
 				saved = record
 				return nil
 			}
@@ -100,9 +110,18 @@ func (r *Repository) SaveSymbolConfig(ctx context.Context, record SymbolSignalCo
 		err := tx.Where("user_id = ? AND symbol = ?", record.UserID, record.Symbol).First(&existing).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
+				// PositionAwareEnabled 带 default:true；首次创建也必须尊重用户显式 false。
+				// 用同一事务内的显式 map UPDATE 覆盖数据库默认值。
+				desiredPositionAware := record.PositionAwareEnabled
 				if err := tx.Create(&record).Error; err != nil {
 					return translateWriteError(err)
 				}
+				if err := tx.Model(&SymbolSignalConfigRecord{}).Where("id = ?", record.ID).Updates(map[string]any{
+					"position_aware_enabled": desiredPositionAware,
+				}).Error; err != nil {
+					return translateWriteError(err)
+				}
+				record.PositionAwareEnabled = desiredPositionAware
 				saved = record
 				return nil
 			}

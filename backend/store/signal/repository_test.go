@@ -102,6 +102,56 @@ func TestSignalRepo_WebhookEndpointCRUD(t *testing.T) {
 	}
 }
 
+// 回归：WebhookEndpointRecord.IsEnabled 带 default:true，首次创建时显式 false 必须写入。
+func TestSignalRepo_WebhookCreate_ExplicitFalsePersists(t *testing.T) {
+	repo, cleanup := setupSignalTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	record := makeWebhookRecord("user-wh-disabled")
+	record.IsEnabled = false
+	saved, err := repo.SaveWebhookEndpoint(ctx, record)
+	if err != nil {
+		t.Fatalf("SaveWebhookEndpoint failed: %v", err)
+	}
+	if saved.IsEnabled {
+		t.Fatal("首次创建显式 false 不应被 default:true 覆盖")
+	}
+
+	found, err := repo.GetWebhookEndpoint(ctx, record.UserID)
+	if err != nil {
+		t.Fatalf("GetWebhookEndpoint failed: %v", err)
+	}
+	if found.IsEnabled {
+		t.Fatal("数据库回读应保留 IsEnabled=false")
+	}
+}
+
+// 回归：首次创建单票配置时，用户显式关闭持仓感知必须有效。
+func TestSignalRepo_SymbolConfigCreate_ExplicitPositionAwareFalsePersists(t *testing.T) {
+	repo, cleanup := setupSignalTest(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	record := makeSignalConfigRecord("user-sc-position-off", "000001.SZ")
+	record.PositionAwareEnabled = false
+	saved, err := repo.SaveSymbolConfig(ctx, record)
+	if err != nil {
+		t.Fatalf("SaveSymbolConfig failed: %v", err)
+	}
+	if saved.PositionAwareEnabled {
+		t.Fatal("首次创建显式 false 不应被 default:true 覆盖")
+	}
+
+	found, err := repo.GetSymbolConfig(ctx, record.UserID, record.Symbol)
+	if err != nil {
+		t.Fatalf("GetSymbolConfig failed: %v", err)
+	}
+	if found.PositionAwareEnabled {
+		t.Fatal("数据库回读应保留 PositionAwareEnabled=false")
+	}
+}
+
 func TestSignalRepo_GetWebhookEndpoint_NotFound(t *testing.T) {
 	repo, cleanup := setupSignalTest(t)
 	defer cleanup()

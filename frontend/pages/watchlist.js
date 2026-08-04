@@ -63,11 +63,13 @@ export default function WatchlistPage() {
 
   const loadSignalConfigs = async () => {
     try {
-      const data = await requestJson('/api/signal-configs')
+      // 信号中心订阅体系：任一启用订阅即展示「信号」角标。
+      const data = await requestJson('/api/signal/subscriptions')
       const items = Array.isArray(data?.items) ? data.items : []
       const map = {}
-      for (const cfg of items) {
-        if (cfg?.symbol) map[cfg.symbol] = cfg
+      for (const sub of items) {
+        if (!sub?.symbol) continue
+        map[sub.symbol] = { is_enabled: Boolean(map[sub.symbol]?.is_enabled) || Boolean(sub.is_enabled) }
       }
       setSignalConfigMap(map)
     } catch {

@@ -783,6 +783,7 @@ func TestHandleStrategyDelete_WithRefs_Returns409(t *testing.T) {
 	testutil.AutoMigrateModels(t, db,
 		&strategy.StrategyRecord{},
 		&signal.SymbolSignalConfigRecord{},
+		&signal.SignalSubscriptionRecord{},
 		&quadrant.QuadrantScoreRecord{},
 	)
 

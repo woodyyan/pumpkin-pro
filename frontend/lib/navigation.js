@@ -24,6 +24,7 @@ export const NAV_GROUPS = [
     label: '跟踪',
     items: [
       { key: 'watchlist', href: '/watchlist', label: '自选股', matchNested: true },
+      { key: 'signal-center', href: '/signals', label: '信号中心', badgeKey: 'signal', matchNested: true },
       { key: 'portfolio-tracking', href: '/portfolio-tracking', label: '组合跟踪', matchNested: true },
       { key: 'portfolio', href: '/portfolio', label: '持仓管理', matchNested: true },
     ],
@@ -80,10 +81,15 @@ export function isNavItemActive(currentPath, item) {
   return false
 }
 
-export function buildNavigationState(currentPath, unreadCount = 0) {
+export function buildNavigationState(currentPath, unreadCount = 0, signalUnreadCount = 0) {
   const groups = NAV_GROUPS.map((group) => {
     const items = group.items.map((item) => {
-      const badge = item.badgeKey === 'changelog' ? formatNavBadgeCount(unreadCount) : null
+      let badge = null
+      if (item.badgeKey === 'changelog') {
+        badge = formatNavBadgeCount(unreadCount)
+      } else if (item.badgeKey === 'signal') {
+        badge = formatNavBadgeCount(signalUnreadCount)
+      }
       return {
         ...item,
         isActive: isNavItemActive(currentPath, item),

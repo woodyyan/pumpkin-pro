@@ -15,8 +15,8 @@ import { buildNavigationState } from '../lib/navigation'
  *
  * 桌面端不渲染本组件（md:hidden），桌面导航由 DesktopNavMenu 负责，保持不变。
  */
-export default function MobileNavMenu({ open, currentPath, unreadCount, onClose }) {
-  const { groups } = buildNavigationState(currentPath, unreadCount)
+export default function MobileNavMenu({ open, currentPath, unreadCount, signalUnreadCount, onClose }) {
+  const { groups } = buildNavigationState(currentPath, unreadCount, signalUnreadCount)
   const [mounted, setMounted] = useState(false)
 
   // 延迟一帧再上滑入态，保证 transition 生效（先挂载在屏幕外，再过渡进来）。

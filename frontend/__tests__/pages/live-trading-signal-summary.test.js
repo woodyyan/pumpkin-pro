@@ -5,20 +5,29 @@ import { readFileSync } from 'node:fs'
 const pageSource = readFileSync(new URL('../../pages/live-trading/[symbol].js', import.meta.url), 'utf8')
 
 describe('live trading signal summary section', () => {
-  it('keeps trading signal configuration visible by default inside portfolio tab', () => {
-    const signalStart = pageSource.indexOf('Inline signal config')
+  it('keeps a read-only signal summary with entry to signal center inside portfolio tab', () => {
+    const signalStart = pageSource.indexOf('信号摘要（完整配置已迁入信号中心')
     assert.notEqual(signalStart, -1)
     const signalSegment = pageSource.slice(signalStart, pageSource.indexOf('{isPortfolioTab && !privateAccessReady', signalStart))
 
     assert.match(signalSegment, /交易信号/)
-    assert.match(signalSegment, /signalStatusSummary/)
-    assert.match(signalSegment, /signalConfigMeta.map/)
-    assert.match(signalSegment, /role="switch"/)
-    assert.match(signalSegment, /保存配置/)
+    assert.match(signalSegment, /signalSummaryText/)
+    assert.match(signalSegment, /\/signals\?symbol=/)
+    assert.match(signalSegment, /管理信号|开启信号/)
   })
 
-  it('removes the expand or collapse state and button for signal config', () => {
-    assert.doesNotMatch(pageSource, /signalConfigExpanded/)
-    assert.doesNotMatch(pageSource, /展开配置|收起配置/)
+  it('no longer embeds the legacy inline signal config editor', () => {
+    assert.ok(!pageSource.includes('Inline signal config'))
+    assert.ok(!pageSource.includes('signalConfigMeta'))
+    assert.ok(!pageSource.includes('handleToggleSignal'))
+    assert.ok(!pageSource.includes('handleSaveSignalConfig'))
+    assert.ok(!pageSource.includes('lib/signal-config-ui'))
+    assert.ok(!pageSource.includes("/api/signal-configs"))
+  })
+
+  it('loads per-symbol subscription summary from the signal center API', () => {
+    assert.ok(pageSource.includes("requestJson('/api/signal/subscriptions')"))
+    assert.ok(pageSource.includes('loadSignalSummary'))
+    assert.ok(pageSource.includes('lib/signal-center-ui'))
   })
 })

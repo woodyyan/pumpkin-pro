@@ -2,6 +2,7 @@ package analysis_history
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -187,11 +188,16 @@ func (r *Repository) SaveFromAPIResponse(ctx context.Context, userID, symbol, sy
 	return r.Create(ctx, record)
 }
 
-// generateUUID 简易 UUID v4（不需要引入额外依赖）
+// generateUUID UUID v4（crypto/rand 真随机）。
+// 历史实现用 time.Now().UnixNano() 位移构造，同一纳秒窗口内多次调用会产生
+// 完全相同 ID（且末 6 字节恒为 0），曾导致记录插入 UNIQUE 冲突。
 func generateUUID() string {
 	b := make([]byte, 16)
-	for i := range b {
-		b[i] = byte(time.Now().UnixNano() >> uint(i*7) & 0xff)
+	if _, err := rand.Read(b); err != nil {
+		// 极端兜底：crypto/rand 不可用几乎不可能发生，退化为纳秒+随机种子拼接。
+		return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+			uint32(time.Now().UnixNano()), uint16(time.Now().UnixNano()>>32), uint16(time.Now().UnixNano()>>16)|0x4000,
+			uint16(time.Now().UnixNano()>>8)|0x8000, uint64(time.Now().UnixNano())&0xffffffffffff)
 	}
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant 10

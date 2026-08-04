@@ -1319,13 +1319,13 @@ func (a *appServer) handleStrategyDetail(w http.ResponseWriter, r *http.Request,
 			return
 		}
 
-		refCount, err := a.signalService.CountSymbolConfigRefsByStrategy(r.Context(), userID, strategyID)
+		refCount, err := a.signalService.CountSignalRefsByStrategy(r.Context(), userID, strategyID)
 		if err != nil {
 			a.writeSignalError(w, err)
 			return
 		}
 		if refCount > 0 {
-			refs, refErr := a.signalService.ListSymbolConfigRefs(r.Context(), userID, strategyID)
+			refs, refErr := a.signalService.ListSignalRefs(r.Context(), userID, strategyID)
 			if refErr != nil {
 				a.writeSignalError(w, refErr)
 				return
@@ -1446,48 +1446,11 @@ func (a *appServer) handleSignalConfigSubroutes(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	symbol := suffix
 	switch r.Method {
-	case http.MethodPut:
-		payload, err := decodeBodyAsMap(r)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "信号配置请求格式错误")
-			return
-		}
-		input := signal.SymbolSignalConfigInput{
-			StrategyID:          asString(payload["strategy_id"]),
-			IsEnabled:           asBoolPtr(payload["is_enabled"]),
-			CooldownSeconds:     asInt(payload["cooldown_seconds"]),
-			EvalIntervalSeconds: asInt(payload["eval_interval_seconds"]),
-			Thresholds:          asMap(payload["thresholds"]),
-
-			// 持仓感知 / 风控：指针语义区分"未传保持原值"与"显式 0 关闭规则"
-			PositionAwareEnabled: asBoolPtr(payload["position_aware_enabled"]),
-			MaxPositionPct:       asFloat64Ptr(payload["max_position_pct"]),
-			MaxAddTimes:          asIntPtr(payload["max_add_times"]),
-			StopLossPct:          asFloat64Ptr(payload["stop_loss_pct"]),
-			TrailingStopPct:      asFloat64Ptr(payload["trailing_stop_pct"]),
-		}
-
-		if strings.TrimSpace(input.StrategyID) != "" {
-			if _, err := a.strategyService.GetByID(r.Context(), currentUserID(r), input.StrategyID); err != nil {
-				a.writeStrategyError(w, err)
-				return
-			}
-		}
-
-		item, err := a.signalService.UpsertSymbolConfig(r.Context(), currentUserID(r), symbol, input)
-		if err != nil {
-			a.writeSignalError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"item": item})
-	case http.MethodDelete:
-		if err := a.signalService.DeleteSymbolConfig(r.Context(), currentUserID(r), symbol); err != nil {
-			a.writeSignalError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "symbol": strings.ToUpper(symbol)})
+	case http.MethodPut, http.MethodDelete:
+		// 旧单股信号配置已迁移为「信号中心」订阅体系，旧写接口转为只读兼容：
+		// GET 保留给存量前端读取，写操作引导到新订阅 API。
+		writeError(w, http.StatusGone, "信号配置已升级为信号中心，请使用 /api/signal/subscriptions 管理")
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "Only PUT, DELETE and POST methods are allowed")
 	}
@@ -1506,6 +1469,161 @@ func (a *appServer) handleSignalEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// ── 信号中心（模板 + 订阅 + 双状态事件流）──
+
+func (a *appServer) handleSignalTemplates(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	items, err := a.signalService.ListSignalTemplates(r.Context())
+	if err != nil {
+		a.writeSignalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *appServer) handleSignalSubscriptions(w http.ResponseWriter, r *http.Request) {
+	userID := currentUserID(r)
+	switch r.Method {
+	case http.MethodGet:
+		items, err := a.signalService.ListSubscriptions(r.Context(), userID)
+		if err != nil {
+			a.writeSignalError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	case http.MethodPost:
+		payload, err := decodeBodyAsMap(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "信号订阅请求格式错误")
+			return
+		}
+		input := signal.SignalSubscriptionInput{
+			TemplateKey:         asString(payload["template_key"]),
+			StrategyID:          asString(payload["strategy_id"]),
+			ScopeType:           asString(payload["scope_type"]),
+			Symbol:              asString(payload["symbol"]),
+			Params:              asMap(payload["params"]),
+			IsEnabled:           asBoolPtr(payload["is_enabled"]),
+			EvalIntervalSeconds: asInt(payload["eval_interval_seconds"]),
+			CooldownSeconds:     asInt(payload["cooldown_seconds"]),
+		}
+		// 策略模板：策略存在性校验（与旧信号配置同一口径）。
+		if strings.TrimSpace(input.StrategyID) != "" {
+			if _, err := a.strategyService.GetByID(r.Context(), userID, input.StrategyID); err != nil {
+				a.writeStrategyError(w, err)
+				return
+			}
+		}
+		item, err := a.signalService.CreateSubscription(r.Context(), userID, input)
+		if err != nil {
+			a.writeSignalError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"item": item})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Only GET and POST methods are allowed")
+	}
+}
+
+func (a *appServer) handleSignalSubscriptionSubroutes(w http.ResponseWriter, r *http.Request) {
+	suffix := strings.TrimPrefix(r.URL.Path, "/api/signal/subscriptions/")
+	id := strings.Trim(strings.TrimSpace(suffix), "/")
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	userID := currentUserID(r)
+	switch r.Method {
+	case http.MethodPut:
+		payload, err := decodeBodyAsMap(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "信号订阅请求格式错误")
+			return
+		}
+		input := signal.SignalSubscriptionUpdateInput{
+			Params:               asMap(payload["params"]),
+			IsEnabled:            asBoolPtr(payload["is_enabled"]),
+			EvalIntervalSeconds:  asIntPtr(payload["eval_interval_seconds"]),
+			CooldownSeconds:      asIntPtr(payload["cooldown_seconds"]),
+			PositionAwareEnabled: asBoolPtr(payload["position_aware_enabled"]),
+			MaxPositionPct:       asFloat64Ptr(payload["max_position_pct"]),
+			MaxAddTimes:          asIntPtr(payload["max_add_times"]),
+			StopLossPct:          asFloat64Ptr(payload["stop_loss_pct"]),
+			TrailingStopPct:      asFloat64Ptr(payload["trailing_stop_pct"]),
+		}
+		item, err := a.signalService.UpdateSubscription(r.Context(), userID, id, input)
+		if err != nil {
+			a.writeSignalError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"item": item})
+	case http.MethodDelete:
+		if err := a.signalService.DeleteSubscription(r.Context(), userID, id); err != nil {
+			a.writeSignalError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "id": id})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Only PUT and DELETE methods are allowed")
+	}
+}
+
+// handleSignalEventsV2 信号中心事件流：支持 symbol / bar_state / side 过滤。
+func (a *appServer) handleSignalEventsV2(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	query := r.URL.Query()
+	items, err := a.signalService.ListSignalEventsFiltered(
+		r.Context(),
+		currentUserID(r),
+		strings.TrimSpace(query.Get("symbol")),
+		strings.TrimSpace(query.Get("bar_state")),
+		strings.TrimSpace(query.Get("side")),
+		parseLimit(query.Get("limit"), 50),
+	)
+	if err != nil {
+		a.writeSignalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *appServer) handleSignalEventsUnreadCount(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	count, err := a.signalService.CountUnreadEvents(r.Context(), currentUserID(r))
+	if err != nil {
+		a.writeSignalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"unread_count": count})
+}
+
+func (a *appServer) handleSignalEventsMarkRead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
+		return
+	}
+	payload, err := decodeBodyAsMap(r)
+	if err != nil {
+		// 允许空 body（标记全部已读）。
+		payload = map[string]any{}
+	}
+	marked, err := a.signalService.MarkEventsRead(r.Context(), currentUserID(r), asString(payload["symbol"]))
+	if err != nil {
+		a.writeSignalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"marked": marked})
 }
 
 func (a *appServer) handleWebhookDeliveries(w http.ResponseWriter, r *http.Request) {
@@ -4083,6 +4201,14 @@ func main() {
 	})
 	signalService.StartDispatcher(context.Background())
 
+	// 旧 symbol_signal_configs → 信号订阅的一次性迁移（幂等，旧表只读保留）。
+	if report, err := signalService.MigrateSymbolConfigsToSubscriptions(context.Background()); err != nil {
+		log.Printf("[signal-migrate] migration failed: %v", err)
+	} else if report.LegacyTotal > 0 {
+		log.Printf("[signal-migrate] legacy=%d enabled=%d created=%d skipped=%d failed=%d",
+			report.LegacyTotal, report.LegacyEnabled, report.Created, report.Skipped, report.Failed)
+	}
+
 	portfolioRepo := portfolio.NewRepository(storeInstance.DB)
 	portfolioService := portfolio.NewService(portfolioRepo)
 	portfolioWorker := portfolio.NewWorker(portfolioService, portfolio.WorkerConfig{
@@ -4242,6 +4368,22 @@ func main() {
 	})
 	signalEvaluator.Start(context.Background())
 
+	// 收盘确认 worker：A 股 15:10 / 港股 16:10（北京时间）产出 close_confirmed 事件。
+	signalCloseConfirmer := signal.NewCloseConfirmer(signalEvaluator, signal.CloseConfirmerConfig{
+		Enabled:      cfg.SignalCloseConfirm.Enabled,
+		AShareHour:   cfg.SignalCloseConfirm.AShareHour,
+		AShareMinute: cfg.SignalCloseConfirm.AShareMinute,
+		HKHour:       cfg.SignalCloseConfirm.HKHour,
+		HKMinute:     cfg.SignalCloseConfirm.HKMinute,
+	})
+	signalCloseConfirmer.Start(context.Background())
+
+	// 价格提醒 pricer：实时快照比对（涨破/跌破/单日涨跌幅），1 分钟 tick。
+	signalPricer := signal.NewPricer(signalService, liveService, signal.PricerConfig{
+		PositionReader: signalPositionReader,
+	})
+	signalPricer.Start(context.Background())
+
 	factorLabRepo := factorlab.NewRepository(storeInstance.DB)
 	factorLabService := factorlab.NewService(factorLabRepo)
 	factorIndexRepo := factorindex.NewRepository(storeInstance.DB)
@@ -4370,6 +4512,13 @@ func main() {
 	mux.HandleFunc("/api/signal-configs", server.withRequiredAuth(server.handleSignalConfigs))
 	mux.HandleFunc("/api/signal-configs/", server.withRequiredAuth(server.handleSignalConfigSubroutes))
 	mux.HandleFunc("/api/signal-events", server.withRequiredAuth(server.handleSignalEvents))
+	// 信号中心（模板 + 订阅 + 双状态事件流）
+	mux.HandleFunc("/api/signal/templates", server.withRequiredAuth(server.handleSignalTemplates))
+	mux.HandleFunc("/api/signal/subscriptions", server.withRequiredAuth(server.handleSignalSubscriptions))
+	mux.HandleFunc("/api/signal/subscriptions/", server.withRequiredAuth(server.handleSignalSubscriptionSubroutes))
+	mux.HandleFunc("/api/signal/events", server.withRequiredAuth(server.handleSignalEventsV2))
+	mux.HandleFunc("/api/signal/events/unread-count", server.withRequiredAuth(server.handleSignalEventsUnreadCount))
+	mux.HandleFunc("/api/signal/events/mark-read", server.withRequiredAuth(server.handleSignalEventsMarkRead))
 	mux.HandleFunc("/api/webhook-deliveries", server.withRequiredAuth(server.handleWebhookDeliveries))
 	mux.HandleFunc("/api/portfolio", server.withRequiredAuth(server.handlePortfolioList))
 	mux.HandleFunc("/api/portfolio/", server.withRequiredAuth(server.handlePortfolioBySymbol))

@@ -24,37 +24,6 @@ import {
 } from '../lib/notification.js'
 import Head from 'next/head'
 
-const WEBHOOK_CHANNEL_OPTIONS = [
-  {
-    value: 'wecom',
-    label: '企业微信',
-    docLabel: '企业微信 Webhook 配置教程',
-    docHref: 'https://open.work.weixin.qq.com/help2/pc/14931',
-    payloadPreview: {
-      msgtype: 'text',
-      text: {
-        content: '股票交易信号来啦！\n类型：正式信号\n股票：00700.HK\n方向：BUY\n时间：2026-03-30 18:00:00\n策略：均线金叉策略\n原因：策略触发原因说明',
-      },
-    },
-  },
-  {
-    value: 'feishu',
-    label: '飞书',
-    docLabel: '飞书 Webhook 配置教程',
-    docHref: 'https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot?lang=zh-CN',
-    payloadPreview: {
-      msg_type: 'text',
-      content: {
-        text: '股票交易信号来啦！\n类型：正式信号\n股票：00700.HK\n方向：BUY\n时间：2026-03-30 18:00:00\n策略：均线金叉策略\n原因：策略触发原因说明',
-      },
-    },
-  },
-]
-
-function getWebhookChannelMeta(channel) {
-  return WEBHOOK_CHANNEL_OPTIONS.find((item) => item.value === channel) || WEBHOOK_CHANNEL_OPTIONS[0]
-}
-
 function createInvestForm(profile = null) {
   return {
     total_capital: profile?.total_capital ? String(profile.total_capital) : '',
@@ -73,22 +42,8 @@ function createInvestForm(profile = null) {
 
 export default function SettingsPage() {
   const { openAuthModal, isLoggedIn, ready, user } = useAuth()
-  const [webhookConfig, setWebhookConfig] = useState({
-    url: '',
-    channel: 'wecom',
-    has_secret: false,
-    is_enabled: true,
-    timeout_ms: 3000,
-    updated_at: '',
-  })
-  const [secretInput, setSecretInput] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
-  const [latestDelivery, setLatestDelivery] = useState(null)
-  const [deliveryItems, setDeliveryItems] = useState([])
   const [investProfile, setInvestProfile] = useState(null)
   const [investForm, setInvestForm] = useState(() => createInvestForm())
   const [investSaving, setInvestSaving] = useState(false)
@@ -102,53 +57,10 @@ export default function SettingsPage() {
   const [notifPrefs, setNotifPrefs] = useState(() => loadNotificationPreferences())
   const [notifSupported, setNotifSupported] = useState(false)
   const authIdentityKey = String(user?.id || user?.email || '')
-  const webhookChannelMeta = getWebhookChannelMeta(webhookConfig.channel)
 
   const applyError = (err, fallbackText) => {
-    setNotice('')
     setError(err.message || fallbackText)
     setErrorNeedsLogin(isAuthRequiredError(err))
-  }
-
-  const loadWebhookConfig = async () => {
-    const data = await requestJson('/api/webhook')
-    const item = data?.item || null
-    if (!item) {
-      setWebhookConfig({
-        url: '',
-        channel: 'wecom',
-        has_secret: false,
-        is_enabled: true,
-        timeout_ms: 3000,
-        updated_at: '',
-      })
-      return
-    }
-
-    setWebhookConfig({
-      url: item.url || '',
-      channel: item.channel || 'wecom',
-      has_secret: Boolean(item.has_secret),
-      is_enabled: item.is_enabled !== false,
-      timeout_ms: Number(item.timeout_ms) > 0 ? Number(item.timeout_ms) : 3000,
-      updated_at: item.updated_at || '',
-    })
-  }
-
-  const loadDeliveries = async () => {
-    const latestPromise = requestJson('/api/webhook-deliveries/latest').catch((err) => {
-      if (err?.status === 404) {
-        return { item: null }
-      }
-      throw err
-    })
-
-    const [latestData, listData] = await Promise.all([
-      latestPromise,
-      requestJson('/api/webhook-deliveries?limit=20'),
-    ])
-    setLatestDelivery(latestData?.item || null)
-    setDeliveryItems(Array.isArray(listData?.items) ? listData.items : [])
   }
 
   const loadInvestmentProfile = async () => {
@@ -167,7 +79,7 @@ export default function SettingsPage() {
   const loadPage = async () => {
     try {
       setError('')
-      await Promise.all([loadWebhookConfig(), loadDeliveries(), loadInvestmentProfile()])
+      await loadInvestmentProfile()
     } catch (err) {
       applyError(err, '加载设置失败')
     }
@@ -181,22 +93,10 @@ export default function SettingsPage() {
     if (!ready) return
 
     if (!isLoggedIn) {
-      setWebhookConfig({
-        url: '',
-        channel: 'wecom',
-        has_secret: false,
-        is_enabled: true,
-        timeout_ms: 3000,
-        updated_at: '',
-      })
-      setSecretInput('')
-      setLatestDelivery(null)
-      setDeliveryItems([])
       setInvestProfile(null)
       setInvestForm(createInvestForm())
       clearInvestmentProfileCache()
       setInvestNotice('')
-      setNotice('')
       setError('')
       setErrorNeedsLogin(false)
       return
@@ -206,70 +106,11 @@ export default function SettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, isLoggedIn, authIdentityKey])
 
-  const handleSaveWebhook = async () => {
-    setSaving(true)
-    setNotice('')
-    setError('')
-
-    try {
-      const result = await requestJson('/api/webhook', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: webhookConfig.url,
-          channel: webhookConfig.channel,
-          secret: secretInput,
-          is_enabled: webhookConfig.is_enabled,
-          timeout_ms: Number(webhookConfig.timeout_ms) || 3000,
-        }),
-      })
-
-      const item = result?.item || null
-      if (item) {
-        setWebhookConfig({
-          url: item.url || '',
-          channel: item.channel || 'wecom',
-          has_secret: Boolean(item.has_secret),
-          is_enabled: item.is_enabled !== false,
-          timeout_ms: Number(item.timeout_ms) > 0 ? Number(item.timeout_ms) : 3000,
-          updated_at: item.updated_at || '',
-        })
-      }
-      setSecretInput('')
-      setNotice('Webhook 配置已保存')
-    } catch (err) {
-      applyError(err, '保存 Webhook 配置失败')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleTestWebhook = async () => {
-    setTesting(true)
-    setNotice('')
-    setError('')
-
-    try {
-      await requestJson('/api/webhook/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: '00700.HK', side: 'BUY' }),
-      })
-      await loadDeliveries()
-      setNotice('测试 Webhook 已送达，请查看下方投递结果')
-    } catch (err) {
-      await loadDeliveries().catch(() => null)
-      applyError(err, '测试 Webhook 未送达')
-    } finally {
-      setTesting(false)
-    }
-  }
-
   return (
     <div className="space-y-6">
       <Head>
         <title>设置 — 卧龙AI量化交易台</title>
-        <meta name="description" content="卧龙AI量化交易台设置 — 管理 Webhook 推送配置、信号通知偏好、投资画像等个人设置。" />
+        <meta name="description" content="卧龙AI量化交易台设置 — 管理信号通知偏好、投资画像等个人设置。机器人推送配置已迁入信号中心。" />
         <link rel="canonical" href="https://wolongtrader.top/settings" />
       </Head>
       <section className="rounded-2xl border border-border bg-card p-8">
@@ -278,6 +119,21 @@ export default function SettingsPage() {
           <CommunityQRCard variant="inline" />
         </div>
       </section>
+
+      {error ? (
+        <div className="rounded-xl border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-negative">
+          <div>{error}</div>
+          {errorNeedsLogin ? (
+            <button
+              type="button"
+              onClick={() => openAuthModal('login', '该操作需要登录后才能继续。')}
+              className="mt-2 inline-flex rounded-lg border border-negative/40 px-2.5 py-1 text-xs text-negative transition hover:bg-negative/15"
+            >
+              去登录
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Investment Profile */}
       <section className="rounded-2xl border border-border bg-card p-5">
@@ -556,194 +412,21 @@ export default function SettingsPage() {
         </section>
       )}
 
+      {/* Webhook 推送已迁入信号中心（spec signal-center） */}
       <section className="rounded-2xl border border-border bg-card p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-foreground">Webhook 推送配置</h2>
+            <h2 className="text-base font-semibold text-foreground">信号通知</h2>
             <p className="mt-1 text-xs text-foreground-muted">
-              用于接收所有股票的网站信号。当前支持企业微信和飞书机器人。Secret签名为可选。
-              不知道如何获取 Webhook 地址？可参考
-              <a href="https://open.work.weixin.qq.com/help2/pc/14931" target="_blank" rel="noopener noreferrer" className="ml-0.5 text-primary/80 underline underline-offset-2 hover:text-primary">企业微信 Webhook 配置教程</a>
-              {' '}或
-              <a href="https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot?lang=zh-CN" target="_blank" rel="noopener noreferrer" className="ml-0.5 text-primary/80 underline underline-offset-2 hover:text-primary">飞书 Webhook 配置教程</a>。
+              站内提醒默认开启，无需配置；企业微信/飞书机器人推送与投递记录已迁入「信号中心 → 通知设置」。
             </p>
           </div>
-          <div className="text-xs text-foreground-dim">
-            {webhookConfig.updated_at ? `配置更新时间：${formatDateTime(webhookConfig.updated_at)}` : '未配置'}
-          </div>
-        </div>
-
-        {error ? (
-          <div className="mt-3 rounded-xl border border-negative/40 bg-negative/10 px-4 py-3 text-sm text-negative">
-            <div>{error}</div>
-            {errorNeedsLogin ? (
-              <button
-                type="button"
-                onClick={() => openAuthModal('login', 'Webhook 配置需要登录后才能继续。')}
-                className="mt-2 inline-flex rounded-lg border border-negative/40 px-2.5 py-1 text-xs text-negative transition hover:bg-negative/15"
-              >
-                去登录
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-
-        {notice ? (
-          <div className="mt-3 rounded-xl border border-emerald-400/40 bg-positive/10 px-4 py-3 text-sm text-positive">{notice}</div>
-        ) : null}
-
-        <div className="mt-4 space-y-3 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
-          <div>
-            <div className="mb-2 text-xs text-foreground-dim">推送渠道</div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {WEBHOOK_CHANNEL_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setWebhookConfig((prev) => ({ ...prev, channel: option.value }))}
-                  className={
-                    webhookConfig.channel === option.value
-                      ? 'rounded-lg border border-primary bg-primary/10 px-3 py-2 text-left transition shadow-[0_0_0_1px_rgba(230,126,34,0.2)]'
-                      : 'rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-2 text-left transition hover:border-[var(--color-border-strong)]'
-                  }
-                >
-                  <div className="text-sm font-medium text-foreground">{option.label}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <input
-            value={webhookConfig.url}
-            onChange={(event) => setWebhookConfig((prev) => ({ ...prev, url: event.target.value.trim() }))}
-            placeholder="https://example.com/webhook"
-            className="w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
-          />
-
-          <input
-            value={secretInput}
-            onChange={(event) => setSecretInput(event.target.value)}
-            placeholder={webhookConfig.has_secret ? '留空表示不修改 Secret；输入可更新签名密钥' : '可选：输入机器人签名密钥；留空则不启用签名'}
-            className="w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
-          />
-
-          <div className="text-xs text-foreground-dim">
-            当前签名状态：{webhookConfig.has_secret ? <span className="text-positive">已启用</span> : <span className="text-amber-300">未启用（可选）</span>}
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="text-xs text-foreground-muted">
-              超时（毫秒）
-              <input
-                type="number"
-                min={1000}
-                max={10000}
-                value={webhookConfig.timeout_ms}
-                onChange={(event) => setWebhookConfig((prev) => ({ ...prev, timeout_ms: Number(event.target.value) || 3000 }))}
-                className="mt-1 w-full rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary"
-              />
-            </label>
-
-            <label className="flex items-end gap-2 text-sm text-foreground-muted">
-              <input
-                type="checkbox"
-                checked={webhookConfig.is_enabled}
-                onChange={(event) => setWebhookConfig((prev) => ({ ...prev, is_enabled: event.target.checked }))}
-              />
-              启用 Webhook 推送
-            </label>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={saving}
-              onClick={handleSaveWebhook}
-              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? '保存中...' : '保存 Webhook'}
-            </button>
-            <button
-              type="button"
-              disabled={testing}
-              onClick={handleTestWebhook}
-              className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground-muted transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {testing ? '送达校验中...' : '验证 Webhook 送达'}
-            </button>
-          </div>
-
-          <details className="mt-3 rounded-lg border border-border/80 bg-[var(--color-bg-overlay)] p-3">
-            <summary className="cursor-pointer text-xs font-medium text-foreground-muted">查看触发条件与 Payload 模板</summary>
-            <div className="mt-3 space-y-3 text-xs text-foreground-muted">
-              <div className="space-y-1">
-                <div>推送渠道：当前为 {webhookChannelMeta.label} 机器人。</div>
-                <div>评估周期：系统每小时自动评估一次已开启信号的股票策略。</div>
-                <div>失败重试：最多 4 次，退避间隔 1 分钟 / 5 分钟 / 15 分钟。</div>
-              </div>
-              <div>
-                <div className="mb-1 text-foreground-muted">Payload 模板（系统自动生成）</div>
-                <pre className="overflow-x-auto rounded-lg border border-border/80 bg-[var(--color-bg-overlay)] p-2 text-[11px] leading-5 text-positive">
-                  {JSON.stringify(webhookChannelMeta.payloadPreview, null, 2)}
-                </pre>
-              </div>
-            </div>
-          </details>
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-border bg-card p-5">
-        <h2 className="text-base font-semibold text-foreground">Webhook 投递可观测</h2>
-
-        <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
-          <div className="space-y-3 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
-            <div className="text-sm font-semibold text-foreground">最近发送状态</div>
-            {!latestDelivery ? (
-              <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-foreground-dim">暂无投递记录</div>
-            ) : (
-              <div className="space-y-2 text-xs text-foreground-muted">
-                <div>标的：{latestDelivery.symbol || '--'}</div>
-                <div>状态：<span className={deliveryStatusColor(latestDelivery.status)}>{formatDeliveryStatus(latestDelivery.status)}</span></div>
-                <div>HTTP：{latestDelivery.http_status || '--'} · 耗时：{latestDelivery.latency_ms ?? '--'}ms</div>
-                <div>时间：{formatDateTime(latestDelivery.updated_at)}</div>
-                {latestDelivery.error_message ? <div className="text-negative">错误：{latestDelivery.error_message}</div> : null}
-              </div>
-            )}
-          </div>
-
-          {!deliveryItems.length ? (
-            <div className="space-y-2 rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
-              <div className="text-sm font-semibold text-foreground">最近 20 次投递</div>
-              <div className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-foreground-dim">暂无投递记录</div>
-            </div>
-          ) : (
-            <details className="group rounded-xl border border-border bg-[var(--color-bg-hover)] p-4">
-              <summary className="flex cursor-pointer list-none items-start justify-between gap-3 [&::-webkit-details-marker]:hidden">
-                <div>
-                  <div className="text-sm font-semibold text-foreground">最近 20 次投递</div>
-                  <div className="mt-1 text-xs text-foreground-dim">默认收起，点开后查看最近的投递记录。</div>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-foreground-dim">
-                  <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-foreground-muted">{deliveryItems.length} 条</span>
-                  <span className="group-open:hidden">展开</span>
-                  <span className="hidden group-open:inline">收起</span>
-                </div>
-              </summary>
-
-              <div className="mt-3 space-y-2 border-t border-border pt-3">
-                {deliveryItems.map((item) => (
-                  <div key={`${item.event_id}-${item.updated_at}`} className="rounded-lg border border-border bg-[var(--color-bg-overlay)] px-3 py-2 text-xs text-foreground-muted">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="font-medium text-foreground">{item.symbol || '--'} · {item.event_id}</div>
-                      <div className={deliveryStatusColor(item.status)}>{formatDeliveryStatus(item.status)}</div>
-                    </div>
-                    <div className="mt-1">Attempt {item.attempt_no} · HTTP {item.http_status || '--'} · {item.latency_ms ?? '--'}ms · {formatDateTime(item.updated_at)}</div>
-                    {item.error_message ? <div className="mt-1 text-negative">{item.error_message}</div> : null}
-                  </div>
-                ))}
-              </div>
-            </details>
-          )}
+          <a
+            href="/signals"
+            className="inline-flex shrink-0 items-center justify-center rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-black transition hover:opacity-90"
+          >
+            前往信号中心
+          </a>
         </div>
       </section>
 
@@ -850,26 +533,6 @@ export default function SettingsPage() {
       </section>
     </div>
   )
-}
-
-function formatDeliveryStatus(status) {
-  const normalized = String(status || '').trim().toLowerCase()
-  const labels = {
-    pending: '待发送',
-    processing: '发送中',
-    retrying: '重试中',
-    delivered: '已送达',
-    failed: '已失败',
-  }
-  return labels[normalized] || normalized || '--'
-}
-
-function deliveryStatusColor(status) {
-  const normalized = String(status || '').trim().toLowerCase()
-  if (normalized === 'delivered') return 'text-positive'
-  if (normalized === 'failed') return 'text-negative'
-  if (normalized === 'retrying') return 'text-amber-300'
-  return 'text-foreground-muted'
 }
 
 function formatDateTime(value) {

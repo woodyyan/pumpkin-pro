@@ -897,6 +897,12 @@ func (s *Service) GetDailyOverlay(ctx context.Context, symbol string, lookbackDa
 	}, nil
 }
 
+// GetDetailedSnapshots 批量获取任意标的的实时快照（含昨收价/涨跌幅）。
+// 供信号价格提醒（pricer）等后台任务使用； MarketClient 内部带 10 秒短缓存。
+func (s *Service) GetDetailedSnapshots(ctx context.Context, symbols []string) ([]DetailedSymbolSnapshot, error) {
+	return s.marketClient.FetchDetailedSymbolSnapshots(ctx, symbols)
+}
+
 // GetWatchlistSnapshots returns a snapshot for every item in the user's
 // watchlist in a single batch call. The underlying MarketClient.fetchFields
 // already supports multiple quote codes in one HTTP round-trip, so this avoids

@@ -456,23 +456,30 @@ func (s *Service) EmitSignal(ctx context.Context, input EmitSignalInput) (*Signa
 	}
 
 	eventID := "sig_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	// fingerprint 生成规则保持不变，确保既有幂等/去重语义不被破坏。
-	fingerprint := buildFingerprint(userID, normalizedSymbol, strings.TrimSpace(input.StrategyID), normalizedSide, eventTime, input.IsTest, eventID)
+	barState := normalizeBarState(input.BarState, input.IsTest)
+	templateKey := strings.TrimSpace(input.TemplateKey)
+	// fingerprint 含 template_key 与 bar_state：同股同策略同日可同时存在
+	// 盘中试算与收盘确认两条事件；测试信号仍按 eventID 全局唯一。
+	fingerprint := buildFingerprint(userID, normalizedSymbol, strings.TrimSpace(input.StrategyID), templateKey, normalizedSide, barState, eventTime, input.IsTest, eventID)
 
 	now := time.Now().UTC()
 	eventRecord := SignalEventRecord{
-		ID:          uuid.NewString(),
-		EventID:     eventID,
-		UserID:      userID,
-		Symbol:      normalizedSymbol,
-		StrategyID:  strings.TrimSpace(input.StrategyID),
-		Side:        normalizedSide,
-		SignalScore: input.SignalScore,
-		ReasonJSON:  reasonJSON,
-		Fingerprint: fingerprint,
-		IsTest:      input.IsTest,
-		EventTime:   eventTime,
-		CreatedAt:   now,
+		ID:             uuid.NewString(),
+		EventID:        eventID,
+		UserID:         userID,
+		Symbol:         normalizedSymbol,
+		StrategyID:     strings.TrimSpace(input.StrategyID),
+		Side:           normalizedSide,
+		SignalScore:    input.SignalScore,
+		ReasonJSON:     reasonJSON,
+		Fingerprint:    fingerprint,
+		IsTest:         input.IsTest,
+		EventTime:      eventTime,
+		CreatedAt:      now,
+		SubscriptionID: strings.TrimSpace(input.SubscriptionID),
+		TemplateKey:    templateKey,
+		BarState:       barState,
+		TradeDate:      live.TradeDateAt(eventTime),
 	}
 
 	// 决定是否投递：门控模式下由 SkipDelivery + webhook 可用性共同决定。
@@ -1082,12 +1089,26 @@ func normalizeSide(side string) (string, error) {
 	}
 }
 
-func buildFingerprint(userID, symbol, strategyID, side string, eventTime time.Time, isTest bool, eventID string) string {
-	// De-duplicate by trade date (CST): same user + symbol + strategy + side
-	// can only produce ONE signal per calendar day. This prevents repeated
-	// signals when daily bars don't change after market close.
+// normalizeBarState 归一化事件的 bar 状态；测试信号固定为 test。
+// 存量调用方（未传 barState）保持空串，不参与新状态语义。
+func normalizeBarState(raw string, isTest bool) string {
+	if isTest {
+		return BarStateTest
+	}
+	switch strings.TrimSpace(raw) {
+	case BarStateIntradayProvisional, BarStateCloseConfirmed, BarStateRealtime:
+		return strings.TrimSpace(raw)
+	default:
+		return ""
+	}
+}
+
+func buildFingerprint(userID, symbol, strategyID, templateKey, side, barState string, eventTime time.Time, isTest bool, eventID string) string {
+	// De-duplicate by trade date (CST) + bar state: same user + symbol + strategy +
+	// template + side can produce ONE signal per bar state per calendar day.
+	// 盘中试算与收盘确认是两个 bar state，互不冲突；同日同向同状态重复触发被去重。
 	bucket := live.TradeDateAt(eventTime) // "2026-04-02" in CST
-	seed := strings.Join([]string{userID, symbol, strategyID, side, bucket}, "|")
+	seed := strings.Join([]string{userID, symbol, strategyID, templateKey, side, barState, bucket}, "|")
 	if isTest {
 		seed = seed + "|test|" + eventID
 	}

@@ -21,12 +21,38 @@ const (
 	evaluatorHTTPTimeout     = 15 * time.Second
 )
 
-// Evaluator periodically scans enabled signal configs, runs strategy
+// evalOptions 控制单次评估的门控与事件语义。
+// 盘中试算与收盘确认共享同一条评估链路，仅选项不同。
+type evalOptions struct {
+	barState               string // 写入事件的 bar_state
+	enforceTradingHours    bool   // 盘中评估：仅交易时段内执行
+	enforceEvalInterval    bool   // 盘中评估：按订阅频率门控
+	skipCloseOnlyTemplates bool   // 盘中评估：跳过 close_only 模板（放量类盘中失真）
+	requireCurrentTradeDate bool  // 收盘确认：最后一根 bar 必须是当日（隐含市场日历门控）
+}
+
+var (
+	intradayEvalOptions = evalOptions{
+		barState:               BarStateIntradayProvisional,
+		enforceTradingHours:    true,
+		enforceEvalInterval:    true,
+		skipCloseOnlyTemplates: true,
+	}
+	closeConfirmEvalOptions = evalOptions{
+		barState:               BarStateCloseConfirmed,
+		requireCurrentTradeDate: true,
+	}
+)
+
+// Evaluator periodically scans enabled signal subscriptions, runs strategy
 // evaluation via the quant service, and emits real signals when BUY/SELL
 // is detected (respecting cooldown).
 //
 // 信号采用「全量生成 + 推送门控」：策略命中的信号一律落库，
 // 由 RiskGate 决定是否推送，以保留策略胜率的可复盘性。
+//
+// 双状态语义：盘中 tick 产出 intraday_provisional（基于形成中 K 线，收盘可能反转）；
+// 收盘确认由 CloseConfirmer 以 closeConfirmEvalOptions 驱动同一评估逻辑。
 type Evaluator struct {
 	signalService   *Service
 	liveService     *live.Service
@@ -66,79 +92,125 @@ func (e *Evaluator) Start(ctx context.Context) {
 	go func() {
 		defer ticker.Stop()
 		// Run once immediately on start.
-		e.runCycle(ctx)
+		e.RunIntraday(ctx)
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				e.runCycle(ctx)
+				e.RunIntraday(ctx)
 			}
 		}
 	}()
 	log.Printf("[signal-evaluator] started, interval=%s quant=%s", e.interval, e.quantURL)
 }
 
-func (e *Evaluator) runCycle(ctx context.Context) {
-	configs, err := e.signalService.repo.ListAllEnabledConfigs(ctx)
+// RunIntraday 盘中试算：扫描全部启用订阅，按 intradayEvalOptions 评估。
+func (e *Evaluator) RunIntraday(ctx context.Context) {
+	e.runPass(ctx, nil, intradayEvalOptions)
+}
+
+// RunCloseConfirm 收盘确认：仅评估指定市场（ashare/hk）的订阅。
+// 通过 requireCurrentTradeDate 隐含市场日历门控：休市时最后一根 bar 不是当日，自动跳过。
+func (e *Evaluator) RunCloseConfirm(ctx context.Context, market string) {
+	e.runPass(ctx, &market, closeConfirmEvalOptions)
+}
+
+// runPass 评估主循环；market 为 nil 表示不按市场过滤。
+func (e *Evaluator) runPass(ctx context.Context, market *string, opts evalOptions) {
+	subscriptions, err := e.signalService.repo.ListEnabledSubscriptions(ctx)
 	if err != nil {
-		log.Printf("[signal-evaluator] list enabled configs error: %v", err)
+		log.Printf("[signal-evaluator] list enabled subscriptions error: %v", err)
 		return
 	}
-	if len(configs) == 0 {
+	if len(subscriptions) == 0 {
 		return
 	}
 
 	now := time.Now().UTC()
-	for _, cfg := range configs {
-		e.evaluateOne(ctx, cfg, now)
+	for _, sub := range subscriptions {
+		if market != nil && !marketMatches(sub.Symbol, *market) {
+			continue
+		}
+		e.evaluateSubscription(ctx, sub, now, opts)
 	}
 }
 
-func (e *Evaluator) evaluateOne(ctx context.Context, cfg SymbolSignalConfigRecord, now time.Time) {
-	userID := cfg.UserID
-	symbol := cfg.Symbol
-	strategyID := cfg.StrategyID
+// marketMatches 按 symbol 判断市场归属；market 取值 ashare / hk。
+func marketMatches(symbol, market string) bool {
+	switch strings.ToLower(strings.TrimSpace(market)) {
+	case "ashare":
+		return live.IsAShare(symbol)
+	case "hk":
+		return !live.IsAShare(symbol)
+	default:
+		return true
+	}
+}
 
-	if strings.TrimSpace(strategyID) == "" {
+func (e *Evaluator) evaluateSubscription(ctx context.Context, sub SignalSubscriptionRecord, now time.Time, opts evalOptions) {
+	tpl, ok := GetTemplate(sub.TemplateKey)
+	if !ok || !tpl.IsActive {
 		return
 	}
-
-	// Skip evaluation outside trading hours — no point evaluating unchanged daily bars.
-	if !live.IsTradingHoursAt(symbol, now) {
+	// 价格提醒由 pricer 实时快照链路评估，不走日线评估。
+	if tpl.Category == TemplateCategoryPriceAlert {
+		return
+	}
+	// P2 批量信号预留：当前仅评估单股订阅。
+	if sub.ScopeType != ScopeTypeSymbol || strings.TrimSpace(sub.Symbol) == "" {
+		return
+	}
+	if opts.skipCloseOnlyTemplates && tpl.IntradayMode == IntradayModeCloseOnly {
+		return
+	}
+	if opts.enforceTradingHours && !live.IsTradingHoursAt(sub.Symbol, now) {
 		return
 	}
 
 	// Eval interval check: skip if not enough time has passed since last evaluation.
-	evalInterval := cfg.EvalIntervalSeconds
-	if evalInterval <= 0 {
-		evalInterval = defaultEvalIntervalSeconds
-	}
-	if cfg.LastEvaluatedAt != nil && now.Sub(*cfg.LastEvaluatedAt) < time.Duration(evalInterval)*time.Second {
-		return // not yet time to evaluate
-	}
-
-	// Resolve strategy definition from database (supports both preset and user-created strategies).
-	strat, err := e.strategyService.GetByID(ctx, userID, strategyID)
-	if err != nil {
-		log.Printf("[signal-evaluator] resolve strategy error user=%s strategy=%s: %v", userID, strategyID, err)
-		return
-	}
-	if strat.Status != "active" {
-		return // strategy is not active — skip
+	if opts.enforceEvalInterval {
+		evalInterval := sub.EvalIntervalSeconds
+		if evalInterval <= 0 {
+			evalInterval = defaultSubscriptionEvalIntervalSeconds
+		}
+		if sub.LastEvaluatedAt != nil && now.Sub(*sub.LastEvaluatedAt) < time.Duration(evalInterval)*time.Second {
+			return // not yet time to evaluate
+		}
+		// Mark this subscription as evaluated (regardless of outcome: BUY/SELL/HOLD).
+		_ = e.signalService.repo.UpdateSubscriptionLastEvaluatedAt(ctx, sub.ID, now)
 	}
 
-	// Mark this config as evaluated (regardless of outcome: BUY/SELL/HOLD).
-	_ = e.signalService.repo.UpdateLastEvaluatedAt(ctx, cfg.ID, now)
+	// 解析评估实现：策略模板由绑定策略解析，指标模板由模板注册表解析。
+	implementationKey := tpl.ImplementationKey
+	params := sub.effectiveParams()
+	displayName := tpl.Name
+	strategyID := strings.TrimSpace(sub.StrategyID)
+	if tpl.NeedsStrategy {
+		if strategyID == "" {
+			return
+		}
+		strat, err := e.strategyService.GetByID(ctx, sub.UserID, strategyID)
+		if err != nil {
+			log.Printf("[signal-evaluator] resolve strategy error user=%s strategy=%s: %v", sub.UserID, strategyID, err)
+			return
+		}
+		if strat.Status != "active" {
+			return // strategy is not active — skip
+		}
+		implementationKey = strat.ImplementationKey
+		params = strat.DefaultParams
+		displayName = strat.Name
+	}
 
-	// Cooldown check: skip if last signal for this user+symbol is within cooldown window.
-	cooldown := cfg.CooldownSeconds
+	// Cooldown check: 按订阅 + bar_state 维度（盘中试算的冷却不阻塞收盘确认）。
+	cooldown := sub.CooldownSeconds
 	if cooldown <= 0 {
 		cooldown = defaultCooldownSeconds
 	}
-	lastEventTime, err := e.signalService.repo.GetLastSignalEventTime(ctx, userID, symbol)
+	lastEventTime, err := e.signalService.repo.GetLastSignalEventTimeBySubscription(ctx, sub.UserID, sub.ID, opts.barState)
 	if err != nil {
-		log.Printf("[signal-evaluator] get last event time error user=%s symbol=%s: %v", userID, symbol, err)
+		log.Printf("[signal-evaluator] get last event time error user=%s symbol=%s: %v", sub.UserID, sub.Symbol, err)
 		return
 	}
 	if lastEventTime != nil && now.Sub(*lastEventTime) < time.Duration(cooldown)*time.Second {
@@ -146,23 +218,33 @@ func (e *Evaluator) evaluateOne(ctx context.Context, cfg SymbolSignalConfigRecor
 	}
 
 	// Fetch daily bars from live service.
-	bars, err := e.liveService.GetDailyBars(ctx, symbol, evaluatorDailyBarsCount)
+	// 盘中：腾讯日线接口最后一根为形成中 K 线（close=最新价），试算语义真实。
+	bars, err := e.liveService.GetDailyBars(ctx, sub.Symbol, evaluatorDailyBarsCount)
 	if err != nil || len(bars) < 10 {
 		// Not enough data or data source issue — skip silently.
 		return
 	}
 
+	// 收盘确认：最后一根 bar 必须是当日，否则视为休市/停牌，跳过。
+	// 这也是市场日历门控的隐含实现（无需额外依赖日历服务）。
+	if opts.requireCurrentTradeDate {
+		lastBarDate := bars[len(bars)-1].Date
+		if lastBarDate != live.TradeDateAt(now) {
+			return
+		}
+	}
+
 	// Call quant service to evaluate with implementation_key + params directly.
 	result, err := e.callQuantEvaluate(ctx, quantEvaluateInput{
 		StrategyID:        strategyID,
-		ImplementationKey: strat.ImplementationKey,
-		StrategyName:      strat.Name,
-		Params:            strat.DefaultParams,
-		Symbol:            symbol,
+		ImplementationKey: implementationKey,
+		StrategyName:      displayName,
+		Params:            params,
+		Symbol:            sub.Symbol,
 		Bars:              bars,
 	})
 	if err != nil {
-		log.Printf("[signal-evaluator] quant evaluate error user=%s symbol=%s strategy=%s: %v", userID, symbol, strategyID, err)
+		log.Printf("[signal-evaluator] quant evaluate error user=%s symbol=%s template=%s: %v", sub.UserID, sub.Symbol, sub.TemplateKey, err)
 		return
 	}
 
@@ -179,12 +261,12 @@ func (e *Evaluator) evaluateOne(ctx context.Context, cfg SymbolSignalConfigRecor
 		referencePrice = bars[len(bars)-1].Close
 	}
 	positionCtx := e.contextBuilder.Build(ctx, BuildInput{
-		UserID:      userID,
-		Symbol:      symbol,
+		UserID:      sub.UserID,
+		Symbol:      sub.Symbol,
 		LatestPrice: referencePrice,
 		// 能取到有效价格即视为可交易；停牌等场景下 referencePrice 为 0。
 		IsTradable: referencePrice > 0,
-		Config:     cfg,
+		Config:     sub.riskConfigRecord(),
 		Now:        now,
 	})
 	gateDecision := EvaluateGate(side, positionCtx)
@@ -195,10 +277,16 @@ func (e *Evaluator) evaluateOne(ctx context.Context, cfg SymbolSignalConfigRecor
 	if reason == nil {
 		reason = map[string]any{}
 	}
-	// Enrich reason with strategy info.
-	reason["strategy_name"] = strat.Name
-	reason["strategy_params"] = strat.DefaultParams
+	// Enrich reason with template/strategy info.
+	reason["template_key"] = sub.TemplateKey
+	reason["template_name"] = displayName
+	reason["strategy_name"] = displayName
+	reason["strategy_params"] = params
 	reason["latest_close"] = result.LatestClose
+	reason["bar_state"] = opts.barState
+	if opts.barState == BarStateIntradayProvisional {
+		reason["bar_state_note"] = "盘中试算基于当日未完成 K 线，收盘前信号可能反转。"
+	}
 	// 门控上下文写入 reason，供 webhook 文案与站内展示使用。
 	reason["position_summary"] = BuildGateSummary(positionCtx)
 	if gateDecision.SemanticLabel != "" {
@@ -214,14 +302,17 @@ func (e *Evaluator) evaluateOne(ctx context.Context, cfg SymbolSignalConfigRecor
 	reason["disclaimer"] = SignalComplianceDisclaimer
 
 	_, emitErr := e.signalService.EmitSignal(ctx, EmitSignalInput{
-		UserID:      userID,
-		Symbol:      symbol,
-		StrategyID:  strategyID,
-		Side:        finalSide,
-		SignalScore: result.Score,
-		Reason:      reason,
-		EventTime:   now,
-		IsTest:      false,
+		UserID:         sub.UserID,
+		Symbol:         sub.Symbol,
+		StrategyID:     strategyID,
+		Side:           finalSide,
+		SignalScore:    result.Score,
+		Reason:         reason,
+		EventTime:      now,
+		IsTest:         false,
+		SubscriptionID: sub.ID,
+		TemplateKey:    sub.TemplateKey,
+		BarState:       opts.barState,
 		Gate: &EmitGateInfo{
 			RawSide:            side,
 			FinalSide:          finalSide,
@@ -236,17 +327,17 @@ func (e *Evaluator) evaluateOne(ctx context.Context, cfg SymbolSignalConfigRecor
 		},
 	})
 	if emitErr != nil {
-		log.Printf("[signal-evaluator] emit signal error user=%s symbol=%s side=%s: %v", userID, symbol, finalSide, emitErr)
+		log.Printf("[signal-evaluator] emit signal error user=%s symbol=%s side=%s: %v", sub.UserID, sub.Symbol, finalSide, emitErr)
 		return
 	}
 
 	if gateDecision.SkipDelivery() {
 		log.Printf("[signal-evaluator] ⛔ suppressed %s signal user=%s symbol=%s rule=%s (已归档，未推送)",
-			side, userID, symbol, gateDecision.SuppressedReason)
+			side, sub.UserID, sub.Symbol, gateDecision.SuppressedReason)
 		return
 	}
-	log.Printf("[signal-evaluator] ✅ emitted %s signal user=%s symbol=%s strategy=%s decision=%s reason=%s",
-		finalSide, userID, symbol, strat.Name, gateDecision.Decision, truncate(reason["message"], 80))
+	log.Printf("[signal-evaluator] ✅ emitted %s signal user=%s symbol=%s template=%s bar_state=%s decision=%s reason=%s",
+		finalSide, sub.UserID, sub.Symbol, displayName, opts.barState, gateDecision.Decision, truncate(reason["message"], 80))
 }
 
 // collectGateNotes 把非决策性提示规则码翻译成用户可读文案。
@@ -373,7 +464,7 @@ func truncate(v any, maxLen int) string {
 
 func truncateBytes(b []byte, maxLen int) string {
 	if len(b) > maxLen {
-		return string(b[:maxLen])
+		return string(b)
 	}
-	return string(b)
+	return string(b[:maxLen])
 }

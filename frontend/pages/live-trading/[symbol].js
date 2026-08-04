@@ -32,14 +32,8 @@ import {
   subscribeInvestmentProfileUpdates,
 } from '../../lib/investment-profile-storage.js'
 import {
-  buildSignalConfigMeta,
-  buildSignalConfigPayload,
-  buildSignalStatusSummary,
-  canEnableSignal,
-  hasSignalConfigChanged,
-  mergeServerSignalConfig,
-  normalizeSignalConfig,
-} from '../../lib/signal-config-ui'
+  normalizeSubscriptions,
+} from '../../lib/signal-center-ui'
 import {
   buildPortfolioEventPreview,
   buildPortfolioSummaryMetrics,
@@ -77,8 +71,6 @@ const SIGNAL_CENTER_REFRESH_MS = 15 * 1000
 const FUNDAMENTALS_REFRESH_MS = 24 * 60 * 60 * 1000
 const SUPPORT_LOOKBACK_DAYS = 120
 const MA_LOOKBACK_DAYS = 240
-const SIGNAL_MAX_ATTEMPTS = 4
-const SIGNAL_BACKOFF_STEPS = ['1 分钟', '5 分钟', '15 分钟']
 const AI_ENTRY_COPY_DESKTOP = 'AI 会给出看多/看空判断、交易建议、执行条件和风险提示'
 const AI_ENTRY_COPY_MOBILE = '看方向、给建议、提条件、控风险'
 const AI_HISTORY_SUBTITLE = '最近一次观点 + 5日验证'
@@ -147,14 +139,8 @@ export default function LiveTradingDetailPage() {
   const [movingAverageError, setMovingAverageError] = useState('')
   const [priceVolumeEvents, setPriceVolumeEvents] = useState([])
   const [blockFlowEvents, setBlockFlowEvents] = useState([])
-  const [activeStrategies, setActiveStrategies] = useState([])
-  const [serverSignalConfig, setServerSignalConfig] = useState(null)
-  const [draftSignalConfig, setDraftSignalConfig] = useState(null)
-  const [webhookConfig, setWebhookConfig] = useState({ url: '', has_secret: false, is_enabled: true, timeout_ms: 3000, updated_at: '' })
-  const [savingSignalConfig, setSavingSignalConfig] = useState(false)
-  const [isTogglingSignal, setIsTogglingSignal] = useState(false)
-  const [toggleTargetEnabled, setToggleTargetEnabled] = useState(null)
-  const [signalNotice, setSignalNotice] = useState('')
+  // 信号中心：本股票的订阅摘要（完整配置已迁入 /signals，本页只读展示 + 跳转）
+  const [symbolSubscriptions, setSymbolSubscriptions] = useState([])
   const [signalError, setSignalError] = useState('')
   const [newsSummary, setNewsSummary] = useState(null)
   const [newsItems, setNewsItems] = useState([])
@@ -203,9 +189,7 @@ export default function LiveTradingDetailPage() {
   const fundamentalsRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const newsSummaryRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const newsItemsRefreshRef = useRef(0)
-  const signalCenterRefreshRef = useRef(0)
-  const signalDirtyRef = useRef(false)
-  const togglingSignalRef = useRef(false)
+  const signalSummaryRefreshRef = useRef(0)
 
   const privateAccessReady = ready && isLoggedIn
   const authIdentityKey = String(user?.id || user?.email || '')
@@ -238,16 +222,6 @@ export default function LiveTradingDetailPage() {
       { shallow: true, scroll: false }
     )
   }, [activeTab, rawSymbol, router, symbol])
-
-  const signalDirty = useMemo(() => hasSignalConfigChanged(serverSignalConfig, draftSignalConfig), [serverSignalConfig, draftSignalConfig])
-
-  useEffect(() => {
-    signalDirtyRef.current = signalDirty
-  }, [signalDirty])
-
-  useEffect(() => {
-    togglingSignalRef.current = isTogglingSignal
-  }, [isTogglingSignal])
 
   useEffect(() => {
     if (!aiAnalyzing || !aiWaitStartedAt) return undefined
@@ -862,39 +836,14 @@ export default function LiveTradingDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, symbol, activeTab, newsFilter])
 
-  const loadSignalCenter = async ({ force = false } = {}) => {
+  // 加载本股票的信号订阅摘要（信号中心上线后，本页只做只读展示与跳转）。
+  const loadSignalSummary = async ({ force = false } = {}) => {
     const now = Date.now()
-    if (!force && now - signalCenterRefreshRef.current < SIGNAL_CENTER_REFRESH_MS) return
-    const [strategiesData, configsData, webhookData] = await Promise.all([
-      requestJson('/api/strategies/active'),
-      requestJson('/api/signal-configs'),
-      requestJson('/api/webhook'),
-    ])
-    const strategies = Array.isArray(strategiesData?.items) ? strategiesData.items : []
-    setActiveStrategies(strategies)
-
-    const configs = Array.isArray(configsData?.items) ? configsData.items : []
-    const matched = configs.find((c) => c?.symbol === symbol)
-    const nextServerConfig = normalizeSignalConfig(matched, symbol, strategies)
-    setServerSignalConfig(nextServerConfig)
-    setDraftSignalConfig((prev) => mergeServerSignalConfig({
-      serverConfig: nextServerConfig,
-      draftConfig: prev,
-      isDirty: signalDirtyRef.current,
-      isToggling: togglingSignalRef.current,
-    }))
-
-    const wh = webhookData?.item || null
-    if (wh) {
-      setWebhookConfig({
-        url: wh.url || '',
-        has_secret: Boolean(wh.has_secret),
-        is_enabled: wh.is_enabled !== false,
-        timeout_ms: Number(wh.timeout_ms) > 0 ? Number(wh.timeout_ms) : 3000,
-        updated_at: wh.updated_at || '',
-      })
-    }
-    signalCenterRefreshRef.current = now
+    if (!force && now - signalSummaryRefreshRef.current < SIGNAL_CENTER_REFRESH_MS) return
+    const subscriptionsData = await requestJson('/api/signal/subscriptions')
+    const items = normalizeSubscriptions(subscriptionsData?.items)
+    setSymbolSubscriptions(items.filter((item) => item.symbol === symbol))
+    signalSummaryRefreshRef.current = now
   }
 
   // ── Bootstrap & polling ──
@@ -916,13 +865,13 @@ export default function LiveTradingDetailPage() {
       if (privateAccessReady) {
         try {
           await Promise.all([
-            loadSignalCenter({ force: true }),
+            loadSignalSummary({ force: true }),
             loadPortfolio(symbol),
             loadInvestmentProfile(),
             loadAnalysisHistory(symbol, { limit: 10 }),
           ])
         } catch (err) {
-          setSignalError(err.message || '信号配置加载失败')
+          setSignalError(err.message || '信号摘要加载失败')
         }
         // 检查是否已关注
         try {
@@ -1029,119 +978,25 @@ export default function LiveTradingDetailPage() {
         applyRequestError(err, '数据刷新失败')
       }
       if (privateAccessReady) {
-        try { await loadSignalCenter() } catch (_) {}
+        try { await loadSignalSummary() } catch (_) {}
       }
     }, interval)
     return () => clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, symbol, privateAccessReady, authIdentityKey])
 
-  // ── Signal config handlers ──
+  // ── 信号摘要（完整配置已迁入 /signals 信号中心）──
 
-  const syncSavedSignalConfig = useCallback((nextConfig) => {
-    const normalized = normalizeSignalConfig(nextConfig, symbol, activeStrategies)
-    setServerSignalConfig(normalized)
-    setDraftSignalConfig(normalized)
-    return normalized
-  }, [activeStrategies, symbol])
+  const symbolSignalEnabledCount = useMemo(
+    () => symbolSubscriptions.filter((item) => item.is_enabled).length,
+    [symbolSubscriptions],
+  )
+  const signalSummaryText = symbolSubscriptions.length === 0
+    ? '未配置'
+    : symbolSignalEnabledCount > 0
+      ? `${symbolSignalEnabledCount} 个信号开启中`
+      : `${symbolSubscriptions.length} 个信号已关闭`
 
-  const updateDraftSignalConfig = (patch) => {
-    setSignalNotice('')
-    setSignalError('')
-    setDraftSignalConfig((prev) => normalizeSignalConfig({
-      ...(prev || serverSignalConfig || {}),
-      ...patch,
-    }, symbol, activeStrategies))
-  }
-
-  const handleSaveSignalConfig = async () => {
-    if (!draftSignalConfig) return
-    setSavingSignalConfig(true)
-    setSignalNotice('')
-    setSignalError('')
-    try {
-      const result = await requestJson(`/api/signal-configs/${encodeURIComponent(symbol)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildSignalConfigPayload(draftSignalConfig)),
-      })
-      syncSavedSignalConfig(result?.item || draftSignalConfig)
-      setSignalNotice('配置已保存')
-    } catch (err) {
-      setSignalError(err.message || '信号配置保存失败')
-    } finally {
-      setSavingSignalConfig(false)
-    }
-  }
-
-  const handleToggleSignal = async () => {
-    if (!draftSignalConfig || isTogglingSignal) return
-    const nextEnabled = !draftSignalConfig.is_enabled
-    if (nextEnabled) {
-      const check = canEnableSignal(draftSignalConfig)
-      if (!check.ok) {
-        setSignalNotice('')
-        setSignalError(check.reason)
-        return
-      }
-    }
-
-    const previousConfig = draftSignalConfig
-    const optimisticConfig = normalizeSignalConfig({
-      ...draftSignalConfig,
-      is_enabled: nextEnabled,
-    }, symbol, activeStrategies)
-
-    setSignalNotice('')
-    setSignalError('')
-    setIsTogglingSignal(true)
-    setToggleTargetEnabled(nextEnabled)
-    setDraftSignalConfig(optimisticConfig)
-
-    try {
-      const result = await requestJson(`/api/signal-configs/${encodeURIComponent(symbol)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildSignalConfigPayload(optimisticConfig, nextEnabled)),
-      })
-      const saved = syncSavedSignalConfig(result?.item || optimisticConfig)
-      setSignalNotice(saved.is_enabled ? '已开启' : '已关闭')
-    } catch (err) {
-      setDraftSignalConfig(previousConfig)
-      setSignalError(err.message || (nextEnabled ? '开启失败，请稍后重试' : '关闭失败，请稍后重试'))
-    } finally {
-      setIsTogglingSignal(false)
-      setToggleTargetEnabled(null)
-    }
-  }
-
-  const handleResetSignalDraft = () => {
-    if (!serverSignalConfig) return
-    setDraftSignalConfig(serverSignalConfig)
-    setSignalError('')
-    setSignalNotice('已恢复为上次保存的配置')
-  }
-
-  const strategyByID = useMemo(() => {
-    const map = {}
-    activeStrategies.forEach((s) => { if (s?.id) map[s.id] = s })
-    return map
-  }, [activeStrategies])
-
-  const signalConfig = draftSignalConfig
-  const webhookConfigured = Boolean(webhookConfig.url)
-  const signalStatusSummary = buildSignalStatusSummary({
-    config: signalConfig,
-    isToggling: isTogglingSignal,
-    toggleTargetEnabled,
-  })
-  const signalConfigMeta = buildSignalConfigMeta({
-    config: signalConfig,
-    strategyMap: strategyByID,
-    isDirty: signalDirty,
-    webhookConfigured,
-    webhookEnabled: Boolean(webhookConfig.is_enabled),
-  })
   const fundamentalsItems = fundamentalsPayload?.items || {}
   const fundamentalsMeta = fundamentalsPayload?.meta || null
   const fundamentalsReportLabel = buildFundamentalsReportLabel(fundamentalsMeta)
@@ -1389,7 +1244,7 @@ export default function LiveTradingDetailPage() {
                   </div>
                   <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] px-3 py-3">
                     <div className="text-xs text-foreground-dim">交易信号</div>
-                    <div className="mt-1 text-sm font-semibold text-foreground">{signalStatusSummary || '未配置'}</div>
+                    <div className="mt-1 text-sm font-semibold text-foreground">{signalSummaryText}</div>
                   </div>
                 </div>
               ) : (
@@ -1802,112 +1657,35 @@ export default function LiveTradingDetailPage() {
 
             </section>
           )}
-              {/* Inline signal config (login required) */}
-              {privateAccessReady && signalConfig && (
+              {/* 信号摘要（完整配置已迁入信号中心 /signals） */}
+              {privateAccessReady && (
                 <section className="mt-4 rounded-2xl border border-border bg-card p-5">
                 {signalError && <div className="mb-3 rounded-lg border border-negative/40 bg-negative/10 px-3 py-2 text-xs text-negative">{signalError}</div>}
 
                 <div className="rounded-xl border border-border bg-[var(--color-bg-hover)] p-3">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div>
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="min-w-0">
                       <div className="text-sm font-medium text-foreground/88">交易信号</div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${signalConfig.is_enabled ? 'border-emerald-400/60 dark:border-primary/70 bg-emerald-100 dark:bg-white text-emerald-700 dark:text-primary shadow-[0_0_0_1px_rgba(16,185,129,0.3)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.18)]' : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted'}`}>
-                        {signalStatusSummary}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                        <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${symbolSignalEnabledCount > 0 ? 'border-emerald-400/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted'}`}>
+                          {signalSummaryText}
+                        </span>
+                        {symbolSubscriptions.length > 0 ? (
+                          <span className="text-[11px] text-foreground-dim">
+                            {symbolSubscriptions.map((item) => item.template_name).slice(0, 3).join(' · ')}{symbolSubscriptions.length > 3 ? ` 等 ${symbolSubscriptions.length} 个` : ''}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-foreground-dim">可为该股配置价格提醒、MACD/RSI 等指标信号</span>
+                        )}
                       </div>
                     </div>
+                    <a
+                      href={`/signals?symbol=${encodeURIComponent(symbol)}`}
+                      className="inline-flex shrink-0 items-center justify-center rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-black transition hover:opacity-90"
+                    >
+                      {symbolSubscriptions.length > 0 ? '管理信号' : '开启信号'}
+                    </a>
                   </div>
-
-                  {signalNotice && (
-                    <div className="mt-3 rounded-lg border border-emerald-400/25 bg-positive/10 px-3 py-2 text-xs text-positive">
-                      {signalNotice}
-                    </div>
-                  )}
-
-                  <div className="mt-3 border-t border-border pt-3">
-                      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                        {signalConfigMeta.map((item) => (
-                          <div key={item.label} className="rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-2.5">
-                            <div className="text-[11px] text-foreground-dim">{item.label}</div>
-                            <div className={`mt-1 text-sm font-semibold ${item.tone === 'warning' ? 'text-amber-300' : 'text-foreground'}`}>{item.value}</div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap items-center gap-2.5">
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={Boolean(signalConfig.is_enabled)}
-                          disabled={isTogglingSignal || savingSignalConfig}
-                          onClick={handleToggleSignal}
-                          className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60 ${
-                            signalConfig.is_enabled
-                              ? 'border-emerald-500/60 dark:border-emerald-300/60 bg-emerald-100 dark:bg-emerald-500/18 text-emerald-800 dark:text-emerald-50'
-                              : 'border-[var(--color-border-strong)] bg-[var(--color-bg-secondary)] text-foreground-muted hover:border-[var(--color-border-strong)]'
-                          }`}
-                        >
-                          <span className="font-medium">
-                            {isTogglingSignal
-                              ? (toggleTargetEnabled ? '开启中...' : '关闭中...')
-                              : (signalConfig.is_enabled ? '已开启' : '已关闭')}
-                          </span>
-                          <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border transition ${signalConfig.is_enabled ? 'border-emerald-200/60 bg-emerald-300/90' : 'border-[var(--color-border-strong)] bg-[var(--color-bg-overlay)]'}`}>
-                            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${signalConfig.is_enabled ? 'left-[18px]' : 'left-0.5'}`} />
-                          </span>
-                        </button>
-                        <select
-                          value={signalConfig.strategy_id || ''}
-                          onChange={(e) => updateDraftSignalConfig({ strategy_id: e.target.value })}
-                          className={`min-w-[140px] rounded-lg border bg-[var(--color-bg-overlay)] px-2.5 py-1.5 text-xs text-foreground outline-none transition focus:border-primary ${signalError.includes('请选择策略') ? 'border-rose-300/60' : 'border-border'}`}
-                        >
-                          <option value="">请选择策略</option>
-                          {activeStrategies.map((s) => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                          ))}
-                        </select>
-                        <select
-                          value={signalConfig.eval_interval_seconds || 3600}
-                          onChange={(e) => updateDraftSignalConfig({ eval_interval_seconds: Number(e.target.value) })}
-                          className="rounded-lg border border-border bg-[var(--color-bg-overlay)] px-2.5 py-1.5 text-xs text-foreground outline-none transition focus:border-primary"
-                        >
-                          <option value={900}>每 15 分钟</option>
-                          <option value={1800}>每 30 分钟</option>
-                          <option value={3600}>每小时</option>
-                          <option value={7200}>每 2 小时</option>
-                          <option value={14400}>每 4 小时</option>
-                        </select>
-                        <button
-                          type="button"
-                          disabled={savingSignalConfig || isTogglingSignal || !signalDirty}
-                          onClick={handleSaveSignalConfig}
-                          className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {savingSignalConfig ? '保存中...' : '保存配置'}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={savingSignalConfig || isTogglingSignal || !signalDirty}
-                          onClick={handleResetSignalDraft}
-                          className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          取消修改
-                        </button>
-                      </div>
-
-                      {signalDirty && !isTogglingSignal && (
-                        <div className="mt-2 rounded-lg border border-border bg-[var(--color-bg-hover)] px-3 py-1.5 text-[11px] text-foreground-dim">
-                          当前修改尚未生效，点击「保存配置」后更新信号配置。
-                        </div>
-                      )}
-
-                      {signalConfig.is_enabled && (!webhookConfigured || !webhookConfig.is_enabled) && (
-                        <div className="mt-2 rounded-lg border border-amber-400/25 bg-amber-500/8 px-3 py-1.5 text-[11px] text-amber-200/90">
-                          信号已开启，但当前 Webhook 未配置或未启用，暂时不会发送提醒。<a href="/settings" className="ml-1 underline underline-offset-2 hover:text-amber-100">去配置</a>
-                        </div>
-                      )}
-                    </div>
                 </div>
               </section>
             )}

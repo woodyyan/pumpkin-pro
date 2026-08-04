@@ -20,7 +20,9 @@ describe('watchlist page syntax', () => {
   it('loads only private watchlist data and does not fetch market overview', () => {
     assert.ok(pageSource.includes("requestJson('/api/live/watchlist')"))
     assert.ok(pageSource.includes("requestJson('/api/live/watchlist/snapshots')"))
-    assert.ok(pageSource.includes("requestJson('/api/signal-configs')"))
+    // 信号角标已切换到信号中心订阅体系。
+    assert.ok(pageSource.includes("requestJson('/api/signal/subscriptions')"))
+    assert.ok(!pageSource.includes('/api/signal-configs'))
     assert.ok(!pageSource.includes('/api/live/market/overview'))
   })
 

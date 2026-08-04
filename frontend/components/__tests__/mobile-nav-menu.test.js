@@ -14,9 +14,18 @@ describe('mobile nav grouped menu', () => {
     assert.deepEqual(state.groups.map((group) => group.label), ['卧龙AI', '看板', '跟踪', '选股', '更多'])
     assert.deepEqual(
       state.groups.find((group) => group.key === 'tracking').items.map((item) => item.label),
-      ['自选股', '组合跟踪', '持仓管理']
+      ['自选股', '信号中心', '组合跟踪', '持仓管理']
     )
     assert.equal(state.activeGroupKey, 'tracking')
+  })
+
+  it('exposes the signal unread badge on the signal center item', () => {
+    const state = buildNavigationState('/watchlist', 0, 7)
+    const signalItem = state.groups.find((group) => group.key === 'tracking').items.find((item) => item.key === 'signal-center')
+
+    assert.equal(signalItem.badge, '7')
+    const cleared = buildNavigationState('/watchlist', 0, 0)
+    assert.equal(cleared.groups.find((group) => group.key === 'tracking').items.find((item) => item.key === 'signal-center').badge, null)
   })
 
   it('treats live-trading detail pages as the market entry under 看板', () => {
@@ -55,7 +64,7 @@ describe('mobile nav grouped menu', () => {
   it('locks page scroll in _app and closes the menu through a dedicated callback', () => {
     assert.match(appSource, /document\.body\.style\.overflow = 'hidden'/)
     assert.match(appSource, /document\.documentElement\.style\.overflow = 'hidden'/)
-    assert.match(appSource, /<MobileNavMenu open=\{mobileMenuOpen\} currentPath=\{currentPath\} unreadCount=\{unreadCount\} onClose=\{\(\) => setMobileMenuOpen\(false\)\} \/>/)
+    assert.match(appSource, /<MobileNavMenu open=\{mobileMenuOpen\} currentPath=\{currentPath\} unreadCount=\{unreadCount\} signalUnreadCount=\{signalUnreadCount\} onClose=\{\(\) => setMobileMenuOpen\(false\)\} \/>/)
     assert.doesNotMatch(appSource, /mobileMenuRef/)
   })
 })

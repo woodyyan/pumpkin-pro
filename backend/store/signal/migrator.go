@@ -16,6 +16,7 @@ func (Migrator) AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&WebhookEndpointRecord{},
 		&SymbolSignalConfigRecord{},
+		&SignalSubscriptionRecord{},
 		&SignalEventRecord{},
 		&WebhookDeliveryRecord{},
 	)

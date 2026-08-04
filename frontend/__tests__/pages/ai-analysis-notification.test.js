@@ -7,6 +7,7 @@ const workspaceSource = readFileSync(new URL('../../components/AIAnalysisWorkspa
 const analysisPageSource = readFileSync(new URL('../../pages/ai/analysis.js', import.meta.url), 'utf8')
 const helperSource = readFileSync(new URL('../../lib/ai-analysis-helpers.js', import.meta.url), 'utf8')
 const settingsPageSource = readFileSync(new URL('../../pages/settings.js', import.meta.url), 'utf8')
+const webhookPanelSource = readFileSync(new URL('../../components/SignalWebhookPanel.js', import.meta.url), 'utf8')
 
 describe('AI analysis browser notification integration', () => {
   it('extracts notification helpers into the shared AI workspace', () => {
@@ -106,28 +107,30 @@ describe('settings page notification preferences', () => {
   })
 })
 
-describe('settings page webhook delivery history', () => {
-  it('renders delivery history as collapsed details by default', () => {
-    assert.match(settingsPageSource, /<details className="group rounded-xl border border-border bg-\[var\(--color-bg-hover\)\] p-4">/)
-    assert.match(settingsPageSource, /默认收起，点开后查看最近的投递记录。/)
-    assert.match(settingsPageSource, /group-open:hidden/)
-    assert.match(settingsPageSource, /group-open:inline/)
-  })
-})
-
-describe('settings page webhook channel support', () => {
-  it('supports both wecom and feishu options in settings page', () => {
-    assert.match(settingsPageSource, /WEBHOOK_CHANNEL_OPTIONS/)
-    assert.match(settingsPageSource, /value: 'wecom'/)
-    assert.match(settingsPageSource, /value: 'feishu'/)
-    assert.match(settingsPageSource, /飞书 Webhook 配置教程/)
-    assert.match(settingsPageSource, /webhookConfig\.channel/)
+describe('webhook panel moved into signal center', () => {
+  it('settings page links to the signal center for webhook management', () => {
+    assert.match(settingsPageSource, /信号通知/)
+    assert.match(settingsPageSource, /href="\/signals"/)
+    assert.match(settingsPageSource, /前往信号中心/)
+    // 旧的内嵌 webhook 配置与投递可观测已迁出设置页。
+    assert.doesNotMatch(settingsPageSource, /WEBHOOK_CHANNEL_OPTIONS/)
+    assert.doesNotMatch(settingsPageSource, /Webhook 推送配置/)
+    assert.doesNotMatch(settingsPageSource, /Webhook 投递可观测/)
   })
 
-  it('switches payload preview by selected channel', () => {
-    assert.match(settingsPageSource, /msgtype: 'text'/)
-    assert.match(settingsPageSource, /msg_type: 'text'/)
-    assert.match(settingsPageSource, /JSON\.stringify\(webhookChannelMeta\.payloadPreview, null, 2\)/)
+  it('signal webhook panel keeps wecom and feishu channel options', () => {
+    assert.match(webhookPanelSource, /WEBHOOK_CHANNEL_OPTIONS/)
+    assert.match(webhookPanelSource, /value: 'wecom'/)
+    assert.match(webhookPanelSource, /value: 'feishu'/)
+    assert.match(webhookPanelSource, /飞书 Webhook 配置教程/)
+  })
+
+  it('signal webhook panel keeps save, test and recent deliveries', () => {
+    assert.match(webhookPanelSource, /保存 Webhook/)
+    assert.match(webhookPanelSource, /验证 Webhook 送达/)
+    assert.match(webhookPanelSource, /最近投递/)
+    assert.match(webhookPanelSource, /\/api\/webhook-deliveries/)
+    assert.match(webhookPanelSource, /formatDeliveryStatus/)
   })
 })
 

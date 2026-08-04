@@ -22,8 +22,8 @@ function Chevron({ open }) {
   )
 }
 
-export default function DesktopNavMenu({ currentPath, unreadCount }) {
-  const { groups } = buildNavigationState(currentPath, unreadCount)
+export default function DesktopNavMenu({ currentPath, unreadCount, signalUnreadCount }) {
+  const { groups } = buildNavigationState(currentPath, unreadCount, signalUnreadCount)
   const [openGroupKey, setOpenGroupKey] = useState(null)
   const navRef = useRef(null)
 

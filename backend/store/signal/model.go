@@ -66,6 +66,15 @@ type SignalEventRecord struct {
 	EventTime   time.Time `gorm:"not null;index"`
 	CreatedAt   time.Time `gorm:"not null;index"`
 
+	// ── 信号中心（模板 + 订阅 + 双状态）──
+	// BarState：intraday_provisional（盘中试算）/ close_confirmed（收盘确认）/
+	// realtime（价格提醒实时触发）/ test（测试）。空串为订阅体系上线前的存量事件。
+	SubscriptionID string `gorm:"size:36;not null;default:'';index"`
+	TemplateKey    string `gorm:"size:64;not null;default:'';index"`
+	BarState       string `gorm:"size:24;not null;default:'';index"`
+	TradeDate      string `gorm:"size:10;not null;default:'';index"`
+	IsRead         bool   `gorm:"not null;default:false;index"`
+
 	// ── 持仓感知门控（全量生成 + 推送门控）──
 	// 设计要点：所有信号一律落库（保留策略胜率可复盘性），仅 IsDelivered 决定是否投递 webhook。
 	RawSide              string  `gorm:"size:16;not null;default:''"`     // 策略原始输出（未经门控）
@@ -141,6 +150,14 @@ type SignalEvent struct {
 	IsTest      bool           `json:"is_test"`
 	EventTime   string         `json:"event_time"`
 	Reason      map[string]any `json:"reason"`
+
+	// 信号中心（模板 + 订阅 + 双状态）
+	SubscriptionID string `json:"subscription_id,omitempty"`
+	TemplateKey    string `json:"template_key,omitempty"`
+	TemplateName   string `json:"template_name,omitempty"`
+	BarState       string `json:"bar_state,omitempty"`
+	TradeDate      string `json:"trade_date,omitempty"`
+	IsRead         bool   `json:"is_read"`
 
 	// 持仓感知门控信息（供前端信号历史展示"为什么没推送"）
 	RawSide            string            `json:"raw_side,omitempty"`
@@ -220,6 +237,11 @@ type EmitSignalInput struct {
 	EventTime   time.Time
 	IsTest      bool
 
+	// ── 信号中心（可选；为空时保持存量语义）──
+	SubscriptionID string
+	TemplateKey    string
+	BarState       string // intraday_provisional / close_confirmed / realtime / test
+
 	// ── 持仓感知门控（可选；为空时行为与改造前完全一致，保证向后兼容）──
 	// Gate 为 nil 表示"未经门控"，EmitSignal 会按老逻辑要求 webhook 并正常投递。
 	Gate *EmitGateInfo
@@ -296,6 +318,12 @@ func toSignalEvent(record SignalEventRecord) (*SignalEvent, error) {
 	if strings.TrimSpace(record.MatchedRulesJSON) != "" {
 		_ = json.Unmarshal([]byte(record.MatchedRulesJSON), &matchedRules)
 	}
+	templateName := ""
+	if record.TemplateKey != "" {
+		if tpl, ok := GetTemplate(record.TemplateKey); ok {
+			templateName = tpl.Name
+		}
+	}
 	return &SignalEvent{
 		EventID:     record.EventID,
 		Symbol:      record.Symbol,
@@ -305,6 +333,13 @@ func toSignalEvent(record SignalEventRecord) (*SignalEvent, error) {
 		IsTest:      record.IsTest,
 		EventTime:   record.EventTime.UTC().Format(time.RFC3339),
 		Reason:      reason,
+
+		SubscriptionID: record.SubscriptionID,
+		TemplateKey:    record.TemplateKey,
+		TemplateName:   templateName,
+		BarState:       record.BarState,
+		TradeDate:      record.TradeDate,
+		IsRead:         record.IsRead,
 
 		RawSide:            record.RawSide,
 		FinalSide:          record.FinalSide,

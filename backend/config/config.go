@@ -26,6 +26,7 @@ type Config struct {
 	FactorIndex              FactorIndexConfig
 	PortfolioSnapshot        PortfolioSnapshotConfig
 	RankingPortfolioRealtime RankingPortfolioRealtimeConfig
+	SignalCloseConfirm       SignalCloseConfirmConfig
 }
 
 type PasswordResetConfig struct {
@@ -111,6 +112,15 @@ type RankingPortfolioRealtimeConfig struct {
 	// open-entry pricing change. The admin repair job will never backfill
 	// dates strictly before this date. Defaults to "2026-06-10" (first live day).
 	CutoverDate string
+}
+
+// SignalCloseConfirmConfig 信号收盘确认 worker 调度配置（北京时间）。
+type SignalCloseConfirmConfig struct {
+	Enabled      bool
+	AShareHour   int
+	AShareMinute int
+	HKHour       int
+	HKMinute     int
 }
 
 // BackupConfig holds database backup settings.
@@ -294,6 +304,13 @@ func Load() Config {
 			ASharePoints: nil,
 			HKPoints:     nil,
 			CutoverDate:  getEnv("RANKING_PORTFOLIO_CUTOVER_DATE", "2026-06-10"),
+		},
+		SignalCloseConfirm: SignalCloseConfirmConfig{
+			Enabled:      getEnvAsBool("SIGNAL_CLOSE_CONFIRM_ENABLED", true),
+			AShareHour:   getEnvAsInt("SIGNAL_CLOSE_CONFIRM_ASHARE_HOUR", 15),
+			AShareMinute: getEnvAsInt("SIGNAL_CLOSE_CONFIRM_ASHARE_MINUTE", 10),
+			HKHour:       getEnvAsInt("SIGNAL_CLOSE_CONFIRM_HK_HOUR", 16),
+			HKMinute:     getEnvAsInt("SIGNAL_CLOSE_CONFIRM_HK_MINUTE", 10),
 		},
 	}
 }

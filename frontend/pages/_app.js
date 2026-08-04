@@ -9,6 +9,7 @@ import MobileNavMenu from '../components/MobileNavMenu'
 import NavSearchBox from '../components/NavSearchBox'
 import ThemeToggle from '../components/ThemeToggle'
 import { AuthProvider, useAuth } from '../lib/auth-context'
+import { requestJson } from '../lib/api'
 import changelogData from '../data/changelog.json'
 import {
   buildMembershipMenuLabel,
@@ -66,6 +67,46 @@ function useChangelogUnread() {
   return { unreadCount, markAsSeen }
 }
 
+// 信号未读角标：登录后轮询 /api/signal/events/unread-count；
+// 进入信号中心页即乐观清零（页面自身会调用 mark-read 落库）。
+const SIGNAL_UNREAD_POLL_MS = 60000
+
+function useSignalUnread(isLoggedIn, pathname) {
+  const [signalUnreadCount, setSignalUnreadCount] = useState(0)
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setSignalUnreadCount(0)
+      return undefined
+    }
+    let cancelled = false
+    const load = () => {
+      requestJson('/api/signal/events/unread-count')
+        .then((data) => {
+          if (!cancelled) setSignalUnreadCount(Number(data?.unread_count) || 0)
+        })
+        .catch(() => {})
+    }
+    load()
+    const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      load()
+    }, SIGNAL_UNREAD_POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [isLoggedIn])
+
+  useEffect(() => {
+    if (pathname === '/signals' && signalUnreadCount > 0) {
+      setSignalUnreadCount(0)
+    }
+  }, [pathname, signalUnreadCount])
+
+  return signalUnreadCount
+}
+
 function getVisitorId() {
   if (typeof window === 'undefined') return ''
 
@@ -120,6 +161,8 @@ function AppLayout({ Component, pageProps }) {
   const currentPath = router.asPath
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const { unreadCount, markAsSeen } = useChangelogUnread()
+  const { isLoggedIn } = useAuth()
+  const signalUnreadCount = useSignalUnread(isLoggedIn, router.pathname)
 
   useEffect(() => {
     reportPageView(router.pathname)
@@ -197,7 +240,7 @@ function AppLayout({ Component, pageProps }) {
               <span className="text-lg font-bold tracking-tight sm:hidden">卧龙</span>
             </Link>
 
-            <DesktopNavMenu currentPath={currentPath} unreadCount={unreadCount} />
+            <DesktopNavMenu currentPath={currentPath} unreadCount={unreadCount} signalUnreadCount={signalUnreadCount} />
 
             <div className="flex items-center gap-2 shrink-0">
               <div className="hidden md:block">
@@ -227,7 +270,7 @@ function AppLayout({ Component, pageProps }) {
           </div>
         </nav>
 
-        <MobileNavMenu open={mobileMenuOpen} currentPath={currentPath} unreadCount={unreadCount} onClose={() => setMobileMenuOpen(false)} />
+        <MobileNavMenu open={mobileMenuOpen} currentPath={currentPath} unreadCount={unreadCount} signalUnreadCount={signalUnreadCount} onClose={() => setMobileMenuOpen(false)} />
 
         <main className="flex-1 mt-16 p-4 md:p-6">
           <Component {...pageProps} />

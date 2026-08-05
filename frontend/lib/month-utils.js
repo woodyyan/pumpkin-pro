@@ -32,3 +32,14 @@ export function shiftMonth(month, delta) {
   base.setUTCMonth(base.getUTCMonth() + (Number.isFinite(step) ? step : 0))
   return base.toISOString().slice(0, 7)
 }
+
+/**
+ * 取本地当天日期字符串 YYYY-MM-DD。
+ * 避免用 toISOString()（UTC 序列化）在东八区每天 00:00-08:00 取到“昨天”。
+ * @param {Date} [date] 可注入日期便于测试，默认当前时间。
+ */
+export function getTodayDate(date = new Date()) {
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${m}-${d}`
+}

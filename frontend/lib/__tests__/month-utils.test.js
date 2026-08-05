@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { getCurrentMonth, shiftMonth } from '../month-utils.js'
+import { getCurrentMonth, getTodayDate, shiftMonth } from '../month-utils.js'
 
 const MONTH_RE = /^\d{4}-\d{2}$/
 
@@ -77,5 +77,23 @@ test('getCurrentMonth 随本地时区取当月（东八区 1 号凌晨不落后�
   })
   withTZ('America/New_York', () => {
     assert.equal(getCurrentMonth(new Date(2026, 7, 1, 0, 30)), '2026-08')
+  })
+})
+
+test('getTodayDate 返回本地 YYYY-MM-DD', () => {
+  assert.equal(getTodayDate(new Date(2026, 7, 5, 10, 30)), '2026-08-05')
+  assert.equal(getTodayDate(new Date(2026, 0, 9)), '2026-01-09')
+  assert.equal(getTodayDate(new Date(2026, 11, 1)), '2026-12-01')
+})
+
+test('getTodayDate 东八区凌晨不取到昨天（toISOString 回归用例）', () => {
+  // 旧实现 new Date().toISOString().slice(0, 10)：东八区每天 00:00-08:00 UTC 仍是前一天。
+  // 新实现按本地 getFullYear/getMonth/getDate 取当天。
+  withTZ('Asia/Shanghai', () => {
+    assert.equal(getTodayDate(new Date(2026, 7, 1, 0, 30)), '2026-08-01')
+    assert.equal(getTodayDate(new Date(2026, 7, 1, 7, 59)), '2026-08-01')
+  })
+  withTZ('America/New_York', () => {
+    assert.equal(getTodayDate(new Date(2026, 7, 1, 0, 30)), '2026-08-01')
   })
 })

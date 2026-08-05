@@ -26,7 +26,7 @@ import {
   resolveAdminPaymentPollingState,
   resolveAdminSelectedPaymentId,
 } from '../../lib/admin-payments'
-import { getCurrentMonth, shiftMonth } from '../../lib/month-utils'
+import { getCurrentMonth, getTodayDate, shiftMonth } from '../../lib/month-utils'
 
 // ── Simple Doughnut Chart (SVG) ──
 
@@ -2099,7 +2099,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
     setActionError('')
     setPipelineNotice('')
     try {
-      const today = new Date().toISOString().slice(0, 10)
+      const today = getTodayDate()
       const resp = await adminFetch('/api/admin/sim-portfolio-pipeline/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

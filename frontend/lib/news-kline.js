@@ -89,17 +89,35 @@ export function normalizeRange(range) {
   return ['1M', '3M', '6M', '1Y', 'ALL'].includes(range) ? range : '1Y'
 }
 
+const DATE_STR_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
+
+/**
+ * 对 YYYY-MM-DD 日期字符串做纯字符串月偏移（支持跨年，月末自动截断）。
+ * 不经过 Date 的本地/UTC 转换，避免“+08:00 解析 + 本地 setMonth + UTC 序列化”
+ * 混用导致的边界差一天问题。非法输入原样返回。
+ * @param {string} dateStr YYYY-MM-DD
+ * @param {number} delta 月偏移量
+ */
+export function shiftDateByMonths(dateStr, delta) {
+  const match = DATE_STR_PATTERN.exec(String(dateStr || ''))
+  if (!match) return dateStr
+  let year = Number(match[1])
+  let month = Number(match[2]) + delta
+  const day = Number(match[3])
+  while (month < 1) { month += 12; year -= 1 }
+  while (month > 12) { month -= 12; year += 1 }
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  const padded = (value) => String(value).padStart(2, '0')
+  return `${year}-${padded(month)}-${padded(Math.min(day, lastDay))}`
+}
+
 export function filterKlineByRange(kline, range) {
   const rows = Array.isArray(kline) ? kline : []
   const normalized = normalizeRange(range)
   if (!rows.length || normalized === 'ALL') return rows
   const endDate = rows[rows.length - 1]?.date
   if (!endDate) return rows
-  const start = new Date(`${endDate}T00:00:00+08:00`)
-  if (normalized === '1M') start.setMonth(start.getMonth() - 1)
-  if (normalized === '3M') start.setMonth(start.getMonth() - 3)
-  if (normalized === '6M') start.setMonth(start.getMonth() - 6)
-  if (normalized === '1Y') start.setFullYear(start.getFullYear() - 1)
-  const startText = start.toISOString().slice(0, 10)
+  const deltas = { '1M': -1, '3M': -3, '6M': -6, '1Y': -12 }
+  const startText = shiftDateByMonths(endDate, deltas[normalized] ?? 0)
   return rows.filter((item) => String(item.date || '') >= startText)
 }

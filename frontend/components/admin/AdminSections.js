@@ -26,6 +26,7 @@ import {
   resolveAdminPaymentPollingState,
   resolveAdminSelectedPaymentId,
 } from '../../lib/admin-payments'
+import { getCurrentMonth, shiftMonth } from '../../lib/month-utils'
 
 // ── Simple Doughnut Chart (SVG) ──
 
@@ -1804,12 +1805,6 @@ function formatSimPipelineMonthLabel(month) {
   return `${year}年${Number(mon || 1)}月`
 }
 
-function shiftMonth(month, delta) {
-  const base = month ? new Date(`${month}-01T00:00:00`) : new Date()
-  base.setMonth(base.getMonth() + delta)
-  return base.toISOString().slice(0, 7)
-}
-
 function SimPipelineMarketCalendar({ market, onSelectDay, onPreviewStart }) {
   const days = market?.days || []
   const leading = days[0] ? new Date(`${days[0].date}T00:00:00`).getDay() : 0
@@ -2011,7 +2006,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
   const [initializingPipeline, setInitializingPipeline] = useState(false)
   const [pipelineRunResult, setPipelineRunResult] = useState(null)
   const [pipelineNotice, setPipelineNotice] = useState('')
-  const [pipelineMonth, setPipelineMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [pipelineMonth, setPipelineMonth] = useState(getCurrentMonth)
   const [selectedPipelineDay, setSelectedPipelineDay] = useState(null)
   const [pipelineDayDetail, setPipelineDayDetail] = useState(null)
   const [loadingPipelineDay, setLoadingPipelineDay] = useState(false)
@@ -2501,7 +2496,7 @@ export function QuadrantAdminPanel({ onUnauthorized }) {
           <div className="text-xs font-medium text-foreground">市场日历驾驶舱 · {formatSimPipelineMonthLabel(pipelineMonth)}</div>
           <div className="flex items-center gap-2">
             <button onClick={() => setPipelineMonth(shiftMonth(pipelineMonth, -1))} className="rounded-lg border border-border px-2 py-1 text-xs text-foreground-muted hover:bg-background-alt">上一月</button>
-            <button onClick={() => setPipelineMonth(new Date().toISOString().slice(0, 7))} className="rounded-lg border border-border px-2 py-1 text-xs text-foreground-muted hover:bg-background-alt">本月</button>
+            <button onClick={() => setPipelineMonth(getCurrentMonth())} className="rounded-lg border border-border px-2 py-1 text-xs text-foreground-muted hover:bg-background-alt">本月</button>
             <button onClick={() => setPipelineMonth(shiftMonth(pipelineMonth, 1))} className="rounded-lg border border-border px-2 py-1 text-xs text-foreground-muted hover:bg-background-alt">下一月</button>
           </div>
         </div>

@@ -14,6 +14,7 @@ export const NAV_GROUPS = [
     label: '看板',
     items: [
       { key: 'market-overview', href: '/live-trading', label: '市场行情', matchNested: true },
+      { key: 'stock-pool', href: '/stock-pool', label: '卧龙股池', matchNested: true },
       { key: 'quadrant', href: '/quadrant', label: '市场全景', matchNested: true },
       { key: 'capital-map', href: '/capital-map', label: '资金星图', matchNested: true },
       { key: 'news-kline', href: '/news-kline', label: '新闻透视', matchNested: true },

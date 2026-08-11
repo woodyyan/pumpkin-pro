@@ -40,6 +40,7 @@ frontend/
 |---|---|---|
 | `/` | `index.js` | 首页/落地页；内容配置集中在 `frontend/data/homepage.js`，主叙事为 AI投研工作台，包含 Hero、三大卖点、快速上手、功能分类、教程和风险提示 |
 | `/live-trading` | `live-trading.js` | 市场行情页（导航归属「看板」）；当前实现为 `Hero + 单因子指数卡片 + 核心指数卡片 + 市场摘要` 的 dashboard，总览 A 股单因子指数与 A/H 股大盘指数 |
+| `/stock-pool` | `stock-pool.js` | 卧龙股池（导航归属「看板」）；展示 7 个单因子指数当前月度冻结成分的 Top10，并服务端批量覆盖基础实时行情 |
 | `/live-trading/[symbol]` | `live-trading/[symbol].js` | 个股详情页 (194KB)，active 仍归属「看板 / 市场行情」 |
 | `/ai/analysis` | `ai/analysis.js` | AI分析占位页（一期「敬请期待」） |
 | `/ai/reports` | `ai/reports.js` | AI研报页面：A 股/中国香港股票个股研报介绍、缩略图样例、登录后弹窗预览、微信定制转化与合规风险提示 |
@@ -67,7 +68,7 @@ frontend/
 - PC 端导航由 `components/DesktopNavMenu.js` + `components/NavDropdown.js` 渲染：hover 展开下拉，点击一级导航只负责展开/收起，不做跳转。
 - 移动端导航由 `components/MobileNavMenu.js` 渲染：保留汉堡入口，菜单内部按「卧龙AI / 看板 / 跟踪 / 选股 / 更多」分组折叠，一次只展开一个分组。
 - 「卧龙AI」分组当前顺序为「AI分析 / AI研报 / AI选股 / AI回测」。
-- 「看板」分组当前顺序为「市场行情 / 市场全景 / 资金星图 / 新闻透视」。其中资金星图路由固定为 `/capital-map`，首期仅支持 A 股；新闻透视路由固定为 `/news-kline`，支持 A 股与中国香港股票。
+- 「看板」分组当前顺序为「市场行情 / 卧龙股池 / 市场全景 / 资金星图 / 新闻透视」。其中卧龙股池路由固定为 `/stock-pool`，首期仅支持 A 股单因子指数当前月度成分；资金星图路由固定为 `/capital-map`，首期仅支持 A 股；新闻透视路由固定为 `/news-kline`，支持 A 股与中国香港股票。
 - 占位页统一复用 `components/ComingSoonPage.js`，文案固定为标题 + 「敬请期待」，避免散落多个空白实现。
 
 ### 首页内容架构（2026-06-27）
@@ -87,6 +88,7 @@ frontend/
 - 趋势图组件继续复用 `frontend/components/MiniChart.js`，当前用于市场指数真实趋势点和单因子指数近 20 日净值曲线的轻量表达，不承载专业分时分析交互。
 - 页面首屏新增 7 张 A 股单因子指数卡片，固定放在「核心指数卡片」上方；不新增单独详情页，用户在同一页完成因子指数与大盘指数对比。
 - 页面首屏核心指数固定为 6 张：上证指数、深证成指、创业板指、恒生指数、恒生中国企业指数、恒生科技指数；扩展指数仍预留沪深300、科创50、上证50、中证500。
+- `/stock-pool` 通过 backend `GET /api/live/factor-pool` 读取 7 个指数最新 `factor_index_daily.rebalance_id` 对应的 Top10 成分，不直接以最新调仓表拼当前名单；`factorpool` 只将 `live.Service` 的 10 秒批量行情作为覆盖层，行情异常时保留月度成分事实和排序。
 
 ### 关键组件
 - `ThemeToggle.js`: 主题切换按钮（三态：浅色/深色/跟随系统）

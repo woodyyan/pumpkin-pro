@@ -3,6 +3,7 @@ package factorindex
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -49,6 +50,73 @@ func (r *Repository) ListActiveDefinitions(ctx context.Context, exchange string)
 		return nil, err
 	}
 	return rows, nil
+}
+
+// PoolSource 是卧龙股池的可复现来源。它只引用已物化的最新日度指数行，
+// 因此 constituent 的调仓批次、数据日期和状态始终保持一致。
+type PoolSource struct {
+	Definition Definition
+	Daily      *Daily
+	Rebalance  *Rebalance
+	Items      []Constituent
+}
+
+// ListCurrentPoolSources 返回当前每个活跃单因子指数的 TopN 成分。
+// "当前"定义为该指数最新已物化日度记录关联的 rebalance_id，而不是独立查询
+// 最新调仓记录，避免日度指数、月度成分来自不同批次而发生口径漂移。
+func (r *Repository) ListCurrentPoolSources(ctx context.Context, exchange string, topN int) ([]PoolSource, error) {
+	if topN <= 0 {
+		topN = 10
+	}
+	definitions, err := r.ListActiveDefinitions(ctx, exchange)
+	if err != nil {
+		return nil, err
+	}
+	definitionByKey := make(map[string]Definition, len(definitions))
+	for _, definition := range definitions {
+		definitionByKey[definition.FactorKey] = definition
+	}
+
+	ordered := make([]Definition, 0, len(definitions))
+	for _, item := range defaultDefinitions {
+		if definition, ok := definitionByKey[item.FactorKey]; ok {
+			ordered = append(ordered, definition)
+			delete(definitionByKey, item.FactorKey)
+		}
+	}
+	extraDefinitions := make([]Definition, 0, len(definitionByKey))
+	for _, definition := range definitionByKey {
+		extraDefinitions = append(extraDefinitions, definition)
+	}
+	sort.Slice(extraDefinitions, func(left, right int) bool {
+		return extraDefinitions[left].FactorKey < extraDefinitions[right].FactorKey
+	})
+	ordered = append(ordered, extraDefinitions...)
+
+	result := make([]PoolSource, 0, len(ordered))
+	for _, definition := range ordered {
+		daily, err := r.LatestDaily(ctx, definition.ID)
+		if err != nil {
+			return nil, err
+		}
+		source := PoolSource{Definition: definition, Daily: daily, Items: []Constituent{}}
+		if daily == nil || strings.TrimSpace(daily.RebalanceID) == "" {
+			result = append(result, source)
+			continue
+		}
+		rebalance, err := r.GetRebalanceByID(ctx, daily.RebalanceID)
+		if err != nil {
+			return nil, err
+		}
+		items, err := r.ListTopConstituentsByRebalance(ctx, daily.RebalanceID, topN)
+		if err != nil {
+			return nil, err
+		}
+		source.Rebalance = rebalance
+		source.Items = items
+		result = append(result, source)
+	}
+	return result, nil
 }
 
 func (r *Repository) ListSnapshotDates(ctx context.Context) ([]string, error) {
@@ -250,6 +318,31 @@ func (r *Repository) ListConstituentsByRebalance(ctx context.Context, rebalanceI
 		Order("rank ASC, stock_code ASC").
 		Find(&rows).Error
 	return rows, err
+}
+
+func (r *Repository) ListTopConstituentsByRebalance(ctx context.Context, rebalanceID string, limit int) ([]Constituent, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	var rows []Constituent
+	err := r.db.WithContext(ctx).Model(&Constituent{}).
+		Where("rebalance_id = ? AND rank > 0", strings.TrimSpace(rebalanceID)).
+		Order("rank ASC, stock_code ASC").
+		Limit(limit).
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *Repository) GetRebalanceByID(ctx context.Context, rebalanceID string) (*Rebalance, error) {
+	var row Rebalance
+	err := r.db.WithContext(ctx).Where("id = ?", strings.TrimSpace(rebalanceID)).First(&row).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &row, nil
 }
 
 func (r *Repository) GetDailyByTradeDate(ctx context.Context, indexID, tradeDate string) (*Daily, error) {

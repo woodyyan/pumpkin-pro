@@ -12,6 +12,7 @@ describe('navigation config', () => {
     assert.ok(hrefs.includes('/ai/picker'))
     assert.ok(hrefs.includes('/ai/backtest'))
     assert.ok(hrefs.includes('/quadrant'))
+    assert.ok(hrefs.includes('/stock-pool'))
     assert.ok(hrefs.includes('/capital-map'))
     assert.ok(hrefs.includes('/news-kline'))
     assert.ok(hrefs.includes('/watchlist'))
@@ -25,10 +26,10 @@ describe('navigation config', () => {
     assert.deepEqual(aiItems.map((item) => item.href).slice(0, 3), ['/ai/analysis', '/ai/reports', '/ai/picker'])
   })
 
-  it('places news perspective under dashboard after capital map', () => {
+  it('places Wolong stock pool after market overview and preserves later dashboard order', () => {
     const dashboardItems = NAV_GROUPS.find((group) => group.key === 'dashboard').items
 
-    assert.deepEqual(dashboardItems.map((item) => item.href), ['/live-trading', '/quadrant', '/capital-map', '/news-kline'])
+    assert.deepEqual(dashboardItems.map((item) => item.href), ['/live-trading', '/stock-pool', '/quadrant', '/capital-map', '/news-kline'])
   })
 
   it('does not duplicate hrefs across navigation items', () => {

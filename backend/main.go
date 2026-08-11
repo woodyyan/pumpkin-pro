@@ -28,6 +28,7 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/companyprofile"
 	"github.com/woodyyan/pumpkin-pro/backend/store/factorindex"
 	"github.com/woodyyan/pumpkin-pro/backend/store/factorlab"
+	"github.com/woodyyan/pumpkin-pro/backend/store/factorpool"
 	"github.com/woodyyan/pumpkin-pro/backend/store/feedback"
 	"github.com/woodyyan/pumpkin-pro/backend/store/fundcache"
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
@@ -311,6 +312,7 @@ type appServer struct {
 	factorLabService      *factorlab.Service
 	factorLabWorker       *factorlab.Worker
 	factorIndexService    *factorindex.Service
+	factorPoolService     *factorpool.Service
 	factorIndexWorker     *factorindex.Worker
 	backtestService       *backtest.Service
 	screenerService       *screener.Service
@@ -1771,6 +1773,23 @@ func (a *appServer) handleLiveFactorIndexOverview(w http.ResponseWriter, r *http
 		return
 	}
 	writeJSON(w, http.StatusOK, overview)
+}
+
+func (a *appServer) handleLiveFactorPool(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
+		return
+	}
+	if a.factorPoolService == nil {
+		writeError(w, http.StatusServiceUnavailable, "卧龙股池服务暂不可用")
+		return
+	}
+	payload, err := a.factorPoolService.GetCurrent(r.Context(), r.URL.Query().Get("exchange"))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (a *appServer) handleCapitalMap(w http.ResponseWriter, r *http.Request) {
@@ -4388,6 +4407,7 @@ func main() {
 	factorLabService := factorlab.NewService(factorLabRepo)
 	factorIndexRepo := factorindex.NewRepository(storeInstance.DB)
 	factorIndexService := factorindex.NewService(factorIndexRepo)
+	factorPoolService := factorpool.NewService(factorIndexRepo, liveService)
 	factorIndexService.MinBarCoverageRatio = cfg.FactorIndex.MinBarCoverageRatio
 	if err := factorIndexService.EnsureInitialized(context.Background()); err != nil {
 		log.Printf("factor index init skipped: %v", err)
@@ -4470,6 +4490,7 @@ func main() {
 		factorLabService:      factorLabService,
 		factorLabWorker:       factorLabWorker,
 		factorIndexService:    factorIndexService,
+		factorPoolService:     factorPoolService,
 		factorIndexWorker:     factorIndexWorker,
 		backtestService:       backtestService,
 		screenerService:       screenerService,
@@ -4543,6 +4564,7 @@ func main() {
 	mux.HandleFunc("/api/live/watchlist/", server.withRequiredAuth(server.handleLiveWatchlistSubroutes))
 	mux.HandleFunc("/api/live/market/overview", server.handleLiveMarketOverview)
 	mux.HandleFunc("/api/live/factor-index/overview", server.handleLiveFactorIndexOverview)
+	mux.HandleFunc("/api/live/factor-pool", server.handleLiveFactorPool)
 	mux.HandleFunc("/api/capital-map", server.handleCapitalMap)
 	mux.HandleFunc("/api/live/news-kline", server.handleNewsKline)
 	mux.HandleFunc("/api/live/symbols/", server.withOptionalAuth(server.handleLiveSymbolsSubroutes))

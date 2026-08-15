@@ -7,16 +7,9 @@ import InfoTip from '../../components/InfoTip'
 import AIAnalysisReportContent from '../../components/AIAnalysisReportContent'
 import AIAnalysisShareCard from '../../components/AIAnalysisShareCard'
 import { notifyAIAnalysisFinished } from '../../components/AIAnalysisWorkspace'
-import SymbolNewsSummaryCard from '../../components/SymbolNewsSummaryCard'
 import { useTheme } from '../../lib/theme-context'
 import { requestJson } from '../../lib/api'
-import {
-  buildAINewsContext,
-  buildNewsEmptyState,
-  filterSymbolNewsItems,
-  formatNewsTime,
-  formatNewsTypeLabel,
-} from '../../lib/symbol-news-ui'
+import { buildAINewsContext } from '../../lib/symbol-news-ui'
 import { useAuth } from '../../lib/auth-context'
 import { isAuthRequiredError } from '../../lib/auth-storage'
 import { deriveAIAnalysisWaitState } from '../../lib/ai-analysis-wait'
@@ -65,8 +58,6 @@ const POLL_MS = 10000
 const POLL_MS_NON_TRADING = 60000  // non-trading: 1 min fallback (data comes from DB cache)
 const OVERLAY_WINDOW_MINUTES = 60
 const SUPPORT_REFRESH_MS = 60 * 1000
-const NEWS_SUMMARY_REFRESH_MS = 10 * 60 * 1000
-const NEWS_ITEMS_REFRESH_MS = 60 * 1000
 const SIGNAL_CENTER_REFRESH_MS = 15 * 1000
 const FUNDAMENTALS_REFRESH_MS = 24 * 60 * 60 * 1000
 const SUPPORT_LOOKBACK_DAYS = 120
@@ -142,12 +133,6 @@ export default function LiveTradingDetailPage() {
   // 信号中心：本股票的订阅摘要（完整配置已迁入 /signals，本页只读展示 + 跳转）
   const [symbolSubscriptions, setSymbolSubscriptions] = useState([])
   const [signalError, setSignalError] = useState('')
-  const [newsSummary, setNewsSummary] = useState(null)
-  const [newsItems, setNewsItems] = useState([])
-  const [newsLoading, setNewsLoading] = useState(false)
-  const [newsError, setNewsError] = useState('')
-  const [newsFilter, setNewsFilter] = useState('all')
-  const [newsUpdatedAt, setNewsUpdatedAt] = useState('')
   const [error, setError] = useState('')
   const [errorNeedsLogin, setErrorNeedsLogin] = useState(false)
   const [lastUpdateAt, setLastUpdateAt] = useState('')
@@ -187,8 +172,6 @@ export default function LiveTradingDetailPage() {
   const resistanceRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const movingAverageRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
   const fundamentalsRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
-  const newsSummaryRefreshRef = useRef({ symbol: '', refreshedAt: 0 })
-  const newsItemsRefreshRef = useRef(0)
   const signalSummaryRefreshRef = useRef(0)
 
   const privateAccessReady = ready && isLoggedIn
@@ -356,48 +339,6 @@ export default function LiveTradingDetailPage() {
       setPortfolioData(data?.item || null)
     } catch {
       setPortfolioData(null)
-    }
-  }
-
-  const loadNewsSummary = async (sym, { force = false } = {}) => {
-    if (!sym) return
-    const now = Date.now()
-    const cache = newsSummaryRefreshRef.current
-    if (!force && cache.symbol === sym && now - cache.refreshedAt < NEWS_SUMMARY_REFRESH_MS) return
-    try {
-      const data = await requestJson(`/api/live/symbols/${encodeURIComponent(sym)}/news/summary`)
-      setNewsSummary(data?.summary || null)
-      setNewsUpdatedAt(data?.updated_at || '')
-      setNewsError('')
-      newsSummaryRefreshRef.current = { symbol: sym, refreshedAt: now }
-    } catch (err) {
-      setNewsError(err.message || '新闻摘要暂不可用')
-      if (force || cache.symbol !== sym) {
-        setNewsSummary(null)
-        setNewsUpdatedAt('')
-      }
-    }
-  }
-
-  const loadNewsItems = async (sym, { type = 'all', force = false } = {}) => {
-    if (!sym) return
-    const now = Date.now()
-    if (!force && now - newsItemsRefreshRef.current < NEWS_ITEMS_REFRESH_MS && newsItems.length > 0 && newsFilter === type) return
-    setNewsLoading(true)
-    try {
-      const query = type && type !== 'all' ? `?type=${encodeURIComponent(type)}&limit=24` : '?limit=24'
-      const data = await requestJson(`/api/live/symbols/${encodeURIComponent(sym)}/news${query}`)
-      setNewsSummary(data?.summary || null)
-      setNewsItems(Array.isArray(data?.items) ? data.items : [])
-      setNewsUpdatedAt(data?.updated_at || '')
-      setNewsError('')
-      newsItemsRefreshRef.current = now
-      newsSummaryRefreshRef.current = { symbol: sym, refreshedAt: now }
-    } catch (err) {
-      setNewsError(err.message || '新闻列表暂不可用')
-      if (force) setNewsItems([])
-    } finally {
-      setNewsLoading(false)
     }
   }
 
@@ -820,22 +761,6 @@ export default function LiveTradingDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, symbol, overlayRange])
 
-  useEffect(() => {
-    if (!ready || !symbol) return undefined
-    const timer = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
-      loadNewsSummary(symbol)
-    }, NEWS_SUMMARY_REFRESH_MS)
-    return () => clearInterval(timer)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, symbol])
-
-  useEffect(() => {
-    if (!ready || !symbol || activeTab !== STOCK_DETAIL_TAB_KEYS.NEWS) return
-    loadNewsItems(symbol, { type: newsFilter, force: true })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, symbol, activeTab, newsFilter])
-
   // 加载本股票的信号订阅摘要（信号中心上线后，本页只做只读展示与跳转）。
   const loadSignalSummary = async ({ force = false } = {}) => {
     const now = Date.now()
@@ -856,7 +781,6 @@ export default function LiveTradingDetailPage() {
           loadSymbolPanels(symbol, { forceSupport: true }),
           loadFundamentals(symbol),
           loadDailyOverlay(symbol, overlayRange),
-          loadNewsSummary(symbol, { force: true }),
         ])
         updateError('')
       } catch (err) {
@@ -897,13 +821,6 @@ export default function LiveTradingDetailPage() {
     setPortfolioDeleteConfirmValue('')
     setPortfolioDangerMenu(createPortfolioDangerMenuState())
     setPriceAutoFilled(false)
-    setNewsFilter('all')
-    setNewsItems([])
-    setNewsSummary(null)
-    setNewsError('')
-    setNewsUpdatedAt('')
-    newsSummaryRefreshRef.current = { symbol: '', refreshedAt: 0 }
-    newsItemsRefreshRef.current = 0
   }, [symbol, authIdentityKey, exchange])
 
   useEffect(() => {
@@ -1030,7 +947,6 @@ export default function LiveTradingDetailPage() {
   const isChartTab = activeTab === STOCK_DETAIL_TAB_KEYS.CHART
   const isTechnicalTab = activeTab === STOCK_DETAIL_TAB_KEYS.TECHNICAL
   const isFundamentalTab = activeTab === STOCK_DETAIL_TAB_KEYS.FUNDAMENTAL
-  const isNewsTab = activeTab === STOCK_DETAIL_TAB_KEYS.NEWS
   const isPortfolioTab = activeTab === STOCK_DETAIL_TAB_KEYS.PORTFOLIO
 
   if (!symbol) {
@@ -1179,27 +1095,6 @@ export default function LiveTradingDetailPage() {
           activeTabMeta={activeTabMeta}
           onChange={switchStockDetailTab}
         />
-
-        {isNewsTab && (
-          <section className="space-y-4">
-            <SymbolNewsSummaryCard
-              summary={newsSummary}
-              updatedAt={newsUpdatedAt}
-              loading={newsLoading}
-              error={newsError || ''}
-            />
-            <InlineSymbolNewsList
-              items={newsItems}
-              summary={newsSummary}
-              activeType={newsFilter}
-              loading={newsLoading}
-              error={newsError}
-              updatedAt={newsUpdatedAt}
-              onRefresh={() => loadNewsItems(symbol, { type: newsFilter, force: true })}
-              onTypeChange={setNewsFilter}
-            />
-          </section>
-        )}
 
         {isOverviewTab && (
           <section className="grid gap-4 xl:grid-cols-[1.2fr_0.9fr_0.9fr]">
@@ -1965,94 +1860,6 @@ export default function LiveTradingDetailPage() {
       </div>
 
     </>
-  )
-}
-
-const NEWS_FILTERS = [
-  { value: 'all', label: '全部' },
-  { value: 'news', label: '新闻' },
-  { value: 'announcement', label: '公告' },
-  { value: 'filing', label: '财报' },
-]
-
-function InlineSymbolNewsList({ items, summary, activeType, loading = false, error = '', updatedAt = '', onRefresh, onTypeChange }) {
-  const filtered = filterSymbolNewsItems(items, activeType)
-
-  return (
-    <section className="rounded-2xl border border-border bg-card p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold text-foreground">新闻与公告列表</h3>
-          <div className="mt-1 text-xs text-foreground-dim">
-            {summary?.last_24h_count ? `近24h ${summary.last_24h_count} 条` : '暂无高相关事件'}
-            {updatedAt ? ` · 更新：${formatNewsTime(updatedAt)}` : ''}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onRefresh}
-          className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-foreground-muted transition hover:border-[var(--color-border-strong)] hover:text-foreground"
-        >
-          刷新
-        </button>
-      </div>
-
-      {Array.isArray(summary?.highlight_tags) && summary.highlight_tags.length > 0 ? (
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-          {summary.highlight_tags.map((tag) => (
-            <span key={tag} className="whitespace-nowrap rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] text-primary">
-              {tag}
-            </span>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-        {NEWS_FILTERS.map((item) => (
-          <button
-            key={item.value}
-            type="button"
-            onClick={() => onTypeChange(item.value)}
-            className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs transition ${activeType === item.value ? 'border-primary bg-primary text-foreground' : 'border-border bg-[var(--color-bg-hover)] text-foreground-muted hover:border-[var(--color-border-strong)] hover:text-foreground'}`}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-4">
-        {error ? <div className="mb-3 rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">{error}</div> : null}
-        {loading ? (
-          <div className="rounded-xl border border-dashed border-border px-4 py-8 text-sm text-foreground-dim">新闻加载中...</div>
-        ) : filtered.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border px-4 py-8 text-sm text-foreground-dim">{buildNewsEmptyState(activeType)}</div>
-        ) : (
-          <div className="space-y-3">
-            {filtered.map((item) => (
-              <article key={item.id} className="rounded-2xl border border-border bg-[var(--color-bg-hover)] p-4">
-                <div className="flex flex-wrap items-center gap-2 text-[11px] text-foreground-dim">
-                  <span className={`rounded-full border px-2 py-0.5 ${item.type === 'filing' ? 'border-primary/30 bg-primary/10 text-primary' : item.type === 'announcement' ? 'border-amber-300/30 bg-amber-500/10 text-amber-800 dark:text-amber-200' : 'border-border bg-[var(--color-bg-hover)] text-foreground-dim'}`}>
-                    {formatNewsTypeLabel(item.type)}
-                  </span>
-                  {(item.source_type === 'official' || item.official) ? <span className="rounded-full border border-emerald-300/25 bg-positive/10 px-2 py-0.5 text-positive">官方</span> : null}
-                  <span>{item.source_name || item.source || '未知来源'}</span>
-                  <span>{formatNewsTime(item.published_at)}</span>
-                </div>
-                <div className="mt-3 text-sm font-medium leading-6 text-foreground">{item.title}</div>
-                {item.summary ? <div className="mt-2 text-sm leading-6 text-foreground-muted">{item.summary}</div> : null}
-                {(item.report_period || item.report_type || item.url) ? (
-                  <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-foreground-dim">
-                    {item.report_period ? <span>{item.report_period}</span> : null}
-                    {item.report_type ? <span>{item.report_type}</span> : null}
-                    {item.url ? <a href={item.url} target="_blank" rel="noreferrer" className="text-primary hover:text-primary/80">原文</a> : null}
-                  </div>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
   )
 }
 

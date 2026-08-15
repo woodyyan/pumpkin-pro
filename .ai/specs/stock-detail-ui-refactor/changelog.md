@@ -22,3 +22,10 @@
 - 「新闻与公告」Tab 移除「查看全部」侧边抽屉入口，摘要与新闻/公告列表直接在 Tab 下方展示。
 - 概览 AI 入口移除「最近观点：已生成，可在下方 AI 分析历史中查看详情。」提示文案。
 - 概览中「实时快照」调整到「AI 分析历史」上方，AI 历史作为快照后的补充信息展示。
+
+## 2026-08-15
+
+- 下线「新闻与公告」Tab：PC 端 Tab 收为概览、走势、技术、基本面、持仓 & 提醒五个；移动端入口收为概览、走势、分析、持仓四组。
+- 删除前端新闻 Tab 专属代码（`SymbolNewsSummaryCard`、页内 `InlineSymbolNewsList`、新闻 state/轮询/加载函数），并顺带清理已无引用的 `SymbolNewsPanel` 死代码。
+- 后端 `/api/live/symbols/{symbol}/news*` 与 quant `/api/news/{symbol}` 保留：AI 分析上下文（`fetchAIAnalysisNewsContext`）仍依赖该链路。
+- `frontend/lib/symbol-news-ui.js` 仅保留 `buildAINewsContext` 供 AI 分析使用。

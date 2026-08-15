@@ -3,7 +3,6 @@ export const STOCK_DETAIL_TAB_KEYS = Object.freeze({
   CHART: 'chart',
   TECHNICAL: 'technical',
   FUNDAMENTAL: 'fundamental',
-  NEWS: 'news',
   PORTFOLIO: 'portfolio',
 })
 
@@ -35,13 +34,6 @@ export const STOCK_DETAIL_TABS = Object.freeze([
     shortLabel: '基本',
     mobileGroup: 'analysis',
     description: '估值、盈利质量、收入与利润概览',
-  },
-  {
-    key: STOCK_DETAIL_TAB_KEYS.NEWS,
-    label: '新闻与公告',
-    shortLabel: '新闻',
-    mobileGroup: 'news',
-    description: '个股新闻摘要、公告与资讯列表',
   },
   {
     key: STOCK_DETAIL_TAB_KEYS.PORTFOLIO,
@@ -76,8 +68,6 @@ export function getStockDetailMobileGroups(tabs = STOCK_DETAIL_TABS) {
     seen.add(groupKey)
     if (groupKey === 'analysis') {
       groups.push({ key: groupKey, label: '分析', shortLabel: '分析' })
-    } else if (groupKey === 'news') {
-      groups.push({ key: groupKey, label: '新闻', shortLabel: '新闻' })
     } else if (groupKey === 'portfolio') {
       groups.push({ key: groupKey, label: '持仓', shortLabel: '持仓' })
     } else {

@@ -25,12 +25,11 @@ export const ADMIN_NAV_ITEMS = [
     href: '/admin/ops',
     label: '运维与支持',
     shortLabel: '运维',
-    description: '支付、备份、系统健康、反馈',
+    description: '备份、系统健康、反馈',
   },
 ]
 
 export const ADMIN_TAB_ROUTE_MAP = {
-  payments: '/admin/ops',
   backup: '/admin/ops',
   feedback: '/admin/ops',
   system: '/admin/ops',

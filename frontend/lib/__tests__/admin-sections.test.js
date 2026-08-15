@@ -41,8 +41,6 @@ describe('resolveAdminSectionApis()', () => {
 
   it('returns ops APIs for ops page', () => {
     assert.deepEqual(resolveAdminSectionApis('ops'), [
-      '/api/admin/payments/config',
-      '/api/admin/payments',
       '/api/admin/backup-status',
       '/api/admin/backup-history',
       '/api/admin/backup-stats',

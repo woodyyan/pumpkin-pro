@@ -34,7 +34,6 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"github.com/woodyyan/pumpkin-pro/backend/store/mail"
 	"github.com/woodyyan/pumpkin-pro/backend/store/newskline"
-	"github.com/woodyyan/pumpkin-pro/backend/store/payment"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 	"github.com/woodyyan/pumpkin-pro/backend/store/screener"
@@ -281,15 +280,6 @@ func quadrantSnapshotTradeDates(tradeDate string, exchange string) []string {
 	return dates
 }
 
-type paymentService interface {
-	GetConfigView(ctx context.Context) *payment.PaymentConfigView
-	CreateAdminCheckoutSession(ctx context.Context, adminID string, input payment.AdminCreateCheckoutSessionInput) (*payment.CreateCheckoutSessionResult, error)
-	ListPayments(ctx context.Context, input payment.ListPaymentsInput) ([]payment.PaymentRecord, int64, error)
-	GetPaymentDetail(ctx context.Context, paymentID string) (*payment.PaymentDetail, error)
-	ExpireAdminPayment(ctx context.Context, paymentID string) (*payment.PaymentRecord, error)
-	HandleWebhook(ctx context.Context, payload []byte, signatureHeader string) error
-}
-
 type appServer struct {
 	cfg                   config.Config
 	authService           *auth.Service
@@ -323,7 +313,6 @@ type appServer struct {
 	analysisHistoryRepo   *analysis_history.Repository
 	portfolioRiskRepo     *portfolio.RiskRepository
 	newsService           *live.NewsService
-	paymentService        paymentService
 }
 
 // writeDeviceSnapshotAsync parses UA and writes a device snapshot asynchronously.
@@ -4439,11 +4428,6 @@ func main() {
 		AccessTTL: 2 * time.Hour,
 		EnvAI:     cfg.AI,
 	})
-	paymentRepo := payment.NewRepository(storeInstance.DB)
-	paymentService := payment.NewService(paymentRepo, payment.ServiceConfig{
-		AppPublicBaseURL: strings.TrimSpace(cfg.AppPublicBaseURL),
-		Stripe:           cfg.Stripe,
-	})
 	if err := adminService.SeedAdmin(context.Background(), cfg.AdminSeed.Email, cfg.AdminSeed.Password); err != nil {
 		log.Printf("Admin seed skipped: %v", err)
 	}
@@ -4501,7 +4485,6 @@ func main() {
 		analysisHistoryRepo:   analysisHistoryRepo,
 		portfolioRiskRepo:     portfolioRiskRepo,
 		newsService:           newsService,
-		paymentService:        paymentService,
 	}
 
 	mux := http.NewServeMux()
@@ -4651,11 +4634,6 @@ func main() {
 	mux.HandleFunc("/api/admin/backup-history", server.withSuperAdminAuth(server.handleAdminBackupHistory))
 	mux.HandleFunc("/api/admin/backup-trigger", server.withSuperAdminAuth(server.handleAdminBackupTrigger))
 	mux.HandleFunc("/api/admin/backup-stats", server.withSuperAdminAuth(server.handleAdminBackupStats))
-	mux.HandleFunc("/api/admin/payments/config", server.withSuperAdminAuth(server.handleAdminPaymentConfig))
-	mux.HandleFunc("/api/admin/payments/checkout-sessions", server.withSuperAdminAuth(server.handleAdminPaymentCheckoutSessions))
-	mux.HandleFunc("/api/admin/payments", server.withSuperAdminAuth(server.handleAdminPayments))
-	mux.HandleFunc("/api/admin/payments/", server.withSuperAdminAuth(server.handleAdminPaymentSubroutes))
-	mux.HandleFunc("/api/stripe/webhook", server.handleStripeWebhook)
 
 	mux.HandleFunc("/api/factor-lab/meta", server.withOptionalAuth(server.handleFactorLabMeta))
 	mux.HandleFunc("/api/factor-lab/screener", server.withOptionalAuth(server.handleFactorLabScreener))

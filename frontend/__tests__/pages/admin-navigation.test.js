@@ -16,7 +16,6 @@ describe('admin navigation architecture', () => {
     assert.match(navSource, /href: '\/admin\/data'/)
     assert.match(navSource, /href: '\/admin\/ai'/)
     assert.match(navSource, /href: '\/admin\/ops'/)
-    assert.match(navSource, /payments: '\/admin\/ops'/)
     assert.match(navSource, /factor: '\/admin\/data'/)
     assert.match(navSource, /ai: '\/admin\/ai'/)
   })

@@ -7,7 +7,6 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/mileusna/useragent v1.3.5
 	github.com/stretchr/testify v1.8.1
-	github.com/stripe/stripe-go/v83 v83.2.1
 	golang.org/x/crypto v0.31.0
 	golang.org/x/sync v0.10.0
 	golang.org/x/text v0.21.0

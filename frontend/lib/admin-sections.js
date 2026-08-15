@@ -33,8 +33,6 @@ export function resolveAdminSectionApis(section) {
   }
   if (section === 'ops') {
     return [
-      '/api/admin/payments/config',
-      '/api/admin/payments',
       '/api/admin/backup-status',
       '/api/admin/backup-history',
       '/api/admin/backup-stats',

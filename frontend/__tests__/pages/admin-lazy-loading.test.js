@@ -5,13 +5,12 @@ import { readFileSync } from 'node:fs'
 const sectionsSource = readFileSync(new URL('../../components/admin/AdminSections.js', import.meta.url), 'utf8')
 
 describe('admin lazy loading boundaries', () => {
-  it('keeps overview page free of payments, backup, ai config and factor pipeline mounts', () => {
+  it('keeps overview page free of backup, ai config and factor pipeline mounts', () => {
     const overviewBlock = sectionsSource.slice(
       sectionsSource.indexOf('export function AdminOverviewPage'),
       sectionsSource.indexOf('export function AIUsageAdminPanel')
     )
 
-    assert.doesNotMatch(overviewBlock, /AdminPaymentsPanel/)
     assert.doesNotMatch(overviewBlock, /BackupPanel/)
     assert.doesNotMatch(overviewBlock, /AIProviderConfigPanel/)
     assert.doesNotMatch(overviewBlock, /FactorLabPipelinePanel/)

@@ -25,14 +25,6 @@ from result.metrics import PerformanceMetrics
 from strategy_library.models import StrategyDefinition, StrategyParamDefinition
 from strategy_library.registry import StrategyRegistry
 from strategy_library.resolver import ResolvedStrategy, StrategyResolver
-from screener.scanner import (
-    FILTERABLE_COLUMNS,
-    apply_filters,
-    df_to_records,
-    get_a_share_snapshot,
-    get_hk_snapshot,
-    sort_and_paginate,
-)
 from screener.quadrant import compute_all_quadrant_scores, compute_hk_quadrant_scores, get_cached_scores
 from strategy_library.service import StrategyService
 
@@ -82,26 +74,9 @@ class RuntimeStrategyPayload(BaseModel):
     params: Dict[str, Any] = Field(default_factory=dict)
 
 
-class ScreenerFilterRange(BaseModel):
-    min: Optional[float] = None
-    max: Optional[float] = None
-
-
 class CompanyProfileSyncRequest(BaseModel):
     symbols: List[str] = Field(default_factory=list)
     limit: int = Field(default=0, ge=0)
-
-
-class ScreenerScanRequest(BaseModel):
-    exchange: Optional[str] = Field(
-        default=None,
-        description="市场: HKEX=港股, 其他/null=A股",
-    )
-    filters: Dict[str, ScreenerFilterRange] = Field(default_factory=dict)
-    sort_by: str = Field(default="code")
-    sort_order: str = Field(default="asc")
-    page: int = Field(default=1, ge=1)
-    page_size: int = Field(default=50, ge=1, le=200)
 
 
 class BacktestRequest(BaseModel):
@@ -151,48 +126,6 @@ def get_data_source_health():
     except Exception:
         health["baostock_quota"] = None
     return health
-
-
-@app.post("/api/screener/scan")
-def screener_scan(req: ScreenerScanRequest):
-    """全市场筛选：获取实时快照 → 多维指标范围过滤 → 排序 → 分页返回
-
-    支持 A 股（默认）和港股（exchange=HKEX）两个市场。
-    """
-    try:
-        # 根据 exchange 参数分流到对应市场的快照
-        if req.exchange and req.exchange.upper() == "HKEX":
-            df = get_hk_snapshot()
-        else:
-            df = get_a_share_snapshot()
-
-        # 将 Pydantic 模型转为 dict
-        raw_filters = {}
-        for key, bounds in req.filters.items():
-            if key not in FILTERABLE_COLUMNS:
-                continue
-            entry = {}
-            if bounds.min is not None:
-                entry["min"] = bounds.min
-            if bounds.max is not None:
-                entry["max"] = bounds.max
-            if entry:
-                raw_filters[key] = entry
-
-        df = apply_filters(df, raw_filters)
-        page_df, total = sort_and_paginate(df, req.sort_by, req.sort_order, req.page, req.page_size)
-
-        return {
-            "total": total,
-            "page": req.page,
-            "page_size": req.page_size,
-            "items": df_to_records(page_df),
-        }
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("选股筛选异常")
-        raise HTTPException(status_code=500, detail=f"选股筛选失败: {exc}") from exc
 
 
 @app.post("/api/company-profiles/sync")

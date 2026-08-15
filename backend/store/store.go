@@ -20,7 +20,6 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/live"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
-	"github.com/woodyyan/pumpkin-pro/backend/store/screener"
 	"github.com/woodyyan/pumpkin-pro/backend/store/signal"
 	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
 	"gorm.io/gorm"
@@ -51,7 +50,6 @@ func New(cfg config.DBConfig) (*Store, error) {
 		portfolio.NewMigrator(),
 		companyprofile.NewMigrator(),
 		quadrant.NewMigrator(),
-		screener.NewMigrator(),
 		analytics.NewMigrator(),
 		feedback.NewMigrator(),
 		aireport.NewMigrator(),

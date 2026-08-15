@@ -32,7 +32,7 @@ describe('desktop and overflow navigation state', () => {
 
     assert.deepEqual(
       screeningGroup.items.map((item) => item.label),
-      ['选股器', '因子实验室', '回测引擎', '策略库']
+      ['因子实验室', '回测引擎', '策略库']
     )
     assert.equal(screeningGroup.isActive, true)
   })

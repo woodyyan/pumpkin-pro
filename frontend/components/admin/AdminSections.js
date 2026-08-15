@@ -622,8 +622,6 @@ export function AdminOverviewPage({ onUnauthorized }) {
                 <StatCard label="今日持仓操作" value={stats.features?.portfolio_event_today} />
                 <StatCard label="7天持仓活跃用户" value={stats.features?.portfolio_event_users_7d} />
                 <StatCard label="已填投资画像" value={stats.features?.portfolio_profile_users} />
-                <StatCard label="自选表" value={stats.features?.screener_lists} />
-                <StatCard label="选股用户" value={stats.features?.screener_users} />
               </div>
               {stats.trends?.daily_portfolio_ops && stats.trends.daily_portfolio_ops.length > 0 && (
                 <div className="mt-4 rounded-xl border border-border bg-card p-3">

@@ -344,18 +344,6 @@ func (r *Repository) CountPortfolioProfileUsers(ctx context.Context) (int64, err
 	return count, err
 }
 
-func (r *Repository) CountScreenerWatchlists(ctx context.Context) (int64, error) {
-	var count int64
-	err := r.db.WithContext(ctx).Table("screener_watchlists").Count(&count).Error
-	return count, err
-}
-
-func (r *Repository) CountScreenerUsers(ctx context.Context) (int64, error) {
-	var count int64
-	err := r.db.WithContext(ctx).Table("screener_watchlists").Distinct("user_id").Count(&count).Error
-	return count, err
-}
-
 // ── Traffic source queries ──
 
 type SourceCount struct {

@@ -109,8 +109,6 @@ type FeatureStats struct {
 	PortfolioEventToday      int64 `json:"portfolio_event_today"`
 	PortfolioEventUsers7D    int64 `json:"portfolio_event_users_7d"`
 	PortfolioProfileUsers    int64 `json:"portfolio_profile_users"`
-	ScreenerLists            int64 `json:"screener_lists"`
-	ScreenerUsers            int64 `json:"screener_users"`
 }
 
 type TrendStats struct {

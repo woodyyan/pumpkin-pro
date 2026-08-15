@@ -373,8 +373,6 @@ func (s *Service) collectFeatureStats(ctx context.Context, today, sevenDaysAgo t
 	pfEventToday, _ := s.repo.CountPortfolioEventsSince(ctx, today)
 	pfEventUsers7D, _ := s.repo.CountPortfolioEventUsersSince(ctx, sevenDaysAgo)
 	pfProfileUsers, _ := s.repo.CountPortfolioProfileUsers(ctx)
-	scLists, _ := s.repo.CountScreenerWatchlists(ctx)
-	scUsers, _ := s.repo.CountScreenerUsers(ctx)
 	return FeatureStats{
 		BacktestTotal:            btTotal,
 		BacktestToday:            btToday,
@@ -387,8 +385,6 @@ func (s *Service) collectFeatureStats(ctx context.Context, today, sevenDaysAgo t
 		PortfolioEventToday:      pfEventToday,
 		PortfolioEventUsers7D:    pfEventUsers7D,
 		PortfolioProfileUsers:    pfProfileUsers,
-		ScreenerLists:            scLists,
-		ScreenerUsers:            scUsers,
 	}
 }
 

@@ -138,7 +138,6 @@ export const FEATURE_CATEGORIES = [
     title: '选股与策略研究',
     description: '用条件、因子、策略和历史数据交叉验证想法。',
     items: [
-      { title: '选股器', href: '/stock-picker', status: '已上线', summary: '按行业、财务、技术面等条件筛选股票并排序。' },
       { title: '因子实验室', href: '/factor-lab', status: '已上线', summary: '自定义 7 类因子权重，生成综合排名分和候选列表。' },
       { title: '回测引擎', href: '/backtest', status: '已上线', summary: '基于历史数据验证策略收益、最大回撤、胜率和交易记录。' },
       { title: '策略库', href: '/strategies', status: '已上线', summary: '维护预设和自定义策略，为回测与信号评估提供参数。' },
@@ -206,13 +205,6 @@ export const TUTORIAL_GROUPS = [
         cta: '进入因子实验室',
         steps: ['进入「因子实验室」页面', '勾选价值、成长、质量、动量、股息率、规模或低波动因子', '输入各因子权重并应用', '按综合得分查看股票排名'],
         tip: '权重需要满足页面校验，应用后才会刷新排名结果。',
-      },
-      {
-        q: '如何使用选股器筛选股票？',
-        href: '/stock-picker',
-        cta: '去选股器',
-        steps: ['进入「选股器」页面', '选择行业、财务和技术面条件', '执行筛选并查看结果列表', '按关键指标排序，打开感兴趣的股票详情页'],
-        tip: '选股器适合条件筛选，因子实验室适合模型化权重排序。',
       },
       {
         q: '如何用回测验证策略想法？',

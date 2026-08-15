@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// ── AI 策略生成配置（复用 screener 包的 AI 配置格式） ──
+// ── AI 策略生成配置 ──
 
 type AIConfig struct {
 	APIKey  string

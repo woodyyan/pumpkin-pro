@@ -34,7 +34,6 @@ export const NAV_GROUPS = [
     key: 'screening',
     label: '选股',
     items: [
-      { key: 'stock-picker', href: '/stock-picker', label: '选股器', matchNested: true },
       { key: 'factor-lab', href: '/factor-lab', label: '因子实验室', matchNested: true },
       { key: 'backtest', href: '/backtest', label: '回测引擎', matchNested: true },
       { key: 'strategies', href: '/strategies', label: '策略库', matchNested: true },

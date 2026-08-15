@@ -36,7 +36,6 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/newskline"
 	"github.com/woodyyan/pumpkin-pro/backend/store/portfolio"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
-	"github.com/woodyyan/pumpkin-pro/backend/store/screener"
 	"github.com/woodyyan/pumpkin-pro/backend/store/signal"
 	"github.com/woodyyan/pumpkin-pro/backend/store/strategy"
 	"gorm.io/gorm"
@@ -305,7 +304,6 @@ type appServer struct {
 	factorPoolService     *factorpool.Service
 	factorIndexWorker     *factorindex.Worker
 	backtestService       *backtest.Service
-	screenerService       *screener.Service
 	analyticsRepo         *analytics.Repository
 	feedbackRepo          *feedback.Repository
 	aiRateLimiter         *strategy.AIRateLimiter
@@ -439,18 +437,6 @@ func (a *appServer) resolveStrategyAIConfig(ctx context.Context) (strategy.AICon
 		return strategy.AIConfig{}, err
 	}
 	return strategy.AIConfig{
-		APIKey:  resolved.APIKey,
-		BaseURL: resolved.BaseURL,
-		Model:   resolved.ModelID,
-	}, nil
-}
-
-func (a *appServer) resolveScreenerAIConfig(ctx context.Context) (screener.AIConfig, error) {
-	resolved, err := a.resolveRuntimeAIConfig(ctx)
-	if err != nil {
-		return screener.AIConfig{}, err
-	}
-	return screener.AIConfig{
 		APIKey:  resolved.APIKey,
 		BaseURL: resolved.BaseURL,
 		Model:   resolved.ModelID,
@@ -3085,47 +3071,6 @@ func (a *appServer) handleFactorLabScreener(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (a *appServer) handleScreenerAIParse(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
-		return
-	}
-	userID := currentUserID(r)
-	if strings.TrimSpace(userID) == "" {
-		writeError(w, http.StatusUnauthorized, "请先登录后使用 AI 选股功能")
-		return
-	}
-	// 限流检查
-	if !a.aiRateLimiter.Allow(userID) {
-		writeError(w, http.StatusTooManyRequests, "本小时 AI 调用次数已达上限（20 次/小时），请稍后再试")
-		return
-	}
-	payload, err := decodeBodyAsMap(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "请求格式错误")
-		return
-	}
-	query := asString(payload["query"])
-	exchange := asString(payload["exchange"])
-	if exchange == "" {
-		exchange = "ASHARE"
-	}
-
-	aiCfg, err := a.resolveScreenerAIConfig(r.Context())
-	if err != nil {
-		log.Printf("[screener-ai] resolve runtime config failed: %v", err)
-		writeError(w, http.StatusInternalServerError, "AI 配置读取失败，请联系管理员检查")
-		return
-	}
-
-	result, err := screener.ParseNaturalLanguage(r.Context(), aiCfg, userID, query, exchange)
-	if err != nil {
-		a.writeScreenerError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
 func (a *appServer) handleAIPickerMeta(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
@@ -3213,94 +3158,6 @@ func (a *appServer) handleAIPickerGenerate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
-}
-
-func (a *appServer) handleScreenerScan(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
-		return
-	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "请求体读取失败")
-		return
-	}
-	defer r.Body.Close()
-	a.proxyToQuant(w, r, "/api/screener/scan", body)
-}
-
-func (a *appServer) handleScreenerWatchlists(w http.ResponseWriter, r *http.Request) {
-	userID := currentUserID(r)
-	switch r.Method {
-	case http.MethodGet:
-		items, err := a.screenerService.List(r.Context(), userID)
-		if err != nil {
-			a.writeScreenerError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": items})
-	case http.MethodPost:
-		var input screener.CreateWatchlistInput
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-			writeError(w, http.StatusBadRequest, "自选表请求格式错误")
-			return
-		}
-		detail, err := a.screenerService.Create(r.Context(), userID, input)
-		if err != nil {
-			a.writeScreenerError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"item": detail})
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "Only GET and POST methods are allowed")
-	}
-}
-
-func (a *appServer) handleScreenerWatchlistSubroutes(w http.ResponseWriter, r *http.Request) {
-	suffix := strings.TrimPrefix(r.URL.Path, "/api/screener/watchlists/")
-	suffix = strings.TrimSpace(strings.Trim(suffix, "/"))
-	if suffix == "" {
-		http.NotFound(w, r)
-		return
-	}
-
-	userID := currentUserID(r)
-	watchlistID := suffix
-
-	switch r.Method {
-	case http.MethodGet:
-		detail, err := a.screenerService.GetByID(r.Context(), userID, watchlistID)
-		if err != nil {
-			a.writeScreenerError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"item": detail})
-	case http.MethodDelete:
-		if err := a.screenerService.Delete(r.Context(), userID, watchlistID); err != nil {
-			a.writeScreenerError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "id": watchlistID})
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "Only GET and DELETE methods are allowed")
-	}
-}
-
-func (a *appServer) writeScreenerError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, screener.ErrNotFound):
-		writeError(w, http.StatusNotFound, "自选表不存在")
-	case errors.Is(err, screener.ErrForbidden):
-		writeError(w, http.StatusForbidden, "该操作需要登录后使用")
-	case errors.Is(err, screener.ErrConflict):
-		writeError(w, http.StatusConflict, "同名自选表已存在")
-	case errors.Is(err, screener.ErrInvalid):
-		writeError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, screener.ErrLimit):
-		writeError(w, http.StatusConflict, err.Error())
-	default:
-		writeError(w, http.StatusInternalServerError, err.Error())
-	}
 }
 
 func writeError(w http.ResponseWriter, statusCode int, detail string) {
@@ -4435,9 +4292,6 @@ func main() {
 	backtestRepo := backtest.NewRepository(storeInstance.DB)
 	backtestService := backtest.NewService(backtestRepo)
 
-	screenerRepo := screener.NewRepository(storeInstance.DB)
-	screenerService := screener.NewService(screenerRepo)
-
 	analyticsRepo := analytics.NewRepository(storeInstance.DB)
 	feedbackRepo := feedback.NewRepository(storeInstance.DB)
 	fundCacheRepo := fundcache.NewRepository(storeInstance.DB)
@@ -4477,7 +4331,6 @@ func main() {
 		factorPoolService:     factorPoolService,
 		factorIndexWorker:     factorIndexWorker,
 		backtestService:       backtestService,
-		screenerService:       screenerService,
 		analyticsRepo:         analyticsRepo,
 		feedbackRepo:          feedbackRepo,
 		aiRateLimiter:         strategy.NewAIRateLimiter(20),
@@ -4640,11 +4493,6 @@ func main() {
 	mux.HandleFunc("/api/ai/picker/meta", server.withOptionalAuth(server.handleAIPickerMeta))
 	mux.HandleFunc("/api/ai/picker/daily", server.withOptionalAuth(server.handleAIPickerDaily))
 	mux.HandleFunc("/api/ai/picker", server.withRequiredAuth(server.handleAIPickerGenerate))
-
-	mux.HandleFunc("/api/screener/scan", server.withOptionalAuth(server.handleScreenerScan))
-	mux.HandleFunc("/api/screener/ai-parse", server.withRequiredAuth(server.handleScreenerAIParse))
-	mux.HandleFunc("/api/screener/watchlists", server.withRequiredAuth(server.handleScreenerWatchlists))
-	mux.HandleFunc("/api/screener/watchlists/", server.withRequiredAuth(server.handleScreenerWatchlistSubroutes))
 
 	handler := corsMiddleware(server.loggingMiddleware(mux))
 	log.Printf("🚀 Wolong Pro Backend is running on port %s (db=%s)", cfg.Port, cfg.DB.Type)

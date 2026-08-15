@@ -14,9 +14,7 @@ import math
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional, Tuple
-
-import numpy as np
+from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
 # 延迟导入辅助函数：所有第三方依赖（akshare / requests / pandas）仅在
@@ -71,14 +69,6 @@ COLUMN_MAP = {
 
 # FUNDAMENTAL_COLUMN_MAP / 财务字段合并逻辑已在 V2 中移除（industry + profit_growth_rate 全局禁用）
 # 保留注释以便后续追溯。
-
-# 可被用于范围筛选的数值列（不含 industry / profit_growth_rate — 已全局移除）
-FILTERABLE_COLUMNS = [
-    "price", "change_pct", "total_mv", "pe", "pb",
-    "turnover_rate", "volume_ratio", "amplitude",
-    "turnover", "change_pct_60d", "change_pct_ytd", "float_mv",
-    "volume", "change_amt",
-]
 
 # 需要转为 float 的列（排除 code / name / industry / profit_growth_rate — 已全局移除）
 NUMERIC_COLUMNS = [
@@ -299,80 +289,6 @@ def get_a_share_snapshot() -> Any:
 
 
 # ---------------------------------------------------------------------------
-# 筛选
-# ---------------------------------------------------------------------------
-def apply_filters(
-    df: Any,
-    filters: Dict[str, Dict[str, Any]],
-) -> Any:
-    """
-    按 min/max 范围过滤 DataFrame。
-    filters 示例:
-        {"price": {"min": 10, "max": 100}, "pe": {"max": 30}}
-    """
-    if not filters:
-        return df
-
-    for key, bounds in filters.items():
-        if key not in df.columns:
-            continue
-        if not isinstance(bounds, dict):
-            continue
-
-        min_val = bounds.get("min")
-        max_val = bounds.get("max")
-
-        if min_val is not None:
-            try:
-                df = df[df[key] >= float(min_val)]
-            except (ValueError, TypeError):
-                pass
-
-        if max_val is not None:
-            try:
-                df = df[df[key] <= float(max_val)]
-            except (ValueError, TypeError):
-                pass
-
-    return df
-
-
-# ---------------------------------------------------------------------------
-# 排序 + 分页
-# ---------------------------------------------------------------------------
-# 注意：SORTABLE_COLUMNS 必须在 HK_COLUMN_MAP 之后定义，见下方
-
-
-def sort_and_paginate(
-    df: Any,
-    sort_by: str = "code",
-    sort_order: str = "asc",
-    page: int = 1,
-    page_size: int = 50,
-) -> Tuple[Any, int]:
-    """排序并分页，返回 (page_df, total)"""
-    # 白名单校验排序列
-    if sort_by not in SORTABLE_COLUMNS:
-        sort_by = "code"
-
-    ascending = sort_order != "desc"
-
-    try:
-        df = df.sort_values(by=sort_by, ascending=ascending, na_position="last")
-    except KeyError:
-        df = df.sort_values(by="code", ascending=True, na_position="last")
-
-    total = len(df)
-
-    # 分页
-    start = (page - 1) * page_size
-    end = start + page_size
-    page_df = df.iloc[start:end]
-
-    return page_df, total
-
-
-# ---------------------------------------------------------------------------
 # 港股列名映射
 # ---------------------------------------------------------------------------
 HK_COLUMN_MAP = {
@@ -402,9 +318,6 @@ HK_NUMERIC_COLUMNS = [
     "volume_ratio", "turnover_rate", "pe", "pb",
     "total_mv", "float_mv",
 ]
-
-# 排序列白名单 = A 股列名 ∪ 港股列名（不包含 industry / profit_growth_rate）
-SORTABLE_COLUMNS = set(COLUMN_MAP.values()) | set(HK_COLUMN_MAP.values())
 
 _hk_cache_data: Optional[Any] = None
 _hk_cache_ts: float = 0.0
@@ -576,27 +489,3 @@ def _get_hk_snapshot_via_qq() -> Any:
 
     logger.info("腾讯财经港股备用源加载完成: %d 只股票", len(df))
     return df
-
-
-# ---------------------------------------------------------------------------
-# DataFrame → JSON-safe list[dict]
-# ---------------------------------------------------------------------------
-def df_to_records(df: Any) -> List[Dict[str, Any]]:
-    """将 DataFrame 转为 JSON 安全的 list[dict]"""
-    if df is None or df.empty:
-        return []
-
-    pd = _get_pd()
-    safe_df = df.copy()
-    safe_df = safe_df.replace([np.inf, -np.inf], np.nan)
-    safe_df = safe_df.where(pd.notnull(safe_df), None)
-
-    records = safe_df.to_dict("records")
-
-    # 确保 NaN 变成 None
-    for record in records:
-        for key, value in record.items():
-            if isinstance(value, float) and (value != value):  # NaN check
-                record[key] = None
-
-    return records

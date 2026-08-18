@@ -10,7 +10,6 @@ describe('navigation config', () => {
     assert.ok(hrefs.includes('/ai/analysis'))
     assert.ok(hrefs.includes('/ai/reports'))
     assert.ok(hrefs.includes('/ai/picker'))
-    assert.ok(hrefs.includes('/ai/backtest'))
     assert.ok(hrefs.includes('/quadrant'))
     assert.ok(hrefs.includes('/stock-pool'))
     assert.ok(hrefs.includes('/capital-map'))

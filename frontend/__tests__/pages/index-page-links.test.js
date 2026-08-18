@@ -52,7 +52,7 @@ describe('home page information architecture', () => {
       assert.match(homepageDataSource, new RegExp(label))
     }
 
-    for (const href of ['/ai/analysis', '/ai/reports', '/ai/picker', '/ai/backtest', '/live-trading', '/quadrant', '/capital-map', '/watchlist', '/portfolio-tracking', '/portfolio', '/factor-lab', '/backtest', '/strategies', '/settings', '/changelog', '/disclaimer']) {
+    for (const href of ['/ai/analysis', '/ai/reports', '/ai/picker', '/live-trading', '/quadrant', '/capital-map', '/watchlist', '/portfolio-tracking', '/portfolio', '/factor-lab', '/backtest', '/strategies', '/settings', '/changelog', '/disclaimer']) {
       assert.match(homepageDataSource, new RegExp(`href: '${href.replaceAll('/', '\\/')}'`))
     }
   })

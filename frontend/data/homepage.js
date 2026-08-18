@@ -21,7 +21,7 @@ export const CORE_SELLING_POINTS = [
     href: '/ai/analysis',
     cta: '开始 AI分析',
     status: '重点能力',
-    capabilities: ['个股 AI分析', '深度 AI研报', '每日 AI选股', 'AI回测即将上线'],
+    capabilities: ['个股 AI分析', '深度 AI研报', '每日 AI选股'],
   },
   {
     key: 'factor-driven-screening',
@@ -118,7 +118,6 @@ export const FEATURE_CATEGORIES = [
       { title: 'AI分析', href: '/ai/analysis', status: '已上线', summary: '输入股票后生成看多 / 看空、交易建议、执行条件和风险提示。' },
       { title: 'AI研报', href: '/ai/reports', status: '人工交付', summary: '展示过往研报，登录后预览样例，并通过企业微信定制完整报告。' },
       { title: 'AI选股', href: '/ai/picker', status: 'A 股已上线', summary: '每日基于因子候选池和 LLM 二次决策生成优选组合。' },
-      { title: 'AI回测', href: '/ai/backtest', status: '即将上线', summary: '面向 AI 策略验证的后续能力，当前保留导航入口。' },
     ],
   },
   {

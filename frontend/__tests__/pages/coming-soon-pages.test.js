@@ -6,21 +6,7 @@ import { readFileSync } from 'node:fs'
 const requireFromCwd = createRequire(process.cwd() + '/')
 const { parse } = requireFromCwd('next/dist/compiled/babel/parser')
 
-const placeholderPageCases = [
-  { relativePath: '../../pages/ai/backtest.js', title: 'AI回测' },
-]
-
 describe('coming soon placeholder pages', () => {
-  for (const pageCase of placeholderPageCases) {
-    it(`keeps ${pageCase.title} as a minimal placeholder page`, () => {
-      const pageSource = readFileSync(new URL(pageCase.relativePath, import.meta.url), 'utf8')
-
-      assert.doesNotThrow(() => parse(pageSource, { sourceType: 'module', plugins: ['jsx'] }))
-      assert.match(pageSource, /ComingSoonPage/)
-      assert.match(pageSource, new RegExp(`title=\"${pageCase.title}\"`))
-    })
-  }
-
   it('renders AI选股 as a real page instead of a placeholder', () => {
     const pageSource = readFileSync(new URL('../../pages/ai/picker.js', import.meta.url), 'utf8')
 
@@ -39,13 +25,6 @@ describe('coming soon placeholder pages', () => {
     assert.match(pageSource, /AIAnalysisEntryForm/)
     assert.match(pageSource, /GlobalAIAnalysisHistorySection/)
     assert.match(pageSource, /AIAnalysisCapabilityCards/)
-  })
-
-  it('renders the shared placeholder copy', () => {
-    const componentSource = readFileSync(new URL('../../components/ComingSoonPage.js', import.meta.url), 'utf8')
-
-    assert.doesNotThrow(() => parse(componentSource, { sourceType: 'module', plugins: ['jsx'] }))
-    assert.match(componentSource, /敬请期待/)
   })
 
   it('renders quadrant as a real page instead of a placeholder', () => {

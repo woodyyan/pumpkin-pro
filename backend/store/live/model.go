@@ -56,13 +56,13 @@ type TrendPoint struct {
 }
 
 type IndexSnapshot struct {
-	Code        string       `json:"code"`
-	Name        string       `json:"name"`
-	Last        float64      `json:"last"`
-	ChangeRate  float64      `json:"change_rate"`
-	ChangeAmount float64     `json:"change_amount"`
-	TS          string       `json:"ts"`
-	TrendPoints []TrendPoint `json:"trend_points,omitempty"`
+	Code         string       `json:"code"`
+	Name         string       `json:"name"`
+	Last         float64      `json:"last"`
+	ChangeRate   float64      `json:"change_rate"`
+	ChangeAmount float64      `json:"change_amount"`
+	TS           string       `json:"ts"`
+	TrendPoints  []TrendPoint `json:"trend_points,omitempty"`
 }
 
 type BenchmarkSnapshot struct {
@@ -111,27 +111,6 @@ type DetailedSymbolSnapshot struct {
 	TurnoverRate   float64 `json:"turnover_rate"`
 	TS             string  `json:"ts"`
 	Source         string  `json:"source"`
-}
-
-type PriceVolumeAnomaly struct {
-	EventID           string         `json:"event_id"`
-	Symbol            string         `json:"symbol"`
-	AnomalyType       string         `json:"anomaly_type"`
-	Score             float64        `json:"score"`
-	ThresholdSnapshot map[string]any `json:"threshold_snapshot"`
-	MetricsSnapshot   map[string]any `json:"metrics_snapshot"`
-	DetectedAt        string         `json:"detected_at"`
-}
-
-type BlockFlowAnomaly struct {
-	EventID           string  `json:"event_id"`
-	Symbol            string  `json:"symbol"`
-	NetInflow         float64 `json:"net_inflow"`
-	BuyBlockAmount    float64 `json:"buy_block_amount"`
-	SellBlockAmount   float64 `json:"sell_block_amount"`
-	DirectionStrength float64 `json:"direction_strength"`
-	Continuity        float64 `json:"continuity"`
-	DetectedAt        string  `json:"detected_at"`
 }
 
 type ActivateResult struct {
@@ -261,24 +240,24 @@ type ResistanceLevelsPayload struct {
 }
 
 type MovingAveragesPayload struct {
-	Symbol             string       `json:"symbol"`
-	Period             string       `json:"period"`
-	LookbackDays       int          `json:"lookback_days"`
-	AsOf               string       `json:"as_of"`
-	PriceRef           float64      `json:"price_ref"`
-	MA5                float64      `json:"ma5"`
-	MA20               float64      `json:"ma20"`
-	MA60               float64      `json:"ma60"`
-	MA200              float64      `json:"ma200"`
-	DistanceToMA5Pct   float64      `json:"distance_to_ma5_pct"`
-	DistanceToMA20Pct  float64      `json:"distance_to_ma20_pct"`
-	DistanceToMA60Pct  float64      `json:"distance_to_ma60_pct"`
-	DistanceToMA200Pct float64      `json:"distance_to_ma200_pct"`
-	RSI14              float64      `json:"rsi14"`
-	RSI14Status        string       `json:"rsi14_status"`
-	MACD               float64      `json:"macd"`
-	MACDSignal         float64      `json:"macd_signal"`
-	MACDHistogram      float64      `json:"macd_histogram"`
+	Symbol             string           `json:"symbol"`
+	Period             string           `json:"period"`
+	LookbackDays       int              `json:"lookback_days"`
+	AsOf               string           `json:"as_of"`
+	PriceRef           float64          `json:"price_ref"`
+	MA5                float64          `json:"ma5"`
+	MA20               float64          `json:"ma20"`
+	MA60               float64          `json:"ma60"`
+	MA200              float64          `json:"ma200"`
+	DistanceToMA5Pct   float64          `json:"distance_to_ma5_pct"`
+	DistanceToMA20Pct  float64          `json:"distance_to_ma20_pct"`
+	DistanceToMA60Pct  float64          `json:"distance_to_ma60_pct"`
+	DistanceToMA200Pct float64          `json:"distance_to_ma200_pct"`
+	RSI14              float64          `json:"rsi14"`
+	RSI14Status        string           `json:"rsi14_status"`
+	MACD               float64          `json:"macd"`
+	MACDSignal         float64          `json:"macd_signal"`
+	MACDHistogram      float64          `json:"macd_histogram"`
 	MACDSeries         []MACDPoint      `json:"macd_series,omitempty"`
 	BollingerUpper     float64          `json:"bollinger_upper"`
 	BollingerLower     float64          `json:"bollinger_lower"`
@@ -289,8 +268,8 @@ type MovingAveragesPayload struct {
 	Volatility20D      float64          `json:"volatility_20d"`
 	VolumeMA5toMA20    float64          `json:"volume_ma5_to_ma20"`
 	Status             string           `json:"status"`
-	SessionState       SessionState `json:"session_state"`
-	UpdatedAt          string       `json:"updated_at"`
+	SessionState       SessionState     `json:"session_state"`
+	UpdatedAt          string           `json:"updated_at"`
 }
 
 type MACDPoint struct {
@@ -315,11 +294,11 @@ type WatchlistState struct {
 }
 
 type DailyOverlayPoint struct {
-	Date          string  `json:"date"`
-	StockClose    float64 `json:"stock_close"`
-	BenchClose    float64 `json:"bench_close"`
-	StockNorm     float64 `json:"stock_norm"`
-	BenchNorm     float64 `json:"bench_norm"`
+	Date       string  `json:"date"`
+	StockClose float64 `json:"stock_close"`
+	BenchClose float64 `json:"bench_close"`
+	StockNorm  float64 `json:"stock_norm"`
+	BenchNorm  float64 `json:"bench_norm"`
 }
 
 type DailyOverlayMetrics struct {

@@ -30,4 +30,13 @@ describe('live trading stock detail latest UI adjustments', () => {
     assert.notEqual(historyIndex, -1)
     assert.ok(historyIndex > snapshotIndex)
   })
+
+  it('removes anomaly charts and their dedicated API requests without affecting trend panels', () => {
+    assert.doesNotMatch(pageSource, /量价异动/)
+    assert.doesNotMatch(pageSource, /大单流向/)
+    assert.doesNotMatch(pageSource, /anomalies\/price-volume/)
+    assert.doesNotMatch(pageSource, /anomalies\/block-flow/)
+    assert.match(pageSource, /历史走势/)
+    assert.match(pageSource, /走势对比（个股 vs 大盘）/)
+  })
 })

@@ -1973,41 +1973,6 @@ func (a *appServer) handleLiveSymbolsSubroutes(w http.ResponseWriter, r *http.Re
 			"count":      len(bars),
 			"updated_at": time.Now().UTC().Format(time.RFC3339),
 		})
-	case "anomalies/price-volume":
-		if r.Method != http.MethodGet {
-			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
-			return
-		}
-		since := parseSince(r.URL.Query().Get("since"))
-		limit := parseLimit(r.URL.Query().Get("limit"), 50)
-		types := splitCSV(r.URL.Query().Get("types"))
-		items, sessionState, err := a.liveService.ListPriceVolumeAnomalies(r.Context(), userID, symbol, since, limit, types)
-		if err != nil {
-			a.writeLiveError(w, err)
-			return
-		}
-		writeLiveJSON(w, http.StatusOK, map[string]any{
-			"symbol":        strings.ToUpper(symbol),
-			"session_state": sessionState,
-			"items":         items,
-		})
-	case "anomalies/block-flow":
-		if r.Method != http.MethodGet {
-			writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
-			return
-		}
-		since := parseSince(r.URL.Query().Get("since"))
-		limit := parseLimit(r.URL.Query().Get("limit"), 50)
-		items, sessionState, err := a.liveService.ListBlockFlowAnomalies(r.Context(), userID, symbol, since, limit)
-		if err != nil {
-			a.writeLiveError(w, err)
-			return
-		}
-		writeLiveJSON(w, http.StatusOK, map[string]any{
-			"symbol":        strings.ToUpper(symbol),
-			"session_state": sessionState,
-			"items":         items,
-		})
 	case "ai-analysis":
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "仅支持 POST 请求")
@@ -2326,17 +2291,6 @@ func (a *appServer) handleStockAIAnalysis(w http.ResponseWriter, r *http.Request
 			}
 		}(respBytes, symbol, symbolName, analysisPrice)
 	}
-}
-
-func parseSince(raw string) time.Time {
-	if strings.TrimSpace(raw) == "" {
-		return time.Time{}
-	}
-	parsed, err := time.Parse(time.RFC3339, raw)
-	if err != nil {
-		return time.Time{}
-	}
-	return parsed
 }
 
 func parseLimit(raw string, fallback int) int {

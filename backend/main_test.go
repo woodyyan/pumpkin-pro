@@ -99,30 +99,6 @@ func TestParseOffset(t *testing.T) {
 	}
 }
 
-// ── parseSince ──
-
-func TestParseSince(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  bool // want non-zero time?
-	}{
-		{"empty returns zero", "", false},
-		{"RFC3339 valid", "2024-06-15T10:00:00Z", true},
-		{"invalid format", "not-a-date", false},
-		{"garbage", "2024-13-99", false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := parseSince(tc.input)
-			isZero := got.IsZero()
-			if isZero == tc.want {
-				t.Errorf("parseSince(%q).IsZero() = %v; opposite expected", tc.input, isZero)
-			}
-		})
-	}
-}
-
 // ── parseLookbackDays ──
 
 func TestParseLookbackDays(t *testing.T) {

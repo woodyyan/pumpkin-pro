@@ -128,8 +128,6 @@ export default function LiveTradingDetailPage() {
   const [resistanceError, setResistanceError] = useState('')
   const [movingAveragePayload, setMovingAveragePayload] = useState(null)
   const [movingAverageError, setMovingAverageError] = useState('')
-  const [priceVolumeEvents, setPriceVolumeEvents] = useState([])
-  const [blockFlowEvents, setBlockFlowEvents] = useState([])
   // 信号中心：本股票的订阅摘要（完整配置已迁入 /signals，本页只读展示 + 跳转）
   const [symbolSubscriptions, setSymbolSubscriptions] = useState([])
   const [signalError, setSignalError] = useState('')
@@ -230,17 +228,13 @@ export default function LiveTradingDetailPage() {
   const loadSymbolPanels = useCallback(async (sym, { forceSupport = false } = {}) => {
     if (!sym) return
     const encoded = encodeURIComponent(sym)
-    const [snapshotData, overlayData, pvData, blockData] = await Promise.all([
+    const [snapshotData, overlayData] = await Promise.all([
       requestJson(`/api/live/symbols/${encoded}/snapshot`),
       requestJson(`/api/live/symbols/${encoded}/overlay?window_minutes=${OVERLAY_WINDOW_MINUTES}`),
-      requestJson(`/api/live/symbols/${encoded}/anomalies/price-volume?limit=20`),
-      requestJson(`/api/live/symbols/${encoded}/anomalies/block-flow?limit=20`),
     ])
 
     setSnapshotPayload(snapshotData)
     setOverlayPayload(overlayData)
-    setPriceVolumeEvents(pvData.items || [])
-    setBlockFlowEvents(blockData.items || [])
     setLastUpdateAt(new Date().toISOString())
 
     // Load support/resistance/MA in parallel
@@ -1848,15 +1842,6 @@ export default function LiveTradingDetailPage() {
 
         )}
 
-        {/* Anomaly charts */}
-        {isChartTab && (
-          <section className="grid gap-4 xl:grid-cols-2">
-            <PriceVolumeChart events={priceVolumeEvents} />
-            <BlockFlowChart events={blockFlowEvents} />
-          </section>
-
-        )}
-
       </div>
 
     </>
@@ -3055,163 +3040,6 @@ function OverlayIntradayChart({ series, benchmark, symbol }) {
   return <div ref={containerRef} className="w-full overflow-hidden rounded-xl border border-border bg-[var(--color-bg-hover)]" />
 }
 
-const ANOMALY_TYPE_META = {
-  volume_spike: { label: '量能突增', color: '#f59e0b' },
-  price_breakout_up: { label: '向上突破', color: '#ef4444' },
-  price_breakout_down: { label: '向下突破', color: '#22c55e' },
-}
-
-function PriceVolumeChart({ events }) {
-  const { resolvedTheme } = useTheme()
-  const containerRef = useRef(null)
-  const chartRef = useRef(null)
-
-  useEffect(() => {
-    let cleanup = () => {}
-    let cancelled = false
-    const render = async () => {
-      if (!containerRef.current) return
-      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
-      if (!events || events.length === 0) return
-      const { createChart, ColorType } = await import('lightweight-charts')
-      if (cancelled || !containerRef.current) return
-
-      const chart = createChart(containerRef.current, {
-        width: containerRef.current.clientWidth || 500, height: 220,
-        layout: { background: { type: ColorType.Solid, color: getChartThemeTokens(resolvedTheme).background }, textColor: getChartThemeTokens(resolvedTheme).textColor },
-        rightPriceScale: { borderColor: getChartThemeTokens(resolvedTheme).borderColor },
-        timeScale: { borderColor: 'rgba(148,163,184,0.35)', timeVisible: true, secondsVisible: false },
-        grid: { vertLines: { color: getChartThemeTokens(resolvedTheme).gridColor }, horzLines: { color: getChartThemeTokens(resolvedTheme).gridColor } },
-      })
-
-      const byType = {}
-      for (const item of events) {
-        const type = item.anomaly_type || 'unknown'
-        if (!byType[type]) byType[type] = []
-        const ts = Math.floor(new Date(item.detected_at).getTime() / 1000)
-        if (!ts || Number.isNaN(ts)) continue
-        byType[type].push({ time: ts, value: item.score ?? 0 })
-      }
-      for (const [type, points] of Object.entries(byType)) {
-        const meta = ANOMALY_TYPE_META[type] || { color: '#94a3b8' }
-        const deduped = deduplicateTimeSeries(points)
-        const s = chart.addLineSeries({ color: meta.color, lineWidth: 2, title: '', crosshairMarkerRadius: 5, lastValueVisible: false, priceLineVisible: false })
-        s.setData(deduped)
-        s.setMarkers(deduped.map((p) => ({ time: p.time, position: 'inBar', shape: 'circle', color: meta.color, size: 1.5 })))
-      }
-      chart.timeScale().fitContent()
-      chartRef.current = chart
-
-      const onResize = () => {
-        if (!containerRef.current || !chartRef.current) return
-        chartRef.current.applyOptions({ width: containerRef.current.clientWidth || 500 })
-        chartRef.current.timeScale().fitContent()
-      }
-      window.addEventListener('resize', onResize)
-      cleanup = () => { window.removeEventListener('resize', onResize); if (chartRef.current) { chartRef.current.remove(); chartRef.current = null } }
-    }
-    render()
-    return () => { cancelled = true; cleanup() }
-  }, [events])
-
-  const legendItems = Object.entries(ANOMALY_TYPE_META).map(([, meta]) => meta)
-  return (
-    <section className="rounded-2xl border border-border bg-card p-5">
-      <h3 className="text-base font-semibold text-foreground">量价异动</h3>
-      <p className="mt-1 text-xs text-foreground-dim">按时间分布的异动事件，Y 轴为评分。</p>
-      {!events || events.length === 0 ? (
-        <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-foreground-dim">暂无事件</div>
-      ) : (
-        <>
-          <div ref={containerRef} className="mt-3 w-full overflow-hidden rounded-xl border border-border bg-[var(--color-bg-hover)]" />
-          <div className="mt-2 flex flex-wrap gap-3 text-xs text-foreground-dim">
-            {legendItems.map((item) => (
-              <span key={item.label} className="inline-flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />{item.label}
-              </span>
-            ))}
-          </div>
-        </>
-      )}
-    </section>
-  )
-}
-
-function BlockFlowChart({ events }) {
-  const { resolvedTheme } = useTheme()
-  const containerRef = useRef(null)
-  const chartRef = useRef(null)
-
-  useEffect(() => {
-    let cleanup = () => {}
-    let cancelled = false
-    const render = async () => {
-      if (!containerRef.current) return
-      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
-      if (!events || events.length === 0) return
-      const { createChart, ColorType } = await import('lightweight-charts')
-      if (cancelled || !containerRef.current) return
-
-      const chart = createChart(containerRef.current, {
-        width: containerRef.current.clientWidth || 500, height: 220,
-        layout: { background: { type: ColorType.Solid, color: getChartThemeTokens(resolvedTheme).background }, textColor: getChartThemeTokens(resolvedTheme).textColor },
-        rightPriceScale: { borderColor: getChartThemeTokens(resolvedTheme).borderColor },
-        timeScale: { borderColor: 'rgba(148,163,184,0.35)', timeVisible: true, secondsVisible: false },
-        grid: { vertLines: { color: getChartThemeTokens(resolvedTheme).gridColor }, horzLines: { color: getChartThemeTokens(resolvedTheme).gridColor } },
-      })
-
-      const histSeries = chart.addHistogramSeries({ title: '', priceLineVisible: false, lastValueVisible: false, priceFormat: { type: 'volume' } })
-      const rawHistData = events.map((item) => {
-        const ts = Math.floor(new Date(item.detected_at).getTime() / 1000)
-        if (!ts || Number.isNaN(ts)) return null
-        return { time: ts, value: item.net_inflow ?? 0, color: (item.net_inflow ?? 0) >= 0 ? 'rgba(239, 68, 68, 0.75)' : 'rgba(34, 197, 94, 0.75)' }
-      }).filter(Boolean)
-      histSeries.setData(deduplicateTimeSeries(rawHistData))
-
-      const strengthSeries = chart.addLineSeries({ color: '#f59e0b', lineWidth: 1.5, title: '', priceScaleId: 'strength', lastValueVisible: false, priceLineVisible: false })
-      chart.priceScale('strength').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.05 } })
-      const rawStrengthData = events.map((item) => {
-        const ts = Math.floor(new Date(item.detected_at).getTime() / 1000)
-        if (!ts || Number.isNaN(ts)) return null
-        return { time: ts, value: item.direction_strength ?? 0 }
-      }).filter(Boolean)
-      strengthSeries.setData(deduplicateTimeSeries(rawStrengthData))
-
-      chart.timeScale().fitContent()
-      chartRef.current = chart
-
-      const onResize = () => {
-        if (!containerRef.current || !chartRef.current) return
-        chartRef.current.applyOptions({ width: containerRef.current.clientWidth || 500 })
-        chartRef.current.timeScale().fitContent()
-      }
-      window.addEventListener('resize', onResize)
-      cleanup = () => { window.removeEventListener('resize', onResize); if (chartRef.current) { chartRef.current.remove(); chartRef.current = null } }
-    }
-    render()
-    return () => { cancelled = true; cleanup() }
-  }, [events])
-
-  return (
-    <section className="rounded-2xl border border-border bg-card p-5">
-      <h3 className="text-base font-semibold text-foreground">大单流向</h3>
-      <p className="mt-1 text-xs text-foreground-dim">柱状为净流向金额（红入绿出），折线为方向强度。</p>
-      {!events || events.length === 0 ? (
-        <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-5 text-sm text-foreground-dim">暂无事件</div>
-      ) : (
-        <>
-          <div ref={containerRef} className="mt-3 w-full overflow-hidden rounded-xl border border-border bg-[var(--color-bg-hover)]" />
-          <div className="mt-2 flex flex-wrap gap-3 text-xs text-foreground-dim">
-            <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" />资金流入</span>
-            <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-green-500" />资金流出</span>
-            <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3 rounded-full bg-amber-500" />方向强度</span>
-          </div>
-        </>
-      )}
-    </section>
-  )
-}
-
 // ── Shared sub-components ──
 
 function LevelCard({ level, index, type }) {
@@ -3543,16 +3371,6 @@ function toAscendingSeriesData(series, valueField) {
     valueByTime.set(timestamp, value)
   }
   return Array.from(valueByTime.entries()).sort((a, b) => a[0] - b[0]).map(([time, value]) => ({ time, value }))
-}
-
-function deduplicateTimeSeries(points) {
-  if (!points || points.length === 0) return []
-  const sorted = [...points].sort((a, b) => a.time - b.time)
-  const result = [sorted[0]]
-  for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i].time !== result[result.length - 1].time) result.push(sorted[i])
-  }
-  return result
 }
 
 function formatPercent(value) {

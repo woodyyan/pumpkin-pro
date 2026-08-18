@@ -3,7 +3,6 @@ package live
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -13,7 +12,6 @@ import (
 
 const (
 	maxSampleSize            = 80
-	maxEventBufferSize       = 160
 	maxOverlaySampleSize     = 360
 	defaultOverlayBenchmark  = "HSI"
 	defaultOverlayWindowMins = 60
@@ -38,18 +36,8 @@ type userLiveState struct {
 }
 
 type symbolRuntime struct {
-	LastSnapshot *SymbolSnapshot
-	LastVolume   float64
-	LastTurnover float64
-	LastPrice    float64
-
-	PriceSamples    []float64
-	VolumeDeltas    []float64
-	NetInflowSeries []float64
-	OverlaySamples  []overlaySample
-
-	PriceVolumeEvents []PriceVolumeAnomaly
-	BlockFlowEvents   []BlockFlowAnomaly
+	PriceSamples   []float64
+	OverlaySamples []overlaySample
 }
 
 type overlaySample struct {
@@ -321,85 +309,6 @@ func (s *Service) GetOverlay(ctx context.Context, userID, symbol string, windowM
 	}, nil
 }
 
-func (s *Service) ListPriceVolumeAnomalies(ctx context.Context, userID, symbol string, since time.Time, limit int, types []string) ([]PriceVolumeAnomaly, SessionState, error) {
-	normalized, _, err := NormalizeSymbol(symbol)
-	if err != nil {
-		return nil, SessionIdle, err
-	}
-	if _, _, _, err := s.GetSymbolSnapshot(ctx, userID, normalized); err != nil {
-		return nil, SessionDegraded, err
-	}
-
-	typeSet := map[string]struct{}{}
-	for _, item := range types {
-		text := strings.TrimSpace(item)
-		if text != "" {
-			typeSet[text] = struct{}{}
-		}
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	state := s.ensureUserState(userID)
-	rt := s.ensureRuntime(state, normalized)
-	items := make([]PriceVolumeAnomaly, 0, len(rt.PriceVolumeEvents))
-	for _, event := range rt.PriceVolumeEvents {
-		t, err := time.Parse(time.RFC3339, event.DetectedAt)
-		if err != nil {
-			continue
-		}
-		if !since.IsZero() && !t.After(since) {
-			continue
-		}
-		if len(typeSet) > 0 {
-			if _, ok := typeSet[event.AnomalyType]; !ok {
-				continue
-			}
-		}
-		items = append(items, event)
-	}
-	if limit <= 0 {
-		limit = 50
-	}
-	if len(items) > limit {
-		items = items[:limit]
-	}
-	return items, state.sessionState, nil
-}
-
-func (s *Service) ListBlockFlowAnomalies(ctx context.Context, userID, symbol string, since time.Time, limit int) ([]BlockFlowAnomaly, SessionState, error) {
-	normalized, _, err := NormalizeSymbol(symbol)
-	if err != nil {
-		return nil, SessionIdle, err
-	}
-	if _, _, _, err := s.GetSymbolSnapshot(ctx, userID, normalized); err != nil {
-		return nil, SessionDegraded, err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	state := s.ensureUserState(userID)
-	rt := s.ensureRuntime(state, normalized)
-	items := make([]BlockFlowAnomaly, 0, len(rt.BlockFlowEvents))
-	for _, event := range rt.BlockFlowEvents {
-		t, err := time.Parse(time.RFC3339, event.DetectedAt)
-		if err != nil {
-			continue
-		}
-		if !since.IsZero() && !t.After(since) {
-			continue
-		}
-		items = append(items, event)
-	}
-	if limit <= 0 {
-		limit = 50
-	}
-	if len(items) > limit {
-		items = items[:limit]
-	}
-	return items, state.sessionState, nil
-}
-
 func (s *Service) ensureUserState(userID string) *userLiveState {
 	state, ok := s.states[userID]
 	if !ok {
@@ -423,194 +332,25 @@ func (s *Service) ensureRuntime(state *userLiveState, symbol string) *symbolRunt
 
 func (s *Service) processRuntimeUpdate(rt *symbolRuntime, snapshot *SymbolSnapshot, benchmark *BenchmarkSnapshot) {
 	price := snapshot.LastPrice
-	volume := snapshot.Volume
-	turnover := snapshot.Turnover
-
-	priceDelta := 0.0
-	if rt.LastPrice > 0 {
-		priceDelta = price - rt.LastPrice
-	}
-	volumeDelta := 0.0
-	if rt.LastVolume > 0 {
-		volumeDelta = math.Max(0, volume-rt.LastVolume)
-	}
-	turnoverDelta := 0.0
-	if rt.LastTurnover > 0 {
-		turnoverDelta = math.Max(0, turnover-rt.LastTurnover)
-	}
-	if rt.LastTurnover == 0 {
-		turnoverDelta = turnover
-	}
-
 	rt.PriceSamples = appendWithCap(rt.PriceSamples, price, maxSampleSize)
-	if volumeDelta > 0 {
-		rt.VolumeDeltas = appendWithCap(rt.VolumeDeltas, volumeDelta, maxSampleSize)
+
+	if benchmark == nil || price <= 0 || benchmark.Last <= 0 {
+		return
 	}
 
-	netInflow := turnoverDelta
-	if priceDelta < 0 {
-		netInflow = -turnoverDelta
+	sampleTS, _ := time.Parse(time.RFC3339, snapshot.TS)
+	if sampleTS.IsZero() {
+		sampleTS = time.Now().UTC()
 	}
-	rt.NetInflowSeries = appendWithCap(rt.NetInflowSeries, netInflow, maxSampleSize)
-
-	now, _ := time.Parse(time.RFC3339, snapshot.TS)
-	if now.IsZero() {
-		now = time.Now().UTC()
+	benchmarkTS, _ := time.Parse(time.RFC3339, benchmark.TS)
+	if benchmarkTS.After(sampleTS) {
+		sampleTS = benchmarkTS
 	}
-	if benchmark != nil && price > 0 && benchmark.Last > 0 {
-		benchmarkTS, _ := time.Parse(time.RFC3339, benchmark.TS)
-		if benchmarkTS.IsZero() {
-			benchmarkTS = now
-		}
-		sampleTS := now
-		if benchmarkTS.After(sampleTS) {
-			sampleTS = benchmarkTS
-		}
-		rt.OverlaySamples = appendOverlaySample(rt.OverlaySamples, overlaySample{
-			TS:             sampleTS.UTC(),
-			StockPrice:     price,
-			BenchmarkPrice: benchmark.Last,
-		}, maxOverlaySampleSize)
-	}
-
-	newPriceEvents := detectPriceVolumeAnomalies(snapshot.Symbol, rt.PriceSamples, rt.VolumeDeltas, priceDelta, volumeDelta, now)
-	if len(newPriceEvents) > 0 {
-		rt.PriceVolumeEvents = append(newPriceEvents, rt.PriceVolumeEvents...)
-		if len(rt.PriceVolumeEvents) > maxEventBufferSize {
-			rt.PriceVolumeEvents = rt.PriceVolumeEvents[:maxEventBufferSize]
-		}
-	}
-
-	newBlockEvents := detectBlockFlowAnomalies(snapshot.Symbol, netInflow, turnoverDelta, priceDelta, rt.NetInflowSeries, now)
-	if len(newBlockEvents) > 0 {
-		rt.BlockFlowEvents = append(newBlockEvents, rt.BlockFlowEvents...)
-		if len(rt.BlockFlowEvents) > maxEventBufferSize {
-			rt.BlockFlowEvents = rt.BlockFlowEvents[:maxEventBufferSize]
-		}
-	}
-
-	rt.LastSnapshot = snapshot
-	rt.LastVolume = volume
-	rt.LastTurnover = turnover
-	rt.LastPrice = price
-}
-
-func detectPriceVolumeAnomalies(symbol string, prices []float64, volumeDeltas []float64, priceDelta float64, volumeDelta float64, now time.Time) []PriceVolumeAnomaly {
-	items := make([]PriceVolumeAnomaly, 0, 2)
-	if len(volumeDeltas) >= 12 {
-		window := volumeDeltas
-		if len(window) > 20 {
-			window = window[len(window)-20:]
-		}
-		base := median(window[:len(window)-1])
-		latest := window[len(window)-1]
-		if base > 0 && latest >= 2.5*base {
-			score := math.Min(100, latest/base*25)
-			items = append(items, PriceVolumeAnomaly{
-				EventID:     fmt.Sprintf("pv-volume-%s-%d", symbol, now.UnixNano()),
-				Symbol:      symbol,
-				AnomalyType: "volume_spike",
-				Score:       score,
-				ThresholdSnapshot: map[string]any{
-					"multiplier": 2.5,
-					"baseline":   base,
-					"current":    latest,
-				},
-				MetricsSnapshot: map[string]any{
-					"price_delta":  priceDelta,
-					"volume_delta": volumeDelta,
-				},
-				DetectedAt: now.UTC().Format(time.RFC3339),
-			})
-		}
-	}
-
-	if len(prices) >= 16 {
-		recent := prices
-		if len(recent) > 15 {
-			recent = recent[len(recent)-15:]
-		}
-		current := recent[len(recent)-1]
-		prev := recent[:len(recent)-1]
-		maxPrev := maxFloat(prev)
-		minPrev := minFloat(prev)
-		if maxPrev > 0 && current >= maxPrev*1.008 {
-			items = append(items, PriceVolumeAnomaly{
-				EventID:     fmt.Sprintf("pv-breakout-up-%s-%d", symbol, now.UnixNano()),
-				Symbol:      symbol,
-				AnomalyType: "price_breakout_up",
-				Score:       math.Min(100, (current/maxPrev-1)*10000),
-				ThresholdSnapshot: map[string]any{
-					"threshold_ratio": 0.008,
-					"previous_high":   maxPrev,
-					"current_price":   current,
-				},
-				MetricsSnapshot: map[string]any{"volume_delta": volumeDelta},
-				DetectedAt:      now.UTC().Format(time.RFC3339),
-			})
-		}
-		if minPrev > 0 && current <= minPrev*0.992 {
-			items = append(items, PriceVolumeAnomaly{
-				EventID:     fmt.Sprintf("pv-breakout-down-%s-%d", symbol, now.UnixNano()),
-				Symbol:      symbol,
-				AnomalyType: "price_breakout_down",
-				Score:       math.Min(100, (1-current/minPrev)*10000),
-				ThresholdSnapshot: map[string]any{
-					"threshold_ratio": -0.008,
-					"previous_low":    minPrev,
-					"current_price":   current,
-				},
-				MetricsSnapshot: map[string]any{"volume_delta": volumeDelta},
-				DetectedAt:      now.UTC().Format(time.RFC3339),
-			})
-		}
-	}
-	return items
-}
-
-func detectBlockFlowAnomalies(symbol string, netInflow float64, turnoverDelta float64, priceDelta float64, series []float64, now time.Time) []BlockFlowAnomaly {
-	if turnoverDelta <= 0 {
-		return nil
-	}
-	directionStrength := math.Min(1, math.Abs(netInflow)/math.Max(turnoverDelta, 1))
-	buyAmount := turnoverDelta * (0.5 + directionStrength/2)
-	sellAmount := turnoverDelta - buyAmount
-	if netInflow < 0 {
-		sellAmount = turnoverDelta * (0.5 + directionStrength/2)
-		buyAmount = turnoverDelta - sellAmount
-	}
-
-	continuity := 0.0
-	if len(series) >= 5 {
-		recent := series
-		if len(recent) > 5 {
-			recent = recent[len(recent)-5:]
-		}
-		sameDirection := 0
-		for _, value := range recent {
-			if (netInflow >= 0 && value >= 0) || (netInflow < 0 && value < 0) {
-				sameDirection++
-			}
-		}
-		continuity = float64(sameDirection) / float64(len(recent))
-	}
-
-	if directionStrength < 0.4 && continuity < 0.7 {
-		return nil
-	}
-
-	event := BlockFlowAnomaly{
-		EventID:           fmt.Sprintf("bf-%s-%d", symbol, now.UnixNano()),
-		Symbol:            symbol,
-		NetInflow:         netInflow,
-		BuyBlockAmount:    buyAmount,
-		SellBlockAmount:   sellAmount,
-		DirectionStrength: directionStrength,
-		Continuity:        continuity,
-		DetectedAt:        now.UTC().Format(time.RFC3339),
-	}
-	_ = priceDelta
-	return []BlockFlowAnomaly{event}
+	rt.OverlaySamples = appendOverlaySample(rt.OverlaySamples, overlaySample{
+		TS:             sampleTS.UTC(),
+		StockPrice:     price,
+		BenchmarkPrice: benchmark.Last,
+	}, maxOverlaySampleSize)
 }
 
 func (s *Service) setDegradedIfRunning(userID string) {
@@ -628,45 +368,6 @@ func appendWithCap(items []float64, value float64, capSize int) []float64 {
 		items = items[len(items)-capSize:]
 	}
 	return items
-}
-
-func median(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	clone := append([]float64(nil), values...)
-	sort.Float64s(clone)
-	middle := len(clone) / 2
-	if len(clone)%2 == 0 {
-		return (clone[middle-1] + clone[middle]) / 2
-	}
-	return clone[middle]
-}
-
-func maxFloat(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	maxValue := values[0]
-	for _, value := range values[1:] {
-		if value > maxValue {
-			maxValue = value
-		}
-	}
-	return maxValue
-}
-
-func minFloat(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	minValue := values[0]
-	for _, value := range values[1:] {
-		if value < minValue {
-			minValue = value
-		}
-	}
-	return minValue
 }
 
 func appendOverlaySample(items []overlaySample, sample overlaySample, capSize int) []overlaySample {
@@ -837,11 +538,11 @@ func (s *Service) GetDailyOverlay(ctx context.Context, symbol string, lookbackDa
 	benchReturns := make([]float64, 0, len(pairs)-1)
 	for i, p := range pairs {
 		series = append(series, DailyOverlayPoint{
-			Date:      p.Date,
+			Date:       p.Date,
 			StockClose: roundTo(p.StockClose, 4),
 			BenchClose: roundTo(p.BenchClose, 4),
-			StockNorm: roundTo(p.StockClose/baseStock, 6),
-			BenchNorm: roundTo(p.BenchClose/baseBench, 6),
+			StockNorm:  roundTo(p.StockClose/baseStock, 6),
+			BenchNorm:  roundTo(p.BenchClose/baseBench, 6),
 		})
 		if i > 0 {
 			stockReturns = append(stockReturns, p.StockClose/pairs[i-1].StockClose-1)

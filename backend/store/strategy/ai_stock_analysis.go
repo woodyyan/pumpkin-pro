@@ -201,14 +201,16 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, userID string, input *Stock
 	// 拼接 User Prompt
 	userPrompt := buildStockUserPrompt(input, profile)
 
+	// 不设置 MaxTokens：把输出 token 上限交给 provider 默认策略，
+	// 避免长 JSON 输出被 finish_reason=length 截断（见 .ai/memory/bug-patterns.md BP-016）。
 	body := aiChatRequest{
 		Model: cfg.Model,
 		Messages: []aiChatMessage{
 			{Role: "system", Content: stockAnalysisSystemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
-		Temperature: 0.2,
-		MaxTokens:   3000,
+		Temperature:    0.2,
+		ResponseFormat: &aiResponseFmt{Type: "json_object"},
 	}
 
 	encoded, err := json.Marshal(body)
@@ -219,7 +221,9 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, userID string, input *Stock
 	endpoint := cfg.BaseURL + "/chat/completions"
 
 	// 个股分析是重计算任务（长 prompt → 长推理 → 长 output），
-	// 使用 90s 超时 + 1 次重试覆盖网络抖动 / AI 服务瞬时过载
+	// 使用 240s 超时 + 1 次重试覆盖网络抖动 / AI 服务瞬时过载。
+	// 放开 max_tokens 后模型可自由输出完整 JSON，推理时间相应变长，
+	// 短超时会把「截断」错误掩盖成 timeout/EOF。
 	const maxRetries = 1
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -232,7 +236,7 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, userID string, input *Stock
 			}
 		}
 
-		client := &http.Client{Timeout: 90 * time.Second}
+		client := &http.Client{Timeout: 240 * time.Second}
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(encoded))
 		if err != nil {
@@ -301,12 +305,33 @@ func AnalyzeStock(ctx context.Context, cfg AIConfig, userID string, input *Stock
 			return nil, fmt.Errorf("AI 未返回有效结果")
 		}
 
-		content := stripAICodeFence(strings.TrimSpace(chatResp.Choices[0].Message.Content))
+		choice := chatResp.Choices[0]
+		logEntry.ExtraMeta["finish_reason"] = choice.FinishReason
+		logEntry.ExtraMeta["completion_tokens"] = chatResp.Usage.CompletionTokens
+		logEntry.ExtraMeta["prompt_chars"] = len(userPrompt)
+
+		// finish_reason=length：即使去掉 max_tokens，provider 仍可能有自身默认上限，
+		// 此时 JSON 必然被截断。直接失败，不重试（重试同样会被截断）。
+		if choice.FinishReason == "length" {
+			logEntry.Status = "error"
+			logEntry.ErrorMessage = fmt.Sprintf(
+				"output truncated (finish_reason=length, completion_tokens=%d, prompt_chars=%d); provider 仍有默认 token 上限",
+				chatResp.Usage.CompletionTokens, len(userPrompt),
+			)
+			LogAICall(logEntry)
+			return nil, fmt.Errorf(
+				"AI 输出被 provider 截断 (finish_reason=length, completion_tokens=%d)，请联系管理员确认 provider 默认上限",
+				chatResp.Usage.CompletionTokens,
+			)
+		}
+
+		content := stripAICodeFence(strings.TrimSpace(choice.Message.Content))
 
 		var output StockAnalysisOutput
 		if err := json.Unmarshal([]byte(content), &output); err != nil {
 			logEntry.Status = "error"
-			logEntry.ErrorMessage = "JSON parse error"
+			logEntry.ErrorMessage = fmt.Sprintf("JSON parse error: %v", err)
+			logEntry.ExtraMeta["raw_content_head"] = truncateStr(content, 500)
 			LogAICall(logEntry)
 			return nil, fmt.Errorf("AI 返回的 JSON 格式不正确: %w", err)
 		}

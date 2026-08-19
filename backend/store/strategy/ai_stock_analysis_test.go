@@ -1,6 +1,12 @@
 package strategy
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -466,5 +472,91 @@ func TestBuildStockUserPrompt_Fundamentals_AllUnavailable(t *testing.T) {
 		if !strings.Contains(prompt, expected) {
 			t.Errorf("all-unavailable: expected %q", expected)
 		}
+	}
+}
+
+// ── AnalyzeStock HTTP 调用回归测试（对齐 aipicker 的 max_tokens / finish_reason 修法）──
+
+// TestAnalyzeStock_NoMaxTokensInRequest 验证请求体不含 max_tokens，且带 response_format=json_object。
+func TestAnalyzeStock_NoMaxTokensInRequest(t *testing.T) {
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedBody, _ = io.ReadAll(r.Body)
+		r.Body.Close()
+		resp := `{"choices":[{"message":{"role":"assistant","content":"{\"signal\":\"hold\",\"confidence_score\":50,\"confidence_level\":\"medium\",\"logic_summary\":\"测试\",\"risk_warnings\":[\"风险\"]}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":200,"total_tokens":300}}`
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, resp)
+	}))
+	defer srv.Close()
+
+	cfg := AIConfig{APIKey: "test", BaseURL: srv.URL, Model: "test-model"}
+	if _, err := AnalyzeStock(context.Background(), cfg, "user1", makeStockInput(), nil); err != nil {
+		t.Fatalf("AnalyzeStock returned unexpected error: %v", err)
+	}
+
+	var reqMap map[string]any
+	if jsonErr := json.Unmarshal(capturedBody, &reqMap); jsonErr != nil {
+		t.Fatalf("failed to parse captured request body: %v", jsonErr)
+	}
+	if _, exists := reqMap["max_tokens"]; exists {
+		t.Fatalf("request body must NOT contain max_tokens, got: %v", reqMap)
+	}
+	rf, ok := reqMap["response_format"].(map[string]any)
+	if !ok {
+		t.Fatalf("request body must contain response_format, got: %v", reqMap)
+	}
+	if rf["type"] != "json_object" {
+		t.Fatalf("expected response_format.type=json_object, got %v", rf["type"])
+	}
+}
+
+// TestAnalyzeStock_FinishReasonLengthFails 验证 finish_reason=length 时不重试、直接失败并带可观测信息。
+func TestAnalyzeStock_FinishReasonLengthFails(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		resp := `{"choices":[{"message":{"role":"assistant","content":"{\"signal\":\"hold\""},"finish_reason":"length"}],"usage":{"prompt_tokens":50,"completion_tokens":4096,"total_tokens":4146}}`
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, resp)
+	}))
+	defer srv.Close()
+
+	cfg := AIConfig{APIKey: "test", BaseURL: srv.URL, Model: "test-model"}
+	_, err := AnalyzeStock(context.Background(), cfg, "user1", makeStockInput(), nil)
+
+	if err == nil {
+		t.Fatal("expected error for finish_reason=length, got nil")
+	}
+	if !strings.Contains(err.Error(), "finish_reason=length") {
+		t.Fatalf("expected error to mention finish_reason=length, got: %v", err)
+	}
+	// finish_reason=length 不应重试 —— 只应发出 1 次请求
+	if callCount != 1 {
+		t.Fatalf("expected exactly 1 attempt (no retry for length), got %d", callCount)
+	}
+}
+
+// TestAnalyzeStock_HappyPath 验证合法 JSON 返回成功并解析出字段。
+func TestAnalyzeStock_HappyPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := `{"choices":[{"message":{"role":"assistant","content":"{\"signal\":\"buy\",\"confidence_score\":72,\"confidence_level\":\"high\",\"logic_summary\":\"叙事层处于主线，资金流入明显。\",\"risk_warnings\":[\"大盘波动风险\"],\"trading_suggestions\":{\"action_suggestion\":\"逢低布局\"}}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":200,"total_tokens":300}}`
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, resp)
+	}))
+	defer srv.Close()
+
+	cfg := AIConfig{APIKey: "test", BaseURL: srv.URL, Model: "test-model"}
+	result, err := AnalyzeStock(context.Background(), cfg, "user1", makeStockInput(), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeStock unexpected error: %v", err)
+	}
+	if result == nil || result.Analysis == nil {
+		t.Fatal("expected non-nil analysis result")
+	}
+	if result.Analysis.Signal != "buy" {
+		t.Fatalf("expected signal=buy, got %q", result.Analysis.Signal)
+	}
+	if result.Analysis.ConfidenceScore != 72 {
+		t.Fatalf("expected confidence_score=72, got %d", result.Analysis.ConfidenceScore)
 	}
 }

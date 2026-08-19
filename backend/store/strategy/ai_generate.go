@@ -139,14 +139,20 @@ type aiChatMessage struct {
 }
 
 type aiChatRequest struct {
-	Model       string          `json:"model"`
-	Messages    []aiChatMessage `json:"messages"`
-	Temperature float64         `json:"temperature"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
+	Model          string          `json:"model"`
+	Messages       []aiChatMessage `json:"messages"`
+	Temperature    float64         `json:"temperature"`
+	MaxTokens      int             `json:"max_tokens,omitempty"`
+	ResponseFormat *aiResponseFmt  `json:"response_format,omitempty"`
+}
+
+type aiResponseFmt struct {
+	Type string `json:"type"`
 }
 
 type aiChatChoice struct {
-	Message aiChatMessage `json:"message"`
+	Message      aiChatMessage `json:"message"`
+	FinishReason string        `json:"finish_reason"`
 }
 
 type aiChatResponse struct {

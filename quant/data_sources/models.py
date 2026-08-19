@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 
 
 class Capability:
-    COMPANY_PROFILE = "company_profile"
     FUNDAMENTALS = "fundamentals"
     FINANCIALS = "financials"
     DIVIDENDS = "dividends"

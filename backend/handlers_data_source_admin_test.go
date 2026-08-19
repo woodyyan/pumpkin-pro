@@ -1,103 +1,80 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
 
-	"github.com/woodyyan/pumpkin-pro/backend/store/companyprofile"
-	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
-	"github.com/woodyyan/pumpkin-pro/backend/tests/testutil"
+	"github.com/woodyyan/pumpkin-pro/backend/config"
 )
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return fn(req)
-}
-
 func TestHandleAdminDataSourceHealth(t *testing.T) {
-	db := testutil.InMemoryDB(t)
-	testutil.AutoMigrateModels(t, db, &companyprofile.CompanyProfileRecord{}, &companyprofile.IndustryMappingRecord{}, &quadrant.QuadrantScoreRecord{})
-	repo := companyprofile.NewRepository(db)
-	now := time.Now().UTC()
-	if err := db.Create(&quadrant.QuadrantScoreRecord{Code: "600519", Name: "贵州茅台", Exchange: "SSE", Board: "MAIN", ComputedAt: now}).Error; err != nil {
-		t.Fatalf("seed universe failed: %v", err)
-	}
-	if err := repo.Upsert(context.Background(), companyprofile.CompanyProfileRecord{
-		Symbol:        "600519.SH",
-		Exchange:      "SSE",
-		Code:          "600519",
-		Name:          "贵州茅台",
-		ListingStatus: companyprofile.ListingStatusListed,
-		ProfileStatus: companyprofile.ProfileStatusComplete,
-		QualityFlags:  `[]`,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}); err != nil {
-		t.Fatalf("seed company profile failed: %v", err)
-	}
-
-	oldTransport := http.DefaultTransport
-	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path != "/api/data-sources/health" {
-			t.Fatalf("unexpected path: %s", r.URL.Path)
+	quant := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/data-sources/health" {
+			t.Fatalf("unexpected quant request: %s %s", r.Method, r.URL.Path)
 		}
-		body := `{"providers":{"eastmoney":{"success":2,"failed":1,"last_status":"success"}},"capabilities":{"company_profile":{"success":1,"failed":0,"last_provider":"eastmoney","last_status":"success","last_market":"ASHARE"}},"total_events":3,"recent":[]}`
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(body)),
-		}, nil
-	})
-	defer func() { http.DefaultTransport = oldTransport }()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"providers":{"eastmoney":{"success":2,"failed":1,"last_status":"success"}},"capabilities":{"fundamentals":{"success":1,"failed":0,"last_provider":"eastmoney","last_status":"success","last_market":"ASHARE"}},"total_events":3,"recent":[]}`))
+	}))
+	defer quant.Close()
 
-	svc := companyprofile.NewService(repo)
-	svc.SetQuantServiceURL("http://quant.test")
-	server := &appServer{companyProfileService: svc}
-
+	server := &appServer{cfg: config.Config{QuantServiceURL: quant.URL}}
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/data-source-health", nil)
 	resp := httptest.NewRecorder()
 	server.handleAdminDataSourceHealth(resp, req)
 
 	if resp.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.Code)
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
 	}
 	var payload map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if payload["data_source_health"] == nil {
-		t.Fatalf("expected data_source_health, got %+v", payload)
+	health, ok := payload["data_source_health"].(map[string]any)
+	if !ok || health["total_events"] != float64(3) {
+		t.Fatalf("unexpected data_source_health: %+v", payload)
+	}
+	if payload["updated_at"] == nil {
+		t.Fatalf("expected updated_at, got %+v", payload)
+	}
+	if _, exists := payload["refresh"]; exists {
+		t.Fatalf("retired company profile refresh state should not be returned: %+v", payload)
 	}
 }
 
-func TestHandleAdminCompanyProfilesRefresh(t *testing.T) {
-	db := testutil.InMemoryDB(t)
-	testutil.AutoMigrateModels(t, db, &companyprofile.CompanyProfileRecord{}, &companyprofile.IndustryMappingRecord{})
-	repo := companyprofile.NewRepository(db)
-	svc := companyprofile.NewService(repo)
-	svc.SetQuantServiceURL("http://quant.test")
-	server := &appServer{companyProfileService: svc}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/company-profiles/refresh", strings.NewReader(`{"exchange":"ALL","limit":10}`))
-	req.Header.Set("Content-Type", "application/json")
+func TestHandleAdminDataSourceHealthRejectsUnsupportedMethod(t *testing.T) {
+	server := &appServer{}
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/data-source-health", nil)
 	resp := httptest.NewRecorder()
-	server.handleAdminCompanyProfilesRefresh(resp, req)
+	server.handleAdminDataSourceHealth(resp, req)
+	if resp.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", resp.Code)
+	}
+}
 
-	if resp.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d", resp.Code)
+func TestHandleAdminDataSourceHealthRequiresQuantURL(t *testing.T) {
+	server := &appServer{}
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/data-source-health", nil)
+	resp := httptest.NewRecorder()
+	server.handleAdminDataSourceHealth(resp, req)
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", resp.Code)
 	}
-	var payload map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if payload["ok"] != true {
-		t.Fatalf("expected ok=true, got %+v", payload)
+}
+
+func TestHandleAdminDataSourceHealthRejectsInvalidQuantPayload(t *testing.T) {
+	quant := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`not-json`))
+	}))
+	defer quant.Close()
+
+	server := &appServer{cfg: config.Config{QuantServiceURL: quant.URL}}
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/data-source-health", nil)
+	resp := httptest.NewRecorder()
+	server.handleAdminDataSourceHealth(resp, req)
+	if resp.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", resp.Code)
 	}
 }

@@ -25,7 +25,6 @@ import (
 	"github.com/woodyyan/pumpkin-pro/backend/store/backtest"
 	"github.com/woodyyan/pumpkin-pro/backend/store/backup"
 	"github.com/woodyyan/pumpkin-pro/backend/store/capitalmap"
-	"github.com/woodyyan/pumpkin-pro/backend/store/companyprofile"
 	"github.com/woodyyan/pumpkin-pro/backend/store/factorindex"
 	"github.com/woodyyan/pumpkin-pro/backend/store/factorlab"
 	"github.com/woodyyan/pumpkin-pro/backend/store/factorpool"
@@ -289,7 +288,6 @@ type appServer struct {
 	portfolioWorker       *portfolio.Worker
 	capitalMapService     *capitalmap.ProxyService
 	newsKlineService      *newskline.ProxyService
-	companyProfileService *companyprofile.Service
 	quadrantService       *quadrant.Service
 	simPortfolioV2Service *quadrant.SimPortfolioV2Service
 	adminService          *admin.Service
@@ -4010,9 +4008,6 @@ func main() {
 	liveMarketClient := live.NewMarketClient()
 	capitalMapService := capitalmap.NewProxyService(cfg.QuantServiceURL, nil)
 	newsKlineService := newskline.NewProxyService(cfg.QuantServiceURL, nil)
-	companyProfileRepo := companyprofile.NewRepository(storeInstance.DB)
-	companyProfileService := companyprofile.NewService(companyProfileRepo)
-	companyProfileService.SetQuantServiceURL(cfg.QuantServiceURL)
 
 	signalRepo := signal.NewRepository(storeInstance.DB)
 	signalService := signal.NewService(signalRepo, signal.ServiceConfig{
@@ -4270,7 +4265,6 @@ func main() {
 		portfolioWorker:       portfolioWorker,
 		capitalMapService:     capitalMapService,
 		newsKlineService:      newsKlineService,
-		companyProfileService: companyProfileService,
 		quadrantService:       quadrantService,
 		simPortfolioV2Service: simPortfolioV2Service,
 		adminService:          adminService,
@@ -4384,7 +4378,6 @@ func main() {
 	mux.HandleFunc("/api/admin/factor-index/status", server.withSuperAdminAuth(server.handleAdminFactorIndexStatus))
 	mux.HandleFunc("/api/admin/factor-index/recompute", server.withSuperAdminAuth(server.handleAdminFactorIndexRecompute))
 	mux.HandleFunc("/api/admin/data-source-health", server.withSuperAdminAuth(server.handleAdminDataSourceHealth))
-	mux.HandleFunc("/api/admin/company-profiles/refresh", server.withSuperAdminAuth(server.handleAdminCompanyProfilesRefresh))
 
 	mux.HandleFunc("/api/analytics/pageview", server.withOptionalAuth(server.handlePageView))
 

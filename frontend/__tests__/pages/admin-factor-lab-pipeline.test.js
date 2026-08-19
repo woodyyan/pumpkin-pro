@@ -29,11 +29,12 @@ describe('admin factor lab pipeline labels', () => {
     assert.match(sectionsSource, /自动链路允许 warning 放行，不再 hard fail/)
   })
 
-  it('shows data source health panel on admin data page', () => {
+  it('shows gateway health without the retired company profile refresh controls', () => {
     assert.match(sectionsSource, /数据源健康/)
     assert.match(sectionsSource, /adminFetch\('\/api\/admin\/data-source-health'\)/)
-    assert.match(sectionsSource, /adminFetch\('\/api\/admin\/company-profiles\/refresh'/)
     assert.match(sectionsSource, /Gateway 最近状态/)
-    assert.match(sectionsSource, /公司资料同步/)
+    assert.doesNotMatch(sectionsSource, /adminFetch\('\/api\/admin\/company-profiles\/refresh'/)
+    assert.doesNotMatch(sectionsSource, /公司资料同步/)
+    assert.doesNotMatch(sectionsSource, /刷新公司资料/)
   })
 })

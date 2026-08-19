@@ -59,8 +59,8 @@ func seedFactorLabAdminMetadata(t *testing.T, repo *Repository) {
 		t.Fatalf("seed factor securities: %v", err)
 	}
 	profiles := []companyprofile.CompanyProfileRecord{
-		{Symbol: "000001.SZ", Exchange: "SZSE", Code: "000001", Name: "平安银行", IndustryName: "银行", ListingStatus: companyprofile.ListingStatusListed, ProfileStatus: companyprofile.ProfileStatusComplete, QualityFlags: `[]`, CreatedAt: now, UpdatedAt: now},
-		{Symbol: "000002.SZ", Exchange: "SZSE", Code: "000002", Name: "万科A", IndustryName: "房地产", ListingStatus: companyprofile.ListingStatusListed, ProfileStatus: companyprofile.ProfileStatusComplete, QualityFlags: `[]`, CreatedAt: now, UpdatedAt: now},
+		{Symbol: "000001.SZ", Exchange: "SZSE", Code: "000001", Name: "平安银行", IndustryName: "银行", ListingStatus: "LISTED", ProfileStatus: "COMPLETE", QualityFlags: `[]`, CreatedAt: now, UpdatedAt: now},
+		{Symbol: "000002.SZ", Exchange: "SZSE", Code: "000002", Name: "万科A", IndustryName: "房地产", ListingStatus: "LISTED", ProfileStatus: "COMPLETE", QualityFlags: `[]`, CreatedAt: now, UpdatedAt: now},
 	}
 	if err := repo.db.WithContext(context.Background()).Create(&profiles).Error; err != nil {
 		t.Fatalf("seed company profiles: %v", err)

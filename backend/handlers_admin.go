@@ -14,7 +14,6 @@ import (
 
 	"github.com/woodyyan/pumpkin-pro/backend/store/admin"
 	"github.com/woodyyan/pumpkin-pro/backend/store/analytics"
-	"github.com/woodyyan/pumpkin-pro/backend/store/companyprofile"
 	"github.com/woodyyan/pumpkin-pro/backend/store/quadrant"
 )
 
@@ -192,56 +191,47 @@ func (a *appServer) handleAdminAITokenUsage(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, result)
 }
 
-// handleAdminDataSourceHealth returns company profile + quant gateway health for admin/data.
+// handleAdminDataSourceHealth returns Quant Data Source Gateway health for admin/data.
 // GET /api/admin/data-source-health
 func (a *appServer) handleAdminDataSourceHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Only GET method is allowed")
 		return
 	}
-	if a.companyProfileService == nil {
-		writeError(w, http.StatusInternalServerError, "数据源健康服务未初始化")
+	quantURL := strings.TrimRight(strings.TrimSpace(a.cfg.QuantServiceURL), "/")
+	if quantURL == "" {
+		writeError(w, http.StatusInternalServerError, "Quant 服务地址未配置")
 		return
 	}
-	overview, err := a.companyProfileService.AdminOverview(r.Context())
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, quantURL+"/api/data-sources/health", nil)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "获取数据源健康失败")
+		writeError(w, http.StatusInternalServerError, "创建数据源健康请求失败")
 		return
 	}
-	writeJSON(w, http.StatusOK, overview)
-}
-
-// handleAdminCompanyProfilesRefresh triggers manual static profile refresh.
-// POST /api/admin/company-profiles/refresh
-func (a *appServer) handleAdminCompanyProfilesRefresh(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "Only POST method is allowed")
-		return
-	}
-	if a.companyProfileService == nil {
-		writeError(w, http.StatusInternalServerError, "公司资料服务未初始化")
-		return
-	}
-	var req companyprofile.CompanyProfileRefreshRequest
-	if len(strings.TrimSpace(r.URL.Query().Get("exchange"))) > 0 && r.ContentLength == 0 {
-		req.Exchange = r.URL.Query().Get("exchange")
-	}
-	if r.Body != nil && r.ContentLength != 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "公司资料刷新请求格式错误")
-			return
-		}
-	}
-	status, err := a.companyProfileService.StartManualRefresh(r.Context(), req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		if strings.Contains(err.Error(), "already running") {
-			writeError(w, http.StatusConflict, "公司资料刷新任务已在运行")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "触发公司资料刷新失败")
+		writeError(w, http.StatusServiceUnavailable, "Quant 数据源健康服务不可用")
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "status": status})
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "读取数据源健康响应失败")
+		return
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		writeError(w, http.StatusBadGateway, "Quant 数据源健康请求失败")
+		return
+	}
+	var health map[string]any
+	if err := json.Unmarshal(body, &health); err != nil {
+		writeError(w, http.StatusBadGateway, "解析数据源健康响应失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data_source_health": health,
+		"updated_at":         time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 // handleAdminSystemHealthPurge triggers cleanup of old error logs (admin-only).

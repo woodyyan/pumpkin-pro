@@ -16,8 +16,7 @@ from data.data_loader import DataLoader, generate_sample_data
 from data.fundamentals import get_symbol_fundamentals
 from data.news import get_symbol_news
 from data.news_kline import get_news_kline_report
-from data.company_profile import fetch_a_share_company_profile, fetch_hk_company_profile, normalize_symbol
-from data_sources import DataSourceManager, GLOBAL_HEALTH, Market
+from data_sources import DataSourceManager, GLOBAL_HEALTH
 from data.scripts.akshare_loader import resolve_stock_name_with_debug
 from data.scripts.online_market_data import fetch_online_bars
 from engine.backtest_engine import BacktestEngine
@@ -74,11 +73,6 @@ class RuntimeStrategyPayload(BaseModel):
     params: Dict[str, Any] = Field(default_factory=dict)
 
 
-class CompanyProfileSyncRequest(BaseModel):
-    symbols: List[str] = Field(default_factory=list)
-    limit: int = Field(default=0, ge=0)
-
-
 class BacktestRequest(BaseModel):
     data_source: str = Field(default="online", description="online/csv/sample")
     ticker: Optional[str] = Field(default=None, description="A股六位数字或港股五位数字")
@@ -126,26 +120,6 @@ def get_data_source_health():
     except Exception:
         health["baostock_quota"] = None
     return health
-
-
-@app.post("/api/company-profiles/sync")
-def sync_company_profiles(req: CompanyProfileSyncRequest):
-    items = []
-    errors = []
-    symbols = req.symbols[: req.limit] if req.limit and req.limit > 0 else req.symbols
-    for symbol in symbols:
-        try:
-            normalized, exchange, _ = normalize_symbol(symbol)
-            market = Market.HKEX if exchange == "HKEX" else Market.ASHARE
-            response = data_source_manager.fetch_company_profile(symbol=normalized, market=market)
-            if not response.ok or not response.data:
-                detail = " | ".join(response.errors or []) or "公司资料暂不可用"
-                raise RuntimeError(detail)
-            items.append(response.data)
-        except Exception as exc:
-            logger.warning("公司资料采集失败 symbol=%s error=%s", symbol, exc)
-            errors.append({"symbol": symbol, "error": str(exc)})
-    return {"items": items, "errors": errors, "count": len(items), "failed_count": len(errors)}
 
 
 @app.get("/api/fundamentals/{symbol}")

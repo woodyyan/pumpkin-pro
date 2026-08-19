@@ -2,29 +2,8 @@ package companyprofile
 
 import "time"
 
-const (
-	IndustryNotApplicable = "not_applicable"
-	IndustryLevelL1       = "l1"
-	IndustrySourceSWL1    = "sw_l1"
-
-	ListingStatusListed    = "LISTED"
-	ListingStatusDelisted  = "DELISTED"
-	ListingStatusSuspended = "SUSPENDED"
-	ListingStatusUnknown   = "UNKNOWN"
-
-	ProfileStatusComplete = "COMPLETE"
-	ProfileStatusPartial  = "PARTIAL"
-	ProfileStatusPending  = "PENDING"
-	ProfileStatusFailed   = "FAILED"
-
-	SummarySourceExtract      = "source_extract"
-	SummarySourceRuleTemplate = "rule_template"
-	SummarySourceFallback     = "fallback"
-	SummarySourceModelOffline = "model_offline"
-)
-
-// CompanyProfileRecord stores static company/security master data used by the
-// public "About" card on the symbol detail page.
+// CompanyProfileRecord preserves the shared company_profiles schema used by
+// Factor Lab industry refresh and Phase 2 industry classification.
 type CompanyProfileRecord struct {
 	Symbol                string    `gorm:"primaryKey;size:16" json:"symbol"`
 	Exchange              string    `gorm:"size:8;not null;default:'';index" json:"exchange"`
@@ -79,100 +58,4 @@ type IndustryMappingRecord struct {
 
 func (IndustryMappingRecord) TableName() string {
 	return "industry_mapping"
-}
-
-type CompanyAboutProfile struct {
-	Name                  string `json:"name"`
-	FullName              string `json:"full_name"`
-	BoardCode             string `json:"board_code"`
-	BoardName             string `json:"board_name"`
-	RawIndustryName       string `json:"raw_industry_name"`
-	IndustryCode          string `json:"industry_code"`
-	IndustryName          string `json:"industry_name"`
-	IndustryLevel         string `json:"industry_level"`
-	IndustrySource        string `json:"industry_source"`
-	Website               string `json:"website"`
-	FoundedDate           string `json:"founded_date"`
-	FoundedDatePrecision  string `json:"founded_date_precision"`
-	IPODate               string `json:"ipo_date"`
-	ListingStatus         string `json:"listing_status"`
-	DelistedDate          string `json:"delisted_date"`
-	BusinessSummary       string `json:"business_summary"`
-	BusinessSummarySource string `json:"business_summary_source"`
-	BusinessScope         string `json:"business_scope"`
-}
-
-type CompanyAboutMeta struct {
-	ProfileStatus   string   `json:"profile_status"`
-	Source          string   `json:"source,omitempty"`
-	SourceURL       string   `json:"source_url,omitempty"`
-	SourceUpdatedAt string   `json:"source_updated_at,omitempty"`
-	UpdatedAt       string   `json:"updated_at,omitempty"`
-	QualityFlags    []string `json:"quality_flags"`
-	Message         string   `json:"message,omitempty"`
-}
-
-type CompanyAboutPayload struct {
-	Symbol     string               `json:"symbol"`
-	Exchange   string               `json:"exchange"`
-	HasProfile bool                 `json:"has_profile"`
-	Profile    *CompanyAboutProfile `json:"profile"`
-	Meta       CompanyAboutMeta     `json:"meta"`
-}
-
-type UniverseSecurity struct {
-	Symbol    string `json:"symbol"`
-	Code      string `json:"code"`
-	Name      string `json:"name"`
-	Exchange  string `json:"exchange"`
-	BoardCode string `json:"board_code"`
-}
-
-type CoverageByExchange struct {
-	Exchange      string  `json:"exchange"`
-	UniverseCount int64   `json:"universe_count"`
-	ProfileCount  int64   `json:"profile_count"`
-	ApplicableCount int64 `json:"applicable_count"`
-	MappedCount   int64   `json:"mapped_count"`
-	CompleteCount int64   `json:"complete_count"`
-	PendingCount  int64   `json:"pending_count"`
-	FailedCount   int64   `json:"failed_count"`
-	DelistedCount int64   `json:"delisted_count"`
-	CoverageRate  float64 `json:"coverage_rate"`
-}
-
-type CompanyProfileFailureItem struct {
-	Symbol        string   `json:"symbol"`
-	Name          string   `json:"name"`
-	Exchange      string   `json:"exchange"`
-	ProfileStatus string   `json:"profile_status"`
-	QualityFlags  []string `json:"quality_flags"`
-	UpdatedAt     string   `json:"updated_at"`
-}
-
-type AdminCompanyProfileOverview struct {
-	Coverage  []CoverageByExchange        `json:"coverage"`
-	Failures  []CompanyProfileFailureItem `json:"failures"`
-	Refresh   CompanyProfileRefreshStatus `json:"refresh"`
-	DataSourceHealth any                  `json:"data_source_health,omitempty"`
-	UpdatedAt string                      `json:"updated_at"`
-}
-
-type CompanyProfileRefreshStatus struct {
-	Running       bool   `json:"running"`
-	Status        string `json:"status"`
-	StartedAt     string `json:"started_at,omitempty"`
-	FinishedAt    string `json:"finished_at,omitempty"`
-	TotalCount    int    `json:"total_count"`
-	SuccessCount  int    `json:"success_count"`
-	FailedCount   int    `json:"failed_count"`
-	NewCount      int    `json:"new_count"`
-	DelistedCount int    `json:"delisted_count"`
-	Message       string `json:"message,omitempty"`
-	Error         string `json:"error,omitempty"`
-}
-
-type CompanyProfileRefreshRequest struct {
-	Exchange string `json:"exchange"`
-	Limit    int    `json:"limit"`
 }

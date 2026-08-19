@@ -105,7 +105,7 @@ func TestBuildStockUserPrompt_Market_FullData(t *testing.T) {
 	}
 }
 
-func TestBuildStockUserPrompt_IncludesCompanyAboutContext(t *testing.T) {
+func TestBuildStockUserPrompt_IncludesOptionalCompanyStaticContext(t *testing.T) {
 	input := makeStockInput()
 	input.Market = makeFullMarket()
 	input.SymbolMeta["business_summary"] = "贵州茅台主要从事茅台酒及系列酒的生产与销售，所属行业为食品饮料。"
@@ -122,7 +122,7 @@ func TestBuildStockUserPrompt_IncludesCompanyAboutContext(t *testing.T) {
 		"上市状态：LISTED",
 	} {
 		if !strings.Contains(prompt, expected) {
-			t.Errorf("expected company about context %q", expected)
+			t.Errorf("expected optional company static context %q", expected)
 		}
 	}
 }

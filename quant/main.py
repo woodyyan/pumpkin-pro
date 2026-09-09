@@ -1063,5 +1063,53 @@ def evaluate_signal(req: SignalEvaluateRequest):
         raise HTTPException(status_code=500, detail=f"信号评估失败: {exc}") from exc
 
 
+# ── Strategy Portfolio replay endpoints（卧龙组合看板）──
+
+
+class C6ReplayRequest(BaseModel):
+    start_date: str = Field(default="", description="回放起点 YYYYMMDD/YYYY-MM-DD，空为全部可得历史")
+    end_date: str = Field(default="", description="回放终点，空为最新可得交易日")
+    params: Optional[Dict[str, Any]] = Field(default=None, description="C6 参数覆盖，缺省用锁定参数")
+
+
+@app.post("/api/strategy-portfolios/c6/replay")
+def replay_c6(req: C6ReplayRequest):
+    """C6 行业 ETF RS 轮动：平台独立回放（同步返回全量事实）。
+
+    Go 后端调用此端点取得 daily/positions/trades/metrics/quality，
+    物化为 candidate release；本端点不持有任何状态，同输入幂等。
+    """
+    from strategy_portfolios.c6_loader import load_c6_inputs
+    from strategy_portfolios.c6_rs_rotation import DEFAULT_PARAMS, run_c6_replay
+
+    try:
+        params = dict(DEFAULT_PARAMS)
+        if req.params:
+            for key, value in req.params.items():
+                if key in params and value is not None:
+                    params[key] = value
+
+        assets, benchmark, trace = load_c6_inputs(
+            data_source_manager, req.start_date.strip(), req.end_date.strip(),
+        )
+        if not benchmark.get("bars"):
+            raise ValueError("基准 510300 行情为空，无法回放")
+        usable = [a for a in assets if a.get("bars")]
+        if not usable:
+            raise ValueError("C6 宇宙全部 ETF 行情为空，无法回放")
+        if len(usable) < len(assets):
+            skipped = [a["code"] for a in assets if not a.get("bars")]
+            logger.warning("[c6] 部分 ETF 无行情，按缺失处理: %s", skipped)
+
+        result = run_c6_replay(assets, benchmark, params)
+        result["trace"] = trace
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("[c6] 回放异常")
+        raise HTTPException(status_code=500, detail=f"C6 回放失败: {exc}") from exc
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

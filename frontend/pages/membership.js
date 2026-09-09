@@ -49,6 +49,23 @@ function PricingCard({ plan, onSubscribe }) {
   )
 }
 
+/**
+ * 会员权益单元格：文案前置主题色对勾，强化「会员项都是已包含权益」的观感。
+ *
+ * 对勾是纯装饰（语义已由表头「会员」列承载），故 aria-hidden，
+ * 避免读屏把每一行都念成「勾选」。
+ */
+function MemberBenefit({ children }) {
+  return (
+    <span className="flex items-start gap-2">
+      <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="mt-0.5 h-4 w-4 shrink-0 text-primary">
+        <path fillRule="evenodd" clipRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.94 3.939 7.48-9.817a.75.75 0 0 1 1.052-.143Z" />
+      </svg>
+      <span>{children}</span>
+    </span>
+  )
+}
+
 export default function MembershipPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const openDialog = () => setDialogOpen(true)
@@ -103,7 +120,7 @@ export default function MembershipPage() {
                 <tr key={row.feature} className="border-t border-border">
                   <td className="px-4 py-3 font-medium text-foreground">{row.feature}</td>
                   <td className="px-4 py-3 text-foreground-muted">{row.free}</td>
-                  <td className="px-4 py-3 text-foreground">{row.member}</td>
+                  <td className="px-4 py-3 text-foreground"><MemberBenefit>{row.member}</MemberBenefit></td>
                 </tr>
               ))}
             </tbody>

@@ -107,6 +107,8 @@ func (w *Worker) Start(ctx context.Context) {
 		return
 	}
 
+	w.initLastComputedAt(ctx)
+
 	go func() {
 		for {
 			now := w.now()
@@ -124,6 +126,33 @@ func (w *Worker) Start(ctx context.Context) {
 		}
 	}()
 	log.Printf("[quadrant-worker] started, scheduled daily at %02d:%02d CST", w.cfg.ComputeHour, w.cfg.ComputeMinute)
+}
+
+// initLastComputedAt seeds lastComputedAt from persisted state before the first cycle.
+//
+// waitForCompletion decides "Quant finished" by checking whether the newest
+// quadrant_scores.computed_at moved past lastComputedAt. Left at the zero time, the
+// very first 30s tick compares against year 1 and matches ANY pre-existing row, so
+// the cycle is declared successful within 30 seconds — long before Quant has actually
+// finished, which in turn skips the 30-minute timeout guard entirely.
+func (w *Worker) initLastComputedAt(ctx context.Context) {
+	if w.service == nil || w.service.repo == nil {
+		return
+	}
+	latestAt, err := w.service.repo.GetLatestComputedAt(ctx)
+	if err != nil {
+		log.Printf("[quadrant-worker] could not seed last_computed_at (%v); first cycle may finish early", err)
+		return
+	}
+	if latestAt == nil {
+		log.Printf("[quadrant-worker] no prior quadrant scores; last_computed_at stays zero")
+		return
+	}
+
+	w.mu.Lock()
+	w.lastComputedAt = *latestAt
+	w.mu.Unlock()
+	log.Printf("[quadrant-worker] seeded last_computed_at=%s", latestAt.UTC().Format(time.RFC3339))
 }
 
 func nextTriggerTime(now time.Time, hour, minute int) time.Time {
@@ -241,6 +270,14 @@ func (w *Worker) runWithRetry(ctx context.Context) {
 				w.mu.Lock()
 				w.lastError = ""
 				w.mu.Unlock()
+				// Safety net: BulkSave normally terminates progress on the callback
+				// path. If that callback never lands (Quant died after writing rows,
+				// or the HTTP callback failed), the entry would stay "running"
+				// forever. Only promote when still running so an authoritative
+				// terminal state from BulkSave — including "failed" — is preserved.
+				if SetProgressTerminalIfRunning("ASHARE", "success", "") {
+					log.Printf("[quadrant-worker] progress had no terminal callback; marked ASHARE success")
+				}
 				log.Printf("[quadrant-worker] ✅ A-share compute cycle completed successfully on attempt %d", attempt)
 				return
 			} else {

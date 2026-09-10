@@ -698,9 +698,17 @@ func TestBulkSave_ProgressTerminalOnError(t *testing.T) {
 
 	_, _ = s.BulkSave(context.Background(), input) // expected to return error
 
-	p := GetProgress()["SZSE"] // default fallback for unknown exchange
-	if p.Status == "running" {
-		t.Error("progress should NOT remain running after BulkSave failure")
+	// Progress is keyed by market ("ASHARE"), never by the raw listing exchange.
+	progress := GetProgress()
+	p, ok := progress["ASHARE"]
+	if !ok {
+		t.Fatal("expected an ASHARE progress entry after BulkSave failure")
+	}
+	if p.Status != "failed" {
+		t.Errorf("expected ASHARE progress=failed after BulkSave failure, got %q", p.Status)
+	}
+	if _, orphan := progress["SZSE"]; orphan {
+		t.Error("BulkSave must not create an orphan SZSE progress entry (nothing reads it)")
 	}
 }
 
@@ -737,5 +745,90 @@ func TestAllEmpty_VariousCases(t *testing.T) {
 	}
 	if !allEmpty([]BulkSaveItem{}) {
 		t.Error("expected allEmpty=true for empty slice")
+	}
+}
+
+// TestBulkSave_ASHAREProgressKeyedByMarket is the regression test for the production
+// incident where the admin progress bar sat at "计算中 900/5009" for 15 hours even
+// though the computation had already succeeded: BulkSave terminated progress under
+// the raw listing exchange ("SZSE"), while the admin UI polls the market key
+// ("ASHARE"). The orphan "SZSE" entry nobody reads was created instead.
+func TestBulkSave_ASHAREProgressKeyedByMarket(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	s := NewService(repo)
+
+	resetQuadrantProgressForTest()
+	UpdateProgress("ASHARE", ComputeProgress{
+		Exchange: "ASHARE", Status: "running", Current: 900, Total: 5009,
+	})
+
+	input := BulkSaveInput{
+		Items: []BulkSaveItem{
+			{Code: "000001", Name: "平安银行", Exchange: "SZSE", Opportunity: 65, Risk: 35, Quadrant: "机会"},
+			{Code: "600519", Name: "贵州茅台", Exchange: "SSE", Opportunity: 80, Risk: 20, Quadrant: "机会"},
+		},
+		ComputedAt: "2026-09-09T13:07:04Z",
+	}
+
+	if _, err := s.BulkSave(context.Background(), input); err != nil {
+		t.Fatalf("BulkSave failed: %v", err)
+	}
+
+	progress := GetProgress()
+
+	p, ok := progress["ASHARE"]
+	if !ok {
+		t.Fatal("expected an ASHARE progress entry after BulkSave")
+	}
+	if p.Status != "success" {
+		t.Errorf("ASHARE progress must reach a terminal state, got %q (the 15h stuck bug)", p.Status)
+	}
+	if p.Total != 5009 || p.Current != p.Total {
+		t.Errorf("expected success to clamp progress to 5009/5009, got %d/%d", p.Current, p.Total)
+	}
+
+	for _, orphanKey := range []string{"SZSE", "SSE"} {
+		if _, exists := progress[orphanKey]; exists {
+			t.Errorf("BulkSave must not create orphan progress key %q (nothing reads it)", orphanKey)
+		}
+	}
+
+	// The persisted log must still carry the raw listing exchange, so historical
+	// rows and FindLatestRunningLog keep working.
+	logs, err := repo.ListComputeLogs(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("ListComputeLogs failed: %v", err)
+	}
+	if len(logs) == 0 {
+		t.Fatal("expected a compute log to be written")
+	}
+	if logs[0].Exchange != "SZSE" {
+		t.Errorf("compute log should keep raw exchange %q, got %q", "SZSE", logs[0].Exchange)
+	}
+}
+
+func TestNormalizeExchangeKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		exchange string
+		want     string
+	}{
+		{"shenzhen maps to ashare", "SZSE", "ASHARE"},
+		{"shanghai maps to ashare", "SSE", "ASHARE"},
+		{"ashare is idempotent", "ASHARE", "ASHARE"},
+		{"empty defaults to ashare", "", "ASHARE"},
+		{"unknown defaults to ashare", "BSE", "ASHARE"},
+		{"hkex preserved", "HKEX", "HKEX"},
+		{"lowercase hkex preserved", "hkex", "HKEX"},
+		{"padded input trimmed", "  szse  ", "ASHARE"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeExchangeKey(tt.exchange); got != tt.want {
+				t.Errorf("normalizeExchangeKey(%q) = %q, want %q", tt.exchange, got, tt.want)
+			}
+		})
 	}
 }

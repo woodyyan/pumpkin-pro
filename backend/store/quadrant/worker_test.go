@@ -125,3 +125,44 @@ func TestRunScheduledCycleTriggersOnlyEligibleMarket(t *testing.T) {
 		t.Fatalf("expected HK progress running after trigger, got %+v", progress["HKEX"])
 	}
 }
+
+// TestWorkerInitLastComputedAtSeedsFromDB guards the second half of the "stuck at
+// 计算中" incident: lastComputedAt used to start at the zero time, so the very first
+// waitForCompletion tick matched any pre-existing row and declared the cycle
+// successful within 30 seconds — 66 minutes before Quant actually finished, which
+// also skipped the 30-minute timeout guard.
+func TestWorkerInitLastComputedAtSeedsFromDB(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+	service := NewService(repo)
+
+	computedAt := time.Date(2026, 9, 9, 13, 7, 4, 0, time.UTC)
+	if err := repo.BulkUpsert(context.Background(), []QuadrantScoreRecord{
+		{Code: "000001", Name: "平安银行", Exchange: "SZSE", Quadrant: "机会", ComputedAt: computedAt},
+	}); err != nil {
+		t.Fatalf("BulkUpsert failed: %v", err)
+	}
+
+	w := NewWorker(service, WorkerConfig{Enabled: true}, nil)
+	if !w.lastComputedAt.IsZero() {
+		t.Fatal("expected lastComputedAt to start at the zero time")
+	}
+
+	w.initLastComputedAt(context.Background())
+
+	if !w.lastComputedAt.Equal(computedAt) {
+		t.Errorf("lastComputedAt = %s, want %s", w.lastComputedAt.UTC(), computedAt)
+	}
+}
+
+func TestWorkerInitLastComputedAtWithEmptyTable(t *testing.T) {
+	repo, cleanup := setupQuadrantTest(t)
+	defer cleanup()
+
+	w := NewWorker(NewService(repo), WorkerConfig{Enabled: true}, nil)
+	w.initLastComputedAt(context.Background())
+
+	if !w.lastComputedAt.IsZero() {
+		t.Errorf("expected lastComputedAt to stay zero with no rows, got %s", w.lastComputedAt)
+	}
+}

@@ -242,20 +242,28 @@ func inferSourceTradeDateFromItems(items []BulkSaveItem) string {
 	return latest
 }
 
-func normalizeTradeDateResolverExchange(exchange string) string {
+// normalizeExchangeKey maps any exchange representation to the canonical market key.
+//
+// Callbacks from Quant carry the raw listing exchange ("SSE" / "SZSE" / "HKEX"),
+// while in-memory progress (progressMap) and the market-scoped APIs are keyed by
+// market ("ASHARE" / "HKEX"). Mixing the two silently strands the A-share progress
+// entry in "running" forever, because SetProgressTerminal("SZSE", ...) creates a
+// brand new orphan entry instead of terminating the "ASHARE" one the UI reads.
+//
+// Always route an exchange through this function before using it as a progress key.
+func normalizeExchangeKey(exchange string) string {
 	switch strings.ToUpper(strings.TrimSpace(exchange)) {
 	case "HKEX":
 		return "HKEX"
-	case "SSE", "SZSE", "ASHARE", "":
-		return "ASHARE"
 	default:
+		// "SSE" / "SZSE" / "ASHARE" / "" and anything unrecognized default to A-share.
 		return "ASHARE"
 	}
 }
 
 func (s *Service) resolveSourceTradeDate(ctx context.Context, exchange string, computedAt time.Time, priceHints map[string]snapshotPriceHint) string {
 	if s.tradeDateResolver != nil {
-		if resolved := normalizeSourceTradeDate(s.tradeDateResolver(ctx, normalizeTradeDateResolverExchange(exchange), computedAt)); resolved != "" {
+		if resolved := normalizeSourceTradeDate(s.tradeDateResolver(ctx, normalizeExchangeKey(exchange), computedAt)); resolved != "" {
 			return resolved
 		}
 	}
@@ -289,8 +297,16 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 		}
 	}
 
-	// Determine exchange from items
+	// Determine exchange from items.
+	//
+	// Two distinct identities are needed and must NOT be conflated:
+	//   - exchange:    raw listing exchange ("SSE"/"SZSE"/"HKEX"). Persisted to
+	//                  quadrant_compute_logs.exchange and used by FindLatestRunningLog,
+	//                  so it must stay backward-compatible with historical rows.
+	//   - progressKey: canonical market key ("ASHARE"/"HKEX") used by progressMap,
+	//                  which is what the admin UI polls.
 	exchange := detectExchange(input.Items)
+	progressKey := normalizeExchangeKey(exchange)
 
 	log.Printf("[quadrant] BulkSave start: exchange=%s, items=%d", exchange, len(input.Items))
 
@@ -307,7 +323,7 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 			StartedAt:  &computedAt,
 			FinishedAt: &computedAt,
 		})
-		SetProgressTerminal(exchange, "failed", "收到空数据（0条有效股票）")
+		SetProgressTerminal(progressKey, "failed", "收到空数据（0条有效股票）")
 		return 0, fmt.Errorf("no valid items to save")
 	}
 
@@ -379,7 +395,7 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 			FinishedAt: &now,
 			TotalCount: totalCount,
 		})
-		SetProgressTerminal(exchange, "failed", fmt.Sprintf("DB写入错误: %v", err))
+		SetProgressTerminal(progressKey, "failed", fmt.Sprintf("DB写入错误: %v", err))
 		return 0, err
 	}
 
@@ -446,9 +462,9 @@ func (s *Service) BulkSave(ctx context.Context, input BulkSaveInput) (int, error
 
 	_ = s.repo.InsertComputeLog(ctx, taskLog)
 
-	// Update progress to terminal state
-	SetProgressTerminal(exchange, status, errorMsg)
-	log.Printf("[quadrant] BulkSave COMPLETE: exchange=%s status=%s log_id=%s", exchange, status, logID)
+	// Update progress to terminal state (keyed by market, not by listing exchange)
+	SetProgressTerminal(progressKey, status, errorMsg)
+	log.Printf("[quadrant] BulkSave COMPLETE: exchange=%s progress_key=%s status=%s log_id=%s", exchange, progressKey, status, logID)
 
 	// Save ranking snapshots and portfolio asynchronously.
 	// These are best-effort operations that must not block the BulkSave response.

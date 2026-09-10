@@ -323,3 +323,47 @@ func TestGetProgress_ContainsAllExchanges(t *testing.T) {
 		t.Error("missing HKEX exchange")
 	}
 }
+
+// ── SetProgressTerminalIfRunning tests ──
+
+func TestSetProgressTerminalIfRunning(t *testing.T) {
+	tests := []struct {
+		name          string
+		initialStatus string
+		wantApplied   bool
+		wantStatus    string
+	}{
+		{"promotes a running entry", "running", true, "success"},
+		{"does not clobber an existing failed state", "failed", false, "failed"},
+		{"does not clobber an existing success state", "success", false, "success"},
+		{"does not resurrect an idle entry", "idle", false, "idle"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetQuadrantProgressForTest()
+			UpdateProgress("ASHARE", ComputeProgress{
+				Exchange: "ASHARE", Status: tt.initialStatus, Current: 900, Total: 5009,
+			})
+
+			applied := SetProgressTerminalIfRunning("ASHARE", "success", "")
+			if applied != tt.wantApplied {
+				t.Errorf("applied = %v, want %v", applied, tt.wantApplied)
+			}
+			if got := GetProgress()["ASHARE"].Status; got != tt.wantStatus {
+				t.Errorf("status = %q, want %q", got, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestSetProgressTerminalIfRunning_UnknownKeyIsNoop(t *testing.T) {
+	resetQuadrantProgressForTest()
+
+	if SetProgressTerminalIfRunning("NOT_A_MARKET", "success", "") {
+		t.Error("expected no transition for an unknown key")
+	}
+	if _, exists := GetProgress()["NOT_A_MARKET"]; exists {
+		t.Error("SetProgressTerminalIfRunning must not create new entries")
+	}
+}

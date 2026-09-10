@@ -68,6 +68,29 @@ func SetProgressTerminal(exchange, status, errorMsg string) {
 	progressMu.Lock()
 	defer progressMu.Unlock()
 
+	setProgressTerminalLocked(exchange, status, errorMsg)
+}
+
+// SetProgressTerminalIfRunning promotes progress to a terminal state only when the
+// entry is still "running", and reports whether the transition was applied.
+//
+// This is for safety-net writers (e.g. the scheduler confirming a cycle finished)
+// that must never clobber a more authoritative terminal state already recorded by
+// the primary completion path (BulkSave) — which may legitimately be "failed".
+func SetProgressTerminalIfRunning(exchange, status, errorMsg string) bool {
+	progressMu.Lock()
+	defer progressMu.Unlock()
+
+	existing, ok := progressMap[exchange]
+	if !ok || existing == nil || existing.Status != "running" {
+		return false
+	}
+	setProgressTerminalLocked(exchange, status, errorMsg)
+	return true
+}
+
+// setProgressTerminalLocked applies a terminal state. Callers must hold progressMu.
+func setProgressTerminalLocked(exchange, status, errorMsg string) {
 	existing, ok := progressMap[exchange]
 	if ok && existing != nil {
 		existing.Status = status

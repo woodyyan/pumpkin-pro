@@ -1,18 +1,18 @@
 package factorlab
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -23,6 +23,8 @@ const (
 	defaultStepTimeout       = 30 * time.Minute
 	defaultProgressInterval  = 500
 	defaultLogTailLimit      = 120
+	defaultLogLineLimit      = 16 * 1024
+	defaultScriptWaitDelay   = 2 * time.Second
 	defaultPythonBin         = "python3"
 	defaultPhase0Script      = "quant/scripts/update_factor_lab_phase0_incremental.py"
 	defaultPhase1Script      = "quant/scripts/compute_factor_lab_phase1.py"
@@ -399,23 +401,31 @@ func (w *Worker) runScript(ctx context.Context, label, scriptPath string, args [
 	log.Printf("%s running %s: %s %s", factorLabWorkerLogPrefix, label, w.cfg.PythonBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, w.cfg.PythonBin, args...)
 	cmd.Dir = inferCommandDir(scriptPath)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
+	cmd.Env = append(os.Environ(),
+		"FACTORLAB_MANAGED_PROCESS_GROUP=1",
+		fmt.Sprintf("FACTORLAB_PARENT_PID=%d", os.Getpid()),
+	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
 		return err
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
+	cmd.WaitDelay = defaultScriptWaitDelay
+	stdout := &scriptOutputWriter{worker: w, label: label, stream: "stdout"}
+	stderr := &scriptOutputWriter{worker: w, label: label, stream: "stderr"}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	err := cmd.Start()
+	if err == nil {
+		err = cmd.Wait()
+		// 即使父进程正常退出，也不允许同组后代留在后台运行。
+		_ = cmd.Cancel()
 	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go w.captureScriptOutput(label, "stdout", stdout, &wg)
-	go w.captureScriptOutput(label, "stderr", stderr, &wg)
-	err = cmd.Wait()
-	wg.Wait()
+	stdout.flush()
+	stderr.flush()
 	finished := time.Now()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -454,19 +464,45 @@ func phaseStatusFromSummary(phase *PhaseStatus) string {
 	return "success"
 }
 
-func (w *Worker) captureScriptOutput(label, stream string, reader io.Reader, wg *sync.WaitGroup) {
-	defer wg.Done()
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 1024), 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimRight(scanner.Text(), "\r\n")
-		if strings.TrimSpace(line) == "" {
-			continue
+type scriptOutputWriter struct {
+	worker    *Worker
+	label     string
+	stream    string
+	buffer    [defaultLogLineLimit]byte
+	used      int
+	truncated bool
+}
+
+func (output *scriptOutputWriter) Write(data []byte) (int, error) {
+	size := len(data)
+	for len(data) > 0 {
+		end := bytes.IndexByte(data, '\n')
+		part := data
+		if end >= 0 {
+			part = data[:end]
 		}
-		w.appendPhaseLogLine(label, stream, line)
+		stored := copy(output.buffer[output.used:], part)
+		output.used += stored
+		output.truncated = output.truncated || stored < len(part)
+		if end < 0 {
+			break
+		}
+		output.flush()
+		data = data[end+1:]
 	}
-	if err := scanner.Err(); err != nil {
-		w.appendPhaseLogLine(label, stream, "log scan error: "+err.Error())
+	return size, nil
+}
+
+func (output *scriptOutputWriter) flush() {
+	line := strings.TrimRight(string(output.buffer[:output.used]), "\r")
+	if output.truncated {
+		const marker = " [truncated]"
+		line = string(output.buffer[:defaultLogLineLimit-len(marker)]) + marker
+	}
+	output.used = 0
+	output.truncated = false
+	if strings.TrimSpace(line) != "" {
+		output.worker.appendPhaseLogLine(output.label, output.stream, line)
 	}
 }
 

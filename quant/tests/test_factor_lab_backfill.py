@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 import sqlite3
+import subprocess
 import sys
+
+import pytest
 from pathlib import Path
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "backfill_factor_lab_phase0.py"
@@ -695,3 +698,77 @@ def test_fetch_eastmoney_income_frame_falls_back_to_dmsk_income(monkeypatch):
 
     assert calls == [("RPT_LICO_FN_CPD", "20260331"), ("RPT_DMSK_FN_INCOME", "20260331")]
     assert frame.iloc[0]["TOTAL_OPERATE_INCOME"] == 1
+
+
+@pytest.mark.parametrize("argv, expected", [
+    (["--mode", "daily-bars"], 1800),
+    (["--mode", "all"], 10800),
+    (["--mode", "daily-bars", "--timeout-seconds", "60"], 60),
+])
+def test_direct_cli_is_supervised_with_default_or_explicit_deadline(monkeypatch, argv, expected):
+    monkeypatch.delenv("FACTORLAB_PHASE0_WORKER", raising=False)
+    calls = []
+
+    def supervise(command, timeout, on_line, **options):
+        calls.append((command, timeout, options))
+        return 0
+
+    monkeypatch.setattr(module, "run_supervised_command", supervise)
+    assert module.main(argv) == 0
+    assert calls[0][0] == [sys.executable, str(SCRIPT_PATH.resolve()), *argv]
+    assert calls[0][1] == expected
+    assert calls[0][2]["child_env"] == {"FACTORLAB_PHASE0_WORKER": "1"}
+
+
+def test_direct_cli_timeout_exits_124_and_rejects_unlimited_budget(monkeypatch):
+    monkeypatch.delenv("FACTORLAB_PHASE0_WORKER", raising=False)
+
+    def timeout(*unused, **options):
+        raise subprocess.TimeoutExpired("backfill", 1)
+
+    monkeypatch.setattr(module, "run_supervised_command", timeout)
+    assert module.main(["--mode", "daily-bars", "--timeout-seconds", "1"]) == 124
+    with pytest.raises(ValueError, match="必须大于 0"):
+        module.main(["--mode", "daily-bars", "--timeout-seconds", "0"])
+
+
+def test_worker_conflict_prevents_any_database_or_network_work(monkeypatch, tmp_path):
+    from factor_lab_process import phase0_mode_lock
+    monkeypatch.setenv("FACTORLAB_PHASE0_WORKER", "1")
+    db = tmp_path / "isolated.db"
+    db.touch()
+
+    def unexpected(*unused):
+        raise AssertionError("conflicting worker must not open DB or fetch")
+
+    monkeypatch.setattr(module, "execute_backfill", unexpected)
+    with phase0_mode_lock(db, "daily-bars"):
+        assert module.main(["--db", str(db), "--mode", "daily-bars"]) == 75
+
+
+def test_worker_empty_daily_scope_completes_and_releases_lock(monkeypatch, tmp_path):
+    from factor_lab_process import phase0_mode_lock
+    monkeypatch.setenv("FACTORLAB_PHASE0_WORKER", "1")
+    db = tmp_path / "isolated.db"
+    db.touch()
+    codes = tmp_path / "empty.txt"
+    codes.write_text("")
+    assert module.main(["--db", str(db), "--mode", "daily-bars", "--code-list-file", str(codes)]) == 0
+    with phase0_mode_lock(db, "daily-bars"):
+        pass
+
+
+def test_gateway_manager_is_reused_for_all_stocks_in_job(monkeypatch):
+    from types import SimpleNamespace
+    created = []
+    manager = SimpleNamespace(fetch=lambda request: SimpleNamespace(ok=True, data=[], used_sources=["tencent"]))
+
+    def create():
+        created.append(manager)
+        return manager
+
+    monkeypatch.setattr(module, "get_data_source_manager", create)
+    args = module.parse_args(["--mode", "daily-bars"])
+    for code in ["000001", "000002"]:
+        module.fetch_daily_bars_with_fallback(code, "20261002", "20261009", args)
+    assert len(created) == 1

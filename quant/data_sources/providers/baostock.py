@@ -30,9 +30,86 @@ _ADJUST_MAP = {"qfq": "2", "hfq": "1"}
 # baostock 请求字段（与 output/baostock_quadrant_calc.py 保持一致）
 _KLINE_FIELDS = "date,code,open,high,low,close,preclose,volume,amount,turn,pctChg,isST,peTTM"
 
-# 请求超时后的重试次数
+# 仅完整响应后的普通错误可重试；传输及资源边界错误直接交给 Gateway。
 _MAX_RETRIES = 2
 _RETRY_DELAY_S = 1.0
+_RESPONSE_TIMEOUT_S = 30.0
+_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+
+
+class _ResponseLimitError(RuntimeError):
+    """响应大小或日线行数超过资源上限。"""
+
+
+class _BoundedSocket:
+    """仅包装登录成功后的连接，不修改 socket 或 SDK 方法。"""
+
+    def __init__(self, sock: Any):
+        self._socket = sock
+        self._deadline: Optional[float] = None
+        self._response_bytes = 0
+        self.error: Optional[Exception] = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._socket, name)
+
+    def fail(self, exc: Exception) -> None:
+        # SDK 会吞掉接收异常，保留首个错误供 Provider 检查，禁止复用坏连接。
+        if self.error is None:
+            self.error = exc
+            try:
+                self._socket.close()
+            except Exception:
+                pass
+        raise self.error
+
+    def _remaining(self) -> float:
+        if self.error is not None:
+            raise self.error
+        if self._deadline is None:
+            self.fail(ConnectionError("BaoStock 接收前尚未发送请求"))
+        remaining = self._deadline - time.monotonic()
+        if remaining <= 0:
+            self.fail(TimeoutError("BaoStock 整帧响应超过总时限"))
+        return remaining
+
+    def send(self, data: bytes, *args: Any, **kwargs: Any) -> int:
+        if self.error is not None:
+            raise self.error
+        self._deadline = time.monotonic() + _RESPONSE_TIMEOUT_S
+        self._response_bytes = 0
+        try:
+            original_timeout = self._socket.gettimeout()
+            self._socket.settimeout(self._remaining())
+            try:
+                sent = self._socket.send(data, *args, **kwargs)
+            finally:
+                self._socket.settimeout(original_timeout)
+            self._remaining()
+            if sent != len(data):
+                self.fail(ConnectionError("BaoStock 请求未完整发送"))
+            return sent
+        except Exception as exc:
+            self.fail(exc)
+
+    def recv(self, size: int, *args: Any, **kwargs: Any) -> bytes:
+        try:
+            remaining = self._remaining()
+            original_timeout = self._socket.gettimeout()
+            self._socket.settimeout(remaining)
+            try:
+                chunk = self._socket.recv(size, *args, **kwargs)
+            finally:
+                self._socket.settimeout(original_timeout)
+            if not chunk:
+                self.fail(ConnectionError("BaoStock 响应未完成时连接已关闭（EOF）"))
+            self._response_bytes += len(chunk)
+            if self._response_bytes > _MAX_RESPONSE_BYTES:
+                self.fail(_ResponseLimitError("BaoStock 整帧响应超过 8 MiB 上限"))
+            self._remaining()
+            return chunk
+        except Exception as exc:
+            self.fail(exc)
 
 
 def _to_baostock_code(symbol: str) -> str:
@@ -77,6 +154,12 @@ class BaoStockProvider:
         self._fetch_lock = threading.Lock()
         self._logged_in = False
         self._login_attempted = False
+        self._socket: Optional[_BoundedSocket] = None
+
+    def _check_socket(self) -> None:
+        if self._socket is not None and self._socket.error is not None:
+            self._logged_in = False
+            raise self._socket.error
 
     def _ensure_login(self) -> bool:
         """
@@ -85,6 +168,7 @@ class BaoStockProvider:
         Returns:
             True 如果已登录或登录成功；False 如果登录失败。
         """
+        self._check_socket()
         if self._logged_in:
             return True
 
@@ -98,6 +182,7 @@ class BaoStockProvider:
             self._login_attempted = True
             try:
                 import baostock as bs
+                # 登录尚未有可包装的连接，仍须由外层真实任务 timeout 兜底。
                 lg = bs.login()
                 if lg.error_code != "0":
                     logger.error(
@@ -105,6 +190,12 @@ class BaoStockProvider:
                         lg.error_code, lg.error_msg,
                     )
                     return False
+                import baostock.common.context as context
+                sock = context.default_socket
+                if sock is None:
+                    raise ConnectionError("BaoStock 登录成功但未建立连接")
+                self._socket = _BoundedSocket(sock)
+                context.default_socket = self._socket
                 self._logged_in = True
                 logger.info("[baostock] 登录成功，session 已建立")
                 return True
@@ -160,6 +251,13 @@ class BaoStockProvider:
         """实际调用 baostock API 获取 K 线数据。"""
         import baostock as bs
 
+        start_dt = datetime.strptime(parse_date(start), "%Y-%m-%d")
+        end_dt = datetime.strptime(parse_date(end), "%Y-%m-%d")
+        start, end = start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
+        max_rows = (end_dt - start_dt).days + 1
+        if max_rows <= 0:
+            raise ValueError("BaoStock 开始日期不能晚于结束日期")
+        self._check_socket()
         adj_flag = _adjust_flag(adjust)
         last_exc: Optional[Exception] = None
 
@@ -173,22 +271,31 @@ class BaoStockProvider:
                     frequency="d",
                     adjustflag=adj_flag,
                 )
+                self._check_socket()
                 if rs.error_code != "0":
                     raise RuntimeError(
                         f"baostock query failed: code={rs.error_code}, msg={rs.error_msg}"
                     )
 
-                # 读取结果到列表
-                rows: List[dict] = []
-                while rs.next():
-                    rows.append(rs.get_row_data())
-
-                if not rows:
-                    raise RuntimeError(f"baostock 返回空数据: {bs_code} ({start}~{end})")
-
-                # 归一化为 DailyBar 列表
+                # 逐行转换，计数包括无效日期行，避免 next() 不推进而无限增长。
                 bars: List[DailyBar] = []
-                for row in rows:
+                row_count = 0
+                while True:
+                    has_next = rs.next()
+                    self._check_socket()
+                    if rs.error_code != "0":
+                        raise RuntimeError(
+                            f"baostock page failed: code={rs.error_code}, msg={rs.error_msg}"
+                        )
+                    if not has_next:
+                        break
+                    if row_count >= max_rows:
+                        raise _ResponseLimitError(
+                            f"BaoStock 日线行数超过日期自然日上限 {max_rows}"
+                        )
+                    row_count += 1
+                    row = rs.get_row_data()
+                    self._check_socket()
                     trade_date = parse_date(row[0]) if len(row) > 0 else ""
                     if not trade_date:
                         continue
@@ -212,6 +319,13 @@ class BaoStockProvider:
                 return bars
 
             except Exception as exc:
+                self._check_socket()
+                # 未读完的帧不能在原连接重试，否则后续响应会错位。
+                if isinstance(exc, (OSError, _ResponseLimitError)):
+                    self._logged_in = False
+                    if self._socket is not None:
+                        self._socket.fail(exc)
+                    raise
                 last_exc = exc
                 if attempt < _MAX_RETRIES:
                     logger.warning(
@@ -230,15 +344,18 @@ class BaoStockProvider:
         end = request.end_date or request.target_trade_date
         if not end:
             end = datetime.now().strftime("%Y-%m-%d")
+        end = datetime.strptime(parse_date(end), "%Y-%m-%d").strftime("%Y-%m-%d")
 
         if request.start_date:
-            start = request.start_date
+            start = datetime.strptime(parse_date(request.start_date), "%Y-%m-%d").strftime("%Y-%m-%d")
         else:
             # 按 lookback_days 往前推
             days = max(request.lookback_days, 90)
             start_dt = datetime.strptime(end, "%Y-%m-%d") - timedelta(days=days + 30)
             start = start_dt.strftime("%Y-%m-%d")
 
+        if start > end:
+            raise ValueError("BaoStock 开始日期不能晚于结束日期")
         return start, end
 
     def logout(self) -> None:

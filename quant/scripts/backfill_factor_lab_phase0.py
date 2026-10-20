@@ -16,8 +16,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 import sqlite3
+import subprocess
 import sys
 import time
 import traceback
@@ -31,7 +33,11 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 QUANT_ROOT = SCRIPT_DIR.parent
 if str(QUANT_ROOT) not in sys.path:
     sys.path.insert(0, str(QUANT_ROOT))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
+from factor_lab_process import (JobAlreadyRunning, bind_to_parent, phase0_mode_lock,
+                                run_supervised_command, termination_signals)
 from data.industry_standardization import (
     NOT_APPLICABLE,
     build_a_share_mapping_rows,
@@ -1270,6 +1276,18 @@ def finish_task_run(conn: sqlite3.Connection, run_id: str, status: str, stats: T
     conn.commit()
 
 
+def mark_interrupted_task_run(conn: sqlite3.Connection, run_id: str, reason: str) -> None:
+    """Supervisor closes only its own interrupted run; preserve committed items."""
+    if not run_id:
+        return
+    conn.execute(
+        "UPDATE factor_task_runs SET status='failed', finished_at=?, error_message=? "
+        "WHERE id=? AND status='running'",
+        (utc_now(), reason, run_id),
+    )
+    conn.commit()
+
+
 def upsert_task_item(conn: sqlite3.Connection, run_id: str, item_type: str, item_key: str, status: str, error: str = "") -> None:
     conn.execute(
         """
@@ -1947,7 +1965,11 @@ def fetch_daily_bars_tencent(code: str, start_date: str, end_date: str, args: ar
 def fetch_daily_bars_with_fallback(code: str, start_date: str, end_date: str, args: argparse.Namespace, is_index: bool = False) -> tuple[list[tuple[Any, ...]], str]:
     mode_label = "index-bars" if is_index else "daily-bars"
     selected_source = args.index_bars_source if is_index else args.daily_bars_source
-    manager = get_data_source_manager()
+    # One manager/session for the entire job, not a fresh BaoStock login per stock.
+    manager = getattr(args, "_data_source_manager", None)
+    if manager is None:
+        manager = get_data_source_manager()
+        args._data_source_manager = manager
     capability = Capability.INDEX_BARS if is_index else Capability.DAILY_BARS
     request = build_gateway_request(
         capability=capability,
@@ -2691,11 +2713,58 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--progress-interval", type=int, default=50, help="每处理多少项输出一次进度")
     parser.add_argument("--verbose", action="store_true", help="输出外部源失败的完整 traceback")
     parser.add_argument("--sleep", type=float, default=0.05, help="单股票请求间隔秒数，避免外部源限流")
+    parser.add_argument("--timeout-seconds", type=int, default=None, help="整任务硬超时；单模式默认1800秒，all默认10800秒；必须大于0")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    timeout = args.timeout_seconds if args.timeout_seconds is not None else (10800 if args.mode == "all" else 1800)
+    if timeout <= 0:
+        raise ValueError("--timeout-seconds 必须大于 0")
+    if os.environ.get("FACTORLAB_PHASE0_WORKER") == "1":
+        # The real worker holds the lock, so a crashed supervisor cannot free it
+        # while network work remains alive. Managed Linux children die with parent.
+        try:
+            with phase0_mode_lock(resolve_db_path(args.db), args.mode):
+                return execute_backfill(args)
+        except JobAlreadyRunning as exc:
+            print(f"failed: {exc}", file=sys.stderr, flush=True)
+            return 75
+    run_id = ""
+    result = None
+
+    def forward_line(line: str) -> None:
+        nonlocal run_id
+        if line.startswith("run_id="):
+            run_id = line.removeprefix("run_id=").strip()
+        print(line, flush=True)
+
+    try:
+        result = run_supervised_command(
+            [sys.executable, str(Path(__file__).resolve()), *argv], timeout,
+            forward_line, child_env={"FACTORLAB_PHASE0_WORKER": "1"},
+        )
+        return result
+    except subprocess.TimeoutExpired:
+        result = 124
+        print(f"failed: {args.mode} timeout after {timeout}s", file=sys.stderr, flush=True)
+        return result
+    finally:
+        if args.write and run_id and result != 0:
+            conn = None
+            try:
+                conn = connect_db(resolve_db_path(args.db))
+                reason = f"timeout after {timeout}s" if result == 124 else "supervisor interrupted"
+                mark_interrupted_task_run(conn, run_id, reason)
+            except sqlite3.Error as exc:
+                print(f"failed to close task record {run_id}: {exc}", file=sys.stderr, flush=True)
+            finally:
+                if conn is not None:
+                    conn.close()
+
+
+def execute_backfill(args: argparse.Namespace) -> int:
     if args.limit < 0:
         raise ValueError("--limit 不能为负数")
     if args.lookback_days <= 0:
@@ -2735,7 +2804,14 @@ def main(argv: list[str]) -> int:
         return 1
     finally:
         conn.close()
+        manager = getattr(args, "_data_source_manager", None)
+        for provider in getattr(manager, "providers", {}).values():
+            logout = getattr(provider, "logout", None)
+            if logout:
+                logout()
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    bind_to_parent()
+    with termination_signals():
+        raise SystemExit(main(sys.argv[1:]))

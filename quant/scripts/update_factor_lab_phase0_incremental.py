@@ -15,6 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -24,7 +25,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from backfill_factor_lab_phase0 import connect_db, ensure_schema, log_step, resolve_db_path  # noqa: E402
+from backfill_factor_lab_phase0 import connect_db, ensure_schema, log_step, mark_interrupted_task_run, resolve_db_path  # noqa: E402
+from factor_lab_process import bind_to_parent, run_supervised_command, termination_signals  # noqa: E402
 
 BACKFILL_SCRIPT = SCRIPT_DIR / "backfill_factor_lab_phase0.py"
 DEFAULT_LOOKBACK_DAYS = 500
@@ -322,40 +324,52 @@ def build_mode_command(args: argparse.Namespace, mode: str, conn: sqlite3.Connec
 
 
 def run_mode(args: argparse.Namespace, mode: str, conn: sqlite3.Connection) -> ModeResult:
-    started = datetime.now()
+    started = time.monotonic()
     cmd = build_mode_command(args, mode, conn)
     log_step(f"incremental: 开始 {mode}: {' '.join(cmd)}")
     parsed_status = ""
+    run_id = ""
+
+    def forward_line(line: str) -> None:
+        nonlocal parsed_status, run_id
+        print(line, flush=True)
+        if line.startswith("run_id="):
+            run_id = line.removeprefix("run_id=").strip()
+        if line.startswith("summary=") and " status=" in line:
+            parsed_status = line.rsplit(" status=", 1)[-1].strip()
+
+    def mark_failed(reason: str) -> None:
+        if args.write and run_id:
+            try:
+                mark_interrupted_task_run(conn, run_id, reason)
+            except sqlite3.Error as exc:
+                log_step(f"incremental: 无法结束任务记录 {run_id}: {exc}")
+
     try:
-        process = subprocess.Popen(
-            cmd,
+        completed_returncode = run_supervised_command(
+            cmd, args.step_timeout_seconds, forward_line,
             cwd=str(SCRIPT_DIR.parents[1]),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            bufsize=1,
+            child_env={"FACTORLAB_PHASE0_WORKER": "1"},
         )
-        assert process.stdout is not None
-        try:
-            for raw_line in process.stdout:
-                line = raw_line.rstrip("\n")
-                if line:
-                    print(line, flush=True)
-                    if line.startswith("summary=") and " status=" in line:
-                        parsed_status = line.rsplit(" status=", 1)[-1].strip()
-            completed_returncode = process.wait(timeout=args.step_timeout_seconds)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-            raise
     except subprocess.TimeoutExpired:
-        duration = (datetime.now() - started).total_seconds()
+        duration = time.monotonic() - started
         message = f"timeout after {args.step_timeout_seconds}s"
+        mark_failed(message)
         log_step(f"incremental: {mode} 超时 {message}")
         return ModeResult(mode=mode, status="failed", return_code=124, duration_seconds=duration, error=message)
+    except (OSError, RuntimeError) as exc:
+        mark_failed(str(exc))
+        return ModeResult(mode=mode, status="failed", return_code=1,
+                          duration_seconds=time.monotonic() - started, error=str(exc))
+    except BaseException:
+        mark_failed("supervisor interrupted")
+        raise
 
-    duration = (datetime.now() - started).total_seconds()
-    status = parsed_status or ("success" if completed_returncode == 0 else "failed")
+    if completed_returncode != 0:
+        mark_failed(f"exit {completed_returncode}")
+    duration = time.monotonic() - started
+    # A printed summary must never override a non-zero exit (including lock conflicts).
+    status = (parsed_status or "success") if completed_returncode == 0 else "failed"
     log_step(f"incremental: {mode} 完成 status={status} duration={duration:.1f}s")
     return ModeResult(mode=mode, status=status, return_code=completed_returncode, duration_seconds=duration, error="" if completed_returncode == 0 else f"exit {completed_returncode}")
 
@@ -423,4 +437,6 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    bind_to_parent()
+    with termination_signals():
+        raise SystemExit(main(sys.argv[1:]))

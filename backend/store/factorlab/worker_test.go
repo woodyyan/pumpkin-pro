@@ -1,8 +1,17 @@
 package factorlab
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -228,5 +237,292 @@ func TestAppendPhaseLogLineLimitsTail(t *testing.T) {
 	snapshot := worker.Snapshot(time.Now())
 	if len(snapshot.Current.Phases[0].LogTail) != defaultLogTailLimit {
 		t.Fatalf("expected tail limit %d, got %d", defaultLogTailLimit, len(snapshot.Current.Phases[0].LogTail))
+	}
+}
+
+func newScriptTestWorker(t *testing.T, python string) *Worker {
+	t.Helper()
+	worker := NewWorker(WorkerConfig{Enabled: true, PythonBin: python, Timeout: 2 * time.Second})
+	if _, ok := worker.beginRun("manual", PipelineRunRequest{Phase: "phase0"}); !ok {
+		t.Fatal("测试阶段未能启动")
+	}
+	return worker
+}
+
+func scriptTestPython(t *testing.T) string {
+	t.Helper()
+	if python := os.Getenv("FACTORLAB_TEST_PYTHON"); python != "" {
+		path, err := exec.LookPath(python)
+		if err != nil {
+			t.Fatalf("测试 Python 不可用: %v", err)
+		}
+		return path
+	}
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatalf("测试需要 Python 3，可设置 FACTORLAB_TEST_PYTHON: %v", err)
+	}
+	return python
+}
+
+func scriptTestPath(t *testing.T) string {
+	t.Helper()
+	// 使用 -c 执行测试代码，只需让推断出的工作目录指向临时目录。
+	return filepath.Join(t.TempDir(), "quant", "scripts", "worker_test.py")
+}
+
+func TestScriptOutputWriterDrainsTruncatedLines(t *testing.T) {
+	worker := newScriptTestWorker(t, defaultPythonBin)
+	output := &scriptOutputWriter{worker: worker, label: "phase0_incremental", stream: "stdout"}
+	chunks := []string{
+		"\n \r\nfirst\r",
+		"\n" + strings.Repeat("x", defaultLogLineLimit-2),
+		strings.Repeat("y", 2*defaultLogLineLimit) + "\nsecond\nsumm",
+		`ary={"total":2,"success":1,"failed":0,"skipped":1,"status":"partial"}`,
+	}
+	for _, chunk := range chunks {
+		if n, err := output.Write([]byte(chunk)); err != nil || n != len(chunk) {
+			t.Fatalf("未完整消费输出: n=%d err=%v", n, err)
+		}
+		if output.used > defaultLogLineLimit {
+			t.Fatalf("单行缓存超出上限: %d", output.used)
+		}
+	}
+	output.flush()
+	output.flush()
+	phase := worker.Snapshot(time.Now()).Current.Phases[0]
+	if len(phase.LogTail) != 4 || !strings.HasSuffix(phase.LogTail[0], "first") || !strings.HasSuffix(phase.LogTail[2], "second") {
+		t.Fatalf("分块、空行或 CRLF 处理错误: 日志数=%d", len(phase.LogTail))
+	}
+	if line := phase.LogTail[1][len("15:04:05 "):]; len(line) != defaultLogLineLimit || !strings.HasSuffix(line, " [truncated]") {
+		t.Fatalf("超长行未按上限截断: 长度=%d", len(line))
+	}
+	if phase.TotalCount != 2 || phase.SuccessCount != 1 || phase.SkippedCount != 1 || !strings.HasPrefix(phase.LastMessage, "summary=") {
+		t.Fatalf("尾部无换行 summary 丢失: %+v", phase.Summary)
+	}
+}
+
+func TestRunScriptDrainsOutputAndFinalSummary(t *testing.T) {
+	t.Setenv("FACTORLAB_MANAGED_PROCESS_GROUP", "0")
+	t.Setenv("FACTORLAB_PARENT_PID", "-1")
+	python := scriptTestPython(t)
+	for _, stream := range []string{"stdout", "stderr"} {
+		t.Run(stream, func(t *testing.T) {
+			worker := newScriptTestWorker(t, python)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			code := `import os, sys
+assert os.environ["FACTORLAB_MANAGED_PROCESS_GROUP"] == "1"
+assert int(os.environ["FACTORLAB_PARENT_PID"]) == int(sys.argv[2])
+output = getattr(sys, sys.argv[1])
+output.write("x" * (4 * 1024 * 1024) + "\n")
+for index in range(150):
+    output.write("progress %d\n" % index)
+output.write('summary={"total":5,"success":3,"failed":1,"skipped":1,"status":"partial"}')
+output.flush()
+`
+			if err := worker.runScript(ctx, "phase0_incremental", scriptTestPath(t), []string{"-c", code, stream, fmt.Sprint(os.Getpid())}); err != nil {
+				t.Fatalf("脚本输出未能正常排空: %v", err)
+			}
+			phase := worker.Snapshot(time.Now()).Current.Phases[0]
+			if phase.Status != "partial" || phase.TotalCount != 5 || phase.SuccessCount != 3 || phase.FailedCount != 1 || phase.SkippedCount != 1 {
+				t.Fatalf("末尾 summary 未解析: 状态=%s summary=%+v", phase.Status, phase.Summary)
+			}
+			if len(phase.LogTail) != defaultLogTailLimit || !strings.HasSuffix(phase.LogTail[len(phase.LogTail)-1], phase.LastMessage) || !strings.HasPrefix(phase.LastMessage, "summary=") {
+				t.Fatalf("日志 tail 末尾 summary 丢失: 日志数=%d 最后消息=%q", len(phase.LogTail), phase.LastMessage)
+			}
+			if phase.FinishedAt == nil || phase.DurationSeconds <= 0 || phase.ErrorMessage != "" {
+				t.Fatalf("阶段结束状态错误: %+v", phase)
+			}
+		})
+	}
+}
+
+func TestRunScriptDrainsUnterminatedLongOutput(t *testing.T) {
+	worker := newScriptTestWorker(t, scriptTestPython(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	code := `import sys
+sys.stdout.write("x" * (4 * 1024 * 1024))
+sys.stdout.flush()
+sys.stderr.write("y" * (4 * 1024 * 1024))
+sys.stderr.flush()
+`
+	if err := worker.runScript(ctx, "phase0_incremental", scriptTestPath(t), []string{"-c", code}); err != nil {
+		t.Fatalf("无换行超长输出阻塞: %v", err)
+	}
+	phase := worker.Snapshot(time.Now()).Current.Phases[0]
+	if phase.Status != "success" || len(phase.LogTail) != 2 {
+		t.Fatalf("无换行输出未完整收尾: 状态=%s 日志数=%d", phase.Status, len(phase.LogTail))
+	}
+	for _, line := range phase.LogTail {
+		if len(line) != len("15:04:05 ")+defaultLogLineLimit || !strings.HasSuffix(line, " [truncated]") {
+			t.Fatalf("无换行输出未有界截断: 长度=%d", len(line))
+		}
+	}
+}
+
+func TestRunScriptStartFailure(t *testing.T) {
+	worker := newScriptTestWorker(t, filepath.Join(t.TempDir(), "missing-python"))
+	err := worker.runScript(context.Background(), "phase0_incremental", scriptTestPath(t), nil)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("启动错误未返回: %v", err)
+	}
+	phase := worker.Snapshot(time.Now()).Current.Phases[0]
+	if phase.Status != "failed" || phase.StartedAt == nil || phase.FinishedAt == nil || phase.ErrorMessage != err.Error() {
+		t.Fatalf("启动失败仍被记录为运行中: %+v", phase)
+	}
+}
+
+const scriptTestProcessTree = `import os, subprocess, sys, time
+child_code = r'''import json, os, subprocess, sys, time
+grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+with open(sys.argv[1] + ".tmp", "w") as output:
+    json.dump({"parent": os.getppid(), "child": os.getpid(), "grandchild": grandchild.pid,
+               "group": os.getpgrp(), "grandchild_group": os.getpgid(grandchild.pid),
+               "managed": os.environ.get("FACTORLAB_MANAGED_PROCESS_GROUP"),
+               "backend": os.environ.get("FACTORLAB_PARENT_PID")}, output)
+os.replace(sys.argv[1] + ".tmp", sys.argv[1])
+time.sleep(60)
+'''
+options = {}
+if sys.argv[2] == "normal":
+    options = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+subprocess.Popen([sys.executable, "-c", child_code, sys.argv[1]], **options)
+while not os.path.exists(sys.argv[1]):
+    time.sleep(0.01)
+print('summary={"total":1,"success":1,"status":"success"}', flush=True)
+if sys.argv[2] == "running":
+    time.sleep(60)
+`
+
+type scriptTestProcesses struct {
+	Parent          int    `json:"parent"`
+	Child           int    `json:"child"`
+	Grandchild      int    `json:"grandchild"`
+	Group           int    `json:"group"`
+	GrandchildGroup int    `json:"grandchild_group"`
+	Managed         string `json:"managed"`
+	Backend         string `json:"backend"`
+}
+
+func waitScriptTestProcesses(t *testing.T, path string) scriptTestProcesses {
+	t.Helper()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var processes scriptTestProcesses
+		if data, err := os.ReadFile(path); err == nil && json.Unmarshal(data, &processes) == nil && processes.Grandchild > 0 {
+			// 只清理本测试创建的独立进程组，防止断言失败留下睡眠进程。
+			if processes.Group != processes.Parent || processes.Group == syscall.Getpgrp() {
+				t.Fatalf("脚本未使用独立进程组: %+v", processes)
+			}
+			t.Cleanup(func() { _ = syscall.Kill(-processes.Group, syscall.SIGKILL) })
+			if processes.GrandchildGroup != processes.Group || processes.Managed != "1" || processes.Backend != fmt.Sprint(os.Getpid()) {
+				t.Fatalf("后代未继承进程组或托管环境: %+v", processes)
+			}
+			return processes
+		}
+		select {
+		case <-timer.C:
+			t.Fatal("Python 进程树未能就绪")
+		case <-ticker.C:
+		}
+	}
+}
+
+func assertScriptTestProcessesDead(t *testing.T, processes scriptTestProcesses) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for _, pid := range []int{processes.Parent, processes.Child, processes.Grandchild} {
+		for {
+			err := syscall.Kill(pid, 0)
+			if errors.Is(err, syscall.ESRCH) {
+				break
+			}
+			if err != nil {
+				t.Fatalf("检查进程 %d 失败: %v", pid, err)
+			}
+			// Linux 上孤儿可能成为僵尸：已死亡但尚未被 init 回收。
+			if runtime.GOOS == "linux" {
+				state, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+				if errors.Is(err, os.ErrNotExist) {
+					break
+				}
+				if err != nil {
+					t.Fatalf("检查进程 %d 状态失败: %v", pid, err)
+				}
+				if end := strings.LastIndex(string(state), ") "); end >= 0 && strings.HasPrefix(string(state)[end+2:], "Z") {
+					break
+				}
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("脚本后代仍存活: pid=%d", pid)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+func TestRunScriptKillsProcessTree(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("进程树测试针对 Linux/macOS")
+	}
+	python := scriptTestPython(t)
+	for _, mode := range []string{"timeout", "cancel", "normal", "inherited-pipes"} {
+		t.Run(mode, func(t *testing.T) {
+			worker := newScriptTestWorker(t, python)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if mode == "timeout" {
+				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), worker.cfg.Timeout)
+			}
+			defer cancel()
+			pidPath := filepath.Join(t.TempDir(), "processes.json")
+			pythonMode := mode
+			if mode == "timeout" || mode == "cancel" {
+				pythonMode = "running"
+			}
+			result := make(chan error, 1)
+			path := scriptTestPath(t)
+			started := time.Now()
+			go func() {
+				result <- worker.runScript(ctx, "phase0_incremental", path, []string{"-c", scriptTestProcessTree, pidPath, pythonMode})
+			}()
+			processes := waitScriptTestProcesses(t, pidPath)
+			if mode == "cancel" {
+				cancel()
+			}
+			var err error
+			select {
+			case err = <-result:
+			case <-time.After(7 * time.Second):
+				t.Fatal("脚本退出未受 WaitDelay 限制")
+			}
+			phase := worker.Snapshot(time.Now()).Current.Phases[0]
+			switch mode {
+			case "normal":
+				if err != nil || phase.Status != "success" {
+					t.Fatalf("正常退出失败: err=%v 状态=%s", err, phase.Status)
+				}
+			case "inherited-pipes":
+				if !errors.Is(err, exec.ErrWaitDelay) || time.Since(started) > 5*time.Second {
+					t.Fatalf("继承输出管道未有界关闭: err=%v 用时=%s", err, time.Since(started))
+				}
+				if phase.Summary == nil || !strings.HasPrefix(phase.LastMessage, "summary=") {
+					t.Fatalf("管道收尾丢失 summary: %+v", phase.Summary)
+				}
+			case "timeout", "cancel":
+				if err == nil || phase.Status != "failed" || phase.FinishedAt == nil || phase.ErrorMessage != err.Error() {
+					t.Fatalf("取消/超时未记录失败: err=%v 状态=%s", err, phase.Status)
+				}
+				if mode == "timeout" && (ctx.Err() != context.DeadlineExceeded || !strings.Contains(err.Error(), "compute timeout after 2s")) {
+					t.Fatalf("超时错误不正确: %v", err)
+				}
+			}
+			assertScriptTestProcessesDead(t, processes)
+		})
 	}
 }

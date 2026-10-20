@@ -1,4 +1,8 @@
-"""BaoStock 接收与 Provider 资源边界回归；全部使用 stub，不连接网络。"""
+"""BaoStock 接收与 Provider 资源边界回归，不连接网络。
+
+测试依赖 baostock==0.9.2 的传输/分页源码；登录、连接和配额均使用 stub。
+CI 必须安装该 SDK，不能因缺依赖而跳过资源安全回归。
+"""
 
 import importlib.util
 import sys
@@ -87,7 +91,7 @@ def clock(monkeypatch):
 
 @pytest.fixture
 def sdk(monkeypatch):
-    # 不 import 已安装包入口：只加载获准的两个源码文件，其依赖全部 stub。
+    # 不 import 包入口或登录模块：只加载传输/分页源码，其依赖全部 stub。
     modules = {}
     for name in (
         "baostock", "baostock.common", "baostock.common.context",
@@ -113,10 +117,13 @@ def sdk(monkeypatch):
     cons.BAOSTOCK_PER_PAGE_COUNT = 2
     modules["baostock.data.messageheader"].to_message_header = lambda *args: header
 
-    def load_allowed(name, relative_path):
+    def load_sdk_source(name, relative_path):
         path = next((Path(root) / "baostock" / relative_path for root in sys.path
                      if (Path(root) / "baostock" / relative_path).is_file()), None)
-        assert path is not None, f"缺少获准测试源码 {relative_path}"
+        assert path is not None, (
+            f"缺少 BaoStock SDK 测试源码 {relative_path}；"
+            "请执行 python -m pip install baostock==0.9.2，并检查 CI 的依赖安装步骤"
+        )
         spec = importlib.util.spec_from_file_location(name, path)
         module = importlib.util.module_from_spec(spec)
         monkeypatch.setitem(sys.modules, name, module)
@@ -125,8 +132,8 @@ def sdk(monkeypatch):
         spec.loader.exec_module(module)
         return module
 
-    socketutil = load_allowed("baostock.util.socketutil", "util/socketutil.py")
-    resultset = load_allowed("baostock.data.resultset", "data/resultset.py")
+    socketutil = load_sdk_source("baostock.util.socketutil", "util/socketutil.py")
+    resultset = load_sdk_source("baostock.data.resultset", "data/resultset.py")
     bs = modules["baostock"]
     context = modules["baostock.common.context"]
     raw_socket = FakeSocket()

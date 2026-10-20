@@ -101,8 +101,10 @@ jobs:
           python-version: '3.11'
           cache: pip
 
-      - name: Install dependencies (math only, no akshare)
-        run: pip install pandas numpy pytest matplotlib pytest-cov pydantic requests
+      # BaoStock transport regression tests load SDK source with stubbed sockets;
+      # keep the tested SDK version explicit without installing AkShare or calling live APIs.
+      - name: Install dependencies (math and BaoStock SDK, no akshare)
+        run: pip install pandas numpy pytest matplotlib pytest-cov pydantic requests baostock==0.9.2
 
       - name: Syntax check
         run: python -m compileall -q .
